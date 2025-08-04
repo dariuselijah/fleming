@@ -1,0 +1,290 @@
+# Query: zola
+# ContextLines: 1
+
+78 results - 24 files
+
+docker-compose.yml:
+  1  services:
+  2:   fleming:
+  3      build:
+
+INSTALL.md:
+  299  
+  300: Ollama allows you to run AI models locally on your machine. Zola has built-in support for Ollama with automatic model detection.
+  301  
+
+  342  
+  343: ### fleming + Ollama Integration
+  344  
+  345: Fleming automatically detects all models available in your Ollama installation. No additional configuration is needed!
+  346  
+
+  348  
+  349: - **Automatic Model Detection**: Fleming scans your Ollama instance and makes all models available
+  350  - **Intelligent Categorization**: Models are automatically categorized by family (Llama, Gemma, Qwen, etc.)
+
+  358  
+  359: By default, Fleming connects to Ollama at `http://localhost:11434`. This works for local installations.
+  360  
+
+  379  
+  380: Fleming includes a settings interface where you can:
+  381  
+
+  390  
+  391: For a complete Docker setup with both Fleming and Ollama:
+  392  
+
+  398  docker run -d -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama
+  399: docker run -p 3000:3000 -e OLLAMA_BASE_URL=http://ollama:11434 Fleming
+  400  ```
+
+  418  
+  419: 1. Refresh the models list in Fleming settings
+  420  2. Check Ollama has models: `ollama list`
+  421: 3. Restart Fleming if models were added after startup
+  422  
+
+  477  # Clone the repository
+  478: git clone https://github.com/ibelick/fleming.git
+  479: cd fleming
+  480  
+
+  491  # Clone the repository
+  492: git clone https://github.com/ibelick/fleming.git
+  493: cd fleming
+  494  
+
+  505  
+  506: Fleming requires Supabase for authentication and storage. Follow these steps to set up your Supabase project:
+  507  
+
+  590  # Build the Docker image
+  591: docker build -t fleming .
+  592  
+
+  599    -e MISTRAL_API_KEY=your_mistral_api_key \
+  600:   fleming
+  601  ```
+
+  610  services:
+  611:   fleming:
+  612      build:
+
+  641  
+  642: For a complete setup with both Fleming and Ollama running locally, use the provided `docker-compose.ollama.yml`:
+  643  
+  644  ```bash
+  645: # Start both Fleming and Ollama services
+  646  docker-compose -f docker-compose.ollama.yml up -d
+
+  659  - **Health checks** for both services
+  660: - **Proper networking** between Fleming and Ollama
+  661  - **Volume persistence** for Ollama models
+  662  
+  663: The Ollama service will be available at `http://localhost:11434` and Fleming will automatically detect all available models.
+  664  
+
+  675  
+  676: The easiest way to deploy Fleming is using Vercel:
+  677  
+
+  704  
+  705: You can customize various aspects of Fleming by modifying the configuration files:
+  706  
+
+package-lock.json:
+  1  {
+  2:   "name": "fleming",
+  3    "version": "0.1.0",
+
+  7      "": {
+  8:       "name": "fleming",
+  9        "version": "0.1.0",
+
+package.json:
+  1  {
+  2:   "name": "fleming",
+  3    "version": "0.1.0",
+
+README.md:
+   1: # fleming
+   2  
+   3: [fleming.chat](https://fleming.chat)
+   4  
+   5: **Fleming** is the open-source chat interface for all your models.
+   6  
+   7: ![fleming cover](./public/cover_fleming.jpg)
+   8  
+
+  25  ```bash
+  26: git clone https://github.com/ibelick/fleming.git
+  27: cd fleming
+  28  npm install
+
+  39  
+  40: # Clone and run Fleming
+  41: git clone https://github.com/ibelick/fleming.git
+  42: cd fleming
+  43  npm install
+
+  46  
+  47: Fleming will automatically detect your local Ollama models!
+  48  
+
+  51  ```bash
+  52: git clone https://github.com/ibelick/fleming.git
+  53: cd fleming
+  54  docker-compose -f docker-compose.ollama.yml up
+
+  56  
+  57: [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/ibelick/fleming)
+  58  
+
+app\layout.tsx:
+  39    const isDev = process.env.NODE_ENV === "development"
+  40:   const isOfficialDeployment = process.env.FLEMING_OFFICIAL === "true"
+  41    const userProfile = await getUserProfile()
+
+  48            src="https://assets.onedollarstats.com/stonks.js"
+  49:           {...(isDev ? { "data-debug": "fleming.chat" } : {})}
+  50          />
+
+app\opengraph-image.alt:
+  1: Fleming is a free, open-source AI chat app with multi-model support.
+
+app\components\chat\utils.ts:
+   9  
+  10:     u.searchParams.set("utm_source", "fleming.chat")
+  11      u.searchParams.set("utm_medium", "research")
+
+app\components\layout\dialog-publish.tsx:
+  60  
+  61:     const X_TEXT = `Check out this public page I created with Fleming! ${publicLink}`
+  62      window.open(`https://x.com/intent/tweet?text=${X_TEXT}`, "_blank")
+
+app\components\layout\header.tsx:
+   7  import { useBreakpoint } from "@/app/hooks/use-breakpoint"
+   8: import { FlemingIcon } from "@/components/icons/fleming"
+   9  import { Button } from "@/components/ui/button"
+
+  35                >
+  36:                 <FlemingIcon className="mr-1 size-4" />
+  37                  {APP_NAME}
+
+app\components\layout\user-menu.tsx:
+  77            <a
+  78:             href="https://x.com/flemingdotchat"
+  79              target="_blank"
+
+  83              <XIcon className="size-4 p-0.5" />
+  84:             <span>@flemingdotchat</span>
+  85            </a>
+
+  88            <a
+  89:             href="https://github.com/ibelick/fleming"
+  90              target="_blank"
+
+app\components\layout\app-info\app-info-content.tsx:
+   4        <p className="text-foreground leading-relaxed">
+   5:         <span className="font-medium">Fleming</span> is the open-source interface
+   6          for AI chat.
+
+  15          <a
+  16:           href="https://github.com/ibelick/fleming"
+  17            target="_blank"
+
+app\components\layout\sidebar\app-sidebar.tsx:
+  118          <a
+  119:           href="https://github.com/ibelick/fleming"
+  120            className="hover:bg-muted flex items-center gap-2 rounded-md p-2"
+
+  128              <div className="text-sidebar-foreground text-sm font-medium">
+  129:               Fleming is open source
+  130              </div>
+
+app\share\[chatId]\article.tsx:
+  55              >
+  56:               Ask Fleming{" "}
+  57                <div className="rounded-full bg-black/20 p-2 backdrop-blur-sm transition-colors group-hover:bg-black/30">
+
+app\share\[chatId]\header.tsx:
+   9          <Link href="/" className="text-xl font-medium tracking-tight">
+  10:           Fleming
+  11          </Link>
+
+app\share\[chatId]\page.tsx:
+  32    const title = chat?.title || "Chat"
+  33:   const description = "A chat in Fleming"
+  34  
+
+  92        title={chatData.title || ""}
+  93:       subtitle={"A conversation in Fleming"}
+  94      />
+
+components\common\feedback-form.tsx:
+  109              <p className="text-muted-foreground text-sm">
+  110:               Your feedback makes Fleming better.
+  111              </p>
+
+  135              >
+  136:               What would make Fleming better for you?
+  137              </motion.span>
+
+components\common\model-selector\base.tsx:
+  229                    <a
+  230:                     href="https://github.com/ibelick/fleming/issues/new?title=Model%20Request%3A%20"
+  231                      target="_blank"
+
+  353                    <a
+  354:                     href="https://github.com/ibelick/fleming/issues/new?title=Model%20Request%3A%20"
+  355                      target="_blank"
+
+components\common\model-selector\pro-dialog.tsx:
+  70            <p className="text-muted-foreground">
+  71:             To use it, connect your own API key. Fleming supports BYOK via{" "}
+  72              <span className="text-primary inline-flex font-medium">
+
+components\common\multi-model-selector\base.tsx:
+  377                    <a
+  378:                     href="https://github.com/ibelick/fleming/issues/new?title=Model%20Request%3A%20"
+  379                      target="_blank"
+
+  502                    <a
+  503:                     href="https://github.com/ibelick/fleming/issues/new?title=Model%20Request%3A%20"
+  504                      target="_blank"
+
+components\icons\zola.tsx:
+   3  
+   4: export function FlemingIcon(props: SVGProps<SVGSVGElement>) {
+   5    return (
+
+  14      >
+  15:       <g clipPath="url(#fleming)">
+  16          <mask
+  17:           id="fleming"
+  18            width={80}
+
+  33        <defs>
+  34:         <clipPath id="fleming">
+  35            <path fill="currentColor" d="M0 0h80v80H0z" />
+
+lib\config.ts:
+   28  
+   29: export const APP_NAME = "Fleming"
+   30: export const APP_DOMAIN = "https://fleming.chat"
+   31  
+
+  118  
+  119: export const SYSTEM_PROMPT_DEFAULT = `You are Fleming, a thoughtful and clear assistant. Your tone is calm, minimal, and human. You write with intention—never too much, never too little. You avoid clichés, speak simply, and offer helpful, grounded answers. When needed, you ask good questions. You don't try to impress—you aim to clarify. You may use metaphors if they bring clarity, but you stay sharp and sincere. You're here to help the user think clearly and move forward, not to overwhelm or overperform.`
+  120  
+
+lib\chat-store\persist.ts:
+  15  const isClient = typeof window !== "undefined"
+  16: const DB_NAME = "fleming-db"
+  17  const DB_VERSION = 2
+
+lib\user\api.ts:
+  24        id: "guest",
+  25:       email: "guest@fleming.chat",
+  26        display_name: "Guest",
