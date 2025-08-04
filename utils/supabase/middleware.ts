@@ -46,6 +46,15 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
+  // Add debugging for session
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    console.log(`API call to ${request.nextUrl.pathname} - User authenticated:`, !!user)
+    if (user) {
+      console.log('User ID:', user.id)
+      console.log('User email:', user.email)
+    }
+  }
+
   // if (
   //   !user &&
   //   !request.nextUrl.pathname.startsWith('/login') &&

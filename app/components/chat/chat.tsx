@@ -120,6 +120,7 @@ export function Chat() {
     selectedModel,
     clearDraft,
     bumpChat,
+    setHasDialogAuth,
   })
 
   // Memoize the conversation props to prevent unnecessary rerenders
@@ -136,25 +137,28 @@ export function Chat() {
 
   // Memoize the chat input props
   const chatInputProps = useMemo(
-    () => ({
-      value: input,
-      onSuggestion: handleSuggestion,
-      onValueChange: handleInputChange,
-      onSend: submit,
-      isSubmitting,
-      files,
-      onFileUpload: handleFileUpload,
-      onFileRemove: handleFileRemove,
-      hasSuggestions:
-        preferences.promptSuggestions && !chatId && messages.length === 0,
-      onSelectModel: handleModelChange,
-      selectedModel,
-      isUserAuthenticated: isAuthenticated,
-      stop,
-      status,
-      setEnableSearch,
-      enableSearch,
-    }),
+    () => {
+      const hasSuggestions = preferences.promptSuggestions && !chatId && messages.length === 0
+      
+      return {
+        value: input,
+        onSuggestion: handleSuggestion,
+        onValueChange: handleInputChange,
+        onSend: submit,
+        isSubmitting,
+        files,
+        onFileUpload: handleFileUpload,
+        onFileRemove: handleFileRemove,
+        hasSuggestions,
+        onSelectModel: handleModelChange,
+        selectedModel,
+        isUserAuthenticated: isAuthenticated,
+        stop,
+        status,
+        setEnableSearch,
+        enableSearch,
+      }
+    },
     [
       input,
       handleSuggestion,

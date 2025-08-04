@@ -75,6 +75,7 @@ function PromptInput({
         setValue: onValueChange ?? handleChange,
         maxHeight,
         onSubmit,
+        disabled: false, // Explicitly set disabled to false to avoid hydration issues
       }}
     >
       <div
@@ -131,7 +132,7 @@ function PromptInputTextarea({
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={handleKeyDown}
       className={cn(
-        "text-primary min-h-[44px] w-full resize-none border-none bg-transparent shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
+        "text-primary min-h-[44px] w-full resize-none border-none bg-transparent shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground placeholder:opacity-70",
         "overflow-y-auto",
         className
       )}
@@ -177,7 +178,7 @@ function PromptInputAction({
 
   return (
     <Tooltip {...props}>
-      <TooltipTrigger asChild disabled={disabled}>
+      <TooltipTrigger asChild disabled={Boolean(disabled)}>
         {children}
       </TooltipTrigger>
       <TooltipContent side={side} className={className}>

@@ -1,4 +1,4 @@
-import { Attachment } from "@ai-sdk/ui-utils"
+import { Attachment as AISDKAttachment } from "@ai-sdk/ui-utils"
 
 export type Json =
   | string
@@ -7,6 +7,13 @@ export type Json =
   | null
   | { [key: string]: Json | undefined }
   | Json[]
+
+export type Attachment = {
+  name: string
+  contentType: string
+  url: string
+  filePath?: string // Store file path for secure access
+}
 
 export type Database = {
   public: {
@@ -138,7 +145,7 @@ export type Database = {
       }
       messages: {
         Row: {
-          experimental_attachments: Attachment[]
+          experimental_attachments: AISDKAttachment[]
           chat_id: string
           content: string | null
           created_at: string | null
@@ -150,7 +157,7 @@ export type Database = {
           model: string | null
         }
         Insert: {
-          experimental_attachments?: Attachment[]
+          experimental_attachments?: AISDKAttachment[]
           chat_id: string
           content: string | null
           created_at?: string | null
@@ -162,7 +169,7 @@ export type Database = {
           model?: string | null
         }
         Update: {
-          experimental_attachments?: Attachment[]
+          experimental_attachments?: AISDKAttachment[]
           chat_id?: string
           content?: string | null
           created_at?: string | null
@@ -308,8 +315,19 @@ export type Database = {
           prompt_suggestions: boolean | null
           show_tool_invocations: boolean | null
           show_conversation_previews: boolean | null
-          multi_model_enabled: boolean | null
           hidden_models: string[] | null
+          user_role: string | null
+          medical_specialty: string | null
+          healthcare_agent_enabled: boolean | null
+          medical_compliance_mode: boolean | null
+          clinical_decision_support: boolean | null
+          medical_literature_access: boolean | null
+          health_context: string | null
+          health_conditions: string[] | null
+          medications: string[] | null
+          allergies: string[] | null
+          family_history: string | null
+          lifestyle_factors: string | null
           created_at: string | null
           updated_at: string | null
         }
@@ -319,8 +337,19 @@ export type Database = {
           prompt_suggestions?: boolean | null
           show_tool_invocations?: boolean | null
           show_conversation_previews?: boolean | null
-          multi_model_enabled?: boolean | null
           hidden_models?: string[] | null
+          user_role?: string | null
+          medical_specialty?: string | null
+          healthcare_agent_enabled?: boolean | null
+          medical_compliance_mode?: boolean | null
+          clinical_decision_support?: boolean | null
+          medical_literature_access?: boolean | null
+          health_context?: string | null
+          health_conditions?: string[] | null
+          medications?: string[] | null
+          allergies?: string[] | null
+          family_history?: string | null
+          lifestyle_factors?: string | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -330,8 +359,19 @@ export type Database = {
           prompt_suggestions?: boolean | null
           show_tool_invocations?: boolean | null
           show_conversation_previews?: boolean | null
-          multi_model_enabled?: boolean | null
           hidden_models?: string[] | null
+          user_role?: string | null
+          medical_specialty?: string | null
+          healthcare_agent_enabled?: boolean | null
+          medical_compliance_mode?: boolean | null
+          clinical_decision_support?: boolean | null
+          medical_literature_access?: boolean | null
+          health_context?: string | null
+          health_conditions?: string[] | null
+          medications?: string[] | null
+          allergies?: string[] | null
+          family_history?: string | null
+          lifestyle_factors?: string | null
           created_at?: string | null
           updated_at?: string | null
         }

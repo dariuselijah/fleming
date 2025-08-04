@@ -16,16 +16,23 @@ type Project = {
 export function SidebarProject() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
-  const { data: projects = [], isLoading } = useQuery<Project[]>({
+  const { data: projects, isLoading, error } = useQuery<Project[]>({
     queryKey: ["projects"],
     queryFn: async () => {
       const response = await fetch("/api/projects")
       if (!response.ok) {
         throw new Error("Failed to fetch projects")
       }
-      return response.json()
+      const data = await response.json()
+      // Ensure we always return an array
+      return Array.isArray(data) ? data : []
     },
+    // Provide a safe default
+    initialData: [],
   })
+
+  // Ensure projects is always an array
+  const safeProjects = Array.isArray(projects) ? projects : []
 
   return (
     <div className="mb-5">
@@ -42,7 +49,7 @@ export function SidebarProject() {
 
       {isLoading ? null : (
         <div className="space-y-1">
-          {projects.map((project) => (
+          {safeProjects.map((project) => (
             <SidebarProjectItem key={project.id} project={project} />
           ))}
         </div>

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
+import { loadAttachmentsWithSignedUrls } from "@/lib/file-handling"
 import type { Message as MessageAISDK } from "ai"
 import { readFromIndexedDB, writeToIndexedDB } from "../persist"
 
@@ -28,15 +29,35 @@ export async function getMessagesFromDb(
     return []
   }
 
-  return data.map((message) => ({
-    ...message,
-    id: String(message.id),
-    content: message.content ?? "",
-    createdAt: new Date(message.created_at || ""),
-    parts: (message?.parts as MessageAISDK["parts"]) || undefined,
-    message_group_id: message.message_group_id,
-    model: message.model,
-  }))
+  // Process messages and load fresh signed URLs for attachments
+  const processedMessages = await Promise.all(
+    data.map(async (message) => {
+      let processedAttachments = message.experimental_attachments || []
+      
+      // If there are attachments, load fresh signed URLs
+      if (processedAttachments.length > 0) {
+        try {
+          processedAttachments = await loadAttachmentsWithSignedUrls(processedAttachments)
+        } catch (error) {
+          console.error("Error loading attachments with signed URLs:", error)
+          // Keep original attachments if signed URL generation fails
+        }
+      }
+
+      return {
+        ...message,
+        id: String(message.id),
+        content: message.content ?? "",
+        createdAt: new Date(message.created_at || ""),
+        parts: (message?.parts as MessageAISDK["parts"]) || undefined,
+        message_group_id: message.message_group_id,
+        model: message.model,
+        experimental_attachments: processedAttachments,
+      }
+    })
+  )
+
+  return processedMessages
 }
 
 async function insertMessageToDb(chatId: string, message: MessageAISDK) {

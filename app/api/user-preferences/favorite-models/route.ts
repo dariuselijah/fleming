@@ -75,9 +75,11 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
+    console.log("GET /api/user-preferences/favorite-models called")
     const supabase = await createClient()
 
     if (!supabase) {
+      console.log("Supabase client not available")
       return NextResponse.json(
         { error: "Database connection failed" },
         { status: 500 }
@@ -90,9 +92,14 @@ export async function GET() {
       error: authError,
     } = await supabase.auth.getUser()
 
+    console.log("Auth result:", { user: !!user, error: authError })
+
     if (authError || !user) {
+      console.log("User not authenticated:", authError?.message || "No user found")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+
+    console.log("User authenticated:", user.email)
 
     // Get the user's favorite models
     const { data, error } = await supabase
@@ -109,6 +116,7 @@ export async function GET() {
       )
     }
 
+    console.log("Favorite models fetched successfully")
     return NextResponse.json({
       favorite_models: data.favorite_models || [],
     })

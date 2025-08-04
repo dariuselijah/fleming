@@ -61,10 +61,10 @@ export function DialogAuth({ open, setOpen }: DialogAuthProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-xl">
-            You&apos;ve reached the limit for today
+            Authentication Required
           </DialogTitle>
           <DialogDescription className="pt-2 text-base">
-            Sign in below to increase your message limits.
+            Please sign in to continue using Fleming. Anonymous access is not allowed.
           </DialogDescription>
         </DialogHeader>
         {error && (

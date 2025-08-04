@@ -137,7 +137,7 @@ export function ModelSelector({
   const trigger = (
     <Button
       variant="outline"
-      className={cn("dark:bg-secondary justify-between", className)}
+      className={cn("bg-background border-border hover:bg-accent", className)}
       disabled={isLoadingModels}
     >
       <div className="flex items-center gap-2">
@@ -165,7 +165,7 @@ export function ModelSelector({
                 size="sm"
                 variant="secondary"
                 className={cn(
-                  "border-border dark:bg-secondary text-accent-foreground h-9 w-auto border bg-transparent",
+                  "border-border bg-background hover:bg-accent text-foreground h-9 w-auto border",
                   className
                 )}
                 type="button"
@@ -280,7 +280,7 @@ export function ModelSelector({
                 <Input
                   ref={searchInputRef}
                   placeholder="Search models..."
-                  className="dark:bg-popover rounded-b-none border border-none pl-8 shadow-none focus-visible:ring-0"
+                  className="bg-background rounded-b-none border border-none pl-8 shadow-none focus-visible:ring-0"
                   value={searchQuery}
                   onChange={handleSearchChange}
                   onClick={(e) => e.stopPropagation()}

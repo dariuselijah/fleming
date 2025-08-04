@@ -21,8 +21,10 @@ import { SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/compone
 
 // Multi-modal configuration - maps user-friendly labels to actual model IDs
 const MODAL_MAPPING = {
-  normal: "gpt-4.1-nano", // Normal mode maps to GPT-4.1 Nano
-  expert: "gpt-4.1", // Expert mode maps to GPT-4.1
+  grok4: "grok-4", // Grok-4 model
+  grok3: "grok-3", // Grok-3 model
+  o3: "o3", // o3 model
+  gpt4o: "gpt-4o", // GPT-4o model
 } as const
 
 type ModalMode = keyof typeof MODAL_MAPPING
@@ -35,7 +37,7 @@ const getActualModelId = (modalMode: string): string => {
 // Helper function to get modal mode from actual model ID
 const getModalModeFromModelId = (modelId: string): string => {
   const entry = Object.entries(MODAL_MAPPING).find(([_, actualId]) => actualId === modelId)
-  return entry ? entry[0] : modelId
+  return entry ? entry[0] : "grok4" // Default to grok4 if no match found
 }
 
 type ChatInputProps = {
@@ -98,7 +100,10 @@ export function ChatInput({
 
   const selectModelConfig = getModelInfo(effectiveModelId)
   const hasSearchSupport = Boolean(selectModelConfig?.webSearch)
-  const isOnlyWhitespace = (text: string) => !/[^\s]/.test(text)
+  const isOnlyWhitespace = (text: string | undefined | null) => {
+    if (!text) return true
+    return !/[^\s]/.test(text)
+  }
 
   // Handle modal mode selection
   const handleModalModeChange = useCallback((modalMode: string) => {
@@ -106,8 +111,11 @@ export function ChatInput({
     onSelectModel(actualModelId)
   }, [onSelectModel])
 
-  // Get the current modal mode for display
-  const currentModalMode = getModalModeFromModelId(selectedModel)
+  // Get the current modal mode for display - ensure it has a default value
+  const currentModalMode = useMemo(() => {
+    const mode = getModalModeFromModelId(selectedModel)
+    return mode || "grok4" // Ensure we always have a valid mode
+  }, [selectedModel])
 
   const handleSend = useCallback(() => {
     if (isSubmitting) {
@@ -135,7 +143,7 @@ export function ChatInput({
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        if (isOnlyWhitespace(value)) {
+        if (!value || isOnlyWhitespace(value)) {
           return
         }
 
@@ -209,10 +217,10 @@ export function ChatInput({
         >
           <FileList files={files} onFileRemove={onFileRemove} />
           <PromptInputTextarea
-            placeholder="Ask Fleming"
+            placeholder="Ask Fleming anything..."
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
+            className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base placeholder:text-muted-foreground placeholder:opacity-80"
           />
           <PromptInputActions className="mt-5 w-full justify-between px-3 pb-3">
             <div className="flex gap-2">
@@ -225,13 +233,13 @@ export function ChatInput({
                 <SelectTrigger className="w-[160px]">
                   <SelectValue placeholder="Select Model" />
                 </SelectTrigger>
-                                  <SelectContent>
-                   {availableModalModes.map(([label, modelId]) => (
-                     <SelectItem key={modelId} value={label}>
-                       {label === 'normal' ? 'Normal (Medical Assistant)' : 'Health Expert'}
-                     </SelectItem>
-                   ))}
-                 </SelectContent>
+                <SelectContent>
+                  {availableModalModes.map(([label, modelId]) => (
+                    <SelectItem key={modelId} value={label}>
+                      {label === 'grok4' ? 'Grok-4' : label === 'grok3' ? 'Grok-3' : label === 'o3' ? 'o3' : 'GPT-4o'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
               {hasSearchSupport ? (
                 <ButtonSearch
@@ -245,7 +253,7 @@ export function ChatInput({
               <Button
                 size="sm"
                 className="size-9 rounded-full transition-all duration-300 ease-out"
-                disabled={!value || isSubmitting || isOnlyWhitespace(value)}
+                disabled={Boolean(!value || isSubmitting || (value && isOnlyWhitespace(value)))}
                 type="button"
                 onClick={handleSend}
                 aria-label={status === "streaming" ? "Stop" : "Send message"}

@@ -10,16 +10,22 @@ type ImageResult = {
 
 export function SearchImages({ results }: { results: ImageResult[] }) {
   const [hiddenIndexes, setHiddenIndexes] = useState<Set<number>>(new Set())
+  const [failedImages, setFailedImages] = useState<Set<number>>(new Set())
 
   const handleError = (index: number) => {
+    console.warn(`Failed to load image at index ${index}:`, results[index]?.imageUrl)
     setHiddenIndexes((prev) => new Set(prev).add(index))
+    setFailedImages((prev) => new Set(prev).add(index))
   }
 
-  if (!results?.length) return null
+  // Filter out results that have already failed
+  const validResults = results.filter((_, index) => !failedImages.has(index))
+
+  if (!validResults?.length) return null
 
   return (
     <div className="my-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-      {results.map((img, i) => {
+      {validResults.map((img, i) => {
         const favicon = getFavicon(img.sourceUrl)
         return hiddenIndexes.has(i) ? null : (
           <a
@@ -35,6 +41,10 @@ export function SearchImages({ results }: { results: ImageResult[] }) {
               onError={() => handleError(i)}
               onLoad={(e) => e.currentTarget.classList.remove("opacity-0")}
               className="h-full max-h-48 min-h-40 w-full object-cover opacity-0 transition-opacity duration-150 ease-out"
+              // Add error handling for Next.js Image component
+              unoptimized={true}
+              // Add a fallback for failed images
+              onErrorCapture={() => handleError(i)}
             />
             <div className="bg-primary absolute right-0 bottom-0 left-0 flex flex-col gap-0.5 px-2.5 py-1.5 opacity-0 transition-opacity duration-100 ease-out group-hover/image:opacity-100">
               <div className="flex items-center gap-1">
@@ -43,6 +53,7 @@ export function SearchImages({ results }: { results: ImageResult[] }) {
                     src={favicon}
                     alt="favicon"
                     className="h-4 w-4 rounded-full"
+                    unoptimized={true}
                   />
                 )}
                 <span className="text-secondary line-clamp-1 text-xs">

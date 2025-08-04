@@ -115,6 +115,8 @@ export async function signInWithGoogle(supabase: SupabaseClient) {
           ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
           : APP_DOMAIN
 
+    console.log("Signing in with Google, redirect URL:", `${baseUrl}/auth/callback`)
+
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -127,9 +129,11 @@ export async function signInWithGoogle(supabase: SupabaseClient) {
     })
 
     if (error) {
+      console.error("OAuth error:", error)
       throw error
     }
 
+    console.log("OAuth initiated successfully")
     // Return the provider URL
     return data
   } catch (err) {
@@ -143,62 +147,7 @@ export const getOrCreateGuestUserId = async (
 ): Promise<string | null> => {
   if (user?.id) return user.id
 
-  const supabase = createClient()
-
-  if (!supabase) {
-    console.warn("Supabase is not available in this deployment.")
-    return null
-  }
-
-  const existingGuestSessionUser = await supabase.auth.getUser()
-  if (
-    existingGuestSessionUser.data?.user &&
-    existingGuestSessionUser.data.user.is_anonymous
-  ) {
-    const anonUserId = existingGuestSessionUser.data.user.id
-
-    const profileCreationAttempted = localStorage.getItem(
-      `guestProfileAttempted_${anonUserId}`
-    )
-
-    if (!profileCreationAttempted) {
-      try {
-        await createGuestUser(anonUserId)
-        localStorage.setItem(`guestProfileAttempted_${anonUserId}`, "true")
-      } catch (error) {
-        console.error(
-          "Failed to ensure guest user profile exists for existing anonymous auth user:",
-          error
-        )
-        return null
-      }
-    }
-    return anonUserId
-  }
-
-  try {
-    const { data: anonAuthData, error: anonAuthError } =
-      await supabase.auth.signInAnonymously()
-
-    if (anonAuthError) {
-      console.error("Error during anonymous sign-in:", anonAuthError)
-      return null
-    }
-
-    if (!anonAuthData || !anonAuthData.user) {
-      console.error("Anonymous sign-in did not return a user.")
-      return null
-    }
-
-    const guestIdFromAuth = anonAuthData.user.id
-    await createGuestUser(guestIdFromAuth)
-    localStorage.setItem(`guestProfileAttempted_${guestIdFromAuth}`, "true")
-    return guestIdFromAuth
-  } catch (error) {
-    console.error(
-      "Error in getOrCreateGuestUserId during anonymous sign-in or profile creation:",
-      error
-    )
-    return null
-  }
+  // Require authentication - no anonymous users allowed
+  console.warn("Authentication required. Please sign in to continue.")
+  return null
 }

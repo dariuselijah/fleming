@@ -54,14 +54,19 @@ export function MessageAssistant({
           part.toolInvocation?.toolName === "imageSearch" &&
           part.toolInvocation?.result?.content?.[0]?.type === "images"
       )
-      .flatMap((part) =>
-        part.type === "tool-invocation" &&
-        part.toolInvocation?.state === "result" &&
-        part.toolInvocation?.toolName === "imageSearch" &&
-        part.toolInvocation?.result?.content?.[0]?.type === "images"
-          ? (part.toolInvocation?.result?.content?.[0]?.results ?? [])
-          : []
-      ) ?? []
+      .flatMap((part) => {
+        try {
+          return part.type === "tool-invocation" &&
+            part.toolInvocation?.state === "result" &&
+            part.toolInvocation?.toolName === "imageSearch" &&
+            part.toolInvocation?.result?.content?.[0]?.type === "images"
+              ? (part.toolInvocation?.result?.content?.[0]?.results ?? [])
+              : []
+        } catch (error) {
+          console.warn("Error processing image search results:", error)
+          return []
+        }
+      }) ?? []
 
   return (
     <Message

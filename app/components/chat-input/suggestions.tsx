@@ -2,9 +2,10 @@
 
 import { PromptSuggestion } from "@/components/prompt-kit/prompt-suggestion"
 import { TRANSITION_SUGGESTIONS } from "@/lib/motion"
+import { getSuggestionsByRole } from "@/lib/config"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { AnimatePresence, motion } from "motion/react"
 import React, { memo, useCallback, useMemo, useState } from "react"
-import { SUGGESTIONS as SUGGESTIONS_CONFIG } from "../../../lib/config"
 
 type SuggestionsProps = {
   onValueChange: (value: string) => void
@@ -20,10 +21,16 @@ export const Suggestions = memo(function Suggestions({
   value,
 }: SuggestionsProps) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
+  const { preferences } = useUserPreferences()
 
   if (!value && activeCategory !== null) {
     setActiveCategory(null)
   }
+
+  // Get suggestions based on user role and medical specialty
+  const SUGGESTIONS_CONFIG = useMemo(() => {
+    return getSuggestionsByRole(preferences.userRole, preferences.medicalSpecialty)
+  }, [preferences.userRole, preferences.medicalSpecialty])
 
   const activeCategoryData = SUGGESTIONS_CONFIG.find(
     (group) => group.label === activeCategory
@@ -87,7 +94,7 @@ export const Suggestions = memo(function Suggestions({
         ))}
       </motion.div>
     ),
-    [handleCategoryClick]
+    [handleCategoryClick, SUGGESTIONS_CONFIG]
   )
 
   const suggestionsList = useMemo(

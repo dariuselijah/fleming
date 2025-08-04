@@ -11,7 +11,6 @@ import {
 import {
   MessageAction,
   MessageActions,
-  Message as MessageContainer,
   MessageContent,
 } from "@/components/prompt-kit/message"
 import { Button } from "@/components/ui/button"
@@ -73,7 +72,7 @@ export function MessageUser({
   }
 
   return (
-    <MessageContainer
+    <div
       className={cn(
         "group flex w-full max-w-3xl flex-col items-end gap-0.5 px-6 pb-2",
         hasScrollAnchor && "min-h-scroll-anchor",
@@ -102,15 +101,16 @@ export function MessageUser({
                   alt={attachment.name || "Attachment"}
                   width={160}
                   height={120}
+                  unoptimized={true}
                 />
               </MorphingDialogTrigger>
               <MorphingDialogContainer>
                 <MorphingDialogContent className="relative rounded-lg">
-                  <MorphingDialogImage
-                    src={attachment.url}
-                    alt={attachment.name || ""}
-                    className="max-h-[90vh] max-w-[90vw] object-contain"
-                  />
+                                  <MorphingDialogImage
+                  src={attachment.url}
+                  alt={attachment.name || ""}
+                  className="max-h-[90vh] max-w-[90vw] object-contain"
+                />
                 </MorphingDialogContent>
                 <MorphingDialogClose className="text-primary" />
               </MorphingDialogContainer>
@@ -217,6 +217,6 @@ export function MessageUser({
           </button>
         </MessageAction>
       </MessageActions>
-    </MessageContainer>
+    </div>
   )
 }

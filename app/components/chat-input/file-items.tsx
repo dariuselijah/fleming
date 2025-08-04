@@ -44,6 +44,7 @@ export function FileItem({ file, onRemove }: FileItemProps) {
                   width={40}
                   height={40}
                   className="h-full w-full object-cover"
+                  unoptimized={true}
                 />
               ) : (
                 <div className="text-center text-xs text-gray-400">
@@ -66,6 +67,7 @@ export function FileItem({ file, onRemove }: FileItemProps) {
             width={200}
             height={200}
             className="h-full w-full object-cover"
+            unoptimized={true}
           />
         </HoverCardContent>
       </HoverCard>

@@ -1,8 +1,6 @@
 import { toast } from "@/components/ui/toast"
-import { SupabaseClient } from "@supabase/supabase-js"
 import * as fileType from "file-type"
 import { DAILY_FILE_UPLOAD_LIMIT } from "./config"
-import { createClient } from "./supabase/client"
 import { isSupabaseEnabled } from "./supabase/config"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
@@ -24,6 +22,7 @@ export type Attachment = {
   name: string
   contentType: string
   url: string
+  filePath?: string // Store file path for secure access
 }
 
 export async function validateFile(
@@ -51,35 +50,86 @@ export async function validateFile(
   return { isValid: true }
 }
 
-export async function uploadFile(
-  supabase: SupabaseClient,
-  file: File
-): Promise<string> {
-  const fileExt = file.name.split(".").pop()
-  const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`
-  const filePath = `uploads/${fileName}`
-
-  const { error } = await supabase.storage
-    .from("chat-attachments")
-    .upload(filePath, file)
-
-  if (error) {
-    throw new Error(`Error uploading file: ${error.message}`)
-  }
-
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from("chat-attachments").getPublicUrl(filePath)
-
-  return publicUrl
-}
-
-export function createAttachment(file: File, url: string): Attachment {
+export function createAttachment(file: File, url: string, filePath?: string): Attachment {
   return {
     name: file.name,
     contentType: file.type,
     url,
+    filePath
   }
+}
+
+// Function to generate a new signed URL for secure file access
+export async function getSignedUrl(filePath: string, expiresIn: number = 3600): Promise<string> {
+  if (!isSupabaseEnabled) {
+    throw new Error("Supabase not enabled")
+  }
+
+  try {
+    const response = await fetch("/api/get-signed-url", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filePath,
+        expiresIn,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || "Failed to generate signed URL")
+    }
+
+    const result = await response.json()
+    return result.signedUrl
+  } catch (error) {
+    throw new Error(`Error generating signed URL: ${error instanceof Error ? error.message : "Unknown error"}`)
+  }
+}
+
+// Function to generate signed URL with retry for newly uploaded files
+export async function getSignedUrlWithRetry(filePath: string, expiresIn: number = 3600, maxRetries: number = 5): Promise<string> {
+  if (!isSupabaseEnabled) {
+    throw new Error("Supabase not enabled")
+  }
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch("/api/get-signed-url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filePath,
+          expiresIn,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        if (errorData.error?.includes("Object not found") && attempt < maxRetries) {
+          // Wait longer between retries for newly uploaded files
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempt))
+          continue
+        }
+        throw new Error(errorData.error || "Failed to generate signed URL")
+      }
+
+      const result = await response.json()
+      return result.signedUrl
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error
+      }
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt))
+    }
+  }
+
+  throw new Error("Failed to generate signed URL after retries")
 }
 
 export async function processFiles(
@@ -87,7 +137,6 @@ export async function processFiles(
   chatId: string,
   userId: string
 ): Promise<Attachment[]> {
-  const supabase = isSupabaseEnabled ? createClient() : null
   const attachments: Attachment[] = []
 
   for (const file of files) {
@@ -103,32 +152,114 @@ export async function processFiles(
     }
 
     try {
-      const url = supabase
-        ? await uploadFile(supabase, file)
-        : URL.createObjectURL(file)
+      let url: string
+      let filePath: string | undefined
 
-      if (supabase) {
-        const { error } = await supabase.from("chat_attachments").insert({
-          chat_id: chatId,
-          user_id: userId,
-          file_url: url,
-          file_name: file.name,
-          file_type: file.type,
-          file_size: file.size,
+      if (isSupabaseEnabled) {
+        // Use server-side API for file uploads
+        const formData = new FormData()
+        formData.append("file", file)
+        formData.append("userId", userId)
+        formData.append("chatId", chatId)
+        formData.append("isAuthenticated", "true") // Assuming authenticated users
+
+        const response = await fetch("/api/upload-file", {
+          method: "POST",
+          body: formData,
         })
 
-        if (error) {
-          throw new Error(`Database insertion failed: ${error.message}`)
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || "Upload failed")
         }
+
+        const result = await response.json()
+        url = result.signedUrl
+        filePath = result.filePath
+      } else {
+        url = URL.createObjectURL(file)
       }
 
-      attachments.push(createAttachment(file, url))
+      attachments.push(createAttachment(file, url, filePath))
     } catch (error) {
       console.error(`Error processing file ${file.name}:`, error)
+      toast({
+        title: "File upload failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        status: "error",
+      })
     }
   }
 
   return attachments
+}
+
+// Function to load existing attachments with fresh signed URLs
+export async function loadAttachmentsWithSignedUrls(
+  attachments: Attachment[]
+): Promise<Attachment[]> {
+  if (!isSupabaseEnabled) {
+    return attachments // Return as-is if no Supabase
+  }
+
+  const updatedAttachments: Attachment[] = []
+
+  for (const attachment of attachments) {
+    try {
+      // If the attachment has a filePath, generate a fresh signed URL
+      if (attachment.filePath) {
+        const signedUrl = await getSignedUrlWithRetry(attachment.filePath)
+        updatedAttachments.push({
+          ...attachment,
+          url: signedUrl
+        })
+      } else {
+        // If no filePath, assume it's already a signed URL or blob URL
+        updatedAttachments.push(attachment)
+      }
+    } catch (error) {
+      console.error(`Error generating signed URL for ${attachment.name}:`, error)
+      // Keep the original attachment even if signed URL generation fails
+      updatedAttachments.push(attachment)
+    }
+  }
+
+  return updatedAttachments
+}
+
+// Function to get attachments from database with fresh signed URLs
+export async function getAttachmentsFromDb(
+  chatId: string,
+  userId: string
+): Promise<Attachment[]> {
+  if (!isSupabaseEnabled) {
+    return []
+  }
+
+  try {
+    const response = await fetch("/api/get-attachments", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        chatId,
+        userId,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      console.error("Error fetching attachments:", errorData.error)
+      return []
+    }
+
+    const result = await response.json()
+    return result.attachments || []
+  } catch (error) {
+    console.error("Error fetching attachments:", error)
+    return []
+  }
 }
 
 export class FileUploadLimitError extends Error {
@@ -142,31 +273,39 @@ export class FileUploadLimitError extends Error {
 export async function checkFileUploadLimit(userId: string) {
   if (!isSupabaseEnabled) return 0
 
-  const supabase = createClient()
+  try {
+    const response = await fetch("/api/check-file-upload-limit", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userId,
+      }),
+    })
 
-  if (!supabase) {
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || "Failed to check file upload limit")
+    }
+
+    const result = await response.json()
+    const count = result.count || 0
+    
+    if (count >= DAILY_FILE_UPLOAD_LIMIT) {
+      throw new FileUploadLimitError("Daily file upload limit reached.")
+    }
+
+    return count
+  } catch (error) {
+    console.error("Error checking file upload limit:", error)
+    if (error instanceof FileUploadLimitError) {
+      throw error
+    }
     toast({
       title: "File upload is not supported in this deployment",
       status: "info",
     })
     return 0
   }
-
-  const now = new Date()
-  const startOfToday = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-  )
-
-  const { count, error } = await supabase
-    .from("chat_attachments")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .gte("created_at", startOfToday.toISOString())
-
-  if (error) throw new Error(error.message)
-  if (count && count >= DAILY_FILE_UPLOAD_LIMIT) {
-    throw new FileUploadLimitError("Daily file upload limit reached.")
-  }
-
-  return count
 }

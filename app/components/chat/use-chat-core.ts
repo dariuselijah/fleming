@@ -31,6 +31,7 @@ type UseChatCoreProps = {
   selectedModel: string
   clearDraft: () => void
   bumpChat: (chatId: string) => void
+  setHasDialogAuth: (value: boolean) => void
 }
 
 export function useChatCore({
@@ -49,10 +50,10 @@ export function useChatCore({
   selectedModel,
   clearDraft,
   bumpChat,
+  setHasDialogAuth,
 }: UseChatCoreProps) {
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [hasDialogAuth, setHasDialogAuth] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
 
   // Refs and derived state
@@ -74,7 +75,11 @@ export function useChatCore({
     console.error("Error message:", error.message)
     let errorMsg = error.message || "Something went wrong."
 
-    if (errorMsg === "An error occurred" || errorMsg === "fetch failed") {
+    // Handle specific image-related errors
+    if (errorMsg.includes("Fetching image failed") || errorMsg.includes("400 Bad Request")) {
+      errorMsg = "There was an issue with image search results. The chat will continue without images."
+      console.warn("Image search error detected, continuing without images:", error)
+    } else if (errorMsg === "An error occurred" || errorMsg === "fetch failed") {
       errorMsg = "Something went wrong. Please try again."
     }
 
@@ -112,14 +117,16 @@ export function useChatCore({
   }, [prompt, setInput])
 
   // Reset messages when navigating from a chat to home
-  if (
-    prevChatIdRef.current !== null &&
-    chatId === null &&
-    messages.length > 0
-  ) {
-    setMessages([])
-  }
-  prevChatIdRef.current = chatId
+  useEffect(() => {
+    if (
+      prevChatIdRef.current !== null &&
+      chatId === null &&
+      messages.length > 0
+    ) {
+      setMessages([])
+    }
+    prevChatIdRef.current = chatId
+  }, [chatId, messages.length, setMessages])
 
   // Submit action
   const submit = useCallback(async () => {
@@ -128,6 +135,7 @@ export function useChatCore({
     const uid = await getOrCreateGuestUserId(user)
     if (!uid) {
       setIsSubmitting(false)
+      setHasDialogAuth(true)
       return
     }
 
@@ -360,8 +368,6 @@ export function useChatCore({
     // Component state
     isSubmitting,
     setIsSubmitting,
-    hasDialogAuth,
-    setHasDialogAuth,
     enableSearch,
     setEnableSearch,
 

@@ -26,9 +26,9 @@ interface UserPreferencesContextType {
   setPromptSuggestions: (enabled: boolean) => void
   setShowToolInvocations: (enabled: boolean) => void
   setShowConversationPreviews: (enabled: boolean) => void
-  setMultiModelEnabled: (enabled: boolean) => void
   toggleModelVisibility: (modelId: string) => void
   isModelHidden: (modelId: string) => boolean
+  updatePreferences: (update: Partial<UserPreferences>) => Promise<void>
   isLoading: boolean
 }
 
@@ -186,7 +186,9 @@ export function UserPreferencesProvider({
     },
   })
 
-  const updatePreferences = mutation.mutate
+  const updatePreferences = async (update: Partial<UserPreferences>) => {
+    await mutation.mutateAsync(update)
+  }
 
   const setLayout = (layout: LayoutType) => {
     if (isAuthenticated || layout === "fullscreen") {
@@ -204,10 +206,6 @@ export function UserPreferencesProvider({
 
   const setShowConversationPreviews = (enabled: boolean) => {
     updatePreferences({ showConversationPreviews: enabled })
-  }
-
-  const setMultiModelEnabled = (enabled: boolean) => {
-    updatePreferences({ multiModelEnabled: enabled })
   }
 
   const toggleModelVisibility = (modelId: string) => {
@@ -232,9 +230,9 @@ export function UserPreferencesProvider({
         setPromptSuggestions,
         setShowToolInvocations,
         setShowConversationPreviews,
-        setMultiModelEnabled,
         toggleModelVisibility,
         isModelHidden,
+        updatePreferences,
         isLoading,
       }}
     >
