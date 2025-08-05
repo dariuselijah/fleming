@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react"
 import { getModelInfo } from "@/lib/models"
 import { useModel } from "@/lib/model-store/provider"
@@ -79,6 +79,7 @@ export function ChatInput({
   enableSearch,
 }: ChatInputProps) {
   const { models } = useModel()
+  const [isButtonDisabled, setIsButtonDisabled] = useState(true);
   
   // Get the actual model ID for the selected modal mode
   const actualModelId = getActualModelId(selectedModel)
@@ -118,36 +119,53 @@ export function ChatInput({
   }, [selectedModel])
 
   const handleSend = useCallback(() => {
+    console.log("=== handleSend CALLED (button click) ===")
+    console.log("Current isSubmitting state:", isSubmitting)
+    console.log("Current status:", status)
+    
     if (isSubmitting) {
+      console.log("Already submitting, ignoring button click")
       return
     }
 
     if (status === "streaming") {
+      console.log("Streaming, stopping")
       stop()
       return
     }
 
+    console.log("Calling onSend from button click")
     onSend()
   }, [isSubmitting, onSend, status, stop])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      console.log("=== handleKeyDown CALLED ===")
+      console.log("Key pressed:", e.key)
+      console.log("Current isSubmitting state:", isSubmitting)
+      console.log("Current status:", status)
+      
       if (isSubmitting) {
+        console.log("Already submitting, preventing key event")
         e.preventDefault()
         return
       }
 
       if (e.key === "Enter" && status === "streaming") {
+        console.log("Streaming, preventing Enter key")
         e.preventDefault()
         return
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
         if (!value || isOnlyWhitespace(value)) {
+          console.log("Empty value or whitespace, ignoring Enter key")
           return
         }
 
+        console.log("=== handleKeyDown CALLED (Enter key) ===")
         e.preventDefault()
+        console.log("Calling onSend from Enter key")
         onSend()
       }
     },
@@ -198,6 +216,10 @@ export function ChatInput({
       setEnableSearch?.(false)
     }
   }, [hasSearchSupport, enableSearch, setEnableSearch])
+
+  useEffect(() => {
+    setIsButtonDisabled(Boolean(!value || isSubmitting || (value && isOnlyWhitespace(value))));
+  }, [value, isSubmitting]);
 
   return (
     <div className="relative flex w-full flex-col gap-4">
@@ -253,7 +275,7 @@ export function ChatInput({
               <Button
                 size="sm"
                 className="size-9 rounded-full transition-all duration-300 ease-out"
-                disabled={Boolean(!value || isSubmitting || (value && isOnlyWhitespace(value)))}
+                disabled={isButtonDisabled}
                 type="button"
                 onClick={handleSend}
                 aria-label={status === "streaming" ? "Stop" : "Send message"}

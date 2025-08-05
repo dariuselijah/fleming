@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
-import { getHealthcareAgentsByRole, getHealthcareAgentById, HealthcareAgent } from "@/lib/models/healthcare-agents"
+import { getHealthcareAgentById, HealthcareAgent } from "@/lib/models/healthcare-agents"
 import { 
   StethoscopeIcon, 
   UserIcon, 
@@ -22,33 +22,41 @@ import {
 import { useState } from "react"
 
 const agentIcons: Record<string, any> = {
-  "cardiology-assistant": HeartIcon,
-  "oncology-assistant": BrainIcon,
-  "pediatrics-assistant": BabyIcon,
-  "emergency-medicine-assistant": FirstAidIcon,
-  "neurology-assistant": BrainCircuitIcon,
-  "psychiatry-assistant": BrainSimpleIcon,
-  "patient-education-assistant": BookOpenIcon,
-  "chronic-disease-assistant": ClockIcon,
-  "mental-health-support": BrainIcon2
+  "healthcare_orchestrator": StethoscopeIcon,
+  "clinical_diagnosis_agent": BrainIcon,
+  "evidence_based_medicine_agent": BookOpenIcon,
+  "drug_interaction_agent": ShieldCheckIcon,
+  "imaging_interpretation_agent": BrainCircuitIcon,
+  "laboratory_analysis_agent": BrainSimpleIcon,
+  "treatment_planning_agent": ClockIcon,
+  "risk_assessment_agent": BrainIcon2,
+  "specialty_consultant_agent": HeartIcon
 }
 
 export function HealthcareAgentSelector() {
   const { preferences, updatePreferences } = useUserPreferences()
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
 
-  const availableAgents = getHealthcareAgentsByRole(preferences.userRole)
+  // Debug logging
+  console.log("HealthcareAgentSelector - Current preferences:", {
+    userRole: preferences.userRole,
+    healthcareAgentEnabled: preferences.healthcareAgentEnabled,
+    medicalSpecialty: preferences.medicalSpecialty
+  })
 
-  const handleAgentSelect = async (agentId: string) => {
+  const handleEnableHealthcareAgent = async () => {
     setIsUpdating(true)
     try {
-      // Update user preferences with selected agent
+      console.log("Enabling healthcare agent...")
       await updatePreferences({ 
         healthcareAgentEnabled: true,
-        // Add agent-specific settings based on the selected agent
+        clinicalDecisionSupport: true,
+        medicalLiteratureAccess: true,
+        medicalComplianceMode: true
       })
-      setSelectedAgent(agentId)
+      console.log("Healthcare agent enabled successfully")
+    } catch (error) {
+      console.error("Error enabling healthcare agent:", error)
     } finally {
       setIsUpdating(false)
     }
@@ -57,63 +65,88 @@ export function HealthcareAgentSelector() {
   const handleDisableAgent = async () => {
     setIsUpdating(true)
     try {
+      console.log("Disabling healthcare agent...")
       await updatePreferences({ 
         healthcareAgentEnabled: false,
         clinicalDecisionSupport: false,
         medicalLiteratureAccess: false,
-        medicalComplianceMode: false,
-        patientEducationMode: false
+        medicalComplianceMode: false
       })
-      setSelectedAgent(null)
+      console.log("Healthcare agent disabled successfully")
+    } catch (error) {
+      console.error("Error disabling healthcare agent:", error)
     } finally {
       setIsUpdating(false)
     }
   }
 
-  const currentAgent = selectedAgent ? getHealthcareAgentById(selectedAgent) : null
-  const CurrentAgentIcon = currentAgent ? agentIcons[currentAgent.id] || StethoscopeIcon : StethoscopeIcon
+  const orchestratorAgent = getHealthcareAgentById("healthcare_orchestrator")
+  const OrchestratorIcon = orchestratorAgent ? agentIcons[orchestratorAgent.id] || StethoscopeIcon : StethoscopeIcon
 
   return (
     <div className="space-y-6">
       <div>
-        <h4 className="mb-2 text-lg font-medium">Healthcare AI Assistant</h4>
+        <h4 className="mb-2 text-lg font-medium">Healthcare AI Orchestrator</h4>
         <p className="text-muted-foreground mb-4 text-sm">
-          Select a specialized AI assistant tailored to your healthcare needs.
+          Enable the advanced multi-agent healthcare system for comprehensive medical assistance.
         </p>
       </div>
 
       {/* Current Agent Display */}
-      {preferences.healthcareAgentEnabled && currentAgent && (
+      {preferences.healthcareAgentEnabled && orchestratorAgent && (
         <Card className="border-blue-200 bg-blue-50/50">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <CurrentAgentIcon className="size-5 text-blue-600" />
-              {currentAgent.name}
+              <OrchestratorIcon className="size-5 text-blue-600" />
+              Healthcare AI Orchestrator
             </CardTitle>
             <CardDescription>
-              {currentAgent.description}
+              Sophisticated medical intelligence system that coordinates multiple specialized AI agents
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <h5 className="mb-2 text-sm font-medium">Capabilities:</h5>
+              <h5 className="mb-2 text-sm font-medium">Available Specialized Agents:</h5>
               <div className="flex flex-wrap gap-1">
-                {currentAgent.capabilities.map((capability, index) => (
-                  <Badge key={index} variant="secondary" className="text-xs">
-                    {capability}
-                  </Badge>
-                ))}
+                <Badge variant="secondary" className="text-xs">
+                  Clinical Diagnosis
+                </Badge>
+                <Badge variant="secondary" className="text-xs">
+                  Evidence-Based Medicine
+                </Badge>
+                <Badge variant="secondary" className="text-xs">
+                  Drug Interactions
+                </Badge>
+                <Badge variant="secondary" className="text-xs">
+                  Imaging Interpretation
+                </Badge>
+                <Badge variant="secondary" className="text-xs">
+                  Laboratory Analysis
+                </Badge>
+                <Badge variant="secondary" className="text-xs">
+                  Treatment Planning
+                </Badge>
+                <Badge variant="secondary" className="text-xs">
+                  Risk Assessment
+                </Badge>
+                <Badge variant="secondary" className="text-xs">
+                  Specialty Consultant
+                </Badge>
               </div>
             </div>
             
             <div>
               <h5 className="mb-2 text-sm font-medium">Compliance Standards:</h5>
               <div className="flex flex-wrap gap-1">
-                {currentAgent.complianceStandards.map((standard, index) => (
-                  <Badge key={index} variant="outline" className="text-xs">
-                    {standard}
-                  </Badge>
-                ))}
+                <Badge variant="outline" className="text-xs">
+                  HIPAA
+                </Badge>
+                <Badge variant="outline" className="text-xs">
+                  FDA
+                </Badge>
+                <Badge variant="outline" className="text-xs">
+                  Medical Ethics
+                </Badge>
               </div>
             </div>
 
@@ -123,90 +156,57 @@ export function HealthcareAgentSelector() {
               disabled={isUpdating}
               className="w-full"
             >
-              Disable Healthcare Assistant
+              Disable Healthcare Orchestrator
             </Button>
           </CardContent>
         </Card>
       )}
 
-      {/* Available Agents */}
-      {(!preferences.healthcareAgentEnabled || !currentAgent) && (
-        <div className="space-y-4">
-          <h5 className="text-sm font-medium">Available Assistants for {preferences.userRole === "doctor" ? "Healthcare Professionals" : "Patients"}:</h5>
-          
-          <div className="grid gap-4 md:grid-cols-2">
-            {availableAgents.map((agent) => {
-              const AgentIcon = agentIcons[agent.id] || StethoscopeIcon
-              return (
-                <Card 
-                  key={agent.id} 
-                  className="cursor-pointer transition-all hover:border-blue-300 hover:shadow-md"
-                  onClick={() => handleAgentSelect(agent.id)}
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center gap-2">
-                      <AgentIcon className="size-5 text-blue-600" />
-                      <CardTitle className="text-base">{agent.name}</CardTitle>
-                    </div>
-                    <CardDescription className="text-sm">
-                      {agent.description}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <div className="space-y-3">
-                      <div>
-                        <h6 className="mb-1 text-xs font-medium text-muted-foreground">Key Capabilities:</h6>
-                        <div className="flex flex-wrap gap-1">
-                          {agent.capabilities.slice(0, 3).map((capability, index) => (
-                            <Badge key={index} variant="secondary" className="text-xs">
-                              {capability}
-                            </Badge>
-                          ))}
-                          {agent.capabilities.length > 3 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{agent.capabilities.length - 3} more
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div>
-                        <h6 className="mb-1 text-xs font-medium text-muted-foreground">Compliance:</h6>
-                        <div className="flex flex-wrap gap-1">
-                          {agent.complianceStandards.slice(0, 2).map((standard, index) => (
-                            <Badge key={index} variant="outline" className="text-xs">
-                              {standard}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
+      {/* Enable Healthcare Agent */}
+      {!preferences.healthcareAgentEnabled && preferences.userRole === "doctor" && (
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <StethoscopeIcon className="size-5" />
+              Enable Healthcare AI Orchestrator
+            </CardTitle>
+            <CardDescription>
+              Activate the advanced multi-agent healthcare system for comprehensive medical assistance.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <h5 className="mb-2 text-sm font-medium">System Features:</h5>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <div>• Intelligent query analysis and agent routing</div>
+                <div>• Evidence-based medical knowledge integration</div>
+                <div>• Multi-agent coordination and response synthesis</div>
+                <div>• Specialty-specific expertise and protocols</div>
+                <div>• Built-in safety validation and compliance</div>
+              </div>
+            </div>
 
-                      <Button 
-                        variant="default" 
-                        size="sm" 
-                        className="w-full"
-                        disabled={isUpdating}
-                      >
-                        Select Assistant
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
-          </div>
-        </div>
+            <Button 
+              variant="default" 
+              onClick={handleEnableHealthcareAgent}
+              disabled={isUpdating}
+              className="w-full"
+            >
+              Enable Healthcare Orchestrator
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
-      {/* No Agents Available */}
-      {availableAgents.length === 0 && (
+      {/* Not Available for General Users */}
+      {preferences.userRole === "general" && (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-8">
-            <StethoscopeIcon className="mb-2 size-8 text-muted-foreground" />
+            <UserIcon className="mb-2 size-8 text-muted-foreground" />
             <p className="text-center text-sm text-muted-foreground">
-              No specialized assistants available for your current role.
+              The Healthcare AI Orchestrator is only available for healthcare professionals.
               <br />
-              Try changing your role in the Healthcare Settings.
+              Change your role to "Healthcare Professional" to access this feature.
             </p>
           </CardContent>
         </Card>

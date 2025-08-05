@@ -26,6 +26,7 @@ export type UserPreferences = {
   showToolInvocations: boolean
   showConversationPreviews: boolean
   hiddenModels: string[]
+
   
   // Healthcare-specific preferences
   userRole: UserRole
@@ -50,6 +51,7 @@ export const defaultPreferences: UserPreferences = {
   showToolInvocations: true,
   showConversationPreviews: true,
   hiddenModels: [],
+
   
   // Healthcare defaults
   userRole: "general",
@@ -70,12 +72,14 @@ export const defaultPreferences: UserPreferences = {
 
 // Helper functions to convert between API format (snake_case) and frontend format (camelCase)
 export function convertFromApiFormat(apiData: any): UserPreferences {
-  return {
+  console.log("Converting from API format:", apiData)
+  const result = {
     layout: apiData.layout || "fullscreen",
     promptSuggestions: apiData.prompt_suggestions ?? true,
     showToolInvocations: apiData.show_tool_invocations ?? true,
     showConversationPreviews: apiData.show_conversation_previews ?? true,
     hiddenModels: apiData.hidden_models || [],
+
     
     // Healthcare preferences
     userRole: apiData.user_role || "general",
@@ -93,9 +97,12 @@ export function convertFromApiFormat(apiData: any): UserPreferences {
     familyHistory: apiData.family_history || "",
     lifestyleFactors: apiData.lifestyle_factors || "",
   }
+  console.log("Converted to frontend format:", result)
+  return result
 }
 
 export function convertToApiFormat(preferences: Partial<UserPreferences>) {
+  console.log("Converting to API format:", preferences)
   const apiData: any = {}
   if (preferences.layout !== undefined) apiData.layout = preferences.layout
   if (preferences.promptSuggestions !== undefined)
@@ -106,6 +113,7 @@ export function convertToApiFormat(preferences: Partial<UserPreferences>) {
     apiData.show_conversation_previews = preferences.showConversationPreviews
   if (preferences.hiddenModels !== undefined)
     apiData.hidden_models = preferences.hiddenModels
+
   
   // Healthcare preferences
   if (preferences.userRole !== undefined)
@@ -135,5 +143,6 @@ export function convertToApiFormat(preferences: Partial<UserPreferences>) {
   if (preferences.lifestyleFactors !== undefined)
     apiData.lifestyle_factors = preferences.lifestyleFactors
   
+  console.log("Converted API data:", apiData)
   return apiData
 }

@@ -1,10 +1,13 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { convertFromApiFormat, convertToApiFormat } from "@/lib/user-preference-store/utils"
+import { convertFromApiFormat, convertToApiFormat, defaultPreferences } from "@/lib/user-preference-store/utils"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  console.log("GET /api/user-preferences called")
+  
   try {
     const supabase = await createClient()
+    console.log("Supabase client created:", !!supabase)
 
     if (!supabase) {
       console.error("Database connection failed")
@@ -20,6 +23,8 @@ export async function GET() {
       error: authError,
     } = await supabase.auth.getUser()
 
+    console.log("Auth result:", { user: !!user, authError, userId: user?.id })
+
     if (authError) {
       console.error("Auth error:", authError)
       return NextResponse.json({ error: "Authentication error" }, { status: 401 })
@@ -30,12 +35,17 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Get the user's preferences
+    console.log("User authenticated:", user.id)
+
+    // Fetch user preferences from database
     const { data: preferences, error } = await supabase
       .from("user_preferences")
       .select("*")
       .eq("user_id", user.id)
       .single()
+
+    console.log("Fetched preferences:", preferences)
+    console.log("Fetch error:", error)
 
     if (error && error.code !== "PGRST116") {
       console.error("Error fetching user preferences:", error)
@@ -46,13 +56,14 @@ export async function GET() {
     }
 
     if (!preferences) {
-      // Return default preferences if none exist
-      return NextResponse.json(convertToApiFormat({}))
+      console.log("No preferences found, returning defaults")
+      return NextResponse.json(convertToApiFormat(defaultPreferences))
     }
 
+    console.log("Returning user preferences:", preferences)
     return NextResponse.json(preferences)
   } catch (error) {
-    console.error("Error in user-preferences GET API:", error)
+    console.error("Unexpected error in GET /api/user-preferences:", error)
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -61,8 +72,12 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
+  console.log("PUT /api/user-preferences called")
+  console.log("Request headers:", Object.fromEntries(request.headers.entries()))
+  
   try {
     const supabase = await createClient()
+    console.log("Supabase client created:", !!supabase)
 
     if (!supabase) {
       console.error("Database connection failed")
@@ -78,6 +93,8 @@ export async function PUT(request: NextRequest) {
       error: authError,
     } = await supabase.auth.getUser()
 
+    console.log("Auth result:", { user: !!user, authError, userId: user?.id })
+
     if (authError) {
       console.error("Auth error:", authError)
       return NextResponse.json({ error: "Authentication error" }, { status: 401 })
@@ -88,16 +105,23 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    console.log("User authenticated:", user.id)
+
     // Parse the request body
     const body = await request.json()
+    console.log("PUT request body received:", body)
     const apiData = convertToApiFormat(body)
+    console.log("Converted to API format:", apiData)
+    console.log("User role being set to:", apiData.user_role)
 
     // Check if preferences exist
     const { data: existingPreferences, error: checkError } = await supabase
       .from("user_preferences")
-      .select("user_id")
+      .select("user_id, user_role")
       .eq("user_id", user.id)
       .single()
+
+    console.log("Existing preferences check:", { existingPreferences, checkError })
 
     if (checkError && checkError.code !== "PGRST116") {
       console.error("Error checking existing preferences:", checkError)
@@ -109,6 +133,7 @@ export async function PUT(request: NextRequest) {
 
     if (existingPreferences) {
       // Update existing preferences
+      console.log("Updating user preferences:", apiData)
       const { data, error } = await supabase
         .from("user_preferences")
         .update({
@@ -119,6 +144,8 @@ export async function PUT(request: NextRequest) {
         .select()
         .single()
 
+      console.log("Update result:", { data, error })
+
       if (error) {
         console.error("Error updating user preferences:", error)
         return NextResponse.json(
@@ -127,9 +154,11 @@ export async function PUT(request: NextRequest) {
         )
       }
 
+      console.log("Updated user preferences response:", data)
       return NextResponse.json(data)
     } else {
       // Create new preferences
+      console.log("Creating new user preferences:", apiData)
       const { data, error } = await supabase
         .from("user_preferences")
         .insert({
@@ -141,6 +170,8 @@ export async function PUT(request: NextRequest) {
         .select()
         .single()
 
+      console.log("Create result:", { data, error })
+
       if (error) {
         console.error("Error creating user preferences:", error)
         return NextResponse.json(
@@ -149,6 +180,7 @@ export async function PUT(request: NextRequest) {
         )
       }
 
+      console.log("Created user preferences response:", data)
       return NextResponse.json(data)
     }
   } catch (error) {

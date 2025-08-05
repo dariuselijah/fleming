@@ -18,8 +18,27 @@ export async function getMessageUsage(
     .eq("id", userId)
     .maybeSingle()
 
-  if (error || !data) {
-    throw new Error(error?.message || "Failed to fetch message usage")
+  if (error) {
+    console.error("Error fetching message usage:", error)
+    // Consider returning a default/error state instead of throwing
+    return {
+      dailyCount: 0,
+      dailyProCount: 0,
+      dailyLimit: isAuthenticated ? AUTH_DAILY_MESSAGE_LIMIT : NON_AUTH_DAILY_MESSAGE_LIMIT,
+      remaining: isAuthenticated ? AUTH_DAILY_MESSAGE_LIMIT : NON_AUTH_DAILY_MESSAGE_LIMIT,
+      remainingPro: DAILY_LIMIT_PRO_MODELS,
+    }
+  }
+
+  // If data is null (e.g., new user), return default values
+  if (!data) {
+    return {
+      dailyCount: 0,
+      dailyProCount: 0,
+      dailyLimit: isAuthenticated ? AUTH_DAILY_MESSAGE_LIMIT : NON_AUTH_DAILY_MESSAGE_LIMIT,
+      remaining: isAuthenticated ? AUTH_DAILY_MESSAGE_LIMIT : NON_AUTH_DAILY_MESSAGE_LIMIT,
+      remainingPro: DAILY_LIMIT_PRO_MODELS,
+    }
   }
 
   const dailyLimit = isAuthenticated

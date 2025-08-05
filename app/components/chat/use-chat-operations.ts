@@ -71,12 +71,19 @@ export function useChatOperations({
   }
 
   const ensureChatExists = async (userId: string, input: string) => {
+    console.log("=== ensureChatExists CALLED ===")
+    console.log("isAuthenticated:", isAuthenticated)
+    console.log("messages.length:", messages.length)
+    console.log("chatId:", chatId)
+    
     if (!isAuthenticated) {
       const storedGuestChatId = localStorage.getItem("guestChatId")
+      console.log("Stored guest chat ID:", storedGuestChatId)
       if (storedGuestChatId) return storedGuestChatId
     }
 
     if (messages.length === 0) {
+      console.log("Creating new chat because messages.length is 0")
       try {
         const newChat = await createNewChat(
           userId,
@@ -114,6 +121,7 @@ export function useChatOperations({
       }
     }
 
+    console.log("Returning existing chatId:", chatId)
     return chatId
   }
 

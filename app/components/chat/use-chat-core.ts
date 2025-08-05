@@ -56,14 +56,60 @@ export function useChatCore({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
 
+  // Get user preferences at the top level
+  const { useUserPreferences } = require("@/lib/user-preference-store/provider")
+  const userPreferences = useUserPreferences()
+
   // Refs and derived state
   const hasSentFirstMessageRef = useRef(false)
   const prevChatIdRef = useRef<string | null>(chatId)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
-  const systemPrompt = useMemo(
-    () => user?.system_prompt || SYSTEM_PROMPT_DEFAULT,
-    [user?.system_prompt]
-  )
+  const systemPrompt = useMemo(() => {
+    console.log("=== SYSTEM PROMPT DETERMINATION ===")
+    console.log("user?.system_prompt:", user?.system_prompt)
+    console.log("userPreferences.preferences.userRole:", userPreferences.preferences.userRole)
+    
+    // If user has a custom system prompt, use it
+    if (user?.system_prompt) {
+      console.log("Using custom user system prompt")
+      return user.system_prompt
+    }
+    
+    // If user role is doctor, use healthcare system prompt
+    if (userPreferences.preferences.userRole === "doctor") {
+      console.log("User role is doctor - using healthcare system prompt")
+      // Import the healthcare system prompt function
+      const { getHealthcareSystemPromptServer } = require("@/lib/models/healthcare-agents")
+      
+      const healthcarePrompt = getHealthcareSystemPromptServer(
+        userPreferences.preferences.userRole,
+        userPreferences.preferences.medicalSpecialty,
+        userPreferences.preferences.clinicalDecisionSupport,
+        userPreferences.preferences.medicalLiteratureAccess,
+        userPreferences.preferences.medicalComplianceMode
+      )
+      
+      if (healthcarePrompt) {
+        console.log("Healthcare system prompt generated successfully")
+        return healthcarePrompt
+      } else {
+        console.log("Healthcare system prompt generation failed, using default")
+      }
+    }
+    
+    console.log("Using default system prompt")
+    return SYSTEM_PROMPT_DEFAULT
+  }, [user?.system_prompt, userPreferences.preferences.userRole])
+
+  // Log system prompt on load
+  useEffect(() => {
+    console.log("=== SYSTEM PROMPT ON LOAD ===")
+    console.log("user?.system_prompt:", user?.system_prompt)
+    console.log("SYSTEM_PROMPT_DEFAULT length:", SYSTEM_PROMPT_DEFAULT.length)
+    console.log("Final systemPrompt length:", systemPrompt.length)
+    console.log("System prompt preview:", systemPrompt.substring(0, 200))
+    console.log("=== END SYSTEM PROMPT ON LOAD ===")
+  }, [systemPrompt, user?.system_prompt])
 
   // Search params handling
   const searchParams = useSearchParams()
@@ -105,7 +151,6 @@ export function useChatCore({
     api: API_ROUTE_CHAT,
     initialMessages,
     initialInput: draftValue,
-    onFinish: cacheAndAddMessage,
     onError: handleError,
   })
 
@@ -130,6 +175,8 @@ export function useChatCore({
 
   // Submit action
   const submit = useCallback(async () => {
+    console.log("=== SUBMIT ACTION TRIGGERED ===")
+    if (!input.trim() && files.length === 0) return
     setIsSubmitting(true)
 
     const uid = await getOrCreateGuestUserId(user)
@@ -139,60 +186,30 @@ export function useChatCore({
       return
     }
 
-    const optimisticId = `optimistic-${Date.now().toString()}`
-    const optimisticAttachments =
-      files.length > 0 ? createOptimisticAttachments(files) : []
-
-    const optimisticMessage = {
-      id: optimisticId,
-      content: input,
-      role: "user" as const,
-      createdAt: new Date(),
-      experimental_attachments:
-        optimisticAttachments.length > 0 ? optimisticAttachments : undefined,
-    }
-
-    setMessages((prev) => [...prev, optimisticMessage])
-    setInput("")
-
-    const submittedFiles = [...files]
-    setFiles([])
-
     try {
       const allowed = await checkLimitsAndNotify(uid)
       if (!allowed) {
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
-        cleanupOptimisticAttachments(optimisticMessage.experimental_attachments)
+        setIsSubmitting(false)
         return
       }
 
       const currentChatId = await ensureChatExists(uid, input)
       if (!currentChatId) {
-        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-        cleanupOptimisticAttachments(optimisticMessage.experimental_attachments)
+        setIsSubmitting(false)
         return
       }
 
-      if (input.length > MESSAGE_MAX_LENGTH) {
-        toast({
-          title: `The message you submitted was too long, please submit something shorter. (Max ${MESSAGE_MAX_LENGTH} characters)`,
-          status: "error",
-        })
-        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-        cleanupOptimisticAttachments(optimisticMessage.experimental_attachments)
+      const processedAttachments = await handleFileUploads(uid, currentChatId)
+      if (processedAttachments === null) {
+        setIsSubmitting(false)
         return
       }
 
-      let attachments: Attachment[] | null = []
-      if (submittedFiles.length > 0) {
-        attachments = await handleFileUploads(uid, currentChatId)
-        if (attachments === null) {
-          setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
-          cleanupOptimisticAttachments(
-            optimisticMessage.experimental_attachments
-          )
-          return
-        }
+      const messageToSend: Message = {
+        id: Date.now().toString(), // Temporary ID for client-side rendering
+        role: "user",
+        content: input,
+        experimental_attachments: processedAttachments,
       }
 
       const options = {
@@ -200,52 +217,59 @@ export function useChatCore({
           chatId: currentChatId,
           userId: uid,
           model: selectedModel,
-          isAuthenticated,
-          systemPrompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
+          isAuthenticated: !!user?.id,
+          systemPrompt,
           enableSearch,
+          userRole: userPreferences.preferences.userRole,
+          medicalSpecialty: userPreferences.preferences.medicalSpecialty,
+          clinicalDecisionSupport:
+            userPreferences.preferences.clinicalDecisionSupport,
+          medicalLiteratureAccess:
+            userPreferences.preferences.medicalLiteratureAccess,
+          medicalComplianceMode:
+            userPreferences.preferences.medicalComplianceMode,
         },
-        experimental_attachments: attachments || undefined,
       }
+      
+      console.log("=== CALLING append ===");
+      const appendPromise = append(messageToSend, options);
+      
+      setInput("");
+      setFiles([]);
+      clearDraft();
 
-      handleSubmit(undefined, options)
-      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-      cleanupOptimisticAttachments(optimisticMessage.experimental_attachments)
-      cacheAndAddMessage(optimisticMessage)
-      clearDraft()
+      await appendPromise;
+      console.log("=== append CALLED ===");
 
-      if (messages.length > 0) {
-        bumpChat(currentChatId)
-      }
-    } catch {
-      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-      cleanupOptimisticAttachments(optimisticMessage.experimental_attachments)
-      toast({ title: "Failed to send message", status: "error" })
+      bumpChat(currentChatId);
+    } catch (error) {
+      console.error("Error in submit:", error)
+      toast({
+        title: "An error occurred while sending your message.",
+        status: "error",
+      })
     } finally {
       setIsSubmitting(false)
     }
   }, [
     user,
-    files,
-    createOptimisticAttachments,
     input,
-    setMessages,
-    setInput,
-    setFiles,
+    files,
     checkLimitsAndNotify,
-    cleanupOptimisticAttachments,
     ensureChatExists,
     handleFileUploads,
+    append,
     selectedModel,
-    isAuthenticated,
     systemPrompt,
     enableSearch,
-    handleSubmit,
-    cacheAndAddMessage,
-    clearDraft,
-    messages.length,
     bumpChat,
+    clearDraft,
     setIsSubmitting,
-  ])
+    setHasDialogAuth,
+    setInput,
+    setFiles,
+    userPreferences,
+  ]);
 
   // Handle suggestion
   const handleSuggestion = useCallback(

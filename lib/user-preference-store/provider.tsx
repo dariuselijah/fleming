@@ -9,6 +9,7 @@ import {
   type LayoutType,
   type UserPreferences,
 } from "./utils"
+import { fetchClient } from "@/lib/fetch"
 
 export {
   type LayoutType,
@@ -26,6 +27,7 @@ interface UserPreferencesContextType {
   setPromptSuggestions: (enabled: boolean) => void
   setShowToolInvocations: (enabled: boolean) => void
   setShowConversationPreviews: (enabled: boolean) => void
+
   toggleModelVisibility: (modelId: string) => void
   isModelHidden: (modelId: string) => boolean
   updatePreferences: (update: Partial<UserPreferences>) => Promise<void>
@@ -116,9 +118,15 @@ export function UserPreferencesProvider({
   }
 
   // Query for user preferences
-  const { data: preferences = getInitialData(), isLoading } =
+  const queryKey = ["user-preferences", userId]
+  console.log("=== USER PREFERENCES PROVIDER DEBUG ===")
+  console.log("Using query key:", queryKey)
+  console.log("isAuthenticated:", isAuthenticated)
+  console.log("initialPreferences:", initialPreferences)
+  
+      const { data: preferences = getInitialData(), isLoading } =
     useQuery<UserPreferences>({
-      queryKey: ["user-preferences", userId],
+      queryKey,
       queryFn: async () => {
         if (!isAuthenticated) {
           return getLocalStoragePreferences()
@@ -144,6 +152,13 @@ export function UserPreferencesProvider({
       initialData:
         initialPreferences && isAuthenticated ? getInitialData() : undefined,
     })
+
+    // Log the preferences data
+    console.log("=== PREFERENCES DATA DEBUG ===")
+    console.log("preferences:", preferences)
+    console.log("preferences.userRole:", preferences?.userRole)
+    console.log("preferences.medicalSpecialty:", preferences?.medicalSpecialty)
+    console.log("=== END PREFERENCES DATA DEBUG ===")
 
   // Mutation for updating preferences
   const mutation = useMutation({
@@ -172,6 +187,7 @@ export function UserPreferencesProvider({
 
       const previous = queryClient.getQueryData<UserPreferences>(queryKey)
       const optimistic = { ...previous, ...update }
+      console.log("Setting optimistic update:", optimistic)
       queryClient.setQueryData(queryKey, optimistic)
 
       return { previous }
@@ -182,7 +198,24 @@ export function UserPreferencesProvider({
       }
     },
     onSuccess: (data) => {
-      queryClient.setQueryData(["user-preferences", userId], data)
+      // Ensure we're using the converted data from the API response
+      const queryKey = ["user-preferences", userId]
+      console.log("User preferences update success, server returned:", data)
+      console.log("Setting query data with:", data)
+      
+      // Check if the server response contains the expected changes
+      // If the server response doesn't match what we expect, keep the optimistic update
+      const currentCache = queryClient.getQueryData<UserPreferences>(queryKey)
+      console.log("Current cache data:", currentCache)
+      
+      // Only update if the server response contains the changes we expect
+      if (data && (data.userRole !== currentCache?.userRole || data.medicalSpecialty !== currentCache?.medicalSpecialty)) {
+        console.log("Server response contains changes, updating cache")
+        queryClient.setQueryData(queryKey, data)
+      } else {
+        console.log("Server response appears stale, keeping optimistic update")
+        // Don't update the cache, keep the optimistic update
+      }
     },
   })
 
@@ -208,6 +241,8 @@ export function UserPreferencesProvider({
     updatePreferences({ showConversationPreviews: enabled })
   }
 
+
+
   const toggleModelVisibility = (modelId: string) => {
     const currentHidden = preferences.hiddenModels || []
     const isHidden = currentHidden.includes(modelId)
@@ -230,6 +265,7 @@ export function UserPreferencesProvider({
         setPromptSuggestions,
         setShowToolInvocations,
         setShowConversationPreviews,
+
         toggleModelVisibility,
         isModelHidden,
         updatePreferences,

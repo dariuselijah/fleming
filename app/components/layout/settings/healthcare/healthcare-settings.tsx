@@ -29,8 +29,9 @@ import {
   BabyCarriageIcon,
   UserListIcon
 } from "@phosphor-icons/react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { HealthcareAgentSelector } from "./healthcare-agent-selector"
+import { Badge } from "@/components/ui/badge"
 
 const specialtyIcons: Record<MedicalSpecialty, any> = {
   "cardiology": HeartIcon,
@@ -73,11 +74,32 @@ const specialtyLabels: Record<MedicalSpecialty, string> = {
 export function HealthcareSettings() {
   const { preferences, updatePreferences } = useUserPreferences()
   const [isUpdating, setIsUpdating] = useState(false)
+  const [localUserRole, setLocalUserRole] = useState<UserRole>(preferences.userRole)
+
+  // Debug logging
+  console.log("=== HEALTHCARE SETTINGS DEBUG ===")
+  console.log("HealthcareSettings - Current preferences:", preferences)
+  console.log("HealthcareSettings - Local user role:", localUserRole)
+  console.log("HealthcareSettings - preferences.userRole:", preferences.userRole)
+  console.log("HealthcareSettings - preferences.medicalSpecialty:", preferences.medicalSpecialty)
+  console.log("=== END HEALTHCARE SETTINGS DEBUG ===")
+
+  // Sync local state with preferences
+  useEffect(() => {
+    console.log("HealthcareSettings - Syncing localUserRole with preferences.userRole:", preferences.userRole)
+    setLocalUserRole(preferences.userRole)
+  }, [preferences.userRole])
 
   const handleRoleChange = async (role: UserRole) => {
     setIsUpdating(true)
     try {
+      console.log("Changing user role to:", role)
+      setLocalUserRole(role) // Update local state immediately
       await updatePreferences({ userRole: role })
+      console.log("User role updated successfully")
+    } catch (error) {
+      console.error("Error updating user role:", error)
+      setLocalUserRole(preferences.userRole) // Revert on error
     } finally {
       setIsUpdating(false)
     }
@@ -86,7 +108,11 @@ export function HealthcareSettings() {
   const handleSpecialtyChange = async (specialty: MedicalSpecialty) => {
     setIsUpdating(true)
     try {
+      console.log("Changing medical specialty to:", specialty)
       await updatePreferences({ medicalSpecialty: specialty })
+      console.log("Medical specialty updated successfully")
+    } catch (error) {
+      console.error("Error updating medical specialty:", error)
     } finally {
       setIsUpdating(false)
     }
@@ -95,7 +121,11 @@ export function HealthcareSettings() {
   const handleToggle = async (key: keyof typeof preferences, value: boolean) => {
     setIsUpdating(true)
     try {
+      console.log("Toggling", key, "to:", value)
       await updatePreferences({ [key]: value })
+      console.log(key, "updated successfully")
+    } catch (error) {
+      console.error("Error updating", key, ":", error)
     } finally {
       setIsUpdating(false)
     }
@@ -127,7 +157,7 @@ export function HealthcareSettings() {
           <div className="space-y-2">
             <Label htmlFor="user-role">Primary Role</Label>
             <Select
-              value={preferences.userRole}
+              value={localUserRole}
               onValueChange={handleRoleChange}
               disabled={isUpdating}
             >
@@ -151,7 +181,7 @@ export function HealthcareSettings() {
             </Select>
           </div>
 
-          {preferences.userRole === "doctor" && (
+          {localUserRole === "doctor" && (
             <div className="space-y-2">
               <Label htmlFor="medical-specialty">Medical Specialty</Label>
               <Select
@@ -188,35 +218,21 @@ export function HealthcareSettings() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <RobotIcon className="size-5" />
-            AI Agent Configuration
+            <ShieldCheckIcon className="size-5" />
+            Healthcare Agent Configuration
           </CardTitle>
           <CardDescription>
-            Enable and configure specialized AI features for your role.
+            Configure advanced features for healthcare professionals.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Enable AI Agent</Label>
-              <p className="text-muted-foreground text-sm">
-                Activate specialized AI features
-              </p>
-            </div>
-            <Switch
-              checked={preferences.healthcareAgentEnabled}
-              onCheckedChange={(checked) => handleToggle("healthcareAgentEnabled", checked)}
-              disabled={isUpdating}
-            />
-          </div>
-
-          {preferences.userRole === "doctor" && preferences.healthcareAgentEnabled && (
+          {localUserRole === "doctor" ? (
             <>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>Clinical Decision Support</Label>
                   <p className="text-muted-foreground text-sm">
-                    AI assistance for diagnosis and treatment planning
+                    Enable evidence-based clinical decision support tools.
                   </p>
                 </div>
                 <Switch
@@ -230,7 +246,7 @@ export function HealthcareSettings() {
                 <div className="space-y-0.5">
                   <Label>Medical Literature Access</Label>
                   <p className="text-muted-foreground text-sm">
-                    Access to latest medical research and guidelines
+                    Access to latest medical literature and guidelines.
                   </p>
                 </div>
                 <Switch
@@ -244,7 +260,7 @@ export function HealthcareSettings() {
                 <div className="space-y-0.5">
                   <Label>Medical Compliance Mode</Label>
                   <p className="text-muted-foreground text-sm">
-                    Ensure responses meet medical standards and regulations
+                    Strict medical compliance and safety protocols.
                   </p>
                 </div>
                 <Switch
@@ -254,6 +270,13 @@ export function HealthcareSettings() {
                 />
               </div>
             </>
+          ) : (
+            <div className="text-center py-8">
+              <UserIcon className="mx-auto mb-2 size-8 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Healthcare agent configuration is only available for healthcare professionals.
+              </p>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -279,32 +302,29 @@ export function HealthcareSettings() {
               {preferences.userRole === "doctor" && preferences.medicalSpecialty && (
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">Specialty:</span>
-                  <div className="flex items-center gap-1">
-                    <SpecialtyIcon className="size-4" />
-                    <span className="text-sm text-muted-foreground">
-                      {specialtyLabels[preferences.medicalSpecialty]}
-                    </span>
-                  </div>
+                  <span className="text-sm text-muted-foreground capitalize">
+                    {preferences.medicalSpecialty.replace(/-/g, " ")}
+                  </span>
                 </div>
               )}
-
+              
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Active Features:</span>
-                <div className="flex flex-wrap gap-1">
+                <span className="text-sm font-medium">Features Enabled:</span>
+                <div className="flex gap-1">
                   {preferences.clinicalDecisionSupport && (
-                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
+                    <Badge variant="secondary" className="text-xs">
                       Clinical Support
-                    </span>
+                    </Badge>
                   )}
                   {preferences.medicalLiteratureAccess && (
-                    <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded">
+                    <Badge variant="secondary" className="text-xs">
                       Literature Access
-                    </span>
+                    </Badge>
                   )}
                   {preferences.medicalComplianceMode && (
-                    <span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded">
+                    <Badge variant="secondary" className="text-xs">
                       Compliance Mode
-                    </span>
+                    </Badge>
                   )}
                 </div>
               </div>

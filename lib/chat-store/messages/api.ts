@@ -37,7 +37,9 @@ export async function getMessagesFromDb(
       // If there are attachments, load fresh signed URLs
       if (processedAttachments.length > 0) {
         try {
-          processedAttachments = await loadAttachmentsWithSignedUrls(processedAttachments)
+          processedAttachments = await loadAttachmentsWithSignedUrls(
+            processedAttachments.map(a => ({ ...a, name: a.name || "", contentType: a.contentType || "" }))
+          )
         } catch (error) {
           console.error("Error loading attachments with signed URLs:", error)
           // Keep original attachments if signed URL generation fails
