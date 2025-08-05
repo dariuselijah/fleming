@@ -48,14 +48,16 @@ async function fetchUserPreferences(): Promise<UserPreferences> {
 }
 
 async function updateUserPreferences(
-  update: Partial<UserPreferences>
+  update: Partial<UserPreferences>,
+  existing: UserPreferences
 ): Promise<UserPreferences> {
+  const merged = { ...existing, ...update }
   const response = await fetch("/api/user-preferences", {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(convertToApiFormat(update)),
+    body: JSON.stringify(convertToApiFormat(merged)),
   })
 
   if (!response.ok) {
@@ -163,20 +165,20 @@ export function UserPreferencesProvider({
   // Mutation for updating preferences
   const mutation = useMutation({
     mutationFn: async (update: Partial<UserPreferences>) => {
-      const updated = { ...preferences, ...update }
-
       if (!isAuthenticated) {
+        const updated = { ...preferences, ...update }
         saveToLocalStorage(updated)
         return updated
       }
 
       try {
-        return await updateUserPreferences(update)
+        return await updateUserPreferences(update, preferences)
       } catch (error) {
         console.error(
           "Failed to update user preferences in database, falling back to localStorage:",
           error
         )
+        const updated = { ...preferences, ...update }
         saveToLocalStorage(updated)
         return updated
       }
@@ -198,24 +200,8 @@ export function UserPreferencesProvider({
       }
     },
     onSuccess: (data) => {
-      // Ensure we're using the converted data from the API response
       const queryKey = ["user-preferences", userId]
-      console.log("User preferences update success, server returned:", data)
-      console.log("Setting query data with:", data)
-      
-      // Check if the server response contains the expected changes
-      // If the server response doesn't match what we expect, keep the optimistic update
-      const currentCache = queryClient.getQueryData<UserPreferences>(queryKey)
-      console.log("Current cache data:", currentCache)
-      
-      // Only update if the server response contains the changes we expect
-      if (data && (data.userRole !== currentCache?.userRole || data.medicalSpecialty !== currentCache?.medicalSpecialty)) {
-        console.log("Server response contains changes, updating cache")
-        queryClient.setQueryData(queryKey, data)
-      } else {
-        console.log("Server response appears stale, keeping optimistic update")
-        // Don't update the cache, keep the optimistic update
-      }
+      queryClient.setQueryData(queryKey, data)
     },
   })
 

@@ -110,8 +110,8 @@ export async function PUT(request: NextRequest) {
     // Parse the request body
     const body = await request.json()
     console.log("PUT request body received:", body)
-    const apiData = convertToApiFormat(body)
-    console.log("Converted to API format:", apiData)
+    const apiData = body
+    console.log("API data received:", apiData)
     console.log("User role being set to:", apiData.user_role)
 
     // Check if preferences exist

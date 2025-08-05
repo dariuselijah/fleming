@@ -74,32 +74,13 @@ const specialtyLabels: Record<MedicalSpecialty, string> = {
 export function HealthcareSettings() {
   const { preferences, updatePreferences } = useUserPreferences()
   const [isUpdating, setIsUpdating] = useState(false)
-  const [localUserRole, setLocalUserRole] = useState<UserRole>(preferences.userRole)
-
-  // Debug logging
-  console.log("=== HEALTHCARE SETTINGS DEBUG ===")
-  console.log("HealthcareSettings - Current preferences:", preferences)
-  console.log("HealthcareSettings - Local user role:", localUserRole)
-  console.log("HealthcareSettings - preferences.userRole:", preferences.userRole)
-  console.log("HealthcareSettings - preferences.medicalSpecialty:", preferences.medicalSpecialty)
-  console.log("=== END HEALTHCARE SETTINGS DEBUG ===")
-
-  // Sync local state with preferences
-  useEffect(() => {
-    console.log("HealthcareSettings - Syncing localUserRole with preferences.userRole:", preferences.userRole)
-    setLocalUserRole(preferences.userRole)
-  }, [preferences.userRole])
 
   const handleRoleChange = async (role: UserRole) => {
     setIsUpdating(true)
     try {
-      console.log("Changing user role to:", role)
-      setLocalUserRole(role) // Update local state immediately
       await updatePreferences({ userRole: role })
-      console.log("User role updated successfully")
     } catch (error) {
       console.error("Error updating user role:", error)
-      setLocalUserRole(preferences.userRole) // Revert on error
     } finally {
       setIsUpdating(false)
     }
@@ -108,9 +89,7 @@ export function HealthcareSettings() {
   const handleSpecialtyChange = async (specialty: MedicalSpecialty) => {
     setIsUpdating(true)
     try {
-      console.log("Changing medical specialty to:", specialty)
       await updatePreferences({ medicalSpecialty: specialty })
-      console.log("Medical specialty updated successfully")
     } catch (error) {
       console.error("Error updating medical specialty:", error)
     } finally {
@@ -121,9 +100,7 @@ export function HealthcareSettings() {
   const handleToggle = async (key: keyof typeof preferences, value: boolean) => {
     setIsUpdating(true)
     try {
-      console.log("Toggling", key, "to:", value)
       await updatePreferences({ [key]: value })
-      console.log(key, "updated successfully")
     } catch (error) {
       console.error("Error updating", key, ":", error)
     } finally {
@@ -157,7 +134,7 @@ export function HealthcareSettings() {
           <div className="space-y-2">
             <Label htmlFor="user-role">Primary Role</Label>
             <Select
-              value={localUserRole}
+              value={preferences.userRole}
               onValueChange={handleRoleChange}
               disabled={isUpdating}
             >
@@ -181,7 +158,7 @@ export function HealthcareSettings() {
             </Select>
           </div>
 
-          {localUserRole === "doctor" && (
+          {preferences.userRole === "doctor" && (
             <div className="space-y-2">
               <Label htmlFor="medical-specialty">Medical Specialty</Label>
               <Select
@@ -226,7 +203,7 @@ export function HealthcareSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {localUserRole === "doctor" ? (
+          {preferences.userRole === "doctor" ? (
             <>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -334,4 +311,4 @@ export function HealthcareSettings() {
       )}
     </div>
   )
-} 
+}
