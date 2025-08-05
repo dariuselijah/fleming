@@ -13,13 +13,13 @@ import {
 import { useChats } from "@/lib/chat-store/chats/provider"
 import {
   ChatTeardropText,
-  GithubLogo,
   MagnifyingGlass,
   NotePencilIcon,
   X,
 } from "@phosphor-icons/react"
 import { useParams, useRouter } from "next/navigation"
 import { useMemo } from "react"
+import { FeedbackTrigger } from "../feedback/feedback-trigger"
 import { HistoryTrigger } from "../../history/history-trigger"
 import { SidebarList } from "./sidebar-list"
 import { SidebarProject } from "./sidebar-project"
@@ -115,24 +115,24 @@ export function AppSidebar() {
         </ScrollArea>
       </SidebarContent>
       <SidebarFooter className="mb-2 p-3">
-        <a
-          href="https://github.com/ibelick/fleming"
+        <FeedbackTrigger>
+        <div
           className="hover:bg-muted flex items-center gap-2 rounded-md p-2"
-          target="_blank"
-          aria-label="Star the repo on GitHub"
+          aria-label="Tell us how to improve Fleming"
         >
           <div className="rounded-full border p-1">
-            <GithubLogo className="size-4" />
+            <ChatTeardropText className="size-4" />
           </div>
           <div className="flex flex-col">
             <div className="text-sidebar-foreground text-sm font-medium">
-              Fleming is open source
+              Help us improve
             </div>
             <div className="text-sidebar-foreground/70 text-xs">
-              Star the repo on GitHub!
+              Tell us how to improve Fleming
             </div>
           </div>
-        </a>
+        </div>
+        </FeedbackTrigger>
       </SidebarFooter>
     </Sidebar>
   )

@@ -75,24 +75,13 @@ export function UserMenu() {
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <a
-            href="https://x.com/flemingdotchat"
+            href="https://x.com/HelloPerkily"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2"
           >
             <XIcon className="size-4 p-0.5" />
-            <span>@flemingdotchat</span>
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a
-            href="https://github.com/ibelick/fleming"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2"
-          >
-            <GithubLogoIcon className="size-4" />
-            <span>GitHub</span>
+            <span>@HelloPerkily</span>
           </a>
         </DropdownMenuItem>
       </DropdownMenuContent>
