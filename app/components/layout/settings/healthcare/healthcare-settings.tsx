@@ -148,6 +148,12 @@ export function HealthcareSettings() {
                     General User
                   </div>
                 </SelectItem>
+                <SelectItem value="medical-student">
+                  <div className="flex items-center gap-2">
+                    <BookOpenIcon className="size-4" />
+                    Medical Student
+                  </div>
+                </SelectItem>
                 <SelectItem value="doctor">
                   <div className="flex items-center gap-2">
                     <RobotIcon className="size-4" />

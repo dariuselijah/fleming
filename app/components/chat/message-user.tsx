@@ -6,6 +6,7 @@ import {
   MorphingDialogContainer,
   MorphingDialogContent,
   MorphingDialogImage,
+  MorphingDialogTitle,
   MorphingDialogTrigger,
 } from "@/components/motion-primitives/morphing-dialog"
 import {
@@ -107,6 +108,9 @@ export function MessageUser({
               </MorphingDialogTrigger>
               <MorphingDialogContainer>
                 <MorphingDialogContent className="relative rounded-lg">
+                  <MorphingDialogTitle className="sr-only">
+                    {attachment.name || "Attachment"}
+                  </MorphingDialogTitle>
                   <MorphingDialogImage
                     src={attachment.url}
                     alt={attachment.name || ""}

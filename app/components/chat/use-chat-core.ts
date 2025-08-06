@@ -9,6 +9,7 @@ import type { Message } from "@ai-sdk/react"
 import { useChat } from "@ai-sdk/react"
 import { useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useStreaming } from "./use-streaming"
 
 type UseChatCoreProps = {
   initialMessages: Message[]
@@ -55,6 +56,21 @@ export function useChatCore({
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
+
+  // Enhanced streaming management
+  const {
+    streamingState,
+    startStreaming,
+    processChunk,
+    stopStreaming,
+    getStreamingMetrics,
+    optimizeStreaming,
+    getStreamingConfig,
+  } = useStreaming()
+
+  // Ref to track current optimistic message to prevent duplicates
+  const currentOptimisticRef = useRef<string | null>(null)
+  const processedMessageIds = useRef(new Set<string>())
 
   // Get user preferences at the top level
   const { useUserPreferences } = require("@/lib/user-preference-store/provider")
@@ -129,13 +145,16 @@ export function useChatCore({
       errorMsg = "Something went wrong. Please try again."
     }
 
+    // Stop streaming on error
+    stopStreaming()
+
     toast({
       title: errorMsg,
       status: "error",
     })
-  }, [])
+  }, [stopStreaming])
 
-  // Initialize useChat
+  // Initialize useChat with enhanced streaming support
   const {
     messages,
     input,
@@ -152,7 +171,30 @@ export function useChatCore({
     initialMessages,
     initialInput: draftValue,
     onError: handleError,
+    onFinish: () => {
+      // Enhanced finish handling with streaming metrics
+      const metrics = getStreamingMetrics()
+      console.log("=== CHAT FINISHED WITH METRICS ===")
+      console.log("Streaming metrics:", metrics)
+      stopStreaming()
+    },
+    onResponse: (response) => {
+      // Start streaming tracking when response begins
+      if (input.trim()) {
+        startStreaming(input)
+      }
+    },
   })
+
+  // Enhanced stop function
+  const enhancedStop = useCallback(() => {
+    console.log("=== STOP CALLED ===")
+    stop()
+    stopStreaming()
+    setIsSubmitting(false)
+    currentOptimisticRef.current = null
+    processedMessageIds.current.clear()
+  }, [stop, stopStreaming])
 
   // Handle search params on mount
   useEffect(() => {
@@ -169,11 +211,58 @@ export function useChatCore({
       messages.length > 0
     ) {
       setMessages([])
+      // Clear processed message IDs when chat changes
+      processedMessageIds.current.clear()
     }
     prevChatIdRef.current = chatId
   }, [chatId, messages.length, setMessages])
 
-  // Submit action
+  // Cleanup processed message IDs when component unmounts or chat changes
+  useEffect(() => {
+    return () => {
+      processedMessageIds.current.clear()
+      currentOptimisticRef.current = null
+    }
+  }, [chatId])
+
+  // Cleanup duplicate messages that might be added by AI SDK
+  useEffect(() => {
+    if (messages.length > 0) {
+      const seenIds = new Set<string>()
+      const seenContents = new Set<string>()
+      let hasDuplicates = false
+      
+      const cleanedMessages = messages.filter(msg => {
+        // Check for duplicate IDs
+        if (seenIds.has(msg.id)) {
+          console.log("=== REMOVING DUPLICATE ID ===", msg.id)
+          hasDuplicates = true
+          return false
+        }
+        seenIds.add(msg.id)
+        
+        // Check for duplicate content (for user messages)
+        if (msg.role === "user") {
+          const contentKey = `${msg.role}-${msg.content}`
+          if (seenContents.has(contentKey)) {
+            console.log("=== REMOVING DUPLICATE CONTENT ===", msg.content)
+            hasDuplicates = true
+            return false
+          }
+          seenContents.add(contentKey)
+        }
+        
+        return true
+      })
+      
+      if (hasDuplicates) {
+        console.log("=== CLEANING DUPLICATE MESSAGES ===")
+        setMessages(cleanedMessages)
+      }
+    }
+  }, [messages, setMessages])
+
+  // Enhanced submit action with streaming optimization
   const submit = useCallback(async () => {
     console.log("=== SUBMIT ACTION TRIGGERED ===")
     if (!input.trim() && files.length === 0) return
@@ -206,11 +295,17 @@ export function useChatCore({
       }
 
       const messageToSend: Message = {
-        id: Date.now().toString(), // Temporary ID for client-side rendering
+        id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // Unique ID for client-side rendering
         role: "user",
         content: input,
         experimental_attachments: processedAttachments,
       }
+
+      // Get optimized streaming configuration
+      const streamingConfig = getStreamingConfig(input)
+      console.log("=== STREAMING CONFIG FOR SUBMIT ===")
+      console.log("Input:", input.substring(0, 100))
+      console.log("Config:", streamingConfig)
 
       const options = {
         body: {
@@ -228,6 +323,7 @@ export function useChatCore({
             userPreferences.preferences.medicalLiteratureAccess,
           medicalComplianceMode:
             userPreferences.preferences.medicalComplianceMode,
+          streamingConfig, // Pass streaming config to API
         },
       }
       
@@ -244,6 +340,7 @@ export function useChatCore({
       bumpChat(currentChatId);
     } catch (error) {
       console.error("Error in submit:", error)
+      stopStreaming() // Stop streaming on error
       toast({
         title: "An error occurred while sending your message.",
         status: "error",
@@ -269,13 +366,45 @@ export function useChatCore({
     setInput,
     setFiles,
     userPreferences,
+    getStreamingConfig,
+    stopStreaming,
   ]);
 
-  // Handle suggestion
+  // Handle suggestion with streaming optimization
   const handleSuggestion = useCallback(
     async (suggestion: string) => {
+      // Prevent multiple simultaneous calls
+      if (isSubmitting) {
+        console.log("=== SUGGESTION BLOCKED: Already submitting ===")
+        return
+      }
+      
+      // Check if we're already processing this exact suggestion
+      if (currentOptimisticRef.current === suggestion) {
+        console.log("=== SUGGESTION BLOCKED: Already processing this suggestion ===")
+        return
+      }
+      
       setIsSubmitting(true)
-      const optimisticId = `optimistic-${Date.now().toString()}`
+      currentOptimisticRef.current = suggestion
+      
+      // Create a truly unique ID with multiple sources of randomness
+      const timestamp = Date.now()
+      const random1 = Math.random().toString(36).substr(2, 9)
+      const random2 = Math.random().toString(36).substr(2, 9)
+      const optimisticId = `optimistic-${timestamp}-${random1}-${random2}`
+      
+      // Check if this ID has already been processed
+      if (processedMessageIds.current.has(optimisticId)) {
+        console.log("=== SUGGESTION BLOCKED: Message ID already processed ===", optimisticId)
+        setIsSubmitting(false)
+        currentOptimisticRef.current = null
+        return
+      }
+      
+      // Add to processed set
+      processedMessageIds.current.add(optimisticId)
+      
       const optimisticMessage = {
         id: optimisticId,
         content: suggestion,
@@ -283,122 +412,208 @@ export function useChatCore({
         createdAt: new Date(),
       }
 
-      setMessages((prev) => [...prev, optimisticMessage])
+      // Check if this exact suggestion is already being processed
+      const existingOptimistic = messages.find(msg => 
+        msg.role === "user" && 
+        msg.content === suggestion && 
+        msg.id.startsWith('optimistic-')
+      )
+      
+      if (existingOptimistic) {
+        console.log("=== SUGGESTION BLOCKED: Existing optimistic message found ===")
+        setIsSubmitting(false)
+        currentOptimisticRef.current = null
+        processedMessageIds.current.delete(optimisticId)
+        return
+      }
+
+      console.log("=== ADDING OPTIMISTIC MESSAGE ===", optimisticId)
+      setMessages((prev) => {
+        // Double-check for duplicates before adding
+        const hasDuplicate = prev.some(msg => msg.id === optimisticId)
+        if (hasDuplicate) {
+          console.log("=== DUPLICATE DETECTED IN SETMESSAGES ===", optimisticId)
+          return prev
+        }
+        return [...prev, optimisticMessage]
+      })
 
       try {
         const uid = await getOrCreateGuestUserId(user)
 
         if (!uid) {
           setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
+          currentOptimisticRef.current = null
+          processedMessageIds.current.delete(optimisticId)
           return
         }
 
         const allowed = await checkLimitsAndNotify(uid)
         if (!allowed) {
           setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+          currentOptimisticRef.current = null
+          processedMessageIds.current.delete(optimisticId)
           return
         }
 
         const currentChatId = await ensureChatExists(uid, suggestion)
-
         if (!currentChatId) {
-          setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+          currentOptimisticRef.current = null
+          processedMessageIds.current.delete(optimisticId)
           return
         }
+
+        const processedAttachments = await handleFileUploads(uid, currentChatId)
+        if (processedAttachments === null) {
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+          currentOptimisticRef.current = null
+          processedMessageIds.current.delete(optimisticId)
+          return
+        }
+
+        const messageToSend: Message = {
+          id: `api-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // Different ID for API call
+          role: "user",
+          content: suggestion,
+          experimental_attachments: processedAttachments,
+        }
+
+        // Get streaming config for suggestion
+        const streamingConfig = getStreamingConfig(suggestion)
 
         const options = {
           body: {
             chatId: currentChatId,
             userId: uid,
             model: selectedModel,
-            isAuthenticated,
-            systemPrompt: SYSTEM_PROMPT_DEFAULT,
+            isAuthenticated: !!user?.id,
+            systemPrompt,
+            enableSearch,
+            userRole: userPreferences.preferences.userRole,
+            medicalSpecialty: userPreferences.preferences.medicalSpecialty,
+            clinicalDecisionSupport:
+              userPreferences.preferences.clinicalDecisionSupport,
+            medicalLiteratureAccess:
+              userPreferences.preferences.medicalLiteratureAccess,
+            medicalComplianceMode:
+              userPreferences.preferences.medicalComplianceMode,
+            streamingConfig,
           },
         }
 
-        append(
-          {
-            role: "user",
-            content: suggestion,
-          },
-          options
+        console.log("=== CALLING APPEND ===", optimisticId)
+        
+        // Check if this exact content already exists in messages
+        const existingMessageWithSameContent = messages.find(msg => 
+          msg.role === "user" && 
+          msg.content === suggestion
         )
-        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-      } catch {
-        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-        toast({ title: "Failed to send suggestion", status: "error" })
+        
+        if (existingMessageWithSameContent) {
+          console.log("=== APPEND BLOCKED: Message with same content already exists ===")
+          // Remove the optimistic message since the real message already exists
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+          currentOptimisticRef.current = null
+          processedMessageIds.current.delete(optimisticId)
+          setIsSubmitting(false)
+          return
+        }
+        
+        // Use a try-catch around append to handle any AI SDK issues
+        try {
+          await append(messageToSend, options)
+          console.log("=== APPEND SUCCESSFUL ===", optimisticId)
+        } catch (appendError) {
+          console.error("=== APPEND ERROR ===", appendError)
+          // Remove the optimistic message on error
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+          throw appendError
+        }
+        
+        bumpChat(currentChatId)
+      } catch (error) {
+        console.error("Error in handleSuggestion:", error)
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+        stopStreaming()
+        toast({
+          title: "An error occurred while processing the suggestion.",
+          status: "error",
+        })
       } finally {
         setIsSubmitting(false)
+        currentOptimisticRef.current = null
+        processedMessageIds.current.delete(optimisticId)
       }
     },
     [
-      ensureChatExists,
-      selectedModel,
       user,
-      append,
       checkLimitsAndNotify,
-      isAuthenticated,
+      ensureChatExists,
+      handleFileUploads,
+      append,
+      selectedModel,
+      systemPrompt,
+      enableSearch,
+      bumpChat,
       setMessages,
-      setIsSubmitting,
+      userPreferences,
+      getStreamingConfig,
+      stopStreaming,
+      isSubmitting,
+      messages,
     ]
   )
 
-  // Handle reload
+  // Enhanced reload with streaming optimization
   const handleReload = useCallback(async () => {
-    const uid = await getOrCreateGuestUserId(user)
-    if (!uid) {
-      return
+    try {
+      // Get the last user message for streaming config
+      const lastUserMessage = messages
+        .filter((m) => m.role === "user")
+        .pop()
+      
+      if (lastUserMessage?.content) {
+        const streamingConfig = getStreamingConfig(lastUserMessage.content)
+        console.log("=== RELOAD WITH STREAMING CONFIG ===")
+        console.log("Config:", streamingConfig)
+      }
+      
+      await reload()
+    } catch (error) {
+      console.error("Error in handleReload:", error)
+      stopStreaming()
+      toast({
+        title: "An error occurred while reloading the conversation.",
+        status: "error",
+      })
     }
+  }, [reload, messages, getStreamingConfig, stopStreaming])
 
-    const options = {
-      body: {
-        chatId,
-        userId: uid,
-        model: selectedModel,
-        isAuthenticated,
-        systemPrompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
-      },
-    }
-
-    reload(options)
-  }, [user, chatId, selectedModel, isAuthenticated, systemPrompt, reload])
-
-  // Handle input change - now with access to the real setInput function!
-  const { setDraftValue } = useChatDraft(chatId)
+  // Enhanced input change handler
   const handleInputChange = useCallback(
     (value: string) => {
       setInput(value)
-      setDraftValue(value)
     },
-    [setInput, setDraftValue]
+    [setInput]
   )
 
   return {
-    // Chat state
     messages,
     input,
-    handleSubmit,
     status,
-    error,
-    reload,
-    stop,
-    setMessages,
-    setInput,
-    append,
-    isAuthenticated,
-    systemPrompt,
+    stop: enhancedStop,
     hasSentFirstMessageRef,
-
-    // Component state
     isSubmitting,
-    setIsSubmitting,
     enableSearch,
     setEnableSearch,
-
-    // Actions
     submit,
     handleSuggestion,
     handleReload,
     handleInputChange,
+    // Enhanced streaming state
+    streamingState,
+    getStreamingMetrics,
+    optimizeStreaming,
   }
 }

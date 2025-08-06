@@ -6,16 +6,21 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { DotsThree, PencilSimple, Trash } from "@phosphor-icons/react"
+import { DotsThree, PencilSimple, Trash, BookOpenIcon } from "@phosphor-icons/react"
 import { useState } from "react"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import { useRouter } from "next/navigation"
 
 type Project = {
   id: string
   name: string
   user_id: string
   created_at: string
+  type?: string
+  discipline?: string
 }
 
 type SidebarProjectMenuProps = {
@@ -31,6 +36,11 @@ export function SidebarProjectMenu({
 }: SidebarProjectMenuProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const isMobile = useBreakpoint(768)
+  const { preferences } = useUserPreferences()
+  const router = useRouter()
+
+  const isStudySession = project.type === "study"
+  const isMedicalStudent = preferences.userRole === "medical-student"
 
   return (
     <>
@@ -47,7 +57,23 @@ export function SidebarProjectMenu({
             <DotsThree size={18} className="text-primary" weight="bold" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-40">
+        <DropdownMenuContent align="end" className="w-48">
+          {isStudySession && isMedicalStudent && (
+            <>
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  router.push(`/p/${project.id}/materials`)
+                }}
+              >
+                <BookOpenIcon size={16} className="mr-2" />
+                Study Materials
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           <DropdownMenuItem
             className="cursor-pointer"
             onClick={(e) => {
@@ -59,6 +85,7 @@ export function SidebarProjectMenu({
             <PencilSimple size={16} className="mr-2" />
             Rename
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive"
             variant="destructive"

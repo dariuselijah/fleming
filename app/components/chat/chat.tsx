@@ -104,6 +104,7 @@ export function Chat() {
     handleSuggestion,
     handleReload,
     handleInputChange,
+    streamingState,
   } = useChatCore({
     initialMessages,
     draftValue,
@@ -131,8 +132,9 @@ export function Chat() {
       onDelete: handleDelete,
       onEdit: handleEdit,
       onReload: handleReload,
+      streamingState, // Pass streaming state to conversation
     }),
-    [messages, status, handleDelete, handleEdit, handleReload]
+    [messages, status, handleDelete, handleEdit, handleReload, streamingState]
   )
 
   // Memoize the chat input props

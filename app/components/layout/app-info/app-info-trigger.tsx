@@ -75,9 +75,9 @@ export function AppInfoTrigger({ trigger }: AppInfoTriggerProps) {
             height={128}
             className="h-32 w-full object-cover"
           />
-          <DialogTitle className="hidden">{APP_NAME}</DialogTitle>
-          <DialogDescription className="hidden">
-            Your minimalist AI chat companion
+          <DialogTitle className="sr-only">{APP_NAME}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Your minimalist AI Health chat companion
           </DialogDescription>
         </DialogHeader>
         <div className="p-4">

@@ -1,6 +1,6 @@
 export type LayoutType = "sidebar" | "fullscreen"
 
-export type UserRole = "general" | "doctor"
+export type UserRole = "general" | "doctor" | "medical-student"
 
 export type MedicalSpecialty = 
   | "cardiology" 

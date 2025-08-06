@@ -22,33 +22,30 @@ export async function POST(request: Request) {
 
     const userId = authData.user.id
 
-    const { name, type, discipline } = await request.json()
+    const { title, discipline, description } = await request.json()
 
-    if (!name?.trim()) {
+    if (!title?.trim()) {
       return NextResponse.json(
-        { error: "Project name is required" },
+        { error: "Study session title is required" },
         { status: 400 }
       )
     }
 
-    const projectData: any = { 
-      name: name.trim(), 
-      user_id: userId 
-    }
-
-    // Add type if provided (defaults to 'project' in database)
-    if (type) {
-      projectData.type = type
-    }
-
-    // Add discipline if provided
-    if (discipline) {
-      projectData.discipline = discipline
+    if (!discipline) {
+      return NextResponse.json(
+        { error: "Study session discipline is required" },
+        { status: 400 }
+      )
     }
 
     const { data, error } = await supabase
-      .from("projects")
-      .insert(projectData)
+      .from("study_sessions")
+      .insert({ 
+        title: title.trim(), 
+        discipline,
+        description: description?.trim() || null,
+        user_id: userId 
+      })
       .select()
       .single()
 
@@ -56,7 +53,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data)
   } catch (err: unknown) {
-    console.error("Error in projects endpoint:", err)
+    console.error("Error in study sessions endpoint:", err)
 
     return new Response(
       JSON.stringify({
@@ -84,11 +81,11 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { data, error } = await supabase
-    .from("projects")
+    .from("study_sessions")
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
-}
+} 

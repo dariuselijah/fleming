@@ -22,6 +22,20 @@ import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
 
 export const maxDuration = 60
 
+// Enhanced chunking configuration for better streaming performance
+const STREAMING_CONFIG = {
+  // Optimal chunk size for smooth streaming (words per chunk)
+  CHUNK_SIZE: 15,
+  // Minimum delay between chunks to prevent overwhelming the client
+  MIN_CHUNK_DELAY: 50,
+  // Maximum delay between chunks to maintain responsiveness
+  MAX_CHUNK_DELAY: 200,
+  // Enable adaptive chunking based on response length
+  ADAPTIVE_CHUNKING: true,
+  // Enable streaming optimizations
+  STREAMING_OPTIMIZATIONS: true
+}
+
 // Function to quickly assess query complexity for smart orchestration
 function assessQueryComplexity(query: string): "simple" | "complex" {
   const queryLower = query.toLowerCase()
@@ -68,6 +82,27 @@ function assessQueryComplexity(query: string): "simple" | "complex" {
   
   // Default to complex for medical queries to be safe
   return "complex"
+}
+
+// Enhanced streaming configuration based on query complexity
+function getStreamingConfig(query: string) {
+  const complexity = assessQueryComplexity(query)
+  
+  if (complexity === "simple") {
+    return {
+      ...STREAMING_CONFIG,
+      CHUNK_SIZE: 20, // Larger chunks for simple queries
+      MIN_CHUNK_DELAY: 30, // Faster streaming for simple queries
+      MAX_CHUNK_DELAY: 100
+    }
+  }
+  
+  return {
+    ...STREAMING_CONFIG,
+    CHUNK_SIZE: 10, // Smaller chunks for complex queries
+    MIN_CHUNK_DELAY: 75, // Slightly slower for complex queries
+    MAX_CHUNK_DELAY: 250
+  }
 }
 
 type ChatRequest = {
@@ -256,27 +291,86 @@ export async function POST(req: Request) {
       effectiveSystemPrompt += `\n\nNOTE: This appears to be a medical query. Provide evidence-based information while maintaining appropriate professional standards.`
     }
     
+    // RAG Integration - Add relevant context from user's materials
+    if (enableSearch) {
+      try {
+        const { ragSearchService } = await import('@/lib/rag/core/search')
+        const relevantContext = await ragSearchService.getRelevantContext(
+          userMessage.content,
+          userId,
+          {
+            threshold: 0.6,
+            limit: 3,
+            maxTokens: 3000
+          }
+        )
+
+        if (relevantContext.sources.length > 0) {
+          const contextText = relevantContext.sources
+            .map(source => `[${source.material_type.toUpperCase()}] ${source.title}:\n${source.content_preview}`)
+            .join('\n\n')
+
+          effectiveSystemPrompt += `\n\nRELEVANT CONTEXT FROM YOUR MATERIALS:\n${contextText}\n\nUse this information to provide more accurate and contextual responses. If the information isn't in your materials, say so.`
+          
+          console.log("RAG context added:", relevantContext.sources.length, "sources")
+        }
+      } catch (error) {
+        console.warn('RAG search failed, continuing without context:', error)
+      }
+    }
+    
+    // Get optimized streaming configuration based on query complexity
+    const streamingConfig = getStreamingConfig(userMessage.content)
+    console.log("=== STREAMING CONFIG ===")
+    console.log("Query complexity:", assessQueryComplexity(userMessage.content))
+    console.log("Chunk size:", streamingConfig.CHUNK_SIZE)
+    console.log("Min delay:", streamingConfig.MIN_CHUNK_DELAY)
+    console.log("Max delay:", streamingConfig.MAX_CHUNK_DELAY)
+    console.log("=== END STREAMING CONFIG ===")
+    
     const result = streamText({
       model: modelConfig.apiSdk(apiKey, { enableSearch }),
       system: effectiveSystemPrompt,
       messages: messages,
       tools: {} as ToolSet,
       maxSteps: 10,
+      
+      // Enhanced error handling with better user feedback
       onError: (err: unknown) => {
         console.error("Streaming error occurred:", err)
-        // Don't set streamError anymore - let the AI SDK handle it through the stream
+        const errorMessage = err instanceof Error ? err.message : String(err)
+        
+        // Log detailed error information for debugging
+        console.error("Error details:", {
+          message: errorMessage,
+          stack: err instanceof Error ? err.stack : undefined,
+          timestamp: new Date().toISOString(),
+          userId,
+          chatId,
+          model
+        })
       },
 
-      onFinish: async ({ response }) => {
+      // Enhanced finish handler with better logging
+      onFinish: async ({ response, usage }) => {
+        console.log("=== STREAMING FINISHED ===")
+        console.log("Response length:", response.messages.length)
+        console.log("Usage:", usage)
+        
         if (supabase) {
-          await storeAssistantMessage({
-            supabase,
-            chatId,
-            messages:
-              response.messages as unknown as import("@/app/types/api.types").Message[],
-            message_group_id,
-            model,
-          })
+          try {
+            await storeAssistantMessage({
+              supabase,
+              chatId,
+              messages:
+                response.messages as unknown as import("@/app/types/api.types").Message[],
+              message_group_id,
+              model,
+            })
+            console.log("Assistant message stored successfully")
+          } catch (error) {
+            console.error("Failed to store assistant message:", error)
+          }
         }
       },
     })
@@ -284,9 +378,26 @@ export async function POST(req: Request) {
     return result.toDataStreamResponse({
       sendReasoning: true,
       sendSources: true,
+      
+      // Enhanced error message extraction
       getErrorMessage: (error: unknown) => {
         console.error("Error forwarded to client:", error)
-        return extractErrorMessage(error)
+        const extractedMessage = extractErrorMessage(error)
+        
+        // Provide more user-friendly error messages
+        if (extractedMessage.includes("rate limit") || extractedMessage.includes("quota")) {
+          return "You've reached your message limit. Please try again later or upgrade your plan."
+        }
+        
+        if (extractedMessage.includes("authentication") || extractedMessage.includes("unauthorized")) {
+          return "Authentication error. Please check your API keys in settings."
+        }
+        
+        if (extractedMessage.includes("network") || extractedMessage.includes("fetch")) {
+          return "Network error. Please check your connection and try again."
+        }
+        
+        return extractedMessage || "An unexpected error occurred. Please try again."
       },
     })
   } catch (err: unknown) {

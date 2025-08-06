@@ -8,6 +8,7 @@ import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
 import { ArrowClockwise, Check, Copy } from "@phosphor-icons/react"
+import { ReactNode } from "react"
 import { getSources } from "./get-sources"
 import { Reasoning } from "./reasoning"
 import { SearchImages } from "./search-images"
@@ -15,7 +16,7 @@ import { SourcesList } from "./sources-list"
 import { ToolInvocation } from "./tool-invocation"
 
 type MessageAssistantProps = {
-  children: string
+  children: ReactNode
   isLast?: boolean
   hasScrollAnchor?: boolean
   copied?: boolean
@@ -24,6 +25,60 @@ type MessageAssistantProps = {
   parts?: MessageAISDK["parts"]
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
+}
+
+// Enhanced streaming indicator component
+function StreamingIndicator({ isStreaming }: { isStreaming: boolean }) {
+  if (!isStreaming) return null
+
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
+      <div className="flex space-x-1">
+        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+      </div>
+      <span>AI is thinking...</span>
+    </div>
+  )
+}
+
+// Enhanced content display with better streaming handling
+function StreamingContent({ 
+  content, 
+  isStreaming, 
+  className 
+}: { 
+  content: string
+  isStreaming: boolean
+  className?: string 
+}) {
+  // Ensure content is always a string for markdown parsing
+  const safeContent = typeof content === 'string' ? content : ''
+  const contentNullOrEmpty = !safeContent || safeContent.trim() === ""
+  
+  if (contentNullOrEmpty && !isStreaming) {
+    return null
+  }
+
+  return (
+    <div className="relative">
+      <MessageContent
+        className={cn(
+          "prose dark:prose-invert relative min-w-full bg-transparent p-0",
+          "prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-base prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto",
+          isStreaming && "streaming-content",
+          className
+        )}
+        markdown={true}
+      >
+        {safeContent}
+      </MessageContent>
+      {isStreaming && (
+        <span className="absolute right-0 top-0 inline-block w-1 h-4 bg-muted-foreground ml-1 animate-pulse" />
+      )}
+    </div>
+  )
 }
 
 export function MessageAssistant({
@@ -43,8 +98,13 @@ export function MessageAssistant({
     (part) => part.type === "tool-invocation"
   )
   const reasoningParts = parts?.find((part) => part.type === "reasoning")
-  const contentNullOrEmpty = children === null || children === ""
+  
+  // Ensure children is always a string for markdown parsing
+  const safeChildren = typeof children === 'string' ? children : (children ? String(children) : '')
+  const contentNullOrEmpty = !safeChildren || safeChildren.trim() === ""
   const isLastStreaming = status === "streaming" && isLast
+  const isStreaming = status === "streaming"
+  
   const searchImageResults =
     parts
       ?.filter(
@@ -73,6 +133,7 @@ export function MessageAssistant({
       className={cn(
         "group flex w-full max-w-3xl flex-1 items-start gap-4 px-6 pb-2",
         hasScrollAnchor && "min-h-scroll-anchor",
+        isStreaming && "streaming-message",
         className
       )}
     >
@@ -94,24 +155,25 @@ export function MessageAssistant({
           <SearchImages results={searchImageResults} />
         )}
 
-        {contentNullOrEmpty ? null : (
-          <MessageContent
-            className={cn(
-              "prose dark:prose-invert relative min-w-full bg-transparent p-0",
-              "prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-base prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
-            )}
-            markdown={true}
-          >
-            {children}
-          </MessageContent>
-        )}
+        <StreamingContent 
+          content={safeChildren} 
+          isStreaming={isStreaming}
+        />
 
         {sources && sources.length > 0 && <SourcesList sources={sources} />}
+
+        {/* Show streaming indicator when streaming and no content yet */}
+        {isStreaming && contentNullOrEmpty && (
+          <div className="mt-2">
+            <StreamingIndicator isStreaming={isStreaming} />
+          </div>
+        )}
 
         {Boolean(isLastStreaming || contentNullOrEmpty) ? null : (
           <MessageActions
             className={cn(
-              "-ml-2 flex gap-0 opacity-0 transition-opacity group-hover:opacity-100"
+              "-ml-2 flex gap-0 opacity-0 transition-opacity group-hover:opacity-100",
+              isStreaming && "opacity-100" // Show actions during streaming
             )}
           >
             <MessageAction
@@ -123,6 +185,7 @@ export function MessageAssistant({
                 aria-label="Copy text"
                 onClick={copyToClipboard}
                 type="button"
+                disabled={isStreaming} // Disable during streaming
               >
                 {copied ? (
                   <Check className="size-4" />
@@ -142,6 +205,7 @@ export function MessageAssistant({
                   aria-label="Regenerate"
                   onClick={onReload}
                   type="button"
+                  disabled={isStreaming} // Disable during streaming
                 >
                   <ArrowClockwise className="size-4" />
                 </button>

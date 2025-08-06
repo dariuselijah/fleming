@@ -14,6 +14,14 @@ type ConversationProps = {
   onDelete: (id: string) => void
   onEdit: (id: string, newText: string) => void
   onReload: () => void
+  // Enhanced streaming props
+  streamingState?: {
+    isStreaming: boolean
+    progress: number
+    estimatedTimeRemaining: number
+    chunksReceived: number
+    lastChunkTime: number
+  }
 }
 
 export function Conversation({
@@ -22,12 +30,14 @@ export function Conversation({
   onDelete,
   onEdit,
   onReload,
+  streamingState,
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
 
-
   if (!messages || messages.length === 0)
     return <div className="h-full w-full"></div>
+
+  const isStreaming = status === "streaming" || streamingState?.isStreaming
 
   return (
     <div className="relative flex h-full w-full flex-col items-center overflow-x-hidden overflow-y-auto">
@@ -35,6 +45,7 @@ export function Conversation({
         <div className="h-app-header bg-background flex w-full lg:hidden lg:h-0" />
         <div className="h-app-header bg-background flex w-full mask-b-from-4% mask-b-to-100% lg:hidden" />
       </div>
+      
       <ChatContainerRoot className="relative w-full">
         <ChatContainerContent
           className="flex w-full flex-col items-center pt-20 pb-4"
@@ -67,6 +78,8 @@ export function Conversation({
               </Message>
             )
           })}
+          
+          {/* Enhanced loading state with streaming indicator */}
           {status === "submitted" &&
             messages.length > 0 &&
             messages[messages.length - 1].role === "user" && (
@@ -74,6 +87,7 @@ export function Conversation({
                 <Loader />
               </div>
             )}
+            
           <div className="absolute bottom-0 flex w-full max-w-3xl flex-1 items-end justify-end gap-4 px-6 pb-2">
             <ScrollButton className="absolute top-[-50px] right-[30px]" />
           </div>

@@ -123,14 +123,14 @@ export function ChatInput({
     console.log("Current isSubmitting state:", isSubmitting)
     console.log("Current status:", status)
     
-    if (isSubmitting) {
-      console.log("Already submitting, ignoring button click")
-      return
-    }
-
     if (status === "streaming") {
       console.log("Streaming, stopping")
       stop()
+      return
+    }
+
+    if (isSubmitting) {
+      console.log("Already submitting, ignoring button click")
       return
     }
 
@@ -218,8 +218,14 @@ export function ChatInput({
   }, [hasSearchSupport, enableSearch, setEnableSearch])
 
   useEffect(() => {
-    setIsButtonDisabled(Boolean(!value || isSubmitting || (value && isOnlyWhitespace(value))));
-  }, [value, isSubmitting]);
+    // Don't disable the button during streaming - allow stop functionality
+    const shouldDisable = Boolean(
+      !value || 
+      (isSubmitting && status !== "streaming") || 
+      (value && isOnlyWhitespace(value))
+    );
+    setIsButtonDisabled(shouldDisable);
+  }, [value, isSubmitting, status]);
 
   return (
     <div className="relative flex w-full flex-col gap-4">

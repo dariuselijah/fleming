@@ -4,18 +4,21 @@ import { useBreakpoint } from "@/app/hooks/use-breakpoint"
 import useClickOutside from "@/app/hooks/use-click-outside"
 import { fetchClient } from "@/lib/fetch"
 import { cn } from "@/lib/utils"
-import { Check, FolderIcon, X } from "@phosphor-icons/react"
+import { Check, FolderIcon, X, BookOpenIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useCallback, useMemo, useRef, useState } from "react"
 import { SidebarProjectMenu } from "./sidebar-project-menu"
+import { Badge } from "@/components/ui/badge"
 
 type Project = {
   id: string
   name: string
   user_id: string
   created_at: string
+  type?: string
+  discipline?: string
 }
 
 type SidebarProjectItemProps = {
@@ -274,8 +277,17 @@ export function SidebarProjectItem({ project }: SidebarProjectItemProps) {
               className="text-primary relative line-clamp-1 flex w-full items-center gap-2 mask-r-from-80% mask-r-to-85% px-2 py-2 text-sm text-ellipsis whitespace-nowrap"
               title={displayName}
             >
-              <FolderIcon size={20} />
-              {displayName}
+              {project.type === "study" ? (
+                <BookOpenIcon size={20} className="flex-shrink-0" />
+              ) : (
+                <FolderIcon size={20} className="flex-shrink-0" />
+              )}
+              <span className="truncate min-w-0 flex-1">{displayName}</span>
+              {project.type === "study" && project.discipline && (
+                <Badge variant="secondary" className="ml-auto text-xs shrink-0 flex-shrink-0">
+                  {project.discipline}
+                </Badge>
+              )}
             </div>
           </Link>
 
