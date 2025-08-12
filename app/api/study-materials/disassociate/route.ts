@@ -55,7 +55,7 @@ export async function POST(request: Request) {
           .insert({
             id: session_id,
             user_id: authData.user.id,
-            title: project.name || "Study Session",
+            name: project.name || "Study Session",
             discipline: project.discipline || "general"
           })
           .select()

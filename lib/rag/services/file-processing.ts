@@ -203,12 +203,11 @@ export class FileProcessingService {
 
     // Insert chunks with embeddings
     const chunkRecords = chunks.map((chunk, index) => ({
-      document_id: materialId,
+      material_id: materialId,
       user_id: userId,
       chunk_index: index,
-      content: chunk.content,
-      embedding: chunkEmbeddings[index]?.embedding || null,
-      metadata: chunk.metadata
+      chunk_content: chunk.content,
+      embedding: chunkEmbeddings[index]?.embedding || null
     }))
 
     await supabase

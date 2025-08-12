@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from("study_sessions")
       .insert({ 
-        title: title.trim(), 
+        name: title.trim(), 
         discipline,
         description: description?.trim() || null,
         user_id: userId 

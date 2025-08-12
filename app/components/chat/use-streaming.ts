@@ -130,8 +130,9 @@ export function useStreaming() {
     
     // Calculate adaptive chunking based on response length
     let adaptiveChunkSize = config.chunkSize
+    let avgChunkSize = 0
     if (config.adaptiveChunking && chunks.length > 5) {
-      const avgChunkSize = chunks.slice(-5).join('').length / 5
+      avgChunkSize = chunks.slice(-5).join('').length / 5
       if (avgChunkSize > 50) {
         adaptiveChunkSize = Math.max(5, config.chunkSize - 5)
       } else if (avgChunkSize < 10) {

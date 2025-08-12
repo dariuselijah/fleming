@@ -75,6 +75,14 @@ export function UserMenu() {
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <a
+            href="/test-document-artifacts"
+            className="flex items-center gap-2"
+          >
+            <span>Document Artifacts Demo</span>
+          </a>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <a
             href="https://x.com/HelloPerkily"
             target="_blank"
             rel="noopener noreferrer"

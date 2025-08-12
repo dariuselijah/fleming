@@ -9,7 +9,7 @@ export interface RagContext {
 export interface RagSource {
   id: string
   title: string
-  material_type: string
+  material_type: string | null
   page?: number
   chapter?: string
   similarity: number
@@ -21,11 +21,11 @@ export interface SearchResult {
   id: string
   title: string
   content: string
-  material_type: string
-  discipline: string
+  material_type: string | null
+  discipline: string | null
   similarity: number
-  content_length: number
-  created_at: string
+  content_length: number | null
+  created_at: string | null
   file_url?: string
 }
 

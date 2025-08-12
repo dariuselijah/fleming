@@ -22,6 +22,9 @@ type ConversationProps = {
     chunksReceived: number
     lastChunkTime: number
   }
+  chatId?: string
+  userId?: string
+  isAuthenticated?: boolean
 }
 
 export function Conversation({
@@ -31,6 +34,9 @@ export function Conversation({
   onEdit,
   onReload,
   streamingState,
+  chatId,
+  userId,
+  isAuthenticated,
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
 
@@ -73,6 +79,9 @@ export function Conversation({
                 hasScrollAnchor={hasScrollAnchor}
                 parts={message.parts}
                 status={status}
+                chatId={chatId}
+                userId={userId}
+                isAuthenticated={isAuthenticated}
               >
                 {message.content}
               </Message>

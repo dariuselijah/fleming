@@ -131,7 +131,8 @@ export async function POST(request: Request) {
     if (sessionIdsArray && Array.isArray(sessionIdsArray) && sessionIdsArray.length > 0) {
       const sessionMaterialRelations = sessionIdsArray.map((sessionId: string) => ({
         session_id: sessionId,
-        material_id: material.id
+        material_id: material.id,
+        user_id: userId
       }))
 
       const { error: relationError } = await supabase
@@ -186,7 +187,7 @@ export async function GET(request: Request) {
     // Check if this is a project ID or study_session ID
     const { data: project } = await supabase
       .from("projects")
-      .select("id, type, discipline")
+      .select("id, type, discipline, name")
       .eq("id", sessionId)
       .single()
 
@@ -208,7 +209,7 @@ export async function GET(request: Request) {
           .insert({
             id: sessionId,
             user_id: userId,
-            title: project.name || "Study Session",
+            name: project.name || "Study Session",
             discipline: project.discipline || "general"
           })
           .select()

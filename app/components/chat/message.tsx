@@ -16,6 +16,9 @@ type MessageProps = {
   parts?: MessageType["parts"]
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
+  chatId?: string
+  userId?: string
+  isAuthenticated?: boolean
 }
 
 export function Message({
@@ -31,6 +34,9 @@ export function Message({
   parts,
   status,
   className,
+  chatId,
+  userId,
+  isAuthenticated,
 }: MessageProps) {
   const [copied, setCopied] = useState(false)
 
@@ -69,6 +75,9 @@ export function Message({
         parts={parts}
         status={status}
         className={className}
+        chatId={chatId}
+        userId={userId}
+        isAuthenticated={isAuthenticated}
       >
         {children}
       </MessageAssistant>

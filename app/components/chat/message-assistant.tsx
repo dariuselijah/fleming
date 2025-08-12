@@ -8,12 +8,13 @@ import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
 import { ArrowClockwise, Check, Copy } from "@phosphor-icons/react"
-import { ReactNode } from "react"
+import { ReactNode, useState, useEffect, useRef } from "react"
 import { getSources } from "./get-sources"
 import { Reasoning } from "./reasoning"
 import { SearchImages } from "./search-images"
 import { SourcesList } from "./sources-list"
 import { ToolInvocation } from "./tool-invocation"
+import { InlineArtifact } from "./inline-artifact"
 
 type MessageAssistantProps = {
   children: ReactNode
@@ -25,6 +26,9 @@ type MessageAssistantProps = {
   parts?: MessageAISDK["parts"]
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
+  chatId?: string
+  userId?: string
+  isAuthenticated?: boolean
 }
 
 // Enhanced streaming indicator component
@@ -91,6 +95,9 @@ export function MessageAssistant({
   parts,
   status,
   className,
+  chatId,
+  userId,
+  isAuthenticated,
 }: MessageAssistantProps) {
   const { preferences } = useUserPreferences()
   const sources = getSources(parts)
@@ -160,6 +167,16 @@ export function MessageAssistant({
           isStreaming={isStreaming}
         />
 
+        {/* Inline Artifacts */}
+        {chatId && userId && isAuthenticated && (
+          <InlineArtifacts 
+            chatId={chatId}
+            userId={userId}
+            isAuthenticated={isAuthenticated}
+            messageContent={safeChildren}
+          />
+        )}
+
         {sources && sources.length > 0 && <SourcesList sources={sources} />}
 
         {/* Show streaming indicator when streaming and no content yet */}
@@ -215,5 +232,91 @@ export function MessageAssistant({
         )}
       </div>
     </Message>
+  )
+}
+
+// Component to fetch and display inline artifacts for a specific message
+function InlineArtifacts({ 
+  chatId, 
+  userId, 
+  isAuthenticated,
+  messageContent
+}: { 
+  chatId: string
+  userId: string
+  isAuthenticated: boolean
+  messageContent: string
+}) {
+  const [artifacts, setArtifacts] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const hasFetched = useRef(false)
+  const mounted = useRef(false)
+  const fetchPromise = useRef<Promise<void> | null>(null)
+
+  // Fetch artifacts only once when the component mounts
+  useEffect(() => {
+    if (mounted.current) return
+    mounted.current = true
+    
+    const fetchArtifacts = async () => {
+      if (hasFetched.current || fetchPromise.current) return
+      
+      hasFetched.current = true
+      setIsLoading(true)
+      
+      try {
+        console.log('🔄 Fetching artifacts for chat:', chatId, 'user:', userId)
+        const response = await fetch(`/api/get-ai-artifacts?chatId=${chatId}&userId=${userId}&isAuthenticated=${isAuthenticated}`)
+        if (response.ok) {
+          const data = await response.json()
+          console.log('📦 Artifacts API response:', data)
+          
+          const chatArtifacts = data.artifacts || []
+          console.log('🎯 Found artifacts:', chatArtifacts.length, chatArtifacts)
+          
+          setArtifacts(chatArtifacts)
+        } else {
+          console.error("❌ Failed to fetch artifacts:", response.status, response.statusText)
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to fetch artifacts:', error)
+      } finally {
+        setIsLoading(false)
+        fetchPromise.current = null
+      }
+    }
+
+    fetchArtifacts()
+  }, []) // Empty dependency array - only run once
+  
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+        <span>Loading artifacts...</span>
+      </div>
+    )
+  }
+  
+  if (artifacts.length === 0) {
+    return null // Don't show anything if no artifacts
+  }
+
+  return (
+    <div className="mt-4 space-y-3">
+      {artifacts.map((artifact) => (
+        <InlineArtifact
+          key={artifact.id}
+          id={artifact.id}
+          title={artifact.title}
+          content={artifact.content}
+          contentType={artifact.content_type}
+          metadata={artifact.metadata}
+          created_at={artifact.created_at}
+          userId={userId}
+          isAuthenticated={isAuthenticated}
+        />
+      ))}
+    </div>
   )
 }

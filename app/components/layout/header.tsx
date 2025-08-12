@@ -55,6 +55,18 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
                 }
               />
               <Link
+                href="/test-document-artifacts"
+                className="font-base text-muted-foreground hover:text-foreground text-base transition-colors"
+              >
+                Document Demo
+              </Link>
+              <Link
+                href="/test-artifact-detection"
+                className="font-base text-muted-foreground hover:text-foreground text-base transition-colors"
+              >
+                Test Detection
+              </Link>
+              <Link
                 href="/auth"
                 className="font-base text-muted-foreground hover:text-foreground text-base transition-colors"
               >

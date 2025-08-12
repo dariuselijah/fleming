@@ -72,7 +72,7 @@ export async function POST(request: Request) {
           .insert({
             id: sessionId,
             user_id: authData.user.id,
-            title: project.name || "Study Session",
+            name: project.name || "Study Session",
             discipline: project.discipline || "general"
           })
           .select()
@@ -117,7 +117,8 @@ export async function POST(request: Request) {
       .from("study_session_materials")
       .insert({
         session_id: actualSessionId,
-        material_id: materialId
+        material_id: materialId,
+        user_id: authData.user.id
       })
 
     if (associateError) {

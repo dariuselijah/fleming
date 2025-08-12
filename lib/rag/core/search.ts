@@ -4,7 +4,7 @@ import { SearchResult, SearchOptions, RagContext, RagSource } from './types'
 
 export class RagSearchService {
   private static instance: RagSearchService
-  private cache = new Map<string, SearchResult[]>()
+  private cache = new Map<string, { results: SearchResult[], timestamp: number }>()
   private readonly cacheDuration = 5 * 60 * 1000 // 5 minutes
 
   static getInstance(): RagSearchService {
@@ -232,7 +232,7 @@ export class RagSearchService {
 
       await supabase.from('rag_search_logs').insert({
         user_id: userId,
-        query_text: query,
+        query: query,
         search_type: searchType,
         results_count: resultsCount,
         response_time_ms: responseTime,

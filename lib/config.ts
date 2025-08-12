@@ -437,8 +437,8 @@ export const SPECIALTY_SUGGESTIONS = {
 export const SUGGESTIONS = GENERAL_USER_SUGGESTIONS
 
 // Function to get appropriate suggestions based on user role and specialty
-export function getSuggestionsByRole(userRole?: "general" | "doctor", medicalSpecialty?: string) {
-  if (userRole === "doctor") {
+export function getSuggestionsByRole(userRole?: "general" | "doctor" | "medical-student", medicalSpecialty?: string) {
+  if (userRole === "doctor" || userRole === "medical-student") {
     // If we have specialty-specific suggestions, use them
     if (medicalSpecialty && medicalSpecialty !== "general" && SPECIALTY_SUGGESTIONS[medicalSpecialty as keyof typeof SPECIALTY_SUGGESTIONS]) {
       return SPECIALTY_SUGGESTIONS[medicalSpecialty as keyof typeof SPECIALTY_SUGGESTIONS]

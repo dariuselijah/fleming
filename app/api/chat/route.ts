@@ -307,7 +307,7 @@ export async function POST(req: Request) {
 
         if (relevantContext.sources.length > 0) {
           const contextText = relevantContext.sources
-            .map(source => `[${source.material_type.toUpperCase()}] ${source.title}:\n${source.content_preview}`)
+            .map(source => `[${(source.material_type || 'unknown').toUpperCase()}] ${source.title}:\n${source.content_preview}`)
             .join('\n\n')
 
           effectiveSystemPrompt += `\n\nRELEVANT CONTEXT FROM YOUR MATERIALS:\n${contextText}\n\nUse this information to provide more accurate and contextual responses. If the information isn't in your materials, say so.`
@@ -351,7 +351,7 @@ export async function POST(req: Request) {
         })
       },
 
-      // Enhanced finish handler with better logging
+      // Enhanced finish handler with better logging and artifact creation
       onFinish: async ({ response, usage }) => {
         console.log("=== STREAMING FINISHED ===")
         console.log("Response length:", response.messages.length)
@@ -368,6 +368,81 @@ export async function POST(req: Request) {
               model,
             })
             console.log("Assistant message stored successfully")
+
+            // Check if we should create an artifact from this response
+            const lastAssistantMessage = response.messages[response.messages.length - 1]
+            if (lastAssistantMessage?.role === 'assistant' && lastAssistantMessage.content) {
+              try {
+                const { ArtifactDetectionService } = await import('@/lib/artifact-detection')
+                
+                // Extract text content from the message parts
+                const messageContent = Array.isArray(lastAssistantMessage.content) 
+                  ? lastAssistantMessage.content
+                      .filter(part => part.type === 'text')
+                      .map(part => (part as any).text)
+                      .join(' ')
+                  : String(lastAssistantMessage.content)
+                
+                const detectionResult = ArtifactDetectionService.detectArtifactOpportunity(
+                  userMessage.content,
+                  messageContent
+                )
+
+                console.log("Artifact detection result:", {
+                  userMessage: userMessage.content,
+                  messageLength: messageContent.length,
+                  detectionResult
+                })
+
+                if (detectionResult.shouldCreateArtifact) {
+                  console.log("Artifact opportunity detected:", detectionResult)
+                  
+                  const artifactContent = ArtifactDetectionService.extractArtifactContent(
+                    messageContent,
+                    detectionResult.contentType
+                  )
+
+                  // Create the artifact
+                  const { data: artifact, error: artifactError } = await supabase
+                    .from('ai_artifacts')
+                    .insert({
+                      chat_id: chatId,
+                      user_id: userId,
+                      title: detectionResult.title,
+                      content: artifactContent,
+                      content_type: detectionResult.contentType,
+                      metadata: {
+                        generated_by: "ai",
+                        confidence: detectionResult.confidence,
+                        reasoning: detectionResult.reasoning,
+                        model: model,
+                        timestamp: new Date().toISOString(),
+                        message_group_id: message_group_id
+                      }
+                    })
+                    .select()
+                    .single()
+
+                  if (artifactError) {
+                    console.error("Failed to create artifact:", artifactError)
+                    
+                    // Check if it's a missing table error
+                    if (artifactError.code === '42P01') {
+                      console.error("❌ CRITICAL: Database table 'ai_artifacts' does not exist!")
+                      console.error("Please run the SQL migration in your Supabase dashboard:")
+                      console.error("1. Go to https://supabase.com/dashboard")
+                      console.error("2. Select your project")
+                      console.error("3. Go to SQL Editor")
+                      console.error("4. Run the contents of create-artifact-tables.sql")
+                    }
+                  } else {
+                    console.log("✅ Artifact created successfully:", artifact.id)
+                  }
+                }
+              } catch (artifactError) {
+                console.warn("Artifact creation failed:", artifactError)
+              }
+            }
           } catch (error) {
             console.error("Failed to store assistant message:", error)
           }

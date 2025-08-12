@@ -23,18 +23,24 @@ export type Database = {
           id: string
           name: string
           user_id: string
+          type: string | null
+          discipline: string | null
           created_at: string | null
         }
         Insert: {
           id?: string
           name: string
           user_id: string
+          type?: string | null
+          discipline?: string | null
           created_at?: string | null
         }
         Update: {
           id?: string
           name?: string
           user_id?: string
+          type?: string | null
+          discipline?: string | null
           created_at?: string | null
         }
         Relationships: [
@@ -328,6 +334,10 @@ export type Database = {
           allergies: string[] | null
           family_history: string | null
           lifestyle_factors: string | null
+          rag_enabled: boolean | null
+          rag_threshold: number | null
+          rag_max_results: number | null
+          rag_file_types: string[] | null
           created_at: string | null
           updated_at: string | null
         }
@@ -350,6 +360,10 @@ export type Database = {
           allergies?: string[] | null
           family_history?: string | null
           lifestyle_factors?: string | null
+          rag_enabled?: boolean | null
+          rag_threshold?: number | null
+          rag_max_results?: number | null
+          rag_file_types?: string[] | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -372,6 +386,10 @@ export type Database = {
           allergies?: string[] | null
           family_history?: string | null
           lifestyle_factors?: string | null
+          rag_enabled?: boolean | null
+          rag_threshold?: number | null
+          rag_max_results?: number | null
+          rag_file_types?: string[] | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -385,12 +403,472 @@ export type Database = {
           },
         ]
       }
+      study_materials: {
+        Row: {
+          id: string
+          title: string
+          content: string
+          user_id: string
+          material_type: string | null
+          discipline: string | null
+          content_length: number | null
+          processing_status: string | null
+          last_embedded_at: string | null
+          search_metadata: any | null
+          combined_embedding: number[] | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          title: string
+          content: string
+          user_id: string
+          material_type?: string | null
+          discipline?: string | null
+          content_length?: number | null
+          processing_status?: string | null
+          last_embedded_at?: string | null
+          search_metadata?: any | null
+          combined_embedding?: number[] | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          title?: string
+          content?: string
+          user_id?: string
+          material_type?: string | null
+          discipline?: string | null
+          content_length?: number | null
+          processing_status?: string | null
+          last_embedded_at?: string | null
+          search_metadata?: any | null
+          combined_embedding?: number[] | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_materials_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      study_sessions: {
+        Row: {
+          id: string
+          name: string
+          user_id: string
+          type: string | null
+          discipline: string | null
+          description: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          name: string
+          user_id: string
+          type?: string | null
+          discipline?: string | null
+          description?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          user_id?: string
+          type?: string | null
+          discipline?: string | null
+          description?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      study_session_materials: {
+        Row: {
+          id: string
+          session_id: string
+          material_id: string
+          user_id: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          material_id: string
+          user_id: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          material_id?: string
+          user_id?: string
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_session_materials_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "study_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_session_materials_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "study_materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_session_materials_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_chunks: {
+        Row: {
+          id: string
+          material_id: string
+          chunk_content: string
+          chunk_index: number
+          user_id: string
+          embedding: number[] | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          material_id: string
+          chunk_content: string
+          chunk_index: number
+          user_id: string
+          embedding?: number[] | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          material_id?: string
+          chunk_content?: string
+          chunk_index?: number
+          user_id?: string
+          embedding?: number[] | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_chunks_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "study_materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_chunks_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rag_search_logs: {
+        Row: {
+          id: string
+          user_id: string
+          query: string
+          results_count: number
+          search_type: string
+          response_time_ms: number
+          cache_hit: boolean
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          query: string
+          results_count: number
+          search_type: string
+          response_time_ms: number
+          cache_hit: boolean
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          query?: string
+          results_count?: number
+          search_type?: string
+          response_time_ms?: number
+          cache_hit?: boolean
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rag_search_logs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      study_content: {
+        Row: {
+          id: string
+          session_id: string
+          content: string
+          content_type: string
+          user_id: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          content: string
+          content_type: string
+          user_id: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          content?: string
+          content_type?: string
+          user_id?: string
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_content_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "study_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_content_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_artifacts: {
+        Row: {
+          id: string
+          chat_id: string
+          user_id: string
+          file_name: string
+          content_type: string
+          file_url: string
+          extracted_content: string
+          metadata: Json | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          chat_id: string
+          user_id: string
+          file_name: string
+          content_type: string
+          file_url: string
+          extracted_content: string
+          metadata?: Json | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          chat_id?: string
+          user_id?: string
+          file_name?: string
+          content_type?: string
+          file_url?: string
+          extracted_content?: string
+          metadata?: Json | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_artifacts_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_artifacts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_artifacts: {
+        Row: {
+          id: string
+          chat_id: string
+          user_id: string
+          title: string
+          content: string
+          content_type: string
+          metadata: Json | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          chat_id: string
+          user_id: string
+          title: string
+          content: string
+          content_type?: string
+          metadata?: Json | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          chat_id?: string
+          user_id?: string
+          title?: string
+          content?: string
+          content_type?: string
+          metadata?: Json | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_artifacts_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_artifacts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_materials_needing_embedding: {
+        Args: {
+          user_id_filter: string
+          limit_count: number
+        }
+        Returns: Array<{
+          id: string
+          title: string
+          content: string
+          user_id: string
+          processing_status: string
+          last_embedded_at: string | null
+        }>
+      }
+      update_material_embeddings: {
+        Args: {
+          material_ids: string[]
+          embeddings_data: Array<{
+            id: string
+            embedding: number[]
+            model: string
+          }>
+        }
+        Returns: number
+      }
+      search_study_materials: {
+        Args: {
+          query_embedding: number[]
+          match_threshold: number
+          match_count: number
+          user_id_filter: string
+          material_types: string[] | null
+          disciplines: string[] | null
+        }
+        Returns: Array<{
+          id: string
+          title: string
+          content: string
+          similarity: number
+          user_id: string
+          material_type: string | null
+          discipline: string | null
+          content_length: number | null
+          created_at: string | null
+        }>
+      }
+      hybrid_search_study_materials: {
+        Args: {
+          query_text: string
+          query_embedding: number[]
+          match_threshold: number
+          match_count: number
+          user_id_filter: string
+        }
+        Returns: Array<{
+          id: string
+          title: string
+          content: string
+          similarity: number
+          user_id: string
+          text_similarity: number
+          material_type: string | null
+          discipline: string | null
+          content_length: number | null
+          created_at: string | null
+        }>
+      }
+      search_document_chunks: {
+        Args: {
+          query_embedding: number[]
+          match_threshold: number
+          match_count: number
+          user_id_filter: string
+        }
+        Returns: Array<{
+          id: string
+          material_id: string
+          chunk_content: string
+          similarity: number
+          user_id: string
+          title: string
+          content: string
+          material_type: string | null
+          discipline: string | null
+          content_length: number | null
+          created_at: string | null
+        }>
+      }
     }
     Enums: Record<string, never>
     CompositeTypes: {

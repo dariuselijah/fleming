@@ -147,7 +147,17 @@ export const getOrCreateGuestUserId = async (
 ): Promise<string | null> => {
   if (user?.id) return user.id
 
-  // Require authentication - no anonymous users allowed
-  console.warn("Authentication required. Please sign in to continue.")
-  return null
+  // Create a guest user ID for anonymous users
+  const guestId = crypto.randomUUID()
+  console.log("Creating guest user with ID:", guestId)
+  
+  try {
+    // Try to create the guest user in the database
+    await createGuestUser(guestId)
+    return guestId
+  } catch (error) {
+    console.error("Failed to create guest user:", error)
+    // Fallback: return the guest ID anyway for local testing
+    return guestId
+  }
 }

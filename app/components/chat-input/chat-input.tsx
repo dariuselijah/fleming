@@ -19,6 +19,7 @@ import { FileList } from "./file-list"
 import { Select } from "@/components/ui/select"
 import { SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
+
 // Multi-modal configuration - maps user-friendly labels to actual model IDs
 const MODAL_MAPPING = {
   grok4: "grok-4", // Grok-4 model
@@ -236,6 +237,8 @@ export function ChatInput({
           value={value}
         />
       )}
+      
+      
       <div className="relative order-2 px-2 pb-3 sm:pb-4 md:order-1">
         <PromptInput
           className="bg-popover relative z-10 p-0 pt-1 shadow-xs backdrop-blur-xl"

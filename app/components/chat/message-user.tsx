@@ -21,6 +21,7 @@ import { Message as MessageType } from "@ai-sdk/react"
 import { Check, Copy, Trash } from "@phosphor-icons/react"
 import Image from "next/image"
 import { useRef, useState } from "react"
+import { DocumentArtifactsList } from "./document-artifacts-list"
 
 const getTextFromDataUrl = (dataUrl: string) => {
   const base64 = dataUrl.split(",")[1]
@@ -54,6 +55,8 @@ export function MessageUser({
 }: MessageUserProps) {
   const [editInput, setEditInput] = useState(children)
   const [isEditing, setIsEditing] = useState(false)
+  const [extractedContents, setExtractedContents] = useState<Record<string, string>>({})
+  const [extractedMetadata, setExtractedMetadata] = useState<Record<string, any>>({})
   const contentRef = useRef<HTMLDivElement>(null)
 
   const handleEditCancel = () => {
@@ -71,6 +74,20 @@ export function MessageUser({
 
   const handleDelete = () => {
     onDelete(id)
+  }
+
+  const handleContentExtract = (fileName: string, content: string) => {
+    setExtractedContents(prev => ({
+      ...prev,
+      [fileName]: content
+    }))
+  }
+
+  const handleMetadataExtract = (fileName: string, metadata: any) => {
+    setExtractedMetadata(prev => ({
+      ...prev,
+      [fileName]: metadata
+    }))
   }
 
   return (
@@ -127,6 +144,23 @@ export function MessageUser({
           ) : null}
         </div>
       ))}
+
+      {/* Document Artifacts */}
+      {attachments && attachments.length > 0 && (
+        <DocumentArtifactsList
+          attachments={attachments.map(att => ({
+            name: att.name || 'Unknown',
+            contentType: att.contentType || 'application/octet-stream',
+            url: att.url || '',
+            filePath: (att as any).filePath
+          }))}
+          extractedContents={extractedContents}
+          extractedMetadata={extractedMetadata}
+          onContentExtract={handleContentExtract}
+          className="mb-3"
+        />
+      )}
+
       {isEditing ? (
         <div
           className="bg-accent relative flex min-w-[180px] flex-col gap-2 rounded-3xl px-5 py-2.5"

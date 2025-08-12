@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"
 import { useEffect, useState } from "react"
 import { Message } from "../chat/message"
+import { useChatSession } from "@/lib/chat-store/session/provider"
+import { useUser } from "@/lib/user-store/provider"
 
 type GroupedMessage = {
   userMessage: MessageType
@@ -38,6 +40,8 @@ type ResponseCardProps = {
 function ResponseCard({ response, group }: ResponseCardProps) {
   const model = getModelInfo(response.model)
   const providerIcon = PROVIDERS.find((p) => p.id === model?.baseProviderId)
+  const { chatId } = useChatSession()
+  const { user } = useUser()
 
   return (
     <div className="relative">
@@ -74,6 +78,9 @@ function ResponseCard({ response, group }: ResponseCardProps) {
             isLast={false}
             hasScrollAnchor={false}
             className="bg-transparent p-0 px-0"
+            chatId={chatId}
+            userId={user?.id}
+            isAuthenticated={!!user?.id}
           >
             {response.message.content}
           </Message>
