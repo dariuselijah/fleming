@@ -13,6 +13,7 @@ import { Reasoning } from "./reasoning"
 import { SearchImages } from "./search-images"
 import { SourcesList } from "./sources-list"
 import { ToolInvocation } from "./tool-invocation"
+import { useMemo, useCallback } from "react"
 
 type MessageAssistantProps = {
   children: string
@@ -38,14 +39,21 @@ export function MessageAssistant({
   className,
 }: MessageAssistantProps) {
   const { preferences } = useUserPreferences()
-  const sources = getSources(parts)
-  const toolInvocationParts = parts?.filter(
-    (part) => part.type === "tool-invocation"
+  
+  // Memoize derived data to prevent unnecessary recalculations during streaming
+  const sources = useMemo(() => getSources(parts), [parts])
+  const toolInvocationParts = useMemo(() => 
+    parts?.filter((part) => part.type === "tool-invocation"), [parts]
   )
-  const reasoningParts = parts?.find((part) => part.type === "reasoning")
+  const reasoningParts = useMemo(() => 
+    parts?.find((part) => part.type === "reasoning"), [parts]
+  )
+  
   const contentNullOrEmpty = children === null || children === ""
   const isLastStreaming = status === "streaming" && isLast
-  const searchImageResults =
+  
+  // Memoize search image results processing
+  const searchImageResults = useMemo(() => 
     parts
       ?.filter(
         (part) =>
@@ -66,7 +74,17 @@ export function MessageAssistant({
           console.warn("Error processing image search results:", error)
           return []
         }
-      }) ?? []
+      }) ?? [], [parts]
+  )
+
+  // Memoize handlers to prevent unnecessary re-renders
+  const memoizedCopyToClipboard = useCallback(() => {
+    if (copyToClipboard) copyToClipboard()
+  }, [copyToClipboard])
+
+  const memoizedOnReload = useCallback(() => {
+    if (onReload) onReload()
+  }, [onReload])
 
   return (
     <Message
@@ -121,7 +139,7 @@ export function MessageAssistant({
               <button
                 className="hover:bg-accent/60 text-muted-foreground hover:text-foreground flex size-7.5 items-center justify-center rounded-full bg-transparent transition"
                 aria-label="Copy text"
-                onClick={copyToClipboard}
+                onClick={memoizedCopyToClipboard}
                 type="button"
               >
                 {copied ? (
@@ -140,7 +158,7 @@ export function MessageAssistant({
                 <button
                   className="hover:bg-accent/60 text-muted-foreground hover:text-foreground flex size-7.5 items-center justify-center rounded-full bg-transparent transition"
                   aria-label="Regenerate"
-                  onClick={onReload}
+                  onClick={memoizedOnReload}
                   type="button"
                 >
                   <ArrowClockwise className="size-4" />

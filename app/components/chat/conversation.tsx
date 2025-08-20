@@ -5,7 +5,7 @@ import {
 import { Loader } from "@/components/prompt-kit/loader"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
 import { Message as MessageType } from "@ai-sdk/react"
-import { useRef } from "react"
+import { useRef, useMemo, useCallback } from "react"
 import { Message } from "./message"
 
 type ConversationProps = {
@@ -25,6 +25,38 @@ export function Conversation({
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
 
+  // Memoize message rendering for streaming performance
+  const renderedMessages = useMemo(() => 
+    messages?.map((message, index) => {
+      const isLast =
+        index === messages.length - 1 && status !== "submitted"
+      const hasScrollAnchor =
+        isLast && messages.length > initialMessageCount.current
+
+      return (
+        <Message
+          key={message.id}
+          id={message.id}
+          variant={message.role}
+          attachments={message.experimental_attachments}
+          isLast={isLast}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          onReload={onReload}
+          hasScrollAnchor={hasScrollAnchor}
+          parts={message.parts}
+          status={status}
+        >
+          {message.content}
+        </Message>
+      )
+    }), [messages, status, onDelete, onEdit, onReload]
+  )
+
+  // Memoize handlers to prevent unnecessary re-renders
+  const memoizedOnDelete = useCallback(onDelete, [onDelete])
+  const memoizedOnEdit = useCallback(onEdit, [onEdit])
+  const memoizedOnReload = useCallback(onReload, [onReload])
 
   if (!messages || messages.length === 0)
     return <div className="h-full w-full"></div>
@@ -43,31 +75,10 @@ export function Conversation({
             scrollbarWidth: "none",
           }}
         >
-          {messages?.map((message, index) => {
-            const isLast =
-              index === messages.length - 1 && status !== "submitted"
-            const hasScrollAnchor =
-              isLast && messages.length > initialMessageCount.current
-
-            return (
-              <Message
-                key={message.id}
-                id={message.id}
-                variant={message.role}
-                attachments={message.experimental_attachments}
-                isLast={isLast}
-                onDelete={onDelete}
-                onEdit={onEdit}
-                onReload={onReload}
-                hasScrollAnchor={hasScrollAnchor}
-                parts={message.parts}
-                status={status}
-              >
-                {message.content}
-              </Message>
-            )
-          })}
-          {status === "submitted" &&
+          {renderedMessages}
+          {/* Show loading immediately when user sends message or when streaming */}
+          {(status === "submitted" || status === "streaming" || 
+            (messages.length > 0 && messages[messages.length - 1].role === "user" && status === "ready")) &&
             messages.length > 0 &&
             messages[messages.length - 1].role === "user" && (
               <div className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">

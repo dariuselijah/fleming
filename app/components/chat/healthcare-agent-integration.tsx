@@ -14,17 +14,39 @@ import {
 export function HealthcareAgentIntegration() {
   const { preferences } = useUserPreferences()
   
-  if (!preferences.healthcareAgentEnabled || preferences.userRole !== "doctor") {
+  if (preferences.userRole !== "doctor" && preferences.userRole !== "medical_student") {
     return null
   }
 
   const getActiveAgent = (): HealthcareAgent | null => {
-    // For healthcare professionals, always use the orchestrator
+    // For healthcare professionals and medical students, always use the orchestrator
     return getHealthcareAgentById("healthcare_orchestrator") || null
   }
 
   const activeAgent = getActiveAgent()
   if (!activeAgent) return null
+
+  const getRoleTitle = () => {
+    switch (preferences.userRole) {
+      case "medical_student":
+        return "Medical Student AI Assistant"
+      case "doctor":
+        return "Healthcare AI Orchestrator"
+      default:
+        return "Healthcare AI Assistant"
+    }
+  }
+
+  const getRoleDescription = () => {
+    switch (preferences.userRole) {
+      case "medical_student":
+        return "Tailored for medical education with focus on learning, clinical reasoning, and exam preparation."
+      case "doctor":
+        return "Sophisticated medical intelligence system that coordinates multiple specialized AI agents."
+      default:
+        return "AI assistant for healthcare professionals."
+    }
+  }
 
   return (
     <Card className="mb-4">
@@ -33,7 +55,7 @@ export function HealthcareAgentIntegration() {
           <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-600">
             🏥
           </div>
-          Healthcare AI Orchestrator
+          {getRoleTitle()}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -107,7 +129,7 @@ export function HealthcareAgentIntegration() {
 export function getHealthcareSystemPrompt(): string {
   const { preferences } = useUserPreferences()
   
-  if (!preferences.healthcareAgentEnabled || preferences.userRole !== "doctor") {
+  if (preferences.userRole !== "doctor" && preferences.userRole !== "medical_student") {
     return ""
   }
 
@@ -126,6 +148,11 @@ export function getHealthcareSystemPrompt(): string {
     if (specialtyAgents.length > 0) {
       systemPrompt += `\n\nSPECIALTY-SPECIFIC AGENTS: ${specialtyAgents.map(agent => agent.name).join(", ")}`
     }
+  }
+  
+  // Add role-specific context
+  if (preferences.userRole === "medical_student") {
+    systemPrompt += "\n\nROLE CONTEXT: You are assisting a medical student. Focus on educational explanations, clinical reasoning development, and exam preparation support."
   }
   
   // Add clinical decision support tools

@@ -1,4 +1,4 @@
-import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
+import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT } from "@/lib/config"
 import { getAllModels } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { ProviderWithoutOllama } from "@/lib/user-keys"
@@ -79,7 +79,7 @@ type ChatRequest = {
   systemPrompt: string
   enableSearch: boolean
   message_group_id?: string
-  userRole?: "doctor" | "general"
+  userRole?: "doctor" | "general" | "medical_student"
   medicalSpecialty?: string
   clinicalDecisionSupport?: boolean
   medicalLiteratureAccess?: boolean
@@ -104,14 +104,6 @@ export async function POST(req: Request) {
       medicalComplianceMode,
     } = (await req.json()) as ChatRequest
 
-    console.log("=== REQUEST DEBUG ===")
-    console.log("Received userRole from frontend:", userRole)
-    console.log("Received medicalSpecialty from frontend:", medicalSpecialty)
-    console.log("Received clinicalDecisionSupport from frontend:", clinicalDecisionSupport)
-    console.log("Received medicalLiteratureAccess from frontend:", medicalLiteratureAccess)
-    console.log("Received medicalComplianceMode from frontend:", medicalComplianceMode)
-    console.log("=== END REQUEST DEBUG ===")
-
     if (!messages || !chatId || !userId) {
       return new Response(
         JSON.stringify({ error: "Error, missing information" }),
@@ -119,32 +111,15 @@ export async function POST(req: Request) {
       )
     }
 
-    const supabase = await validateAndTrackUsage({
-      userId,
-      model,
-      isAuthenticated,
-    })
-
-    // Increment message count for successful validation
-    if (supabase) {
-      await incrementMessageCount({ supabase, userId })
+    // START STREAMING IMMEDIATELY - minimal blocking operations
+    let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT_DEFAULT
+    
+    // Add basic role-based instructions immediately for instant response
+    if (userRole === "doctor" || userRole === "medical_student") {
+      effectiveSystemPrompt += `\n\nYou are a Medical AI Assistant. Provide direct, evidence-based guidance. Use appropriate medical terminology.`
     }
 
-    const userMessage = messages[messages.length - 1]
-
-    if (supabase && userMessage?.role === "user") {
-      await logUserMessage({
-        supabase,
-        userId,
-        chatId,
-        content: userMessage.content,
-        attachments: userMessage.experimental_attachments as Attachment[],
-        model,
-        isAuthenticated,
-        message_group_id,
-      })
-    }
-
+    // Get model config immediately (this is fast)
     const allModels = await getAllModels()
     const modelConfig = allModels.find((m) => m.id === model)
 
@@ -152,110 +127,15 @@ export async function POST(req: Request) {
       throw new Error(`Model ${model} not found`)
     }
 
-    let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT_DEFAULT
-
-    // Role-based system prompt selection:
-    // - userRole === "doctor": Healthcare professional mode with medical AI assistant
-    // - userRole === "general" or undefined: General user mode with appropriate disclaimers
-    if (userRole === "doctor") {
-      console.log("Healthcare professional mode detected - userRole:", userRole)
-      console.log("Original systemPrompt from frontend:", systemPrompt)
-      
-      // Force healthcare system for all doctors, regardless of frontend systemPrompt
-      const healthcarePrompt = getHealthcareSystemPromptServer(
-        userRole,
-        medicalSpecialty,
-        clinicalDecisionSupport,
-        medicalLiteratureAccess,
-        medicalComplianceMode
-      )
-      
-      // Always use healthcare system for doctors, override frontend systemPrompt
-      effectiveSystemPrompt = healthcarePrompt || SYSTEM_PROMPT_DEFAULT
-      
-      console.log("Healthcare prompt result:", healthcarePrompt ? "Generated" : "Failed/Empty")
-      
-      // Add extremely strong doctor-focused instructions
-      effectiveSystemPrompt += `\n\nCRITICAL INSTRUCTIONS: You are a Medical AI Assistant speaking to a healthcare professional. NEVER use patient-facing language like "I'm not a doctor", "I can't diagnose", "talk to your doctor", or "I can't provide medical advice". You are a medical AI assistant designed to support clinical decision-making. Provide direct, evidence-based clinical guidance as you would to a medical colleague. Use medical terminology appropriately and maintain professional clinical standards.`
-      
-      console.log("Healthcare system prompt applied for doctor role")
-      
-      // Always use healthcare agents for medical professionals
-      const medicalContext: MedicalContext = {
-        userRole: "doctor",
-        medicalSpecialty,
-        specialties: medicalSpecialty ? [medicalSpecialty] : [],
-        requiredCapabilities: [],
-        clinicalDecisionSupport,
-        medicalLiteratureAccess,
-        medicalComplianceMode
-      }
-      
-      // Always analyze and orchestrate for healthcare professionals
-      const agentSelections = analyzeMedicalQuery(userMessage.content, medicalContext)
-      
-      if (agentSelections.length > 0) {
-        try {
-          const orchestrationInfo = await orchestrateHealthcareAgents(userMessage.content, medicalContext)
-          effectiveSystemPrompt += `\n\n${orchestrationInfo}`
-          
-          // Integrate medical knowledge for comprehensive responses
-          try {
-            const medicalKnowledge = await integrateMedicalKnowledge(userMessage.content, medicalContext, agentSelections)
-            if (medicalKnowledge.length > 0) {
-              effectiveSystemPrompt += `\n\nMEDICAL KNOWLEDGE SOURCES:\n`
-              medicalKnowledge.slice(0, 3).forEach((knowledge, index) => {
-                effectiveSystemPrompt += `${index + 1}. ${knowledge.source}: ${knowledge.title} (Evidence Level: ${knowledge.evidenceLevel})\n`
-              })
-              effectiveSystemPrompt += `\nUse this evidence-based information to support your recommendations.`
-            }
-          } catch (error) {
-            console.warn("Medical knowledge integration failed:", error)
-          }
-        } catch (error) {
-          console.warn("Orchestration failed, falling back to direct response:", error)
-        }
-      }
-      
-      // Always add compliance reminders
-      effectiveSystemPrompt += `\n\nIMPORTANT: You are assisting a healthcare professional. Provide direct, evidence-based medical guidance as you would to a clinical colleague. Include appropriate disclaimers for clinical use and suggest specialist consultation when needed.`
-    } else {
-      // Even for non-doctor roles, ensure we don't use patient-facing language if this is a medical query
-      if (userMessage.content.toLowerCase().includes('pain') || 
-          userMessage.content.toLowerCase().includes('symptom') || 
-          userMessage.content.toLowerCase().includes('diagnosis') ||
-          userMessage.content.toLowerCase().includes('treatment')) {
-        effectiveSystemPrompt += `\n\nNOTE: If this is a medical query, provide evidence-based information while maintaining appropriate professional standards.`
-      }
-    }
-
+    // Get API key if needed (this is fast)
     let apiKey: string | undefined
     if (isAuthenticated && userId) {
       const { getEffectiveApiKey } = await import("@/lib/user-keys")
       const provider = getProviderForModel(model)
-      apiKey =
-        (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) ||
-        undefined
+      apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
     }
 
-    console.log("Final system prompt for userRole:", userRole, "Length:", effectiveSystemPrompt.length)
-    console.log("System prompt preview:", effectiveSystemPrompt.substring(0, 500))
-    console.log("=== FULL SYSTEM PROMPT ===")
-    console.log(effectiveSystemPrompt)
-    console.log("=== END SYSTEM PROMPT ===")
-    
-    // Only add fallback for medical queries if userRole is explicitly "general" (not undefined or other values)
-    if (userRole === "general" && (
-      userMessage.content.toLowerCase().includes('pain') || 
-      userMessage.content.toLowerCase().includes('symptom') || 
-      userMessage.content.toLowerCase().includes('diagnosis') ||
-      userMessage.content.toLowerCase().includes('treatment') ||
-      userMessage.content.toLowerCase().includes('medical') ||
-      userMessage.content.toLowerCase().includes('patient')
-    )) {
-      effectiveSystemPrompt += `\n\nNOTE: This appears to be a medical query. Provide evidence-based information while maintaining appropriate professional standards.`
-    }
-    
+    // Start streaming immediately with basic prompt
     const result = streamText({
       model: modelConfig.apiSdk(apiKey, { enableSearch }),
       system: effectiveSystemPrompt,
@@ -264,26 +144,115 @@ export async function POST(req: Request) {
       maxSteps: 10,
       onError: (err: unknown) => {
         console.error("Streaming error occurred:", err)
-        // Don't set streamError anymore - let the AI SDK handle it through the stream
       },
-
       onFinish: async ({ response }) => {
-        if (supabase) {
-          await storeAssistantMessage({
-            supabase,
-            chatId,
-            messages:
-              response.messages as unknown as import("@/app/types/api.types").Message[],
-            message_group_id,
-            model,
-          })
-        }
+        // Handle completion in background
+        Promise.resolve().then(async () => {
+          try {
+            const supabase = await validateAndTrackUsage({
+              userId,
+              model,
+              isAuthenticated,
+            })
+
+            if (supabase) {
+              await incrementMessageCount({ supabase, userId })
+              
+              const userMessage = messages[messages.length - 1]
+              if (userMessage?.role === "user") {
+                await logUserMessage({
+                  supabase,
+                  userId,
+                  chatId,
+                  content: userMessage.content,
+                  attachments: userMessage.experimental_attachments as Attachment[],
+                  model,
+                  isAuthenticated,
+                  message_group_id,
+                })
+              }
+
+              await storeAssistantMessage({
+                supabase,
+                chatId,
+                messages:
+                  response.messages as unknown as import("@/app/types/api.types").Message[],
+                message_group_id,
+                model,
+              })
+            }
+          } catch (error) {
+            console.warn("Background operations failed:", error)
+          }
+        })
       },
     })
+
+    // ENHANCE SYSTEM PROMPT IN BACKGROUND (non-blocking)
+    if (userRole === "doctor" || userRole === "medical_student") {
+      // Don't await - let this run in background
+      Promise.resolve().then(async () => {
+        try {
+          console.log("Enhancing system prompt in background for role:", userRole)
+          
+          const healthcarePrompt = getHealthcareSystemPromptServer(
+            userRole,
+            medicalSpecialty,
+            clinicalDecisionSupport,
+            medicalLiteratureAccess,
+            medicalComplianceMode
+          )
+          
+          if (healthcarePrompt) {
+            console.log("Healthcare system prompt generated in background")
+            
+            // Analyze medical query complexity
+            const medicalContext: MedicalContext = {
+              userRole: userRole as "doctor" | "medical_student",
+              medicalSpecialty,
+              specialties: medicalSpecialty ? [medicalSpecialty] : [],
+              requiredCapabilities: [],
+              clinicalDecisionSupport,
+              medicalLiteratureAccess,
+              medicalComplianceMode
+            }
+            
+            const agentSelections = analyzeMedicalQuery(messages[messages.length - 1].content, medicalContext)
+            
+            if (agentSelections.length > 0) {
+              try {
+                const orchestrationInfo = await orchestrateHealthcareAgents(messages[messages.length - 1].content, medicalContext)
+                
+                // Integrate medical knowledge
+                try {
+                  const medicalKnowledge = await integrateMedicalKnowledge(messages[messages.length - 1].content, medicalContext, agentSelections)
+                  if (medicalKnowledge.length > 0) {
+                    console.log("Medical knowledge integrated in background")
+                  }
+                } catch (error) {
+                  console.warn("Background medical knowledge integration failed:", error)
+                }
+              } catch (error) {
+                console.warn("Background orchestration failed:", error)
+              }
+            }
+          }
+        } catch (error) {
+          console.warn("Background system prompt enhancement failed:", error)
+        }
+      })
+    }
 
     return result.toDataStreamResponse({
       sendReasoning: true,
       sendSources: true,
+      // Optimize streaming response
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+      },
       getErrorMessage: (error: unknown) => {
         console.error("Error forwarded to client:", error)
         return extractErrorMessage(error)

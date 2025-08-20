@@ -9,7 +9,6 @@ import {
   CubeIcon,
   GearSixIcon,
   PaintBrushIcon,
-  RobotIcon,
   XIcon,
 } from "@phosphor-icons/react"
 import { useState } from "react"
@@ -19,13 +18,13 @@ import { ThemeSelection } from "./appearance/theme-selection"
 import { AccountManagement } from "./general/account-management"
 import { UserProfile } from "./general/user-profile"
 import { HealthContext } from "./general/health-context"
-import { HealthcareSettings } from "./healthcare/healthcare-settings"
+import { UserRoleSelection } from "./general/user-role-selection"
 
 type SettingsContentProps = {
   isDrawer?: boolean
 }
 
-type TabType = "general" | "appearance" | "agents"
+type TabType = "general" | "appearance"
 
 export function SettingsContent({
   isDrawer = false,
@@ -77,19 +76,13 @@ export function SettingsContent({
                   <PaintBrushIcon className="size-4" />
                   <span>Appearance</span>
                 </TabsTrigger>
-                <TabsTrigger
-                  value="agents"
-                  className="flex shrink-0 items-center gap-2"
-                >
-                  <RobotIcon className="size-4" />
-                  <span>Agents</span>
-                </TabsTrigger>
               </TabsList>
             </div>
 
             {/* Mobile tabs content */}
             <TabsContent value="general" className="space-y-6 px-6">
               <UserProfile />
+              <UserRoleSelection />
               <HealthContext />
               {isSupabaseEnabled && (
                 <>
@@ -102,10 +95,6 @@ export function SettingsContent({
               <ThemeSelection />
               <LayoutSettings />
               <InteractionPreferences />
-            </TabsContent>
-
-            <TabsContent value="agents" className="space-y-6 px-6">
-              <HealthcareSettings />
             </TabsContent>
           </div>
         ) : (
@@ -132,16 +121,6 @@ export function SettingsContent({
                     <span>Appearance</span>
                   </div>
                 </TabsTrigger>
-
-                <TabsTrigger
-                  value="agents"
-                  className="w-full justify-start rounded-md px-3 py-2 text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <RobotIcon className="size-4" />
-                    <span>Agents</span>
-                  </div>
-                </TabsTrigger>
               </div>
             </TabsList>
 
@@ -149,6 +128,7 @@ export function SettingsContent({
             <div className="flex-1 overflow-auto px-6 pt-4">
               <TabsContent value="general" className="mt-0 space-y-6">
                 <UserProfile />
+                <UserRoleSelection />
                 <HealthContext />
                 {isSupabaseEnabled && (
                   <>
@@ -161,10 +141,6 @@ export function SettingsContent({
                 <ThemeSelection />
                 <LayoutSettings />
                 <InteractionPreferences />
-              </TabsContent>
-
-              <TabsContent value="agents" className="mt-0 space-y-6">
-                <HealthcareSettings />
               </TabsContent>
             </div>
           </>

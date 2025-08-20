@@ -198,54 +198,25 @@ export function Chat() {
   const showOnboarding = !chatId && messages.length === 0
 
   return (
-    <div
-      className={cn(
-        "@container/main relative flex h-full flex-col items-center justify-end md:justify-center"
-      )}
-    >
+    <>
+      <div className="flex h-full w-full flex-col">
+        {showOnboarding ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center">
+              <h1 className="mb-6 text-3xl font-medium tracking-tight">
+                What&apos;s on your mind?
+              </h1>
+            </div>
+          </div>
+        ) : (
+          <Conversation {...conversationProps} />
+        )}
+        <ChatInput {...chatInputProps} />
+      </div>
+
       <DialogAuth open={hasDialogAuth} setOpen={setHasDialogAuth} />
 
-      <AnimatePresence initial={false} mode="popLayout">
-        {showOnboarding ? (
-          <motion.div
-            key="onboarding"
-            className="absolute bottom-[60%] mx-auto max-w-[50rem] md:relative md:bottom-auto"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            layout="position"
-            layoutId="onboarding"
-            transition={{
-              layout: {
-                duration: 0,
-              },
-            }}
-          >
-            <h1 className="mb-6 text-3xl font-medium tracking-tight">
-              What&apos;s on your mind?
-            </h1>
-          </motion.div>
-        ) : (
-          <Conversation key="conversation" {...conversationProps} />
-        )}
-      </AnimatePresence>
-
-      <motion.div
-        className={cn(
-          "relative inset-x-0 bottom-0 z-50 mx-auto w-full max-w-3xl"
-        )}
-        layout="position"
-        layoutId="chat-input-container"
-        transition={{
-          layout: {
-            duration: messages.length === 1 ? 0.3 : 0,
-          },
-        }}
-      >
-        <ChatInput {...chatInputProps} />
-      </motion.div>
-
-      <FeedbackWidget authUserId={user?.id} />
-    </div>
+      <FeedbackWidget />
+    </>
   )
 }

@@ -28,7 +28,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Fleming",
   description:
-        "Fleming is a multi-model AI chat application designed for both general users and healthcare professionals. It supports a wide range of models. It also includes a specialized AI assistant for healthcare professionals, providing evidence-based clinical guidance, differential diagnoses, and treatment recommendations.",
+        "Fleming is a multi-model AI chat application designed for general users, medical students, and healthcare professionals. It supports a wide range of models and includes specialized AI assistants tailored for medical education and clinical practice.",
 }
 
 export default async function RootLayout({

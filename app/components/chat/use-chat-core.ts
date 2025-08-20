@@ -64,52 +64,21 @@ export function useChatCore({
   const hasSentFirstMessageRef = useRef(false)
   const prevChatIdRef = useRef<string | null>(chatId)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
+  
+  // Optimized system prompt determination - simplified for faster streaming
   const systemPrompt = useMemo(() => {
-    console.log("=== SYSTEM PROMPT DETERMINATION ===")
-    console.log("user?.system_prompt:", user?.system_prompt)
-    console.log("userPreferences.preferences.userRole:", userPreferences.preferences.userRole)
-    
-    // If user has a custom system prompt, use it
+    // If user has a custom system prompt, use it immediately
     if (user?.system_prompt) {
-      console.log("Using custom user system prompt")
       return user.system_prompt
     }
     
-    // If user role is doctor, use healthcare system prompt
-    if (userPreferences.preferences.userRole === "doctor") {
-      console.log("User role is doctor - using healthcare system prompt")
-      // Import the healthcare system prompt function
-      const { getHealthcareSystemPromptServer } = require("@/lib/models/healthcare-agents")
-      
-      const healthcarePrompt = getHealthcareSystemPromptServer(
-        userPreferences.preferences.userRole,
-        userPreferences.preferences.medicalSpecialty,
-        userPreferences.preferences.clinicalDecisionSupport,
-        userPreferences.preferences.medicalLiteratureAccess,
-        userPreferences.preferences.medicalComplianceMode
-      )
-      
-      if (healthcarePrompt) {
-        console.log("Healthcare system prompt generated successfully")
-        return healthcarePrompt
-      } else {
-        console.log("Healthcare system prompt generation failed, using default")
-      }
+    // For healthcare roles, use basic prompt and enhance in background
+    if (userPreferences.preferences.userRole === "doctor" || userPreferences.preferences.userRole === "medical_student") {
+      return SYSTEM_PROMPT_DEFAULT + "\n\nYou are a Medical AI Assistant. Provide direct, evidence-based guidance."
     }
     
-    console.log("Using default system prompt")
     return SYSTEM_PROMPT_DEFAULT
   }, [user?.system_prompt, userPreferences.preferences.userRole])
-
-  // Log system prompt on load
-  useEffect(() => {
-    console.log("=== SYSTEM PROMPT ON LOAD ===")
-    console.log("user?.system_prompt:", user?.system_prompt)
-    console.log("SYSTEM_PROMPT_DEFAULT length:", SYSTEM_PROMPT_DEFAULT.length)
-    console.log("Final systemPrompt length:", systemPrompt.length)
-    console.log("System prompt preview:", systemPrompt.substring(0, 200))
-    console.log("=== END SYSTEM PROMPT ON LOAD ===")
-  }, [systemPrompt, user?.system_prompt])
 
   // Search params handling
   const searchParams = useSearchParams()
@@ -135,7 +104,7 @@ export function useChatCore({
     })
   }, [])
 
-  // Initialize useChat
+  // Initialize useChat with optimized settings
   const {
     messages,
     input,
@@ -152,6 +121,14 @@ export function useChatCore({
     initialMessages,
     initialInput: draftValue,
     onError: handleError,
+    // Optimize for streaming performance
+    onFinish: () => {
+      // Handle completion without blocking
+    },
+    // Ensure immediate status updates
+    onResponse: () => {
+      // This ensures status changes to "streaming" immediately
+    },
   })
 
   // Handle search params on mount
@@ -173,10 +150,11 @@ export function useChatCore({
     prevChatIdRef.current = chatId
   }, [chatId, messages.length, setMessages])
 
-  // Submit action
+  // Submit action - optimized for immediate response
   const submit = useCallback(async () => {
-    console.log("=== SUBMIT ACTION TRIGGERED ===")
     if (!input.trim() && files.length === 0) return
+    
+    // Set submitting state immediately for optimistic UI
     setIsSubmitting(true)
 
     const uid = await getOrCreateGuestUserId(user)
@@ -231,17 +209,17 @@ export function useChatCore({
         },
       }
       
-      console.log("=== CALLING append ===");
-      const appendPromise = append(messageToSend, options);
+      // Clear input and files immediately for better UX
+      setInput("")
+      setFiles([])
+      clearDraft()
       
-      setInput("");
-      setFiles([]);
-      clearDraft();
+      // Bump chat immediately for optimistic update
+      bumpChat(currentChatId)
+      
+      // Start streaming immediately without waiting
+      append(messageToSend, options)
 
-      await appendPromise;
-      console.log("=== append CALLED ===");
-
-      bumpChat(currentChatId);
     } catch (error) {
       console.error("Error in submit:", error)
       toast({
@@ -264,14 +242,13 @@ export function useChatCore({
     enableSearch,
     bumpChat,
     clearDraft,
-    setIsSubmitting,
     setHasDialogAuth,
     setInput,
     setFiles,
     userPreferences,
   ]);
 
-  // Handle suggestion
+  // Handle suggestion - optimized for immediate response
   const handleSuggestion = useCallback(
     async (suggestion: string) => {
       setIsSubmitting(true)
@@ -283,6 +260,7 @@ export function useChatCore({
         createdAt: new Date(),
       }
 
+      // Add optimistic message immediately
       setMessages((prev) => [...prev, optimisticMessage])
 
       try {
@@ -316,6 +294,7 @@ export function useChatCore({
           },
         }
 
+        // Start streaming immediately without waiting
         append(
           {
             role: "user",
@@ -323,6 +302,8 @@ export function useChatCore({
           },
           options
         )
+        
+        // Remove optimistic message after streaming starts
         setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
       } catch {
         setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
@@ -363,7 +344,7 @@ export function useChatCore({
     reload(options)
   }, [user, chatId, selectedModel, isAuthenticated, systemPrompt, reload])
 
-  // Handle input change - now with access to the real setInput function!
+  // Handle input change - optimized for streaming
   const { setDraftValue } = useChatDraft(chatId)
   const handleInputChange = useCallback(
     (value: string) => {

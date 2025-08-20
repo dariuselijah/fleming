@@ -5,7 +5,7 @@ import { TRANSITION_SUGGESTIONS } from "@/lib/motion"
 import { getSuggestionsByRole } from "@/lib/config"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { AnimatePresence, motion } from "motion/react"
-import React, { memo, useCallback, useMemo, useState } from "react"
+import React, { memo, useCallback, useMemo, useState, useEffect } from "react"
 
 type SuggestionsProps = {
   onValueChange: (value: string) => void
@@ -22,6 +22,11 @@ export const Suggestions = memo(function Suggestions({
 }: SuggestionsProps) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const { preferences } = useUserPreferences()
+
+  // Debug logging to check for duplicate renders
+  useEffect(() => {
+    console.log("Suggestions component rendered - preferences:", preferences)
+  })
 
   if (!value && activeCategory !== null) {
     setActiveCategory(null)

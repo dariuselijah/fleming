@@ -1,0 +1,167 @@
+"use client"
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import { MedicalSpecialty, UserRole } from "@/lib/user-preference-store/utils"
+import { 
+  RobotIcon, 
+  UserIcon, 
+  BookOpenIcon, 
+  HeartIcon,
+  BabyIcon,
+  BrainIcon,
+  MicroscopeIcon,
+  UserGearIcon,
+  WrenchIcon,
+  TrayIcon,
+  TestTubeIcon,
+  SyringeIcon,
+  BabyCarriageIcon,
+  UserListIcon
+} from "@phosphor-icons/react"
+import { useState } from "react"
+
+const specialtyIcons: Record<MedicalSpecialty, any> = {
+  "cardiology": HeartIcon,
+  "oncology": MicroscopeIcon,
+  "pediatrics": BabyIcon,
+  "neurology": BrainIcon,
+  "orthopedics": WrenchIcon,
+  "dermatology": MicroscopeIcon,
+  "psychiatry": BrainIcon,
+  "emergency-medicine": UserGearIcon,
+  "internal-medicine": UserGearIcon,
+  "surgery": WrenchIcon,
+  "radiology": TrayIcon,
+  "pathology": TestTubeIcon,
+  "anesthesiology": SyringeIcon,
+  "obstetrics-gynecology": BabyCarriageIcon,
+  "family-medicine": UserListIcon,
+  "general": UserIcon
+}
+
+const specialtyLabels: Record<MedicalSpecialty, string> = {
+  "cardiology": "Cardiology",
+  "oncology": "Oncology",
+  "pediatrics": "Pediatrics",
+  "neurology": "Neurology",
+  "orthopedics": "Orthopedics",
+  "dermatology": "Dermatology",
+  "psychiatry": "Psychiatry",
+  "emergency-medicine": "Emergency Medicine",
+  "internal-medicine": "Internal Medicine",
+  "surgery": "Surgery",
+  "radiology": "Radiology",
+  "pathology": "Pathology",
+  "anesthesiology": "Anesthesiology",
+  "obstetrics-gynecology": "Obstetrics & Gynecology",
+  "family-medicine": "Family Medicine",
+  "general": "General"
+}
+
+export function UserRoleSelection() {
+  const { preferences, updatePreferences } = useUserPreferences()
+  const [isUpdating, setIsUpdating] = useState(false)
+
+  const handleRoleChange = async (role: UserRole) => {
+    setIsUpdating(true)
+    try {
+      await updatePreferences({ userRole: role })
+    } catch (error) {
+      console.error("Error updating user role:", error)
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  const handleSpecialtyChange = async (specialty: MedicalSpecialty) => {
+    setIsUpdating(true)
+    try {
+      await updatePreferences({ medicalSpecialty: specialty })
+    } catch (error) {
+      console.error("Error updating medical specialty:", error)
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  const SpecialtyIcon = preferences.medicalSpecialty ? specialtyIcons[preferences.medicalSpecialty] : UserIcon
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <UserIcon className="size-5" />
+          User Role & Specialty
+        </CardTitle>
+        <CardDescription>
+          Select your role to customize the AI assistant for your specific needs and learning goals.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="user-role">Primary Role</Label>
+          <Select
+            value={preferences.userRole}
+            onValueChange={handleRoleChange}
+            disabled={isUpdating}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select your role" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="general">
+                <div className="flex items-center gap-2">
+                  <UserIcon className="size-4" />
+                  General User
+                </div>
+              </SelectItem>
+              <SelectItem value="medical_student">
+                <div className="flex items-center gap-2">
+                  <BookOpenIcon className="size-4" />
+                  Medical Student
+                </div>
+              </SelectItem>
+              <SelectItem value="doctor">
+                <div className="flex items-center gap-2">
+                  <RobotIcon className="size-4" />
+                  Healthcare Professional
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {(preferences.userRole === "doctor" || preferences.userRole === "medical_student") && (
+          <div className="space-y-2">
+            <Label htmlFor="medical-specialty">Medical Specialty</Label>
+            <Select
+              value={preferences.medicalSpecialty || "general"}
+              onValueChange={handleSpecialtyChange}
+              disabled={isUpdating}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select your specialty" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(specialtyLabels).map(([key, label]) => {
+                  const Icon = specialtyIcons[key as MedicalSpecialty]
+                  return (
+                    <SelectItem key={key} value={key}>
+                      <div className="flex items-center gap-2">
+                        <Icon className="size-4" />
+                        {label}
+                      </div>
+                    </SelectItem>
+                  )
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+} 

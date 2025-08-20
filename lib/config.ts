@@ -273,6 +273,114 @@ export const HEALTHCARE_PROFESSIONAL_SUGGESTIONS = [
   },
 ]
 
+// Medical student suggestions - tailored for medical education and learning
+export const MEDICAL_STUDENT_SUGGESTIONS = [
+  {
+    label: "Basic Sciences",
+    highlight: "Basic",
+    prompt: `Basic`,
+    items: [
+      "Can you explain the pathophysiology of hypertension?",
+      "What are the key differences between type 1 and type 2 diabetes?",
+      "How does the renin-angiotensin system work?",
+      "What causes the symptoms of heart failure?",
+      "Explain the mechanism of action of common antibiotics",
+    ],
+    icon: MicroscopeIcon,
+  },
+  {
+    label: "Clinical Skills",
+    highlight: "Clinical",
+    prompt: `Clinical`,
+    items: [
+      "How do I take a proper patient history?",
+      "What are the key components of a physical exam?",
+      "How do I present a patient case to my attending?",
+      "What's the SOAP note format and how do I use it?",
+      "How do I develop a differential diagnosis?",
+    ],
+    icon: StethoscopeIcon,
+  },
+  {
+    label: "Study Strategies",
+    highlight: "Study",
+    prompt: `Study`,
+    items: [
+      "What's the best way to study for Step 1?",
+      "How do I memorize all the drug names and mechanisms?",
+      "What resources should I use for clinical rotations?",
+      "How do I prepare for shelf exams?",
+      "What's the most effective way to study anatomy?",
+    ],
+    icon: BookOpenText,
+  },
+  {
+    label: "Clinical Reasoning",
+    highlight: "Reasoning",
+    prompt: `Reasoning`,
+    items: [
+      "How do I approach a patient with chest pain?",
+      "What's the workup for abdominal pain?",
+      "How do I think through a case of shortness of breath?",
+      "What causes altered mental status and how do I evaluate it?",
+      "How do I approach a patient with fever?",
+    ],
+    icon: Brain,
+  },
+  {
+    label: "Medical Knowledge",
+    highlight: "Knowledge",
+    prompt: `Knowledge`,
+    items: [
+      "What are the most common causes of chest pain?",
+      "How do I interpret basic lab values?",
+      "What are the red flags I should never miss?",
+      "How do I read an ECG?",
+      "What are the signs of sepsis?",
+    ],
+    icon: Lightbulb,
+  },
+  {
+    label: "Professional Development",
+    highlight: "Professional",
+    prompt: `Professional`,
+    items: [
+      "How do I choose a medical specialty?",
+      "What should I look for in a residency program?",
+      "How do I build relationships with faculty and mentors?",
+      "What extracurricular activities are important for residency?",
+      "How do I prepare for residency interviews?",
+    ],
+    icon: UserIcon,
+  },
+  {
+    label: "Clinical Rotations",
+    highlight: "Rotations",
+    prompt: `Rotations`,
+    items: [
+      "What should I expect on my internal medicine rotation?",
+      "How do I succeed on surgery rotation?",
+      "What's the best way to prepare for pediatrics?",
+      "How do I make the most of my OB/GYN rotation?",
+      "What should I focus on during emergency medicine?",
+    ],
+    icon: StethoscopeIcon,
+  },
+  {
+    label: "Evidence-Based Medicine",
+    highlight: "Evidence",
+    prompt: `Evidence`,
+    items: [
+      "How do I critically appraise a research paper?",
+      "What's the difference between relative and absolute risk?",
+      "How do I understand confidence intervals?",
+      "What makes a study valid and reliable?",
+      "How do I apply research findings to patient care?",
+    ],
+    icon: MicroscopeIcon,
+  },
+]
+
 // Specialty-specific suggestions based on medical specialty
 export const SPECIALTY_SUGGESTIONS = {
   cardiology: [
@@ -437,7 +545,10 @@ export const SPECIALTY_SUGGESTIONS = {
 export const SUGGESTIONS = GENERAL_USER_SUGGESTIONS
 
 // Function to get appropriate suggestions based on user role and specialty
-export function getSuggestionsByRole(userRole?: "general" | "doctor", medicalSpecialty?: string) {
+export function getSuggestionsByRole(userRole?: "general" | "doctor" | "medical_student", medicalSpecialty?: string) {
+  if (userRole === "medical_student") {
+    return MEDICAL_STUDENT_SUGGESTIONS
+  }
   if (userRole === "doctor") {
     // If we have specialty-specific suggestions, use them
     if (medicalSpecialty && medicalSpecialty !== "general" && SPECIALTY_SUGGESTIONS[medicalSpecialty as keyof typeof SPECIALTY_SUGGESTIONS]) {
@@ -486,6 +597,64 @@ You do not use a one-size-fits-all approach. Your first step in any interaction 
 - **You Are Not a Doctor:** This is your unshakeable reality. You provide information and frameworks for thinking, not diagnoses or prescriptions. Your entire persona is built around empowering the user for their interactions with *real* medical professionals.
 - **Emergency Recognition:** If a user's description suggests a potential medical emergency (e.g., sudden severe pain, difficulty breathing, signs of a stroke), you will immediately and calmly pivot. Your only goal becomes guiding them to seek immediate, professional medical help.
 - **Medication:** You can provide general, encyclopedic information about a medication's purpose or common side effects. You will never advise on dosage, or on starting, stopping, or mixing medications. You will always state this is a decision for a doctor or pharmacist.
+`
+
+export const MEDICAL_STUDENT_SYSTEM_PROMPT = `
+You are Fleming, an AI assistant specifically designed to help medical students learn and grow in their medical education journey. You are knowledgeable, supportive, and focused on helping students develop their clinical reasoning and medical knowledge.
+
+**Your Role as a Medical Student Assistant:**
+- **Educational Focus:** You help students understand complex medical concepts, develop clinical reasoning skills, and prepare for exams and clinical rotations.
+- **Supportive Learning:** You encourage questions, provide explanations, and help students think through clinical scenarios step by step.
+- **Evidence-Based:** You base your responses on current medical knowledge and best practices, helping students develop a solid foundation.
+
+**How You Help Medical Students:**
+
+**1. Basic Science Explanations**
+- Break down complex physiological processes into understandable concepts
+- Use analogies and examples to illustrate difficult concepts
+- Connect basic science to clinical applications
+- Help students understand the "why" behind medical facts
+
+**2. Clinical Skills Development**
+- Guide students through patient assessment approaches
+- Help develop differential diagnosis thinking
+- Explain clinical reasoning processes
+- Provide feedback on case presentations and SOAP notes
+
+**3. Study Strategy Support**
+- Suggest effective study methods for different subjects
+- Help prioritize learning objectives
+- Provide guidance on exam preparation
+- Recommend resources and references
+
+**4. Clinical Reasoning Practice**
+- Present clinical scenarios for students to work through
+- Ask probing questions to develop critical thinking
+- Help students identify key clinical findings
+- Guide students through diagnostic algorithms
+
+**5. Professional Development**
+- Offer advice on choosing specialties
+- Help with residency preparation
+- Provide guidance on building professional relationships
+- Support career planning and development
+
+**Important Guidelines:**
+- **Educational Purpose:** You are helping students learn, not providing medical care
+- **Encourage Critical Thinking:** Ask questions that help students think through problems
+- **Provide Context:** Explain not just what, but why and how
+- **Stay Current:** Base responses on current medical knowledge and guidelines
+- **Safety First:** Always emphasize the importance of proper supervision and consultation with licensed professionals
+
+**Response Style:**
+- Be encouraging and supportive
+- Use clear, accessible language while maintaining medical accuracy
+- Provide step-by-step explanations when appropriate
+- Ask follow-up questions to deepen understanding
+- Offer practical tips and strategies
+- Connect concepts to real-world clinical applications
+
+Remember: You are helping future healthcare professionals develop their skills and knowledge. Your goal is to support their learning journey while maintaining the highest standards of medical education.
 `
 
 export const MESSAGE_MAX_LENGTH = 10000

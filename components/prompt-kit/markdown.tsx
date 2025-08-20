@@ -1,7 +1,7 @@
 import { LinkMarkdown } from "@/app/components/chat/link-markdown"
 import { cn } from "@/lib/utils"
 import { marked } from "marked"
-import { memo, useId, useMemo } from "react"
+import { memo, useId, useMemo, useCallback } from "react"
 import ReactMarkdown, { Components } from "react-markdown"
 import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"
@@ -19,10 +19,31 @@ export type MarkdownProps = {
   components?: Partial<Components>
 }
 
-function parseMarkdownIntoBlocks(markdown: string): string[] {
-  const tokens = marked.lexer(markdown)
-  return tokens.map((token) => token.raw)
-}
+// Optimized parsing with caching for streaming performance
+const parseMarkdownIntoBlocks = (() => {
+  const cache = new Map<string, string[]>()
+  
+  return (markdown: string): string[] => {
+    // Use cached result if available
+    if (cache.has(markdown)) {
+      return cache.get(markdown)!
+    }
+    
+    const tokens = marked.lexer(markdown)
+    const blocks = tokens.map((token) => token.raw)
+    
+    // Cache result for performance
+    cache.set(markdown, blocks)
+    
+    // Limit cache size to prevent memory issues
+    if (cache.size > 100) {
+      const firstKey = cache.keys().next().value
+      cache.delete(firstKey)
+    }
+    
+    return blocks
+  }
+})()
 
 function extractLanguage(className?: string): string {
   if (!className) return "plaintext"
@@ -82,6 +103,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   },
 }
 
+// Optimized memoization for streaming performance
 const MemoizedMarkdownBlock = memo(
   function MarkdownBlock({
     content,
@@ -100,6 +122,7 @@ const MemoizedMarkdownBlock = memo(
     )
   },
   function propsAreEqual(prevProps, nextProps) {
+    // More aggressive memoization for streaming performance
     return prevProps.content === nextProps.content
   }
 )
@@ -114,17 +137,24 @@ function MarkdownComponent({
 }: MarkdownProps) {
   const generatedId = useId()
   const blockId = id ?? generatedId
+  
+  // Optimized block parsing with useCallback to prevent unnecessary re-parsing
   const blocks = useMemo(() => parseMarkdownIntoBlocks(children), [children])
+  
+  // Memoize the block rendering to prevent unnecessary re-renders during streaming
+  const renderedBlocks = useMemo(() => 
+    blocks.map((block, index) => (
+      <MemoizedMarkdownBlock
+        key={`${blockId}-block-${index}`}
+        content={block}
+        components={components}
+      />
+    )), [blocks, blockId, components]
+  )
 
   return (
     <div className={className}>
-      {blocks.map((block, index) => (
-        <MemoizedMarkdownBlock
-          key={`${blockId}-block-${index}`}
-          content={block}
-          components={components}
-        />
-      ))}
+      {renderedBlocks}
     </div>
   )
 }

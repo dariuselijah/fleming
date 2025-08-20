@@ -742,7 +742,7 @@ export type QueryAnalysis = {
 }
 
 export type MedicalContext = {
-  userRole: "doctor"
+  userRole: "doctor" | "medical_student"
   medicalSpecialty?: string
   specialties: string[]
   requiredCapabilities: string[]
@@ -753,7 +753,7 @@ export type MedicalContext = {
 
 // Server-side function to get healthcare system prompt (doesn't use hooks)
 export function getHealthcareSystemPromptServer(
-  userRole?: "doctor" | "general",
+  userRole?: "doctor" | "general" | "medical_student",
   medicalSpecialty?: string,
   clinicalDecisionSupport?: boolean,
   medicalLiteratureAccess?: boolean,
@@ -761,8 +761,8 @@ export function getHealthcareSystemPromptServer(
 ): string {
   console.log("getHealthcareSystemPromptServer called with userRole:", userRole)
   
-  if (userRole !== "doctor") {
-    console.log("Not a doctor role, returning empty string")
+  if (userRole !== "doctor" && userRole !== "medical_student") {
+    console.log("Not a doctor or medical student role, returning empty string")
     return ""
   }
 
@@ -788,10 +788,18 @@ export function getHealthcareSystemPromptServer(
   }
   
   // Add critical instruction to never use patient-facing language
-  systemPrompt += `\n\nCRITICAL INSTRUCTION: You are a Medical AI Assistant for healthcare professionals. NEVER use patient-facing language like "I'm not a doctor", "I can't diagnose", "talk to your doctor", or "I can't provide medical advice". Provide direct clinical guidance as you would to a medical colleague.`
+  if (userRole === "doctor") {
+    systemPrompt += `\n\nCRITICAL INSTRUCTION: You are a Medical AI Assistant for healthcare professionals. NEVER use patient-facing language like "I'm not a doctor", "I can't diagnose", "talk to your doctor", or "I can't provide medical advice". Provide direct clinical guidance as you would to a medical colleague.`
+  } else if (userRole === "medical_student") {
+    systemPrompt += `\n\nCRITICAL INSTRUCTION: You are a Medical AI Assistant for medical students. NEVER use patient-facing language like "I'm not a doctor", "I can't diagnose", "talk to your doctor", or "I can't provide medical advice". Provide direct clinical guidance as you would to a medical student.`
+  }
   
   // Add additional reinforcement
-  systemPrompt += `\n\nRESPONSE STYLE: You are a medical AI assistant speaking to healthcare professionals. Use medical terminology, provide evidence-based guidance, and maintain professional clinical standards. Do not use disclaimers meant for patients.`
+  if (userRole === "doctor") {
+    systemPrompt += `\n\nRESPONSE STYLE: You are a medical AI assistant speaking to healthcare professionals. Use medical terminology, provide evidence-based guidance, and maintain professional clinical standards. Do not use disclaimers meant for patients.`
+  } else if (userRole === "medical_student") {
+    systemPrompt += `\n\nRESPONSE STYLE: You are a medical AI assistant speaking to medical students. Use medical terminology, provide evidence-based guidance, and maintain professional clinical standards. Focus on educational explanations and clinical reasoning.`
+  }
 
   return systemPrompt
 }
