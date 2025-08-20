@@ -4,8 +4,6 @@ const nextConfig: NextConfig = {
   output: "standalone",
   experimental: {
     optimizePackageImports: ["@phosphor-icons/react"],
-    // Optimize streaming performance
-    serverComponentsExternalPackages: ["shiki", "vscode-oniguruma"],
     // Enable streaming optimizations
     serverMinification: true,
     // Optimize bundle splitting for streaming
