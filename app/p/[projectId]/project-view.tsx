@@ -234,7 +234,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
 
       let attachments: Attachment[] | null = []
       if (submittedFiles.length > 0) {
-        attachments = await handleFileUploads(user.id, currentChatId)
+        attachments = await handleFileUploads(user.id, currentChatId, true) // Always authenticated in project context
         if (attachments === null) {
           setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
           cleanupOptimisticAttachments(

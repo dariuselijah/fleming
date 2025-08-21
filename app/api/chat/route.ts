@@ -114,9 +114,11 @@ export async function POST(req: Request) {
     // START STREAMING IMMEDIATELY - minimal blocking operations
     let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT_DEFAULT
     
-    // Add basic role-based instructions immediately for instant response
-    if (userRole === "doctor" || userRole === "medical_student") {
-      effectiveSystemPrompt += `\n\nYou are a Medical AI Assistant. Provide direct, evidence-based guidance. Use appropriate medical terminology.`
+    // Use role-specific system prompts for immediate response
+    if (userRole === "medical_student") {
+      effectiveSystemPrompt = MEDICAL_STUDENT_SYSTEM_PROMPT
+    } else if (userRole === "doctor") {
+      effectiveSystemPrompt += `\n\nYou are a Medical AI Assistant for healthcare professionals. Provide direct, evidence-based clinical guidance with the expertise and precision expected by healthcare professionals. Use medical terminology appropriately and maintain professional clinical standards.`
     }
 
     // Get model config immediately (this is fast)
@@ -135,11 +137,36 @@ export async function POST(req: Request) {
       apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
     }
 
+    // Filter out blob URLs from messages to prevent AI SDK errors
+    // But keep processed attachments (Supabase URLs) for vision models
+    const filteredMessages = messages.map(message => {
+      if (message.experimental_attachments) {
+        // Keep attachments that are actual file URLs (not blob URLs)
+        const filteredAttachments = message.experimental_attachments.filter(
+          (attachment: any) => {
+            // Keep if it's a valid file URL (not a blob URL)
+            return attachment.url && !attachment.url.startsWith('blob:')
+          }
+        )
+        
+        console.log(`Filtering attachments for message: ${filteredAttachments.length}/${message.experimental_attachments.length} kept`)
+        if (filteredAttachments.length > 0) {
+          console.log('Kept attachments:', filteredAttachments.map(a => ({ name: a.name, url: a.url?.substring(0, 50) + '...' })))
+        }
+        
+        return {
+          ...message,
+          experimental_attachments: filteredAttachments.length > 0 ? filteredAttachments : undefined
+        }
+      }
+      return message
+    })
+
     // Start streaming immediately with basic prompt
     const result = streamText({
       model: modelConfig.apiSdk(apiKey, { enableSearch }),
       system: effectiveSystemPrompt,
-      messages: messages,
+      messages: filteredMessages,
       tools: {} as ToolSet,
       maxSteps: 10,
       onError: (err: unknown) => {

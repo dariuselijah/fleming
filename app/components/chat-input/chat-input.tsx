@@ -81,8 +81,11 @@ export function ChatInput({
   const { models } = useModel()
   const [isButtonDisabled, setIsButtonDisabled] = useState(true);
   
-  // Get the actual model ID for the selected modal mode
-  const actualModelId = getActualModelId(selectedModel)
+  // Check if selectedModel is already an actual model ID or a modal mode
+  const isActualModelId = models.some(model => model.id === selectedModel)
+  
+  // Get the actual model ID - if selectedModel is already an actual ID, use it directly
+  const actualModelId = isActualModelId ? selectedModel : getActualModelId(selectedModel)
 
   // Validate that the mapped models exist in available models
   const availableModalModes = useMemo(() => {

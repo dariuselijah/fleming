@@ -135,7 +135,8 @@ export async function getSignedUrlWithRetry(filePath: string, expiresIn: number 
 export async function processFiles(
   files: File[],
   chatId: string,
-  userId: string
+  userId: string,
+  isAuthenticated: boolean = false
 ): Promise<Attachment[]> {
   const attachments: Attachment[] = []
 
@@ -161,7 +162,7 @@ export async function processFiles(
         formData.append("file", file)
         formData.append("userId", userId)
         formData.append("chatId", chatId)
-        formData.append("isAuthenticated", "true") // Assuming authenticated users
+        formData.append("isAuthenticated", isAuthenticated.toString())
 
         const response = await fetch("/api/upload-file", {
           method: "POST",
@@ -169,11 +170,26 @@ export async function processFiles(
         })
 
         if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.error || "Upload failed")
+          let errorMessage = "Upload failed"
+          try {
+            const errorData = await response.json()
+            errorMessage = errorData.error || errorMessage
+          } catch (jsonError) {
+            console.error("Failed to parse error response:", jsonError)
+            // If we can't parse the error response, use the status text
+            errorMessage = response.statusText || errorMessage
+          }
+          throw new Error(errorMessage)
         }
 
-        const result = await response.json()
+        let result
+        try {
+          result = await response.json()
+        } catch (jsonError) {
+          console.error("Failed to parse success response:", jsonError)
+          throw new Error("Invalid response from server")
+        }
+        
         url = result.signedUrl
         filePath = result.filePath
       } else {
@@ -181,16 +197,16 @@ export async function processFiles(
       }
 
       attachments.push(createAttachment(file, url, filePath))
+      console.log(`File ${file.name} processed successfully`)
     } catch (error) {
       console.error(`Error processing file ${file.name}:`, error)
-      toast({
-        title: "File upload failed",
-        description: error instanceof Error ? error.message : "Unknown error",
-        status: "error",
-      })
+      // Don't show toast for individual file failures - let the caller handle it
+      // This prevents multiple toasts from appearing
     }
   }
 
+  // Log the final result
+  console.log(`File processing completed. ${attachments.length}/${files.length} files succeeded`)
   return attachments
 }
 

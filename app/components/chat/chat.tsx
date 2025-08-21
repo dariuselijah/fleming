@@ -138,7 +138,8 @@ export function Chat() {
   // Memoize the chat input props
   const chatInputProps = useMemo(
     () => {
-      const hasSuggestions = preferences.promptSuggestions && !chatId && messages.length === 0
+      // Show suggestions when there are no messages, regardless of chatId
+      const hasSuggestions = preferences.promptSuggestions && messages.length === 0
       
       return {
         value: input,
@@ -199,19 +200,29 @@ export function Chat() {
 
   return (
     <>
-      <div className="flex h-full w-full flex-col">
+      <div className={cn(
+        "relative flex h-full w-full flex-col",
+        showOnboarding ? "items-center justify-center" : "justify-end"
+      )}>
         {showOnboarding ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <h1 className="mb-6 text-3xl font-medium tracking-tight">
+          <>
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-medium tracking-tight">
                 What&apos;s on your mind?
               </h1>
             </div>
-          </div>
+            <div className="w-full max-w-3xl">
+              <ChatInput {...chatInputProps} />
+            </div>
+          </>
         ) : (
-          <Conversation {...conversationProps} />
+          <>
+            <Conversation {...conversationProps} />
+            <div className="w-full">
+              <ChatInput {...chatInputProps} />
+            </div>
+          </>
         )}
-        <ChatInput {...chatInputProps} />
       </div>
 
       <DialogAuth open={hasDialogAuth} setOpen={setHasDialogAuth} />

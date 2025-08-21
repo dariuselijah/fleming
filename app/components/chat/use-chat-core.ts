@@ -1,7 +1,7 @@
 import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { toast } from "@/components/ui/toast"
 import { getOrCreateGuestUserId } from "@/lib/api"
-import { MESSAGE_MAX_LENGTH, SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
+import { MESSAGE_MAX_LENGTH, SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { UserProfile } from "@/lib/user/types"
@@ -26,7 +26,8 @@ type UseChatCoreProps = {
   ensureChatExists: (uid: string, input: string) => Promise<string | null>
   handleFileUploads: (
     uid: string,
-    chatId: string
+    chatId: string,
+    isAuthenticated?: boolean
   ) => Promise<Attachment[] | null>
   selectedModel: string
   clearDraft: () => void
@@ -72,9 +73,11 @@ export function useChatCore({
       return user.system_prompt
     }
     
-    // For healthcare roles, use basic prompt and enhance in background
-    if (userPreferences.preferences.userRole === "doctor" || userPreferences.preferences.userRole === "medical_student") {
-      return SYSTEM_PROMPT_DEFAULT + "\n\nYou are a Medical AI Assistant. Provide direct, evidence-based guidance."
+    // For healthcare roles, use role-specific prompts
+    if (userPreferences.preferences.userRole === "medical_student") {
+      return MEDICAL_STUDENT_SYSTEM_PROMPT
+    } else if (userPreferences.preferences.userRole === "doctor") {
+      return SYSTEM_PROMPT_DEFAULT + "\n\nYou are a Medical AI Assistant for healthcare professionals. Provide direct, evidence-based clinical guidance with the expertise and precision expected by healthcare professionals. Use medical terminology appropriately and maintain professional clinical standards."
     }
     
     return SYSTEM_PROMPT_DEFAULT
@@ -157,42 +160,33 @@ export function useChatCore({
     // Set submitting state immediately for optimistic UI
     setIsSubmitting(true)
 
-    const uid = await getOrCreateGuestUserId(user)
-    if (!uid) {
-      setIsSubmitting(false)
-      setHasDialogAuth(true)
-      return
-    }
+    // Store input and files for async processing
+    const currentInput = input
+    const currentFiles = [...files]
+    
+    // Clear input and files immediately for better UX
+    setInput("")
+    setFiles([])
+    clearDraft()
 
     try {
+      const uid = await getOrCreateGuestUserId(user)
+      if (!uid) {
+        setIsSubmitting(false)
+        setHasDialogAuth(true)
+        return
+      }
+
       const allowed = await checkLimitsAndNotify(uid)
       if (!allowed) {
         setIsSubmitting(false)
         return
       }
 
-      const currentChatId = await ensureChatExists(uid, input)
-      if (!currentChatId) {
-        setIsSubmitting(false)
-        return
-      }
-
-      const processedAttachments = await handleFileUploads(uid, currentChatId)
-      if (processedAttachments === null) {
-        setIsSubmitting(false)
-        return
-      }
-
-      const messageToSend: Message = {
-        id: Date.now().toString(), // Temporary ID for client-side rendering
-        role: "user",
-        content: input,
-        experimental_attachments: processedAttachments,
-      }
-
+      // Start streaming immediately with the message
       const options = {
         body: {
-          chatId: currentChatId,
+          chatId: chatId || "temp", // Use existing chatId or temp for immediate streaming
           userId: uid,
           model: selectedModel,
           isAuthenticated: !!user?.id,
@@ -209,16 +203,37 @@ export function useChatCore({
         },
       }
       
-      // Clear input and files immediately for better UX
-      setInput("")
-      setFiles([])
-      clearDraft()
-      
-      // Bump chat immediately for optimistic update
-      bumpChat(currentChatId)
-      
-      // Start streaming immediately without waiting
-      append(messageToSend, options)
+      // Handle file uploads first if there are files
+      let processedAttachments: Attachment[] | null = null
+      if (currentFiles.length > 0) {
+        try {
+          const currentChatId = await ensureChatExists(uid, currentInput)
+          if (currentChatId) {
+            // Update chatId if it changed
+            if (currentChatId !== chatId) {
+              bumpChat(currentChatId)
+            }
+            
+            // Upload files before sending message
+            processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id)
+            console.log("File uploads completed:", processedAttachments?.length || 0, "files")
+          }
+        } catch (error) {
+          console.error("File upload failed:", error)
+          toast({
+            title: "File upload failed",
+            description: "Your message was sent, but files couldn't be uploaded.",
+            status: "warning",
+          })
+        }
+      }
+
+      // Append message with processed attachments (or none if upload failed)
+      append({
+        role: "user",
+        content: currentInput,
+        experimental_attachments: processedAttachments || undefined,
+      }, options)
 
     } catch (error) {
       console.error("Error in submit:", error)
@@ -233,6 +248,7 @@ export function useChatCore({
     user,
     input,
     files,
+    chatId,
     checkLimitsAndNotify,
     ensureChatExists,
     handleFileUploads,
@@ -252,75 +268,57 @@ export function useChatCore({
   const handleSuggestion = useCallback(
     async (suggestion: string) => {
       setIsSubmitting(true)
-      const optimisticId = `optimistic-${Date.now().toString()}`
-      const optimisticMessage = {
-        id: optimisticId,
-        content: suggestion,
-        role: "user" as const,
-        createdAt: new Date(),
+
+      // Start streaming immediately for instant feedback
+      const options = {
+        body: {
+          chatId: chatId || "temp", // Use existing chatId or temp for immediate streaming
+          userId: "temp", // Will be updated in background
+          model: selectedModel,
+          isAuthenticated,
+          systemPrompt: SYSTEM_PROMPT_DEFAULT,
+        },
       }
 
-      // Add optimistic message immediately
-      setMessages((prev) => [...prev, optimisticMessage])
+      // Append message immediately
+      append(
+        {
+          role: "user",
+          content: suggestion,
+        },
+        options
+      )
 
       try {
         const uid = await getOrCreateGuestUserId(user)
-
         if (!uid) {
-          setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
           return
         }
 
         const allowed = await checkLimitsAndNotify(uid)
         if (!allowed) {
-          setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
           return
         }
 
         const currentChatId = await ensureChatExists(uid, suggestion)
-
-        if (!currentChatId) {
-          setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-          return
+        if (currentChatId && currentChatId !== chatId) {
+          bumpChat(currentChatId)
         }
-
-        const options = {
-          body: {
-            chatId: currentChatId,
-            userId: uid,
-            model: selectedModel,
-            isAuthenticated,
-            systemPrompt: SYSTEM_PROMPT_DEFAULT,
-          },
-        }
-
-        // Start streaming immediately without waiting
-        append(
-          {
-            role: "user",
-            content: suggestion,
-          },
-          options
-        )
-        
-        // Remove optimistic message after streaming starts
-        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
       } catch {
-        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
         toast({ title: "Failed to send suggestion", status: "error" })
       } finally {
         setIsSubmitting(false)
       }
     },
     [
-      ensureChatExists,
+      chatId,
       selectedModel,
       user,
       append,
       checkLimitsAndNotify,
+      ensureChatExists,
       isAuthenticated,
-      setMessages,
-      setIsSubmitting,
+      bumpChat,
     ]
   )
 

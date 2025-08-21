@@ -11,7 +11,8 @@ export const useFileUpload = () => {
 
   const handleFileUploads = async (
     uid: string,
-    chatId: string
+    chatId: string,
+    isAuthenticated: boolean = false
   ): Promise<Attachment[] | null> => {
     if (files.length === 0) return []
 
@@ -26,10 +27,13 @@ export const useFileUpload = () => {
     }
 
     try {
-      const processed = await processFiles(files, chatId, uid)
+      const processed = await processFiles(files, chatId, uid, isAuthenticated)
       setFiles([])
+      // Return the processed attachments even if it's an empty array
+      // This allows the caller to distinguish between failure (null) and no files ([])
       return processed
-    } catch {
+    } catch (error) {
+      console.error("File processing failed:", error)
       toast({ title: "Failed to process files", status: "error" })
       return null
     }
