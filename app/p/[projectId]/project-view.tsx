@@ -9,10 +9,11 @@ import { ProjectChatItem } from "@/app/components/layout/sidebar/project-chat-it
 import { toast } from "@/components/ui/toast"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import { useMessages } from "@/lib/chat-store/messages/provider"
-import { MESSAGE_MAX_LENGTH, SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
+import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import { useUser } from "@/lib/user-store/provider"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import { useChat } from "@ai-sdk/react"
 import { ChatCircleIcon } from "@phosphor-icons/react"
@@ -37,6 +38,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
   const [enableSearch, setEnableSearch] = useState(false)
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const { user } = useUser()
+  const { preferences } = useUserPreferences()
   const { createNewChat, bumpChat } = useChats()
   const { cacheAndAddMessage } = useMessages()
   const pathname = usePathname()
@@ -125,8 +127,9 @@ export function ProjectView({ projectId }: ProjectViewProps) {
             input,
             selectedModel,
             true, // Always authenticated in this context
-            SYSTEM_PROMPT_DEFAULT,
-            projectId
+            undefined, // No custom system prompt
+            projectId,
+            preferences?.userRole // Pass user role
           )
 
           if (!newChat) return null
@@ -164,6 +167,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
       input,
       selectedModel,
       projectId,
+      preferences?.userRole,
     ]
   )
 
@@ -172,7 +176,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     chatId: null,
     messages,
     selectedModel,
-    systemPrompt: SYSTEM_PROMPT_DEFAULT,
+    systemPrompt: getSystemPromptByRole(preferences?.userRole),
     createNewChat,
     setHasDialogAuth: () => {}, // Not used in project context
     setMessages,
@@ -250,7 +254,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
           userId: user.id,
           model: selectedModel,
           isAuthenticated: true,
-          systemPrompt: SYSTEM_PROMPT_DEFAULT,
+          systemPrompt: getSystemPromptByRole(preferences?.userRole),
           enableSearch,
         },
         experimental_attachments: attachments || undefined,
@@ -302,7 +306,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
         userId: user.id,
         model: selectedModel,
         isAuthenticated: true,
-        systemPrompt: SYSTEM_PROMPT_DEFAULT,
+        systemPrompt: getSystemPromptByRole(preferences?.userRole),
       },
     }
 

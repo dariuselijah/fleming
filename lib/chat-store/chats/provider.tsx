@@ -2,7 +2,7 @@
 
 import { toast } from "@/components/ui/toast"
 import { createContext, useContext, useEffect, useState } from "react"
-import { MODEL_DEFAULT, SYSTEM_PROMPT_DEFAULT } from "../../config"
+import { MODEL_DEFAULT, SYSTEM_PROMPT_DEFAULT, getSystemPromptByRole } from "../../config"
 import type { Chats } from "../types"
 import {
   createNewChat as createNewChatFromDb,
@@ -30,7 +30,8 @@ interface ChatsContextType {
     model?: string,
     isAuthenticated?: boolean,
     systemPrompt?: string,
-    projectId?: string
+    projectId?: string,
+    userRole?: "general" | "doctor" | "medical_student"
   ) => Promise<Chats | undefined>
   resetChats: () => Promise<void>
   getChatById: (id: string) => Chats | undefined
@@ -121,7 +122,8 @@ export function ChatsProvider({
     model?: string,
     isAuthenticated?: boolean,
     systemPrompt?: string,
-    projectId?: string
+    projectId?: string,
+    userRole?: "general" | "doctor" | "medical_student"
   ) => {
     if (!userId) return
     const prev = [...chats]
@@ -132,7 +134,7 @@ export function ChatsProvider({
       title: title || "New Chat",
       created_at: new Date().toISOString(),
       model: model || MODEL_DEFAULT,
-      system_prompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
+      system_prompt: getSystemPromptByRole(userRole, systemPrompt),
       user_id: userId,
       public: true,
       updated_at: new Date().toISOString(),

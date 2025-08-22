@@ -727,3 +727,24 @@ You are helping to shape the next generation of healthcare professionals. Your r
 `
 
 export const MESSAGE_MAX_LENGTH = 10000
+
+// Utility function to get the appropriate system prompt based on user role
+export function getSystemPromptByRole(userRole?: "general" | "doctor" | "medical_student", customSystemPrompt?: string): string {
+  // If user has a custom system prompt, use it immediately
+  if (customSystemPrompt) {
+    return customSystemPrompt
+  }
+  
+  // For medical students, always use the medical student system prompt
+  if (userRole === "medical_student") {
+    return MEDICAL_STUDENT_SYSTEM_PROMPT
+  }
+  
+  // For healthcare professionals, enhance the default prompt
+  if (userRole === "doctor") {
+    return SYSTEM_PROMPT_DEFAULT + "\n\nYou are a Medical AI Assistant for healthcare professionals. Provide direct, evidence-based clinical guidance with the expertise and precision expected by healthcare professionals. Use medical terminology appropriately and maintain professional clinical standards."
+  }
+  
+  // Default to general system prompt
+  return SYSTEM_PROMPT_DEFAULT
+}

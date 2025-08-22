@@ -1,4 +1,4 @@
-import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT } from "@/lib/config"
+import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole } from "@/lib/config"
 import { getAllModels } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { ProviderWithoutOllama } from "@/lib/user-keys"
@@ -112,15 +112,8 @@ export async function POST(req: Request) {
     }
 
     // START STREAMING IMMEDIATELY - minimal blocking operations
-    let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT_DEFAULT
+    let effectiveSystemPrompt = getSystemPromptByRole(userRole, systemPrompt)
     
-    // Use role-specific system prompts for immediate response
-    if (userRole === "medical_student") {
-      effectiveSystemPrompt = MEDICAL_STUDENT_SYSTEM_PROMPT
-    } else if (userRole === "doctor") {
-      effectiveSystemPrompt += `\n\nYou are a Medical AI Assistant for healthcare professionals. Provide direct, evidence-based clinical guidance with the expertise and precision expected by healthcare professionals. Use medical terminology appropriately and maintain professional clinical standards.`
-    }
-
     // Get model config immediately (this is fast)
     const allModels = await getAllModels()
     const modelConfig = allModels.find((m) => m.id === model)

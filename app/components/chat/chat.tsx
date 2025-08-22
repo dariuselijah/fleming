@@ -7,7 +7,7 @@ import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import { useMessages } from "@/lib/chat-store/messages/provider"
 import { useChatSession } from "@/lib/chat-store/session/provider"
-import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
+import { getSystemPromptByRole } from "@/lib/config"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
@@ -72,8 +72,8 @@ export function Chat() {
   const [hasDialogAuth, setHasDialogAuth] = useState(false)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
   const systemPrompt = useMemo(
-    () => user?.system_prompt || SYSTEM_PROMPT_DEFAULT,
-    [user?.system_prompt]
+    () => getSystemPromptByRole(preferences?.userRole || "general", user?.system_prompt || undefined),
+    [user?.system_prompt, preferences?.userRole]
   )
 
   // Chat operations (utils + handlers) - created first

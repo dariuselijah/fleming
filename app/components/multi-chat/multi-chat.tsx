@@ -6,9 +6,10 @@ import { getOrCreateGuestUserId } from "@/lib/api"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import { useMessages } from "@/lib/chat-store/messages/provider"
 import { useChatSession } from "@/lib/chat-store/session/provider"
-import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
+import { getSystemPromptByRole } from "@/lib/config"
 import { useModel } from "@/lib/model-store/provider"
 import { useUser } from "@/lib/user-store/provider"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"
 import { AnimatePresence, motion } from "motion/react"
@@ -37,6 +38,7 @@ export function MultiChat() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const { user } = useUser()
+  const { preferences } = useUserPreferences()
   const { models } = useModel()
   const { chatId } = useChatSession()
   const { messages: persistedMessages, isLoading: messagesLoading } =
@@ -86,8 +88,8 @@ export function MultiChat() {
 
   const modelChats = useMultiChat(allModelsToMaintain)
   const systemPrompt = useMemo(
-    () => user?.system_prompt || SYSTEM_PROMPT_DEFAULT,
-    [user?.system_prompt]
+    () => getSystemPromptByRole(preferences?.userRole || "general", user?.system_prompt || undefined),
+    [user?.system_prompt, preferences?.userRole]
   )
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
 

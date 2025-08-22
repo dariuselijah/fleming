@@ -1,7 +1,7 @@
 import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { toast } from "@/components/ui/toast"
 import { getOrCreateGuestUserId } from "@/lib/api"
-import { MESSAGE_MAX_LENGTH, SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT } from "@/lib/config"
+import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { UserProfile } from "@/lib/user/types"
@@ -73,14 +73,8 @@ export function useChatCore({
       return user.system_prompt
     }
     
-    // For healthcare roles, use role-specific prompts
-    if (userPreferences.preferences.userRole === "medical_student") {
-      return MEDICAL_STUDENT_SYSTEM_PROMPT
-    } else if (userPreferences.preferences.userRole === "doctor") {
-      return SYSTEM_PROMPT_DEFAULT + "\n\nYou are a Medical AI Assistant for healthcare professionals. Provide direct, evidence-based clinical guidance with the expertise and precision expected by healthcare professionals. Use medical terminology appropriately and maintain professional clinical standards."
-    }
-    
-    return SYSTEM_PROMPT_DEFAULT
+    // Use the utility function to get the appropriate system prompt based on user role
+    return getSystemPromptByRole(userPreferences.preferences.userRole)
   }, [user?.system_prompt, userPreferences.preferences.userRole])
 
   // Search params handling
@@ -276,7 +270,7 @@ export function useChatCore({
           userId: "temp", // Will be updated in background
           model: selectedModel,
           isAuthenticated,
-          systemPrompt: SYSTEM_PROMPT_DEFAULT,
+          systemPrompt: getSystemPromptByRole(userPreferences.preferences.userRole),
         },
       }
 
@@ -335,7 +329,7 @@ export function useChatCore({
         userId: uid,
         model: selectedModel,
         isAuthenticated,
-        systemPrompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
+        systemPrompt: systemPrompt || getSystemPromptByRole(userPreferences.preferences.userRole),
       },
     }
 
