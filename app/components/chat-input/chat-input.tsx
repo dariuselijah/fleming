@@ -221,8 +221,19 @@ export function ChatInput({
   }, [hasSearchSupport, enableSearch, setEnableSearch])
 
   useEffect(() => {
-    setIsButtonDisabled(Boolean(!value || isSubmitting || (value && isOnlyWhitespace(value))));
-  }, [value, isSubmitting]);
+    // Button should be enabled when:
+    // 1. Streaming (so user can stop)
+    // 2. Has input and not submitting
+    // Button should be disabled when:
+    // 1. No input and not streaming
+    // 2. Submitting (but not streaming)
+    const hasValidInput = value && !isOnlyWhitespace(value);
+    const isStreaming = status === "streaming";
+    const isSubmittingButNotStreaming = isSubmitting && !isStreaming;
+    
+    const shouldDisable = !isStreaming && (!hasValidInput || isSubmittingButNotStreaming);
+    setIsButtonDisabled(Boolean(shouldDisable));
+  }, [value, isSubmitting, status]);
 
   return (
     <div className="relative flex w-full flex-col gap-4">
