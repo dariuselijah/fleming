@@ -4,9 +4,22 @@ import { MessagesProvider } from "@/lib/chat-store/messages/provider"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
+import type { Metadata } from "next"
 
 type Props = {
   params: Promise<{ projectId: string }>
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { projectId } = await params
+  return {
+    title: `Project ${projectId} - AskFleming`,
+    description: "View your project in AskFleming, your AI-powered medical assistant.",
+    robots: {
+      index: false,
+      follow: false,
+    },
+  }
 }
 
 export default async function Page({ params }: Props) {

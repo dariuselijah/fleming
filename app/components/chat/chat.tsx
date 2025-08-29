@@ -18,6 +18,7 @@ import { useMemo, useState } from "react"
 import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
+import { PerformanceMonitor } from "./performance-monitor"
 
 const FeedbackWidget = dynamic(
   () => import("./feedback-widget").then((mod) => mod.FeedbackWidget),
@@ -228,6 +229,9 @@ export function Chat() {
       <DialogAuth open={hasDialogAuth} setOpen={setHasDialogAuth} />
 
       <FeedbackWidget />
+      
+      {/* Performance Monitor for development */}
+      <PerformanceMonitor />
     </>
   )
 }

@@ -1,13 +1,14 @@
-# Fleming
+# AskFleming
 
-[fleming.chat](https://xola.chat)
+[askfleming.perkily.io](https://askfleming.perkily.io)
 
-**Fleming** is an open-source, multi-model AI chat application designed for both general users and healthcare professionals. It supports a wide range of models, including OpenAI, Mistral, Claude, Gemini, and local models via Ollama. With its "Bring Your Own Key" (BYOK) support, users can easily integrate their own API keys.
+**AskFleming** is an AI-powered medical assistant and multi-model chat application designed for both general users and healthcare professionals. It supports a wide range of models, including Grok-4, GPT-4o, Claude, Gemini, and local models via Ollama. With its "Bring Your Own Key" (BYOK) support, users can easily integrate their own API keys.
 
-![fleming cover](./public/cover_fleming.jpg)
+![AskFleming cover](./public/cover_fleming.jpg)
 
 ## Key Features:
 
+- **AI Medical Assistant:** Get instant medical insights, health advice, and AI assistance powered by leading models like Grok-4 and GPT-4o.
 - **Multi-Model Support:** Seamlessly switch between different AI models to find the best one for your needs.
 - **Healthcare Agent:** A specialized AI assistant for healthcare professionals, providing evidence-based clinical guidance, differential diagnoses, and treatment recommendations.
 - **BYOK and Local Models:** Use your own API keys or run models locally with Ollama for greater control and privacy.

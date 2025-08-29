@@ -26,12 +26,17 @@ export function Conversation({
   const initialMessageCount = useRef(messages.length)
 
   // Memoize message rendering for streaming performance
-  const renderedMessages = useMemo(() => 
-    messages?.map((message, index) => {
+  const renderedMessages = useMemo(() => {
+    // Filter out duplicate messages by ID to prevent React key conflicts
+    const uniqueMessages = messages.filter((message, index, self) => 
+      index === self.findIndex(m => m.id === message.id)
+    )
+    
+    return uniqueMessages?.map((message, index) => {
       const isLast =
-        index === messages.length - 1 && status !== "submitted"
+        index === uniqueMessages.length - 1 && status !== "submitted"
       const hasScrollAnchor =
-        isLast && messages.length > initialMessageCount.current
+        isLast && uniqueMessages.length > initialMessageCount.current
 
       return (
         <Message
@@ -50,8 +55,8 @@ export function Conversation({
           {message.content}
         </Message>
       )
-    }), [messages, status, onDelete, onEdit, onReload]
-  )
+    })
+  }, [messages, status, onDelete, onEdit, onReload])
 
   // Memoize handlers to prevent unnecessary re-renders
   const memoizedOnDelete = useCallback(onDelete, [onDelete])

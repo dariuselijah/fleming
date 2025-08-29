@@ -2,6 +2,10 @@ import { createClient } from "@/lib/supabase/server"
 import { validateUserIdentity } from "@/lib/server/api"
 import { NextRequest, NextResponse } from "next/server"
 
+// CACHE for signed URLs to avoid regeneration
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>()
+const CACHE_DURATION = 3000000 // 50 minutes (signed URLs last 1 hour)
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -35,37 +39,62 @@ export async function POST(request: NextRequest) {
     const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`
     const filePath = `uploads/${fileName}`
 
-    const { error: uploadError } = await supabase.storage
-      .from("chat-attachments")
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false
+    // PARALLEL PROCESSING: Upload file and prepare database operation simultaneously
+    const [uploadResult, dbPreparation] = await Promise.all([
+      // Upload file to storage
+      supabase.storage
+        .from("chat-attachments")
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        }),
+      // Prepare database insertion data
+      Promise.resolve({
+        chat_id: chatId,
+        user_id: userId,
+        file_url: filePath,
+        file_name: file.name,
+        file_type: file.type,
+        file_size: file.size,
       })
+    ])
 
-    if (uploadError) {
-      console.error("Upload error:", uploadError)
-      return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 500 })
+    if (uploadResult.error) {
+      console.error("Upload error:", uploadResult.error)
+      return NextResponse.json({ error: `Upload failed: ${uploadResult.error.message}` }, { status: 500 })
     }
 
-    // Generate signed URL
-    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-      .from("chat-attachments")
-      .createSignedUrl(filePath, 3600)
+    // Check cache for existing signed URL
+    const cacheKey = `${filePath}-3600`
+    const cached = signedUrlCache.get(cacheKey)
+    let signedUrl: string
 
-    if (signedUrlError) {
-      console.error("Signed URL error:", signedUrlError)
-      return NextResponse.json({ error: `Failed to generate signed URL: ${signedUrlError.message}` }, { status: 500 })
+    if (cached && cached.expiresAt > Date.now()) {
+      // Use cached signed URL
+      signedUrl = cached.url
+      console.log("Using cached signed URL for:", filePath)
+    } else {
+      // Generate new signed URL
+      const signedUrlData = await supabase.storage
+        .from("chat-attachments")
+        .createSignedUrl(filePath, 3600)
+
+      if (signedUrlData.error) {
+        console.error("Signed URL error:", signedUrlData.error)
+        return NextResponse.json({ error: `Failed to generate signed URL: ${signedUrlData.error.message}` }, { status: 500 })
+      }
+
+      signedUrl = signedUrlData.data.signedUrl
+      
+      // Cache the signed URL
+      signedUrlCache.set(cacheKey, {
+        url: signedUrl,
+        expiresAt: Date.now() + (3600 * 1000) - 600000 // Cache for 50 minutes
+      })
     }
 
-    // Store file metadata in database
-    const { error: dbError } = await supabase.from("chat_attachments").insert({
-      chat_id: chatId,
-      user_id: userId,
-      file_url: filePath,
-      file_name: file.name,
-      file_type: file.type,
-      file_size: file.size,
-    })
+    // Insert into database
+    const { error: dbError } = await supabase.from("chat_attachments").insert(dbPreparation)
 
     if (dbError) {
       console.error("Database error:", dbError)
@@ -75,11 +104,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       filePath,
-      signedUrl: signedUrlData.signedUrl,
+      signedUrl,
       attachment: {
         name: file.name,
         contentType: file.type,
-        url: signedUrlData.signedUrl,
+        url: signedUrl,
         filePath
       }
     })

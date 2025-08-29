@@ -1,5 +1,5 @@
 import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole } from "@/lib/config"
-import { getAllModels } from "@/lib/models"
+import { getAllModels, getModelInfo } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { ProviderWithoutOllama } from "@/lib/user-keys"
 import { Attachment } from "@ai-sdk/ui-utils"
@@ -21,6 +21,19 @@ import {
 import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
 
 export const maxDuration = 60
+
+// CACHED SYSTEM PROMPTS for instant access
+const systemPromptCache = new Map<string, string>()
+const getCachedSystemPrompt = (role: "doctor" | "general" | "medical_student" | undefined, specialty?: string, customPrompt?: string): string => {
+  if (customPrompt) return customPrompt
+  
+  const cacheKey = `${role || 'general'}-${specialty || 'default'}`
+  if (!systemPromptCache.has(cacheKey)) {
+    const prompt = getSystemPromptByRole(role, customPrompt)
+    systemPromptCache.set(cacheKey, prompt)
+  }
+  return systemPromptCache.get(cacheKey)!
+}
 
 // Function to quickly assess query complexity for smart orchestration
 function assessQueryComplexity(query: string): "simple" | "complex" {
@@ -112,39 +125,48 @@ export async function POST(req: Request) {
     }
 
     // START STREAMING IMMEDIATELY - minimal blocking operations
-    let effectiveSystemPrompt = getSystemPromptByRole(userRole, systemPrompt)
+    const effectiveSystemPrompt = getCachedSystemPrompt(
+      userRole || "general", 
+      medicalSpecialty, 
+      systemPrompt
+    )
     
-    // Get model config immediately (this is fast)
-    const allModels = await getAllModels()
-    const modelConfig = allModels.find((m) => m.id === model)
+    // INSTANT MODEL LOADING - no async operations, no delays
+    const modelConfig = getModelInfo(model)
 
     if (!modelConfig || !modelConfig.apiSdk) {
       throw new Error(`Model ${model} not found`)
     }
 
-    // Get API key if needed (this is fast)
+    // Get API key if needed (this is fast) - only for real users
     let apiKey: string | undefined
-    if (isAuthenticated && userId) {
+    if (isAuthenticated && userId && userId !== "temp") {
       const { getEffectiveApiKey } = await import("@/lib/user-keys")
-      const provider = getProviderForModel(model)
+      const provider = getProviderForModel(model as any)
       apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
     }
 
-    // Filter out blob URLs from messages to prevent AI SDK errors
-    // But keep processed attachments (Supabase URLs) for vision models
+    // Filter out invalid attachments but keep data URLs and blob URLs for vision models
+    // Vision models can process both data URLs (base64) and blob URLs directly
     const filteredMessages = messages.map(message => {
       if (message.experimental_attachments) {
-        // Keep attachments that are actual file URLs (not blob URLs)
+        // Keep all valid attachments including data URLs and blob URLs for vision models
         const filteredAttachments = message.experimental_attachments.filter(
           (attachment: any) => {
-            // Keep if it's a valid file URL (not a blob URL)
-            return attachment.url && !attachment.url.startsWith('blob:')
+            // Keep if it has a valid URL (including data URLs and blob URLs for vision models)
+            return attachment.url && attachment.name && attachment.contentType
           }
         )
         
-        console.log(`Filtering attachments for message: ${filteredAttachments.length}/${message.experimental_attachments.length} kept`)
+        console.log(`Processing attachments for message: ${filteredAttachments.length}/${message.experimental_attachments.length} valid`)
         if (filteredAttachments.length > 0) {
-          console.log('Kept attachments:', filteredAttachments.map(a => ({ name: a.name, url: a.url?.substring(0, 50) + '...' })))
+          console.log('Valid attachments:', filteredAttachments.map(a => ({ 
+            name: a.name, 
+            contentType: a.contentType,
+            url: a.url?.startsWith('blob:') ? 'blob:...' : 
+                 a.url?.startsWith('data:') ? 'data:...' : 
+                 a.url?.substring(0, 50) + '...' 
+          })))
         }
         
         return {
@@ -155,7 +177,10 @@ export async function POST(req: Request) {
       return message
     })
 
-    // Start streaming immediately with basic prompt
+    // START STREAMING IMMEDIATELY with basic prompt
+    console.log("🚀 Starting streaming immediately...")
+    const startTime = performance.now()
+    
     const result = streamText({
       model: modelConfig.apiSdk(apiKey, { enableSearch }),
       system: effectiveSystemPrompt,
@@ -169,6 +194,12 @@ export async function POST(req: Request) {
         // Handle completion in background
         Promise.resolve().then(async () => {
           try {
+            // Only process completion if we have a real userId
+            if (userId === "temp") {
+              console.log("Skipping completion processing for temp userId")
+              return
+            }
+
             const supabase = await validateAndTrackUsage({
               userId,
               model,
@@ -207,6 +238,9 @@ export async function POST(req: Request) {
         })
       },
     })
+
+    const streamingStartTime = performance.now() - startTime
+    console.log(`✅ Streaming started in ${streamingStartTime.toFixed(0)}ms`)
 
     // ENHANCE SYSTEM PROMPT IN BACKGROUND (non-blocking)
     if (userRole === "doctor" || userRole === "medical_student") {
@@ -263,6 +297,7 @@ export async function POST(req: Request) {
       })
     }
 
+    console.log("✅ Streaming response ready, returning to client")
     return result.toDataStreamResponse({
       sendReasoning: true,
       sendSources: true,

@@ -35,7 +35,7 @@ export const FREE_MODELS_IDS = [
 export const MODEL_DEFAULT = "grok-4"
 
 export const APP_NAME = "Fleming"
-export const APP_DOMAIN = "https://fleming.chat"
+export const APP_DOMAIN = "https://askfleming.perkily.io"
 
 // General user suggestions - what people actually ask about health
 export const GENERAL_USER_SUGGESTIONS = [
@@ -728,23 +728,52 @@ You are helping to shape the next generation of healthcare professionals. Your r
 
 export const MESSAGE_MAX_LENGTH = 10000
 
-// Utility function to get the appropriate system prompt based on user role
-export function getSystemPromptByRole(userRole?: "general" | "doctor" | "medical_student", customSystemPrompt?: string): string {
-  // If user has a custom system prompt, use it immediately
-  if (customSystemPrompt) {
-    return customSystemPrompt
+// CACHED SYSTEM PROMPTS for instant access
+const systemPromptCache = new Map<string, string>()
+
+export function getSystemPromptByRole(
+  role: "doctor" | "general" | "medical_student" | undefined,
+  customPrompt?: string
+): string {
+  // Return custom prompt immediately if provided
+  if (customPrompt) {
+    return customPrompt
   }
-  
-  // For medical students, always use the medical student system prompt
-  if (userRole === "medical_student") {
-    return MEDICAL_STUDENT_SYSTEM_PROMPT
+
+  // Check cache first
+  const cacheKey = role || "general"
+  if (systemPromptCache.has(cacheKey)) {
+    return systemPromptCache.get(cacheKey)!
   }
-  
-  // For healthcare professionals, enhance the default prompt
-  if (userRole === "doctor") {
-    return SYSTEM_PROMPT_DEFAULT + "\n\nYou are a Medical AI Assistant for healthcare professionals. Provide direct, evidence-based clinical guidance with the expertise and precision expected by healthcare professionals. Use medical terminology appropriately and maintain professional clinical standards."
+
+  // Generate prompt based on role
+  let prompt: string
+  switch (role) {
+    case "doctor":
+      prompt = SYSTEM_PROMPT_DEFAULT + "\n\nYou are a Medical AI Assistant for healthcare professionals. Provide direct, evidence-based clinical guidance with the expertise and precision expected by healthcare professionals. Use medical terminology appropriately and maintain professional clinical standards."
+      break
+    case "medical_student":
+      prompt = MEDICAL_STUDENT_SYSTEM_PROMPT
+      break
+    default:
+      prompt = SYSTEM_PROMPT_DEFAULT
   }
+
+  // Cache the result for instant future access
+  systemPromptCache.set(cacheKey, prompt)
   
-  // Default to general system prompt
-  return SYSTEM_PROMPT_DEFAULT
+  return prompt
+}
+
+// Pre-warm cache with common prompts for instant access
+export function preWarmSystemPromptCache() {
+  // This function can be called on app startup to pre-populate the cache
+  getSystemPromptByRole("general")
+  getSystemPromptByRole("doctor")
+  getSystemPromptByRole("medical_student")
+}
+
+// Clear cache if needed (e.g., for testing or memory management)
+export function clearSystemPromptCache() {
+  systemPromptCache.clear()
 }

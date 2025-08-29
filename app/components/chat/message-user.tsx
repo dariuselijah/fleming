@@ -95,23 +95,38 @@ export function MessageUser({
               }}
             >
               <MorphingDialogTrigger className="z-10">
-                <Image
-                  className="mb-1 w-40 rounded-md"
-                  key={attachment.name}
-                  src={attachment.url}
-                  alt={attachment.name || "Attachment"}
-                  width={160}
-                  height={120}
-                  unoptimized={true}
-                />
+                {/* Only render image if we have a complete, valid URL */}
+                {attachment.url && attachment.url.length > 20 && !attachment.url.endsWith('base64,') ? (
+                  <Image
+                    className="mb-1 w-40 rounded-md"
+                    key={attachment.name}
+                    src={attachment.url}
+                    alt={attachment.name || "Attachment"}
+                    width={160}
+                    height={120}
+                    unoptimized={true}
+                  />
+                ) : (
+                  /* Show placeholder while base64 conversion is in progress */
+                  <div className="mb-1 w-40 h-30 rounded-md bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                    Processing image...
+                  </div>
+                )}
               </MorphingDialogTrigger>
               <MorphingDialogContainer>
                 <MorphingDialogContent className="relative rounded-lg">
-                  <MorphingDialogImage
-                    src={attachment.url}
-                    alt={attachment.name || ""}
-                    className="max-h-[90vh] max-w-[90vw] object-contain"
-                  />
+                  {/* Only show full-size image if we have a complete URL */}
+                  {attachment.url && attachment.url.length > 20 && !attachment.url.endsWith('base64,') ? (
+                    <MorphingDialogImage
+                      src={attachment.url}
+                      alt={attachment.name || ""}
+                      className="max-h-[90vh] max-w-[90vw] object-contain"
+                    />
+                  ) : (
+                    <div className="max-h-[90vh] max-w-[90vw] flex items-center justify-center text-muted-foreground">
+                      Image still processing...
+                    </div>
+                  )}
                 </MorphingDialogContent>
                 <MorphingDialogClose className="text-primary" />
               </MorphingDialogContainer>

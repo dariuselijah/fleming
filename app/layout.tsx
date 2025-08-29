@@ -26,9 +26,74 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Fleming",
-  description:
-        "Fleming is a multi-model AI chat application designed for general users, medical students, and healthcare professionals. It supports a wide range of models and includes specialized AI assistants tailored for medical education and clinical practice.",
+  title: "AskFleming - AI-Powered Medical Assistant & Multi-Model Chat",
+  description: "AskFleming is an advanced AI chat application powered by Grok-4, GPT-4o, and other leading models. Get instant medical insights, health advice, and AI assistance. Perfect for medical students, healthcare professionals, and anyone seeking reliable health information.",
+  keywords: [
+    "AskFleming",
+    "Fleming",
+    "AI medical assistant",
+    "health AI",
+    "medical AI chat",
+    "Grok-4",
+    "GPT-4o",
+    "healthcare AI",
+    "medical advice",
+    "AI health assistant",
+    "medical chatbot",
+    "health information",
+    "AI doctor",
+    "medical consultation",
+    "healthcare chatbot"
+  ],
+  authors: [{ name: "Perkily", url: "https://perkily.io" }],
+  creator: "Perkily",
+  publisher: "Perkily",
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
+  metadataBase: new URL("https://askfleming.perkily.io"),
+  alternates: {
+    canonical: "https://askfleming.perkily.io",
+  },
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: "https://askfleming.perkily.io",
+    siteName: "AskFleming",
+    title: "AskFleming - AI-Powered Medical Assistant & Multi-Model Chat",
+    description: "Get instant medical insights, health advice, and AI assistance with AskFleming. Powered by Grok-4, GPT-4o, and other leading AI models.",
+  },
+  twitter: {
+    card: "summary",
+    title: "AskFleming - AI-Powered Medical Assistant",
+    description: "Get instant medical insights, health advice, and AI assistance with AskFleming. Powered by Grok-4, GPT-4o, and other leading AI models.",
+    creator: "@perkily",
+    site: "@perkily",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
+  verification: {
+    google: "your-google-verification-code", // Replace with actual verification code
+  },
+  manifest: "/manifest.json",
+  other: {
+    "theme-color": "#000000",
+    "apple-mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-status-bar-style": "default",
+    "apple-mobile-web-app-title": "AskFleming",
+    "msapplication-TileColor": "#000000",
+  },
 }
 
 export default async function RootLayout({
@@ -46,9 +111,52 @@ export default async function RootLayout({
         <Script
           defer
           src="https://assets.onedollarstats.com/stonks.js"
-          {...(isDev ? { "data-debug": "fleming.chat" } : {})}
+          {...(isDev ? { "data-debug": "askfleming.perkily.io" } : {})}
         />
       ) : null}
+      
+      {/* Structured Data for SEO */}
+      <Script
+        id="structured-data"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebApplication",
+            "name": "AskFleming",
+            "description": "AI-powered medical assistant and multi-model chat application",
+            "url": "https://askfleming.perkily.io",
+            "applicationCategory": "HealthApplication",
+            "operatingSystem": "Web Browser",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "author": {
+              "@type": "Organization",
+              "name": "Perkily",
+              "url": "https://perkily.io"
+            },
+            "provider": {
+              "@type": "Organization",
+              "name": "Perkily",
+              "url": "https://perkily.io"
+            },
+            "featureList": [
+              "AI Medical Assistant",
+              "Multi-Model AI Chat",
+              "Grok-4 Integration",
+              "GPT-4o Support",
+              "Medical Advice",
+              "Health Information",
+              "File Upload Support",
+              "Real-time Chat"
+            ]
+          })
+        }}
+      />
+
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

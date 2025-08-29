@@ -1,0 +1,19 @@
+{
+  "name": "AskFleming - AI Medical Assistant",
+  "short_name": "AskFleming",
+  "description": "AI-powered medical assistant and multi-model chat application",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ],
+  "categories": ["health", "medical", "productivity", "utilities"],
+  "lang": "en",
+  "scope": "/"
+} 

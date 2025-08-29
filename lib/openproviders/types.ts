@@ -121,11 +121,7 @@ export type OpenRouterModel =
   | "openrouter:x-ai/grok-3-mini-beta"
   | "openrouter:google/gemini-2.5-flash-preview-05-20"
 
-// Static Ollama models for type safety
-export type StaticOllamaModel = "llama3.2:latest" | "qwen2.5-coder:latest"
-
-// Dynamic Ollama model type - allows any string for auto-detected models
-export type OllamaModel = StaticOllamaModel | (string & {})
+// OLLAMA COMPLETELY REMOVED for instant streaming
 
 export type Provider =
   | "openai"
@@ -134,7 +130,6 @@ export type Provider =
   | "google"
   | "anthropic"
   | "xai"
-  | "ollama"
   | "openrouter"
 
 export type SupportedModel =
@@ -144,5 +139,4 @@ export type SupportedModel =
   | PerplexityModel
   | AnthropicModel
   | XaiModel
-  | OllamaModel
   | OpenRouterModel
