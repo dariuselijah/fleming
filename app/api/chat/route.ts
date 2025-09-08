@@ -194,9 +194,9 @@ export async function POST(req: Request) {
         // Handle completion in background
         Promise.resolve().then(async () => {
           try {
-            // Only process completion if we have a real userId
-            if (userId === "temp") {
-              console.log("Skipping completion processing for temp userId")
+            // Only process completion if we have a real userId and chatId
+            if (userId === "temp" || chatId === "temp" || chatId.startsWith("temp-chat-")) {
+              console.log("Skipping completion processing for temp userId or chatId")
               return
             }
 
