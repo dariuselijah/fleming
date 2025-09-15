@@ -150,7 +150,8 @@ export function useChatCore({
   // Submit action - optimized for immediate response
   const submit = useCallback(async () => {
     if (!input.trim() && files.length === 0) return
-    
+   
+   
     // Set submitting state immediately for optimistic UI
     setIsSubmitting(true)
 
@@ -196,7 +197,14 @@ export function useChatCore({
             userPreferences.preferences.medicalComplianceMode,
         },
       }
-      
+     
+      // Append message with processed attachments (or none if upload failed)
+      append({
+        role: "user",
+        content: currentInput,
+        experimental_attachments: undefined,  // Files added later if successful
+      }, options)
+         
       // Handle file uploads first if there are files
       let processedAttachments: Attachment[] | null = null
       if (currentFiles.length > 0) {
@@ -223,11 +231,11 @@ export function useChatCore({
       }
 
       // Append message with processed attachments (or none if upload failed)
-      append({
-        role: "user",
-        content: currentInput,
-        experimental_attachments: processedAttachments || undefined,
-      }, options)
+      //append({
+      //  role: "user",
+      //  content: currentInput,
+      //  experimental_attachments: processedAttachments || undefined,
+      //}, options)
 
     } catch (error) {
       console.error("Error in submit:", error)
