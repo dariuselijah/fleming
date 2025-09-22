@@ -38,6 +38,7 @@ export type OpenAIModel =
   | "gpt-3.5-turbo-1106"
   | "chatgpt-4o-latest"
   | "gpt-3.5-turbo-instruct"
+  | "o4-mini"
 
 export type MistralModel =
   | "ministral-3b-latest"
@@ -92,6 +93,7 @@ export type AnthropicModel =
   | "claude-3-haiku-20240307"
 
 export type XaiModel =
+  | "grok-4"
   | "grok-3"
   | "grok-3-latest"
   | "grok-3-fast"
@@ -111,6 +113,7 @@ export type XaiModel =
   | "grok-2-latest"
   | "grok-vision-beta"
   | "grok-beta"
+  | "o3"
 
 export type OpenRouterModel =
   | "openrouter:deepseek/deepseek-r1:free"

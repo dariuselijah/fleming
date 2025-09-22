@@ -139,7 +139,7 @@ export const useFileUpload = () => {
     const fileId = `${file.name}-${file.size}-${file.lastModified}`
     const uploadPromise = uploadPromisesRef.current.get(fileId)
     if (uploadPromise) {
-      uploadPromise.cancel?.() // Cancel if possible
+      // Note: Regular Promises can't be cancelled, we just remove the reference
       uploadPromisesRef.current.delete(fileId)
     }
     

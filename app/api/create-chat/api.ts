@@ -1,10 +1,11 @@
 import { validateUserIdentity } from "@/lib/server/api"
 import { checkUsageByModel } from "@/lib/usage"
+import type { SupportedModel } from "@/lib/openproviders/types"
 
 type CreateChatInput = {
   userId: string
   title?: string
-  model: string
+  model: SupportedModel
   isAuthenticated: boolean
   projectId?: string
 }
@@ -33,7 +34,7 @@ export async function createChatInDb({
   const insertData: {
     user_id: string
     title: string
-    model: string
+    model: SupportedModel
     project_id?: string
   } = {
     user_id: userId,

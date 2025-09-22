@@ -119,6 +119,7 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "grok-2-latest": "xai",
   "grok-vision-beta": "xai",
   "grok-beta": "xai",
+  "grok-4-fast-reasoning": "xai",
 }
 
 // OLLAMA COMPLETELY REMOVED for instant streaming

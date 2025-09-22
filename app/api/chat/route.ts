@@ -1,6 +1,7 @@
 import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole } from "@/lib/config"
 import { getAllModels, getModelInfo } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
+import type { SupportedModel } from "@/lib/openproviders/types"
 import type { ProviderWithoutOllama } from "@/lib/user-keys"
 import { Attachment } from "@ai-sdk/ui-utils"
 import { Message as MessageAISDK, streamText, ToolSet } from "ai"
@@ -87,7 +88,7 @@ type ChatRequest = {
   messages: MessageAISDK[]
   chatId: string
   userId: string
-  model: string
+  model: SupportedModel
   isAuthenticated: boolean
   systemPrompt: string
   enableSearch: boolean
@@ -142,7 +143,7 @@ export async function POST(req: Request) {
     let apiKey: string | undefined
     if (isAuthenticated && userId && userId !== "temp") {
       const { getEffectiveApiKey } = await import("@/lib/user-keys")
-      const provider = getProviderForModel(model as any)
+      const provider = getProviderForModel(model)
       apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
     }
 
