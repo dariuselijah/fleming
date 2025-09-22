@@ -3,8 +3,8 @@ import { ModelConfig } from "../types"
 
 const grokModels: ModelConfig[] = [
   {
-    id: "grok-4",
-    name: "Grok-4",
+    id: "grok-4-fast-reasoning",
+    name: "Grok-4 Fast Reasoning",
     provider: "xAI",
     providerId: "xai",
     modelFamily: "Grok",
@@ -28,7 +28,7 @@ const grokModels: ModelConfig[] = [
     releasedAt: "2024-12-01",
     icon: "xai",
     accessible: true,
-    apiSdk: (apiKey?: string) => openproviders("grok-4", undefined, apiKey),
+    apiSdk: (apiKey?: string) => openproviders("grok-4-fast-reasoning", undefined, apiKey),
   },
   {
     id: "grok-3",
