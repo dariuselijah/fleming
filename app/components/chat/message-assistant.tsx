@@ -4,6 +4,7 @@ import {
   MessageActions,
   MessageContent,
 } from "@/components/prompt-kit/message"
+import { Loader } from "@/components/prompt-kit/loader"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
@@ -111,8 +112,14 @@ export function MessageAssistant({
         {searchImageResults.length > 0 && (
           <SearchImages results={searchImageResults} />
         )}
+        
 
-        {contentNullOrEmpty ? null : (
+        {contentNullOrEmpty ? (
+        isLastStreaming ? <div
+            className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
+              <Loader>Thinking...</Loader>
+            </div> : null
+        ) : (
           <MessageContent
             className={cn(
               "prose dark:prose-invert relative min-w-full bg-transparent p-0",
@@ -123,6 +130,7 @@ export function MessageAssistant({
             {children}
           </MessageContent>
         )}
+
 
         {sources && sources.length > 0 && <SourcesList sources={sources} />}
 

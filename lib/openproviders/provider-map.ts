@@ -45,6 +45,7 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "o3-2025-04-16": "openai",
   "o4-mini": "openai",
   "o4-mini-2025-04-16": "openai",
+  "gpt-5": "openai",
 
   // Mistral
   "ministral-3b-latest": "mistral",
@@ -99,7 +100,6 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "claude-3-haiku-20240307": "anthropic",
 
   // XAI
-  "grok-4": "xai",
   "grok-3": "xai",
   "grok-3-latest": "xai",
   "grok-3-fast": "xai",

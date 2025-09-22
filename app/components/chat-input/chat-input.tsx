@@ -21,7 +21,7 @@ import { SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/compone
 
 // Multi-modal configuration - maps user-friendly labels to actual model IDs
 const MODAL_MAPPING = {
-  grok4: "grok-4", // Grok-4 model
+  grok4: "grok-4-fast-reasoning", // Grok-4 Fast Reasoning model
   grok3: "grok-3", // Grok-3 model
   o3: "o3", // o3 model
   gpt4o: "gpt-4o", // GPT-4o model
@@ -85,7 +85,20 @@ export function ChatInput({
   const isActualModelId = models.some(model => model.id === selectedModel)
   
   // Get the actual model ID - if selectedModel is already an actual ID, use it directly
-  const actualModelId = isActualModelId ? selectedModel : getActualModelId(selectedModel)
+  let actualModelId = isActualModelId ? selectedModel : getActualModelId(selectedModel)
+  
+  // Fix for old grok-4 model name
+  if (actualModelId === 'grok-4') {
+    console.log("🔄 ChatInput: Converting old grok-4 model name to grok-4-fast-reasoning")
+    actualModelId = 'grok-4-fast-reasoning'
+  }
+  
+  console.log("🔧 ChatInput debug:", {
+    selectedModel,
+    isActualModelId,
+    actualModelId,
+    availableModels: models.map(m => m.id)
+  })
 
   // Validate that the mapped models exist in available models
   const availableModalModes = useMemo(() => {
@@ -96,11 +109,23 @@ export function ChatInput({
 
   // Fallback to first available model if current model is not available
   const effectiveModelId = useMemo(() => {
+    let result
     if (availableModalModes.length === 0) {
-      return models[0]?.id || selectedModel
+      result = models[0]?.id || selectedModel
+    } else {
+      result = actualModelId
     }
-    return actualModelId
+    
+    // Final fix for old grok-4 model name
+    if (result === 'grok-4') {
+      console.log("🔄 ChatInput effectiveModelId: Converting old grok-4 model name to grok-4-fast-reasoning")
+      result = 'grok-4-fast-reasoning'
+    }
+    
+    return result
   }, [availableModalModes.length, actualModelId, models, selectedModel])
+  
+  console.log("🎯 ChatInput effectiveModelId:", effectiveModelId)
 
   const selectModelConfig = getModelInfo(effectiveModelId)
   const hasSearchSupport = Boolean(selectModelConfig?.webSearch)
@@ -272,7 +297,7 @@ export function ChatInput({
                 <SelectContent>
                   {availableModalModes.map(([label, modelId]) => (
                     <SelectItem key={modelId} value={label}>
-                      {label === 'grok4' ? 'Grok-4' : label === 'grok3' ? 'Grok-3' : label === 'o3' ? 'o3' : 'GPT-4o'}
+                      {label === 'grok4' ? 'Grok-4 Fast Reasoning' : label === 'grok3' ? 'Grok-3' : label === 'o3' ? 'o3' : 'GPT-4o'}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -133,9 +133,12 @@ export async function POST(req: Request) {
     )
     
     // INSTANT MODEL LOADING - no async operations, no delays
+    console.log(`🔍 Looking for model: "${model}"`)
     const modelConfig = getModelInfo(model)
+    console.log(`📋 Model config found:`, modelConfig ? `${modelConfig.id} (${modelConfig.name})` : 'null')
 
     if (!modelConfig || !modelConfig.apiSdk) {
+      console.error(`❌ Model "${model}" not found or missing apiSdk`)
       throw new Error(`Model ${model} not found`)
     }
 
@@ -195,9 +198,9 @@ export async function POST(req: Request) {
         // Handle completion in background
         Promise.resolve().then(async () => {
           try {
-            // Only process completion if we have a real userId
-            if (userId === "temp") {
-              console.log("Skipping completion processing for temp userId")
+            // Only process completion if we have a real userId and chatId
+            if (userId === "temp" || chatId === "temp" || chatId.startsWith("temp-chat-")) {
+              console.log("Skipping completion processing for temp userId or chatId")
               return
             }
 

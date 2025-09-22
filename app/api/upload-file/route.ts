@@ -93,12 +93,19 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Insert into database
-    const { error: dbError } = await supabase.from("chat_attachments").insert(dbPreparation)
+    // Only insert into database if chatId is a valid UUID (not a temporary chat)
+    const isTemporaryChat = chatId.startsWith('temp-chat-')
+    
+    if (!isTemporaryChat) {
+      // Insert into database only for real chats
+      const { error: dbError } = await supabase.from("chat_attachments").insert(dbPreparation)
 
-    if (dbError) {
-      console.error("Database error:", dbError)
-      return NextResponse.json({ error: `Database insertion failed: ${dbError.message}` }, { status: 500 })
+      if (dbError) {
+        console.error("Database error:", dbError)
+        return NextResponse.json({ error: `Database insertion failed: ${dbError.message}` }, { status: 500 })
+      }
+    } else {
+      console.log(`Skipping database insertion for temporary chat: ${chatId}`)
     }
 
     return NextResponse.json({

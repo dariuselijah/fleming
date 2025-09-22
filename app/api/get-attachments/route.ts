@@ -20,6 +20,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    // Skip database query for temporary chats
+    const isTemporaryChat = chatId.startsWith('temp-chat-')
+    
+    if (isTemporaryChat) {
+      console.log(`Skipping database query for temporary chat: ${chatId}`)
+      return NextResponse.json({
+        success: true,
+        attachments: []
+      })
+    }
+
     // Fetch attachments from database
     const { data, error } = await supabase
       .from("chat_attachments")

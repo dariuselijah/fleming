@@ -26,13 +26,19 @@ const TRANSITION = {
   repeatType: "loop" as const,
 }
 
-export function Loader() {
+export function Loader({ children }: { children?:
+React.ReactNode }) {
   return (
-    <div className={`flex items-center justify-center ${DOT_SPACING}`}>
-      <Dot delay={DELAY_DOT_1} />
-      <Dot delay={DELAY_DOT_2} />
-      <Dot delay={DELAY_DOT_3} />
-    </div>
+    <div className="
+      flex items-center justify-center gap-2">
+      <div className={`flex items-center justify-center ${DOT_SPACING}`}>
+        <Dot delay={DELAY_DOT_1} />
+        <Dot delay={DELAY_DOT_2} />
+        <Dot delay={DELAY_DOT_3} />
+      </div>
+      {children && <span className="text-sm
+      text-muted-foreground">{children}</span>}
+      </div>
   )
 }
 

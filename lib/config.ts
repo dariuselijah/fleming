@@ -19,20 +19,20 @@ export const REMAINING_QUERY_ALERT_THRESHOLD = 2
 export const DAILY_FILE_UPLOAD_LIMIT = 25
 export const DAILY_LIMIT_PRO_MODELS = 500
 
-export const NON_AUTH_ALLOWED_MODELS = ["grok-4", "grok-3", "o3", "gpt-4o"]
+export const NON_AUTH_ALLOWED_MODELS = ["grok-4-fast-reasoning", "grok-3", "o3", "gpt-4o"]
 
 export const FREE_MODELS_IDS = [
   "openrouter:deepseek/deepseek-r1:free",
   "openrouter:meta-llama/llama-3.3-8b-instruct:free",
   "pixtral-large-latest",
   "mistral-large-latest",
-  "grok-4",
+  "grok-4-fast-reasoning",
   "grok-3",
   "o3",
   "gpt-4o",
 ]
 
-export const MODEL_DEFAULT = "grok-4"
+export const MODEL_DEFAULT = "grok-4-fast-reasoning"
 
 export const APP_NAME = "Fleming"
 export const APP_DOMAIN = "https://askfleming.perkily.io"

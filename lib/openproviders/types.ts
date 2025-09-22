@@ -7,6 +7,7 @@ export type OpenAIModel =
   | "o1-preview-2024-09-12"
   | "o3-mini"
   | "o3-mini-2025-01-31"
+  | "gpt-5"
   | "gpt-4.1"
   | "gpt-4.1-2025-04-14"
   | "gpt-4.1-mini"
