@@ -19,7 +19,7 @@ type UseChatCoreProps = {
   files: File[]
   createOptimisticAttachments: (
     files: File[]
-  ) => Array<{ name: string; contentType: string; url: string }>
+  ) => Promise<Array<{ name: string; contentType: string; url: string }>>
   setFiles: (files: File[]) => void
   checkLimitsAndNotify: (uid: string) => Promise<boolean>
   cleanupOptimisticAttachments: (attachments?: Array<{ url?: string }>) => void
@@ -198,15 +198,17 @@ export function useChatCore({
         },
       }
      
-      // Append message with processed attachments (or none if upload failed)
+      // Create optimistic attachments for immediate display
+      const optimisticAttachments = currentFiles.length > 0 ? await createOptimisticAttachments(currentFiles) : undefined
+      
+      // Append message immediately with optimistic attachments for instant feedback
       append({
         role: "user",
         content: currentInput,
-        experimental_attachments: undefined,  // Files added later if successful
+        experimental_attachments: optimisticAttachments,
       }, options)
-         
-      // Handle file uploads first if there are files
-      let processedAttachments: Attachment[] | null = null
+
+      // Handle file uploads in background if there are files
       if (currentFiles.length > 0) {
         try {
           const currentChatId = await ensureChatExists(uid, currentInput)
@@ -216,9 +218,12 @@ export function useChatCore({
               bumpChat(currentChatId)
             }
             
-            // Upload files before sending message
-            processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id)
+            // Upload files in background
+            const processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id)
             console.log("File uploads completed:", processedAttachments?.length || 0, "files")
+            
+            // Note: The message is already sent with optimistic attachments
+            // The real attachments will be used for the AI response
           }
         } catch (error) {
           console.error("File upload failed:", error)
@@ -229,13 +234,6 @@ export function useChatCore({
           })
         }
       }
-
-      // Append message with processed attachments (or none if upload failed)
-      //append({
-      //  role: "user",
-      //  content: currentInput,
-      //  experimental_attachments: processedAttachments || undefined,
-      //}, options)
 
     } catch (error) {
       console.error("Error in submit:", error)

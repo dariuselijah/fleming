@@ -47,12 +47,48 @@ export const useFileUpload = () => {
     }
   }
 
-  const createOptimisticAttachments = (files: File[]) => {
-    return files.map((file) => ({
-      name: file.name,
-      contentType: file.type,
-      url: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
-    }))
+  const createOptimisticAttachments = async (files: File[]) => {
+    const attachments = []
+    
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        try {
+          // Convert file to data URL for AI SDK compatibility
+          const dataUrl = await fileToDataUrl(file)
+          attachments.push({
+            name: file.name,
+            contentType: file.type,
+            url: dataUrl,
+          })
+        } catch (error) {
+          console.error("Failed to convert file to data URL:", error)
+          // Fallback to blob URL for display only
+          attachments.push({
+            name: file.name,
+            contentType: file.type,
+            url: URL.createObjectURL(file),
+          })
+        }
+      } else {
+        attachments.push({
+          name: file.name,
+          contentType: file.type,
+          url: "",
+        })
+      }
+    }
+    
+    return attachments
+  }
+
+  // Helper function to convert File to data URL
+  const fileToDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
   }
 
   const cleanupOptimisticAttachments = (attachments?: Array<{ url?: string }>) => {

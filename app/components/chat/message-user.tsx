@@ -95,8 +95,12 @@ export function MessageUser({
               }}
             >
               <MorphingDialogTrigger className="z-10">
-                {/* Only render image if we have a complete, valid URL */}
-                {attachment.url && attachment.url.length > 20 && !attachment.url.endsWith('base64,') ? (
+                {/* Render image if we have a valid URL (blob, data, or http) */}
+                {attachment.url && (
+                  attachment.url.startsWith('blob:') || 
+                  attachment.url.startsWith('data:') || 
+                  attachment.url.startsWith('http')
+                ) ? (
                   <Image
                     className="mb-1 w-40 rounded-md"
                     key={attachment.name}
@@ -107,7 +111,7 @@ export function MessageUser({
                     unoptimized={true}
                   />
                 ) : (
-                  /* Show placeholder while base64 conversion is in progress */
+                  /* Show placeholder while processing */
                   <div className="mb-1 w-40 h-30 rounded-md bg-muted flex items-center justify-center text-xs text-muted-foreground">
                     Processing image...
                   </div>
@@ -115,8 +119,12 @@ export function MessageUser({
               </MorphingDialogTrigger>
               <MorphingDialogContainer>
                 <MorphingDialogContent className="relative rounded-lg">
-                  {/* Only show full-size image if we have a complete URL */}
-                  {attachment.url && attachment.url.length > 20 && !attachment.url.endsWith('base64,') ? (
+                  {/* Show full-size image if we have a valid URL */}
+                  {attachment.url && (
+                    attachment.url.startsWith('blob:') || 
+                    attachment.url.startsWith('data:') || 
+                    attachment.url.startsWith('http')
+                  ) ? (
                     <MorphingDialogImage
                       src={attachment.url}
                       alt={attachment.name || ""}

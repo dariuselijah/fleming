@@ -201,7 +201,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
 
     const optimisticId = `optimistic-${Date.now().toString()}`
     const optimisticAttachments =
-      files.length > 0 ? createOptimisticAttachments(files) : []
+      files.length > 0 ? await createOptimisticAttachments(files) : []
 
     const optimisticMessage = {
       id: optimisticId,
