@@ -1,7 +1,8 @@
 import { useChatDraft } from "@/app/hooks/use-chat-draft"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { toast } from "@/components/ui/toast"
 import { getOrCreateGuestUserId } from "@/lib/api"
-import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
+import { getSystemPromptByRole } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { UserProfile } from "@/lib/user/types"
@@ -38,14 +39,14 @@ type UseChatCoreProps = {
 export function useChatCore({
   initialMessages,
   draftValue,
-  cacheAndAddMessage,
+  // cacheAndAddMessage, // Commented out as unused
   chatId,
   user,
   files,
-  createOptimisticAttachments,
+  // createOptimisticAttachments, // Commented out as unused
   setFiles,
   checkLimitsAndNotify,
-  cleanupOptimisticAttachments,
+  // cleanupOptimisticAttachments, // Commented out as unused
   ensureChatExists,
   handleFileUploads,
   selectedModel,
@@ -58,7 +59,6 @@ export function useChatCore({
   const [enableSearch, setEnableSearch] = useState(false)
 
   // Get user preferences at the top level
-  const { useUserPreferences } = require("@/lib/user-preference-store/provider")
   const userPreferences = useUserPreferences()
 
   // Refs and derived state
@@ -201,7 +201,7 @@ export function useChatCore({
      
 
       // Handle file uploads first if there are files
-      let processedAttachments: Attachment[] | null = null
+      const processedAttachments: Attachment[] | null = null
       if (currentFiles.length > 0) {
         try {
           const currentChatId = await ensureChatExists(uid, currentInput)
@@ -318,6 +318,7 @@ export function useChatCore({
       ensureChatExists,
       isAuthenticated,
       bumpChat,
+      userPreferences.preferences.userRole,
     ]
   )
 
@@ -339,7 +340,7 @@ export function useChatCore({
     }
 
     reload(options)
-  }, [user, chatId, selectedModel, isAuthenticated, systemPrompt, reload])
+  }, [user, chatId, selectedModel, isAuthenticated, systemPrompt, reload, userPreferences.preferences.userRole])
 
   // Handle input change - optimized for streaming
   const { setDraftValue } = useChatDraft(chatId)

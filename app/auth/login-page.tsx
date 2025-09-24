@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { signInWithGoogle } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
-import Image from "next/image"
+// import Image from "next/image" // Unused import
 import Link from "next/link"
 import { useState } from "react"
 import { HeaderGoBack } from "../components/header-go-back"
@@ -67,6 +67,7 @@ export default function LoginPage() {
               onClick={handleSignInWithGoogle}
               disabled={isLoading}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="https://www.google.com/favicon.ico"
                 alt="Google logo"

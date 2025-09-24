@@ -5,7 +5,7 @@ import {
 import { Loader } from "@/components/prompt-kit/loader"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
 import { Message as MessageType } from "@ai-sdk/react"
-import { useRef, useMemo, useCallback } from "react"
+import { useRef, useMemo } from "react"
 import { Message } from "./message"
 
 type ConversationProps = {
@@ -57,11 +57,6 @@ export function Conversation({
       )
     })
   }, [messages, status, onDelete, onEdit, onReload])
-
-  // Memoize handlers to prevent unnecessary re-renders
-  const memoizedOnDelete = useCallback(onDelete, [onDelete])
-  const memoizedOnEdit = useCallback(onEdit, [onEdit])
-  const memoizedOnReload = useCallback(onReload, [onReload])
 
   if (!messages || messages.length === 0)
     return <div className="h-full w-full"></div>

@@ -293,6 +293,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     messages.length,
     bumpChat,
     enableSearch,
+    preferences?.userRole,
   ])
 
   const handleReload = useCallback(async () => {
@@ -311,7 +312,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     }
 
     reload(options)
-  }, [user, selectedModel, reload])
+  }, [user, selectedModel, reload, preferences?.userRole])
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {

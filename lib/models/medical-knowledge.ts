@@ -1,4 +1,4 @@
-import { AgentSelection, MedicalContext } from "./healthcare-agents"
+import { MedicalContext } from "./healthcare-agents"
 
 export type MedicalDataSource = {
   id: string
@@ -308,17 +308,16 @@ export class MedicalKnowledgeConnector {
 // Function to integrate medical knowledge with healthcare agents
 export async function integrateMedicalKnowledge(
   query: string,
-  context: MedicalContext,
-  agentSelections: AgentSelection[]
+  context: MedicalContext
 ): Promise<MedicalKnowledgeResult[]> {
   const knowledgeConnector = new MedicalKnowledgeConnector()
-  
+
   const knowledgeQuery: MedicalKnowledgeQuery = {
     query,
     specialties: context.specialties,
     capabilities: context.requiredCapabilities,
     maxResults: 10
   }
-  
+
   return await knowledgeConnector.queryMedicalKnowledge(knowledgeQuery)
 } 

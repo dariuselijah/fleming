@@ -39,6 +39,7 @@ export const isDev = process.env.NODE_ENV === "development"
 // Streaming optimization utilities
 export const streamingUtils = {
   // Debounce function for streaming updates to prevent excessive re-renders
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   debounce: <T extends (...args: any[]) => any>(
     func: T,
     wait: number
@@ -51,6 +52,7 @@ export const streamingUtils = {
   },
 
   // Throttle function for streaming updates to maintain smooth performance
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   throttle: <T extends (...args: any[]) => any>(
     func: T,
     limit: number

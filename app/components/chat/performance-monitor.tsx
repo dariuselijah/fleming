@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { TimerIcon, LightningIcon, WarningIcon } from "@phosphor-icons/react"
+import { TimerIcon, LightningIcon } from "@phosphor-icons/react"
 
 type PerformanceMetrics = {
   messageDisplayTime: number
@@ -26,6 +26,8 @@ export function PerformanceMonitor() {
     return null
   }
 
+  // These functions are for internal testing - they would need to be properly
+  // connected to external components to be useful for actual performance monitoring
   const startMessageTimer = () => {
     startTimeRef.current = performance.now()
     messageSentTimeRef.current = performance.now()
@@ -37,27 +39,29 @@ export function PerformanceMonitor() {
     setCurrentSession(prev => ({ ...prev, messageDisplayTime: displayTime }))
   }
 
-  const recordStreamingStart = () => {
-    const streamingTime = performance.now() - startTimeRef.current
-    setCurrentSession(prev => ({ ...prev, streamingStartTime: streamingTime }))
-  }
+  // Commented out unused functions - they would need proper implementation
+  // to be connected to the actual chat system
+  // const recordStreamingStart = () => {
+  //   const streamingTime = performance.now() - startTimeRef.current
+  //   setCurrentSession(prev => ({ ...prev, streamingStartTime: streamingTime }))
+  // }
 
-  const recordFirstChunk = () => {
-    const chunkTime = performance.now() - startTimeRef.current
-    setCurrentSession(prev => ({ ...prev, firstChunkTime: chunkTime }))
-  }
+  // const recordFirstChunk = () => {
+  //   const chunkTime = performance.now() - startTimeRef.current
+  //   setCurrentSession(prev => ({ ...prev, firstChunkTime: chunkTime }))
+  // }
 
-  const recordFileUpload = (uploadTime: number) => {
-    setCurrentSession(prev => ({ ...prev, fileUploadTime: uploadTime }))
-  }
+  // const recordFileUpload = (uploadTime: number) => {
+  //   setCurrentSession(prev => ({ ...prev, fileUploadTime: uploadTime }))
+  // }
 
-  const completeSession = () => {
-    const totalTime = performance.now() - startTimeRef.current
-    const completedSession = { ...currentSession, totalResponseTime: totalTime }
-    
-    setMetrics(prev => [...prev, completedSession as PerformanceMetrics])
-    setCurrentSession({})
-  }
+  // const completeSession = () => {
+  //   const totalTime = performance.now() - startTimeRef.current
+  //   const completedSession = { ...currentSession, totalResponseTime: totalTime }
+
+  //   setMetrics(prev => [...prev, completedSession as PerformanceMetrics])
+  //   setCurrentSession({})
+  // }
 
   const getPerformanceGrade = (metrics: PerformanceMetrics): { grade: string; color: string } => {
     if (metrics.messageDisplayTime < 100 && metrics.streamingStartTime < 200) {

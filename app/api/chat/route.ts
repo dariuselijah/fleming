@@ -1,5 +1,5 @@
-import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole } from "@/lib/config"
-import { getAllModels, getModelInfo } from "@/lib/models"
+import { getSystemPromptByRole } from "@/lib/config"
+import { getModelInfo } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { SupportedModel } from "@/lib/openproviders/types"
 import type { ProviderWithoutOllama } from "@/lib/user-keys"
@@ -12,10 +12,8 @@ import {
   validateAndTrackUsage,
 } from "./api"
 import { createErrorResponse, extractErrorMessage } from "./utils"
-import { 
-  analyzeMedicalQuery, 
-  MedicalContext, 
-  AgentSelection,
+import {
+  analyzeMedicalQuery,
   getHealthcareSystemPromptServer,
   orchestrateHealthcareAgents
 } from "@/lib/models/healthcare-agents"
@@ -37,6 +35,7 @@ const getCachedSystemPrompt = (role: "doctor" | "general" | "medical_student" | 
 }
 
 // Function to quickly assess query complexity for smart orchestration
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function assessQueryComplexity(query: string): "simple" | "complex" {
   const queryLower = query.toLowerCase()
   
@@ -156,7 +155,7 @@ export async function POST(req: Request) {
       if (message.experimental_attachments) {
         // Keep all valid attachments including data URLs and blob URLs for vision models
         const filteredAttachments = message.experimental_attachments.filter(
-          (attachment: any) => {
+          (attachment: Attachment) => {
             // Keep if it has a valid URL (including data URLs and blob URLs for vision models)
             return attachment.url && attachment.name && attachment.contentType
           }
@@ -279,11 +278,11 @@ export async function POST(req: Request) {
             
             if (agentSelections.length > 0) {
               try {
-                const orchestrationInfo = await orchestrateHealthcareAgents(messages[messages.length - 1].content, medicalContext)
+                await orchestrateHealthcareAgents(messages[messages.length - 1].content, medicalContext)
                 
                 // Integrate medical knowledge
                 try {
-                  const medicalKnowledge = await integrateMedicalKnowledge(messages[messages.length - 1].content, medicalContext, agentSelections)
+                  const medicalKnowledge = await integrateMedicalKnowledge(messages[messages.length - 1].content, medicalContext)
                   if (medicalKnowledge.length > 0) {
                     console.log("Medical knowledge integrated in background")
                   }

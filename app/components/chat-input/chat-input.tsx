@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react"
 import { getModelInfo } from "@/lib/models"
 import { useModel } from "@/lib/model-store/provider"
-import { ModelSelector } from "@/components/common/model-selector/base"
 import {
   PromptInput,
   PromptInputAction,
@@ -36,7 +35,7 @@ const getActualModelId = (modalMode: string): string => {
 
 // Helper function to get modal mode from actual model ID
 const getModalModeFromModelId = (modelId: string): string => {
-  const entry = Object.entries(MODAL_MAPPING).find(([_, actualId]) => actualId === modelId)
+  const entry = Object.entries(MODAL_MAPPING).find(([, actualId]) => actualId === modelId)
   return entry ? entry[0] : "grok4" // Default to grok4 if no match found
 }
 
@@ -45,7 +44,6 @@ type ChatInputProps = {
   onValueChange: (value: string) => void
   onSend: () => void
   isSubmitting?: boolean
-  hasMessages?: boolean
   files: File[]
   onFileUpload: (files: File[]) => void
   onFileRemove: (file: File) => void
@@ -79,7 +77,7 @@ export function ChatInput({
   enableSearch,
 }: ChatInputProps) {
   const { models } = useModel()
-  const [isButtonDisabled, setIsButtonDisabled] = useState(true);
+  const [isButtonDisabled, setIsButtonDisabled] = useState(true)
   
   // Check if selectedModel is already an actual model ID or a modal mode
   const isActualModelId = models.some(model => model.id === selectedModel)
@@ -102,7 +100,7 @@ export function ChatInput({
 
   // Validate that the mapped models exist in available models
   const availableModalModes = useMemo(() => {
-    return Object.entries(MODAL_MAPPING).filter(([_, modelId]) => 
+    return Object.entries(MODAL_MAPPING).filter(([, modelId]) =>
       models.some(model => model.id === modelId)
     )
   }, [models])
@@ -136,8 +134,8 @@ export function ChatInput({
 
   // Handle modal mode selection
   const handleModalModeChange = useCallback((modalMode: string) => {
-    const actualModelId = getActualModelId(modalMode)
-    onSelectModel(actualModelId)
+    const actualModelIdForModal = getActualModelId(modalMode)
+    onSelectModel(actualModelIdForModal)
   }, [onSelectModel])
 
   // Get the current modal mode for display - ensure it has a default value

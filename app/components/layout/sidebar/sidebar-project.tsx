@@ -16,7 +16,7 @@ type Project = {
 export function SidebarProject() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
-  const { data: projects, isLoading, error } = useQuery<Project[]>({
+  const { data: projects, isLoading } = useQuery<Project[]>({
     queryKey: ["projects"],
     queryFn: async () => {
       const response = await fetch("/api/projects")

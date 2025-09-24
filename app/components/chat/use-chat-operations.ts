@@ -4,7 +4,6 @@ import type { Chats } from "@/lib/chat-store/types"
 import { REMAINING_QUERY_ALERT_THRESHOLD } from "@/lib/config"
 import { Message } from "@ai-sdk/react"
 import { useCallback, useRef } from "react"
-import { createNewChat } from "@/lib/chat-store/chats/api"
 
 // Global chat creation lock to prevent multiple chats across components
 let globalChatCreationInProgress = false
@@ -28,7 +27,6 @@ type UseChatOperationsProps = {
   setMessages: (
     messages: Message[] | ((messages: Message[]) => Message[])
   ) => void
-  setInput: (input: string) => void
 }
 
 export function useChatOperations({
@@ -152,6 +150,7 @@ export function useChatOperations({
         ])
 
         if (immediateResult && typeof immediateResult === 'object' && 'id' in immediateResult) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const newChatId = (immediateResult as any).id
           if (isAuthenticated) {
             window.history.pushState(null, "", `/c/${newChatId}`)
@@ -189,6 +188,7 @@ export function useChatOperations({
               }))
             }
           } catch (err) {
+            console.log('Background chat creation error:', err)
             // Don't show error toast - user is already streaming
           } finally {
             chatCreationInProgress.current = false
@@ -199,7 +199,8 @@ export function useChatOperations({
         })
 
         return tempChatId
-      } catch (err: unknown) {
+      } catch (err) {
+        console.log('Chat creation error:', err)
         chatCreationInProgress.current = false
         lastChatCreationAttempt.current = 0
         globalChatCreationInProgress = false

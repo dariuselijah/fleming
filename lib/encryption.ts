@@ -12,7 +12,7 @@ if (ENCRYPTION_KEY) {
       console.warn("ENCRYPTION_KEY must be 32 bytes long, encryption disabled")
       key = null
     }
-  } catch (error) {
+  } catch {
     console.warn("Invalid ENCRYPTION_KEY format, encryption disabled")
     key = null
   }

@@ -70,8 +70,29 @@ export const defaultPreferences: UserPreferences = {
   lifestyleFactors: "",
 }
 
+// API data format type for proper TypeScript typing
+type ApiUserPreferences = {
+  layout?: string
+  prompt_suggestions?: boolean
+  show_tool_invocations?: boolean
+  show_conversation_previews?: boolean
+  hidden_models?: string[]
+  user_role?: string
+  medical_specialty?: string
+  healthcare_agent_enabled?: boolean
+  medical_compliance_mode?: boolean
+  clinical_decision_support?: boolean
+  medical_literature_access?: boolean
+  health_context?: string
+  health_conditions?: string[]
+  medications?: string[]
+  allergies?: string[]
+  family_history?: string
+  lifestyle_factors?: string
+}
+
 // Helper functions to convert between API format (snake_case) and frontend format (camelCase)
-export function convertFromApiFormat(apiData: any): UserPreferences {
+export function convertFromApiFormat(apiData: ApiUserPreferences): UserPreferences {
   console.log("Converting from API format:", apiData)
   const result = {
     layout: apiData.layout || "fullscreen",
@@ -101,9 +122,9 @@ export function convertFromApiFormat(apiData: any): UserPreferences {
   return result
 }
 
-export function convertToApiFormat(preferences: Partial<UserPreferences>) {
+export function convertToApiFormat(preferences: Partial<UserPreferences>): Partial<ApiUserPreferences> {
   console.log("Converting to API format:", preferences)
-  const apiData: any = {}
+  const apiData: Partial<ApiUserPreferences> = {}
   if (preferences.layout !== undefined) apiData.layout = preferences.layout
   if (preferences.promptSuggestions !== undefined)
     apiData.prompt_suggestions = preferences.promptSuggestions

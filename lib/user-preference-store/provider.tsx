@@ -9,7 +9,6 @@ import {
   type LayoutType,
   type UserPreferences,
 } from "./utils"
-import { fetchClient } from "@/lib/fetch"
 
 export {
   type LayoutType,

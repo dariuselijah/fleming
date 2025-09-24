@@ -1,11 +1,7 @@
 import {
   BookOpenText,
   Brain,
-  Code,
   Lightbulb,
-  Notepad,
-  PaintBrush,
-  Sparkle,
   HeartIcon,
   StethoscopeIcon,
   PillIcon,
