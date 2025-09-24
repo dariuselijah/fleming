@@ -182,6 +182,7 @@ export function useChatCore({
       const options = {
         body: {
           chatId: chatId || "temp", // Use existing chatId or temp for immediate streaming
+          //chatId: chatId && !chatId.startsWith('temp') ? chatId : null,
           userId: uid,
           model: selectedModel,
           isAuthenticated: !!user?.id,
@@ -198,17 +199,9 @@ export function useChatCore({
         },
       }
      
-      // Create optimistic attachments for immediate display
-      const optimisticAttachments = currentFiles.length > 0 ? await createOptimisticAttachments(currentFiles) : undefined
-      
-      // Append message immediately with optimistic attachments for instant feedback
-      append({
-        role: "user",
-        content: currentInput,
-        experimental_attachments: optimisticAttachments,
-      }, options)
 
-      // Handle file uploads in background if there are files
+      // Handle file uploads first if there are files
+      let processedAttachments: Attachment[] | null = null
       if (currentFiles.length > 0) {
         try {
           const currentChatId = await ensureChatExists(uid, currentInput)
@@ -235,6 +228,12 @@ export function useChatCore({
         }
       }
 
+      // Append message with processed attachments (or none if upload failed)
+      append({
+        role: "user",
+        content: currentInput,
+        experimental_attachments: processedAttachments || undefined,
+      }, options)
     } catch (error) {
       console.error("Error in submit:", error)
       toast({
