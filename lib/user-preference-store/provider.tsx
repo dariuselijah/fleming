@@ -147,6 +147,7 @@ export function UserPreferencesProvider({
       staleTime: 1000 * 60 * 5, // 5 minutes
       retry: (failureCount, error) => {
         // Only retry for authenticated users and network errors
+        console.log("Retry attempt", failureCount, "due to error:", error)
         return isAuthenticated && failureCount < 2
       },
       // Use initial data if available to avoid unnecessary API calls

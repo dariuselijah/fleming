@@ -180,7 +180,6 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     createNewChat,
     setHasDialogAuth: () => {}, // Not used in project context
     setMessages,
-    setInput,
   })
 
   // Simple input change handler for project context (no draft saving needed)

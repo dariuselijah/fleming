@@ -15,7 +15,8 @@ import { createErrorResponse, extractErrorMessage } from "./utils"
 import {
   analyzeMedicalQuery,
   getHealthcareSystemPromptServer,
-  orchestrateHealthcareAgents
+  orchestrateHealthcareAgents,
+  type MedicalContext
 } from "@/lib/models/healthcare-agents"
 import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
 
@@ -274,7 +275,7 @@ export async function POST(req: Request) {
               medicalComplianceMode
             }
             
-            const agentSelections = analyzeMedicalQuery(messages[messages.length - 1].content, medicalContext)
+            const agentSelections = analyzeMedicalQuery(messages[messages.length - 1].content)
             
             if (agentSelections.length > 0) {
               try {

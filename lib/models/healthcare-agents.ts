@@ -809,8 +809,9 @@ export async function orchestrateHealthcareAgents(
   query: string,
   context: MedicalContext
 ): Promise<string> {
+  console.log("Orchestrating healthcare agents with context:", context)
   // Analyze the query to determine which agents to use
-  const agentSelections = analyzeMedicalQuery(query, context)
+  const agentSelections = analyzeMedicalQuery(query)
   
   if (agentSelections.length === 0) {
     return "I'll provide evidence-based medical guidance based on your query."

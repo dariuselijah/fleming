@@ -87,7 +87,6 @@ export function Chat() {
       createNewChat,
       setHasDialogAuth,
       setMessages: () => {},
-      setInput: () => {},
     })
 
   // Core chat functionality (initialization + state + actions)
