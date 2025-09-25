@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { convertFromApiFormat, convertToApiFormat, defaultPreferences } from "@/lib/user-preference-store/utils"
+import { convertToApiFormat, defaultPreferences } from "@/lib/user-preference-store/utils"
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   console.log("GET /api/user-preferences called")
   
   try {

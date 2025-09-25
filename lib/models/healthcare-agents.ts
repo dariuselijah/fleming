@@ -1,4 +1,4 @@
-import { ModelConfig } from "./types"
+// Note: ModelConfig type not used in this file, removed to fix ESLint warning
 
 export type HealthcareAgentRole = 
   | "orchestrator"
@@ -394,7 +394,7 @@ Always consider the specialty context and coordinate with other specialties when
 ]
 
 // Query Analysis Functions
-export function analyzeMedicalQuery(query: string, context: MedicalContext): AgentSelection[] {
+export function analyzeMedicalQuery(query: string): AgentSelection[] {
   const analysis = {
     queryType: determineQueryType(query),
     urgency: assessUrgency(query),
@@ -404,7 +404,7 @@ export function analyzeMedicalQuery(query: string, context: MedicalContext): Age
   }
 
   const selectedAgents = selectAgents(analysis)
-  return prioritizeAgents(selectedAgents, analysis)
+  return prioritizeAgents(selectedAgents)
 }
 
 function determineQueryType(query: string): MedicalQueryType {
@@ -701,7 +701,7 @@ function selectAgents(analysis: QueryAnalysis): AgentSelection[] {
   return agents
 }
 
-function prioritizeAgents(agents: AgentSelection[], analysis: QueryAnalysis): AgentSelection[] {
+function prioritizeAgents(agents: AgentSelection[]): AgentSelection[] {
   return agents.sort((a, b) => {
     // Higher priority first
     if (a.priority !== b.priority) {
@@ -809,8 +809,9 @@ export async function orchestrateHealthcareAgents(
   query: string,
   context: MedicalContext
 ): Promise<string> {
+  console.log("Orchestrating healthcare agents with context:", context)
   // Analyze the query to determine which agents to use
-  const agentSelections = analyzeMedicalQuery(query, context)
+  const agentSelections = analyzeMedicalQuery(query)
   
   if (agentSelections.length === 0) {
     return "I'll provide evidence-based medical guidance based on your query."
@@ -828,17 +829,4 @@ export async function orchestrateHealthcareAgents(
   return "I'll provide evidence-based medical guidance based on your query."
 }
 
-// Server-side function to get specialty-specific agents
-function getSpecialtyAgentsServer(specialty: string): HealthcareAgent[] {
-  const specialtyAgentMap: Record<string, string[]> = {
-    cardiology: ["clinical_diagnosis_agent", "evidence_based_medicine_agent", "risk_assessment_agent"],
-    pediatrics: ["clinical_diagnosis_agent", "treatment_planning_agent", "specialty_consultant_agent"],
-    oncology: ["clinical_diagnosis_agent", "treatment_planning_agent", "evidence_based_medicine_agent"],
-    psychiatry: ["clinical_diagnosis_agent", "drug_interaction_agent", "specialty_consultant_agent"],
-    emergency_medicine: ["clinical_diagnosis_agent", "risk_assessment_agent", "treatment_planning_agent"],
-    internal_medicine: ["clinical_diagnosis_agent", "evidence_based_medicine_agent", "treatment_planning_agent"]
-  }
-  
-  const agentIds = specialtyAgentMap[specialty] || []
-  return agentIds.map(id => getHealthcareAgentById(id)).filter(Boolean) as HealthcareAgent[]
-} 
+// Note: getSpecialtyAgentsServer function was removed as it was unused 

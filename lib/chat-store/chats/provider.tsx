@@ -2,7 +2,7 @@
 
 import { toast } from "@/components/ui/toast"
 import { createContext, useContext, useEffect, useState } from "react"
-import { MODEL_DEFAULT, SYSTEM_PROMPT_DEFAULT, getSystemPromptByRole } from "../../config"
+import { MODEL_DEFAULT, getSystemPromptByRole } from "../../config"
 import type { Chats } from "../types"
 import {
   createNewChat as createNewChatFromDb,

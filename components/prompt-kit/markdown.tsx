@@ -1,7 +1,7 @@
 import { LinkMarkdown } from "@/app/components/chat/link-markdown"
 import { cn } from "@/lib/utils"
 import { marked } from "marked"
-import { memo, useId, useMemo, useCallback } from "react"
+import { memo, useId, useMemo } from "react"
 import ReactMarkdown, { Components } from "react-markdown"
 import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"

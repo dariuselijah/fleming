@@ -1,10 +1,10 @@
-import { createClient } from "@/lib/supabase/server"
+// import { createClient } from "@/lib/supabase/server"
 import { validateUserIdentity } from "@/lib/server/api"
 import { NextRequest, NextResponse } from "next/server"
 
 // CACHE for signed URLs to avoid regeneration
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>()
-const CACHE_DURATION = 3000000 // 50 minutes (signed URLs last 1 hour)
+// const CACHE_DURATION = 3000000 // 50 minutes (signed URLs last 1 hour)
 
 export async function POST(request: NextRequest) {
   try {

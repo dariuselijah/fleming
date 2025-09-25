@@ -74,8 +74,6 @@ export async function logUserMessage({
   chatId,
   content,
   attachments,
-  model,
-  isAuthenticated,
   message_group_id,
 }: LogUserMessageParams): Promise<void> {
   if (!supabase) return

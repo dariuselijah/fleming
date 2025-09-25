@@ -28,6 +28,7 @@ import {
 import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const specialtyIcons: Record<MedicalSpecialty, any> = {
   "cardiology": HeartIcon,
   "oncology": MicroscopeIcon,
@@ -92,7 +93,6 @@ export function HealthcareSettings() {
     }
   }
 
-  const SpecialtyIcon = preferences.medicalSpecialty ? specialtyIcons[preferences.medicalSpecialty] : UserIcon
 
   return (
     <div className="space-y-6">

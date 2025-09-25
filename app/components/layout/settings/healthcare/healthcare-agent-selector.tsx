@@ -2,41 +2,12 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
-import { 
-  StethoscopeIcon, 
-  UserIcon, 
-  BookOpenIcon,
-  HeartIcon,
-  BabyIcon,
-  BrainIcon,
-  MicroscopeIcon,
-  UserGearIcon,
-  WrenchIcon,
-  TrayIcon,
-  TestTubeIcon,
-  SyringeIcon,
-  BabyCarriageIcon,
-  UserListIcon
+import {
+  StethoscopeIcon,
+  UserIcon,
+  BookOpenIcon
 } from "@phosphor-icons/react"
 
-const specialtyIcons: Record<string, any> = {
-  "cardiology": HeartIcon,
-  "oncology": MicroscopeIcon,
-  "pediatrics": BabyIcon,
-  "neurology": BrainIcon,
-  "orthopedics": WrenchIcon,
-  "dermatology": MicroscopeIcon,
-  "psychiatry": BrainIcon,
-  "emergency-medicine": StethoscopeIcon,
-  "internal-medicine": UserGearIcon,
-  "surgery": WrenchIcon,
-  "radiology": TrayIcon,
-  "pathology": TestTubeIcon,
-  "anesthesiology": SyringeIcon,
-  "obstetrics-gynecology": BabyCarriageIcon,
-  "family-medicine": UserListIcon,
-  "general": UserIcon
-}
 
 const specialtyLabels: Record<string, string> = {
   "cardiology": "Cardiology",
@@ -93,7 +64,6 @@ export function HealthcareAgentSelector() {
     }
   }
 
-  const RoleIcon = getRoleIcon()
 
   return (
     <div className="space-y-6">
@@ -108,7 +78,10 @@ export function HealthcareAgentSelector() {
       <Card className="border-blue-200 bg-blue-50/50">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <RoleIcon className="size-5 text-blue-600" />
+            {(() => {
+              const RoleIcon = getRoleIcon()
+              return <RoleIcon className="size-5 text-blue-600" />
+            })()}
             {getRoleTitle()}
           </CardTitle>
           <CardDescription>

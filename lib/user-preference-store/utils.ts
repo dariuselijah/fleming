@@ -70,20 +70,41 @@ export const defaultPreferences: UserPreferences = {
   lifestyleFactors: "",
 }
 
+// API data format type for proper TypeScript typing
+type ApiUserPreferences = {
+  layout?: string | null
+  prompt_suggestions?: boolean | null
+  show_tool_invocations?: boolean | null
+  show_conversation_previews?: boolean | null
+  hidden_models?: string[] | null
+  user_role?: string | null
+  medical_specialty?: string | null
+  healthcare_agent_enabled?: boolean | null
+  medical_compliance_mode?: boolean | null
+  clinical_decision_support?: boolean | null
+  medical_literature_access?: boolean | null
+  health_context?: string | null
+  health_conditions?: string[] | null
+  medications?: string[] | null
+  allergies?: string[] | null
+  family_history?: string | null
+  lifestyle_factors?: string | null
+}
+
 // Helper functions to convert between API format (snake_case) and frontend format (camelCase)
-export function convertFromApiFormat(apiData: any): UserPreferences {
+export function convertFromApiFormat(apiData: ApiUserPreferences): UserPreferences {
   console.log("Converting from API format:", apiData)
   const result = {
-    layout: apiData.layout || "fullscreen",
+    layout: (apiData.layout as LayoutType) || "fullscreen",
     promptSuggestions: apiData.prompt_suggestions ?? true,
     showToolInvocations: apiData.show_tool_invocations ?? true,
     showConversationPreviews: apiData.show_conversation_previews ?? true,
     hiddenModels: apiData.hidden_models || [],
 
-    
+
     // Healthcare preferences
-    userRole: apiData.user_role || "general",
-    medicalSpecialty: apiData.medical_specialty || "general",
+    userRole: (apiData.user_role as UserRole) || "general",
+    medicalSpecialty: apiData.medical_specialty ? (apiData.medical_specialty as MedicalSpecialty) : undefined,
     healthcareAgentEnabled: apiData.healthcare_agent_enabled ?? false,
     medicalComplianceMode: apiData.medical_compliance_mode ?? false,
     clinicalDecisionSupport: apiData.clinical_decision_support ?? false,
@@ -101,9 +122,9 @@ export function convertFromApiFormat(apiData: any): UserPreferences {
   return result
 }
 
-export function convertToApiFormat(preferences: Partial<UserPreferences>) {
+export function convertToApiFormat(preferences: Partial<UserPreferences>): Partial<ApiUserPreferences> {
   console.log("Converting to API format:", preferences)
-  const apiData: any = {}
+  const apiData: Partial<ApiUserPreferences> = {}
   if (preferences.layout !== undefined) apiData.layout = preferences.layout
   if (preferences.promptSuggestions !== undefined)
     apiData.prompt_suggestions = preferences.promptSuggestions

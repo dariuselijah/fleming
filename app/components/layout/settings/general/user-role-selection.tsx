@@ -23,6 +23,7 @@ import {
 } from "@phosphor-icons/react"
 import { useState } from "react"
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const specialtyIcons: Record<MedicalSpecialty, any> = {
   "cardiology": HeartIcon,
   "oncology": MicroscopeIcon,
@@ -87,7 +88,6 @@ export function UserRoleSelection() {
     }
   }
 
-  const SpecialtyIcon = preferences.medicalSpecialty ? specialtyIcons[preferences.medicalSpecialty] : UserIcon
 
   return (
     <Card>

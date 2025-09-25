@@ -46,7 +46,7 @@ export function useModel({
     })
     
     return effectiveModel
-  }, [currentChat?.model, user?.favorite_models])
+  }, [currentChat?.model, user?.favorite_models, user?.id])
 
   // Use local state only for temporary overrides, derive base value from props
   const [localSelectedModel, setLocalSelectedModel] = useState<string | null>(

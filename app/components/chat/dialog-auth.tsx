@@ -12,7 +12,6 @@ import {
 import { signInWithGoogle } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
-import Image from "next/image"
 import { useState } from "react"
 
 type DialogAuthProps = {
@@ -80,6 +79,7 @@ export function DialogAuth({ open, setOpen }: DialogAuthProps) {
             onClick={handleSignInWithGoogle}
             disabled={isLoading}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="https://www.google.com/favicon.ico"
               alt="Google logo"

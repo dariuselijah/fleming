@@ -11,7 +11,6 @@ import { getSystemPromptByRole } from "@/lib/config"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
-import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
 import { redirect } from "next/navigation"
 import { useMemo, useState } from "react"
@@ -88,7 +87,6 @@ export function Chat() {
       createNewChat,
       setHasDialogAuth,
       setMessages: () => {},
-      setInput: () => {},
     })
 
   // Core chat functionality (initialization + state + actions)
@@ -171,7 +169,6 @@ export function Chat() {
       handleFileUpload,
       handleFileRemove,
       preferences.promptSuggestions,
-      chatId,
       messages.length,
       handleModelChange,
       selectedModel,

@@ -3,12 +3,9 @@
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
-import { 
-  HealthcareAgent, 
-  getHealthcareAgentById, 
-  analyzeMedicalQuery,
-  MedicalContext,
-  AgentSelection
+import {
+  HealthcareAgent,
+  getHealthcareAgentById
 } from "@/lib/models/healthcare-agents"
 
 export function HealthcareAgentIntegration() {
@@ -37,16 +34,17 @@ export function HealthcareAgentIntegration() {
     }
   }
 
-  const getRoleDescription = () => {
-    switch (preferences.userRole) {
-      case "medical_student":
-        return "Tailored for medical education with focus on learning, clinical reasoning, and exam preparation."
-      case "doctor":
-        return "Sophisticated medical intelligence system that coordinates multiple specialized AI agents."
-      default:
-        return "AI assistant for healthcare professionals."
-    }
-  }
+  // Commented out unused function
+  // const getRoleDescription = () => {
+  //   switch (preferences.userRole) {
+  //     case "medical_student":
+  //       return "Tailored for medical education with focus on learning, clinical reasoning, and exam preparation."
+  //     case "doctor":
+  //       return "Sophisticated medical intelligence system that coordinates multiple specialized AI agents."
+  //     default:
+  //       return "AI assistant for healthcare professionals."
+  //   }
+  // }
 
   return (
     <Card className="mb-4">
@@ -126,9 +124,15 @@ export function HealthcareAgentIntegration() {
   )
 }
 
-export function getHealthcareSystemPrompt(): string {
-  const { preferences } = useUserPreferences()
-  
+// Utility function to generate healthcare system prompt based on user preferences
+// This is not a React component and should receive preferences as a parameter
+export function getHealthcareSystemPrompt(preferences: {
+  userRole?: string;
+  medicalSpecialty?: string;
+  clinicalDecisionSupport?: boolean;
+  medicalLiteratureAccess?: boolean;
+  medicalComplianceMode?: boolean;
+}): string {
   if (preferences.userRole !== "doctor" && preferences.userRole !== "medical_student") {
     return ""
   }
@@ -142,29 +146,29 @@ export function getHealthcareSystemPrompt(): string {
   // Add specialty-specific context
   if (preferences.medicalSpecialty) {
     systemPrompt += `\n\nSPECIALTY CONTEXT: You are assisting a ${preferences.medicalSpecialty.replace(/_/g, " ")} specialist.`
-    
+
     // Add specialty-specific agents based on the specialty suggestions
     const specialtyAgents = getSpecialtyAgents(preferences.medicalSpecialty)
     if (specialtyAgents.length > 0) {
       systemPrompt += `\n\nSPECIALTY-SPECIFIC AGENTS: ${specialtyAgents.map(agent => agent.name).join(", ")}`
     }
   }
-  
+
   // Add role-specific context
   if (preferences.userRole === "medical_student") {
     systemPrompt += "\n\nROLE CONTEXT: You are assisting a medical student. Focus on educational explanations, clinical reasoning development, and exam preparation support."
   }
-  
+
   // Add clinical decision support tools
   if (preferences.clinicalDecisionSupport) {
     systemPrompt += "\n\nCLINICAL DECISION SUPPORT: Enabled with access to evidence-based algorithms and clinical guidelines."
   }
-  
+
   // Add medical literature access
   if (preferences.medicalLiteratureAccess) {
     systemPrompt += "\n\nMEDICAL LITERATURE ACCESS: Enabled with access to latest research, guidelines, and clinical evidence."
   }
-  
+
   // Add medical compliance mode
   if (preferences.medicalComplianceMode) {
     systemPrompt += "\n\nMEDICAL COMPLIANCE MODE: Operating in strict medical compliance mode, ensuring all responses meet healthcare standards and regulations."

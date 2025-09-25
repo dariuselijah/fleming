@@ -4,9 +4,8 @@ import { Button } from "@/components/ui/button"
 import { DrawerClose } from "@/components/ui/drawer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
-import { cn, isDev } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import {
-  CubeIcon,
   GearSixIcon,
   PaintBrushIcon,
   XIcon,

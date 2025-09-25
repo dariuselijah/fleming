@@ -180,7 +180,6 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     createNewChat,
     setHasDialogAuth: () => {}, // Not used in project context
     setMessages,
-    setInput,
   })
 
   // Simple input change handler for project context (no draft saving needed)
@@ -293,6 +292,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     messages.length,
     bumpChat,
     enableSearch,
+    preferences?.userRole,
   ])
 
   const handleReload = useCallback(async () => {
@@ -311,7 +311,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     }
 
     reload(options)
-  }, [user, selectedModel, reload])
+  }, [user, selectedModel, reload, preferences?.userRole])
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {

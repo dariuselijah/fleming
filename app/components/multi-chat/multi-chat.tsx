@@ -55,8 +55,8 @@ export function MultiChat() {
 
   const modelsFromPersisted = useMemo(() => {
     return persistedMessages
-      .filter((msg) => (msg as any).model)
-      .map((msg) => (msg as any).model)
+      .filter((msg) => (msg as unknown as { model?: string }).model)
+      .map((msg) => (msg as unknown as { model: string }).model)
   }, [persistedMessages])
 
   const modelsFromLastGroup = useMemo(() => {
@@ -70,8 +70,8 @@ export function MultiChat() {
     for (let i = lastUserIndex + 1; i < persistedMessages.length; i++) {
       const msg = persistedMessages[i]
       if (msg.role === "user") break
-      if (msg.role === "assistant" && (msg as any).model) {
-        modelsInLastGroup.push((msg as any).model)
+      if (msg.role === "assistant" && (msg as unknown as { model?: string }).model) {
+        modelsInLastGroup.push((msg as unknown as { model: string }).model)
       }
     }
     return modelsInLastGroup
@@ -144,7 +144,7 @@ export function MultiChat() {
           userMessage: group.userMessage,
           responses: group.assistantMessages.map((msg, index) => {
             const model =
-              (msg as any).model || selectedModelIds[index] || `model-${index}`
+              (msg as unknown as { model?: string }).model || selectedModelIds[index] || `model-${index}`
             const provider =
               models.find((m) => m.id === model)?.provider || "unknown"
 
@@ -383,7 +383,7 @@ export function MultiChat() {
             transition={{ layout: { duration: 0 } }}
           >
             <h1 className="mb-6 text-3xl font-medium tracking-tight">
-              What's on your mind?
+              What&apos;s on your mind?
             </h1>
           </motion.div>
         ) : (

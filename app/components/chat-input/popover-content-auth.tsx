@@ -76,6 +76,7 @@ export function PopoverContentAuth() {
           onClick={handleSignInWithGoogle}
           disabled={isLoading}
         >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="https://www.google.com/favicon.ico"
             alt="Google logo"

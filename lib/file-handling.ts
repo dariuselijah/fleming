@@ -27,7 +27,6 @@ export type Attachment = {
 
 // CACHE for signed URLs to avoid regeneration
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>()
-const CACHE_DURATION = 3000000 // 50 minutes (signed URLs last 1 hour)
 
 export async function validateFile(
   file: File
@@ -207,7 +206,7 @@ export async function processFiles(
             const errorData = await response.json()
             errorMessage = errorData.error || errorMessage
           } catch (jsonError) {
-            console.error("Failed to parse error response:", jsonError)
+            console.log('Failed to parse error response:', jsonError)
             errorMessage = response.statusText || errorMessage
           }
           throw new Error(errorMessage)
@@ -217,7 +216,7 @@ export async function processFiles(
         try {
           result = await response.json()
         } catch (jsonError) {
-          console.error("Failed to parse success response:", jsonError)
+          console.log('Failed to parse success response:', jsonError)
           throw new Error("Invalid response from server")
         }
         
