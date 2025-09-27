@@ -80,7 +80,7 @@ export async function PUT(request: NextRequest) {
     console.log("Supabase client created:", !!supabase)
 
     if (!supabase) {
-      console.error("Database connection failed")
+      console.error("Database connection failed - Supabase not enabled or misconfigured")
       return NextResponse.json(
         { error: "Database connection failed" },
         { status: 500 }
@@ -185,8 +185,16 @@ export async function PUT(request: NextRequest) {
     }
   } catch (error) {
     console.error("Error in user-preferences PUT API:", error)
+    console.error("Error details:", {
+      message: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+      name: error instanceof Error ? error.name : undefined
+    })
     return NextResponse.json(
-      { error: "Internal server error" },
+      { 
+        error: "Internal server error",
+        details: error instanceof Error ? error.message : "Unknown error"
+      },
       { status: 500 }
     )
   }

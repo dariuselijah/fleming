@@ -41,7 +41,15 @@ const UserPreferencesContext = createContext<
 async function fetchUserPreferences(): Promise<UserPreferences> {
   const response = await fetch("/api/user-preferences")
   if (!response.ok) {
-    throw new Error("Failed to fetch user preferences")
+    let errorMessage = "Failed to fetch user preferences"
+    try {
+      const errorData = await response.json()
+      errorMessage = errorData.error || errorData.details || errorMessage
+    } catch {
+      // If response is not JSON, use the status text
+      errorMessage = response.statusText || errorMessage
+    }
+    throw new Error(errorMessage)
   }
   const data = await response.json()
   return convertFromApiFormat(data)
@@ -61,7 +69,15 @@ async function updateUserPreferences(
   })
 
   if (!response.ok) {
-    throw new Error("Failed to update user preferences")
+    let errorMessage = "Failed to update user preferences"
+    try {
+      const errorData = await response.json()
+      errorMessage = errorData.error || errorData.details || errorMessage
+    } catch {
+      // If response is not JSON, use the status text
+      errorMessage = response.statusText || errorMessage
+    }
+    throw new Error(errorMessage)
   }
 
   const data = await response.json()
@@ -141,6 +157,7 @@ export function UserPreferencesProvider({
             "Failed to fetch user preferences, falling back to localStorage:",
             error
           )
+          // Always fall back to localStorage for any error
           return getLocalStoragePreferences()
         }
       },
@@ -178,6 +195,7 @@ export function UserPreferencesProvider({
           "Failed to update user preferences in database, falling back to localStorage:",
           error
         )
+        // Always fall back to localStorage for any error
         const updated = { ...preferences, ...update }
         saveToLocalStorage(updated)
         return updated
