@@ -1,5 +1,6 @@
 import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { toast } from "@/components/ui/toast"
+import { toast as sonnerToast } from "sonner"
 import { getOrCreateGuestUserId } from "@/lib/api"
 import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
@@ -19,7 +20,7 @@ type UseChatCoreProps = {
   files: File[]
   createOptimisticAttachments: (
     files: File[]
-  ) => Promise<Array<{ name: string; contentType: string; url: string }>>
+  ) => Attachment[]
   setFiles: (files: File[]) => void
   checkLimitsAndNotify: (uid: string) => Promise<boolean>
   cleanupOptimisticAttachments: (attachments?: Array<{ url?: string }>) => void
@@ -203,6 +204,13 @@ export function useChatCore({
       // Handle file uploads first if there are files
       let processedAttachments: Attachment[] | null = null
       if (currentFiles.length > 0) {
+        // Show upload progress notification
+        const uploadingToastId = toast({
+          title: `Uploading ${currentFiles.length} file${currentFiles.length > 1 ? 's' : ''}...`,
+          description: "Please wait while your files are being uploaded",
+          status: "info",
+        })
+
         try {
           const currentChatId = await ensureChatExists(uid, currentInput)
           if (currentChatId) {
@@ -210,16 +218,23 @@ export function useChatCore({
             if (currentChatId !== chatId) {
               bumpChat(currentChatId)
             }
-            
+
             // Upload files in background
             const processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id)
             console.log("File uploads completed:", processedAttachments?.length || 0, "files")
-            
-            // Note: The message is already sent with optimistic attachments
-            // The real attachments will be used for the AI response
+
+            // Dismiss upload progress and show success
+            sonnerToast.dismiss(uploadingToastId)
+            toast({
+              title: "Files uploaded successfully",
+              description: `${processedAttachments?.length || 0} file${(processedAttachments?.length || 0) > 1 ? 's' : ''} ready`,
+              status: "success",
+            })
           }
         } catch (error) {
           console.error("File upload failed:", error)
+          // Dismiss upload progress
+          sonnerToast.dismiss(uploadingToastId)
           toast({
             title: "File upload failed",
             description: "Your message was sent, but files couldn't be uploaded.",
