@@ -14,9 +14,11 @@ export const useFileUpload = () => {
   const handleFileUploads = async (
     uid: string,
     chatId: string,
-    isAuthenticated: boolean = false
+    isAuthenticated: boolean = false,
+    filesToUpload?: File[]
   ): Promise<Attachment[] | null> => {
-    if (files.length === 0) return []
+    const targetFiles = filesToUpload || files
+    if (targetFiles.length === 0) return []
 
     try {
       // Check limits in background (non-blocking)
@@ -30,7 +32,7 @@ export const useFileUpload = () => {
       })
 
       // Process files in parallel immediately
-      const processed = await processFiles(files, chatId, uid, isAuthenticated)
+      const processed = await processFiles(targetFiles, chatId, uid, isAuthenticated)
       
       // Wait for limit check to complete
       const allowed = await limitCheck

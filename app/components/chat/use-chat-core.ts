@@ -28,7 +28,8 @@ type UseChatCoreProps = {
   handleFileUploads: (
     uid: string,
     chatId: string,
-    isAuthenticated?: boolean
+    isAuthenticated?: boolean,
+    filesToUpload?: File[]
   ) => Promise<Attachment[] | null>
   selectedModel: string
   clearDraft: () => void
@@ -204,6 +205,8 @@ export function useChatCore({
       // Handle file uploads first if there are files
       let processedAttachments: Attachment[] | null = null
       if (currentFiles.length > 0) {
+        console.log("[DEBUG] Starting file upload process with", currentFiles.length, "files:", currentFiles.map(f => f.name))
+
         // Show upload progress notification
         const uploadingToastId = toast({
           title: `Uploading ${currentFiles.length} file${currentFiles.length > 1 ? 's' : ''}...`,
@@ -213,6 +216,8 @@ export function useChatCore({
 
         try {
           const currentChatId = await ensureChatExists(uid, currentInput)
+          console.log("[DEBUG] Chat ID ensured:", currentChatId)
+
           if (currentChatId) {
             // Update chatId if it changed
             if (currentChatId !== chatId) {
@@ -220,8 +225,9 @@ export function useChatCore({
             }
 
             // Upload files in background
-            const processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id)
-            console.log("File uploads completed:", processedAttachments?.length || 0, "files")
+            processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id, currentFiles)
+            console.log("[DEBUG] File uploads completed:", processedAttachments?.length || 0, "files")
+            console.log("[DEBUG] Processed attachments:", processedAttachments)
 
             // Dismiss upload progress and show success
             sonnerToast.dismiss(uploadingToastId)
@@ -244,6 +250,9 @@ export function useChatCore({
       }
 
       // Append message with processed attachments (or none if upload failed)
+      console.log("[DEBUG] About to append message with attachments:", processedAttachments)
+      console.log("[DEBUG] Attachment count:", processedAttachments?.length || 0)
+
       append({
         role: "user",
         content: currentInput,
