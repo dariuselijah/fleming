@@ -143,10 +143,11 @@ We created a complete data pipeline from the UI through the chat system to the A
 ┌─────────────────────────────────────────────────────────────┐
 │                 MEDICAL KNOWLEDGE INTEGRATION                │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │  checkDrugInteractions() - RxNorm API                │   │
-│  │  - Queries NLM RxNorm for drug interactions (FREE)   │   │
+│  │  checkDrugInteractions() - FDA openFDA API (Default) │   │
+│  │  - Queries FDA drug labels for interactions (FREE)   │   │
+│  │  - Extracts context and severity automatically       │   │
 │  │  - Optional: DrugBank API (paid, comprehensive)      │   │
-│  │  - Optional: FDA openFDA API (free, label data)      │   │
+│  │  - NOTE: RxNorm Drug Interaction API discontinued    │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                                       │
@@ -591,190 +592,107 @@ MONITORING:
 
 ## API Integration: Drug Interaction Checking
 
-### RxNorm API Integration (Default - FREE)
+### ⚠️ IMPORTANT: RxNorm Drug Interaction API Discontinued
 
-**File:** `/lib/models/medical-knowledge.ts:366-529`
+**As of January 2, 2024**, the National Library of Medicine discontinued the RxNorm Drug-Drug Interaction API. Fleming has been updated to use the FDA openFDA API as the primary interaction checking service.
 
-The system integrates with the National Library of Medicine's RxNorm API to check drug interactions with intelligent database caching.
+### FDA openFDA API Integration (Default - FREE)
 
-### Performance Optimization: RxCUI Caching
+**File:** `/lib/models/medical-knowledge.ts:541-623`
 
-To avoid repeated API calls for common medications, we've implemented a database caching layer:
+The system now integrates with the FDA's openFDA Drug Label API to check drug interactions. This free, maintained API provides interaction warnings directly from official drug labels.
 
-**Database Table:** `drug_rxcui_cache`
-**Migration File:** `/supabase/migrations/add_drug_rxcui_cache.sql`
+### How FDA API Works
 
-#### Cache Architecture:
+Instead of using RxCUIs (which were specific to RxNorm), the FDA API uses generic drug names directly:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  User Query: "Check Warfarin interactions"          │
+│  User has medications: ["Warfarin", "Aspirin"]      │
 └────────────────┬─────────────────────────────────────┘
                  │
                  ▼
 ┌──────────────────────────────────────────────────────┐
-│  1. Normalize drug name: "Warfarin" → "warfarin"    │
+│  1. Query FDA API for each medication's drug label   │
+│     GET https://api.fda.gov/drug/label.json         │
+│     ?search=openfda.generic_name:"warfarin"&limit=1  │
 └────────────────┬─────────────────────────────────────┘
                  │
                  ▼
 ┌──────────────────────────────────────────────────────┐
-│  2. Query database cache (drug_rxcui_cache)          │
-│     SELECT rxcui WHERE drug_name_normalized =        │
-│     'warfarin'                                       │
+│  2. Extract drug_interactions field from response    │
+│     Contains full text of interaction warnings       │
 └────────────────┬─────────────────────────────────────┘
                  │
-        ┌────────┴────────┐
-        │                 │
-        ▼                 ▼
-   CACHE HIT         CACHE MISS
-   (~2ms)            (~200ms)
-        │                 │
-        │                 ▼
-        │    ┌──────────────────────────────┐
-        │    │  3. Call RxNorm API          │
-        │    │  GET /REST/rxcui.json        │
-        │    └────────┬─────────────────────┘
-        │             │
-        │             ▼
-        │    ┌──────────────────────────────┐
-        │    │  4. Save to cache for next   │
-        │    │     time (upsert)            │
-        │    └────────┬─────────────────────┘
-        │             │
-        └─────────────┴─────────────┐
-                                    │
-                                    ▼
-                    ┌──────────────────────────────┐
-                    │  5. Return RxCUI: "11289"    │
-                    └──────────────────────────────┘
+                 ▼
+┌──────────────────────────────────────────────────────┐
+│  3. Search for mentions of other medications         │
+│     Check if "aspirin" appears in warfarin's         │
+│     interaction text                                 │
+└────────────────┬─────────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────────┐
+│  4. Extract context and determine severity           │
+│     - "contraindicated" → contraindicated           │
+│     - "severe", "serious", "major" → major          │
+│     - "may", "minor" → minor                        │
+│     - default → moderate                            │
+└────────────────┬─────────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────────┐
+│  5. Return structured interaction data               │
+│     { drug1: "warfarin", drug2: "aspirin",          │
+│       severity: "major", description: "..." }        │
+└──────────────────────────────────────────────────────┘
 ```
 
-#### Database Schema:
+### API Example: Checking Warfarin + Aspirin
 
-```sql
-CREATE TABLE drug_rxcui_cache (
-  id UUID PRIMARY KEY,
-  drug_name TEXT NOT NULL,                -- Original: "Warfarin"
-  drug_name_normalized TEXT NOT NULL,     -- Normalized: "warfarin"
-  rxcui TEXT NOT NULL,                    -- RxCUI: "11289"
-  source TEXT DEFAULT 'rxnorm',           -- API source
-  last_verified_at TIMESTAMPTZ,           -- Cache timestamp
-  created_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ
-);
-
--- Indexes for performance
-CREATE INDEX idx_drug_rxcui_cache_normalized ON drug_rxcui_cache(drug_name_normalized);
-CREATE UNIQUE INDEX idx_drug_rxcui_cache_unique_name ON drug_rxcui_cache(drug_name_normalized, source);
+**Step 1: Query FDA for Warfarin Label**
+```bash
+GET https://api.fda.gov/drug/label.json?search=openfda.generic_name:"warfarin"&limit=1
 ```
 
-#### Pre-Seeded Common Medications:
-
-The cache is pre-seeded with 20 common medications for immediate availability:
-- Warfarin, Aspirin, Ibuprofen, Lisinopril, Metformin
-- Atorvastatin, Amlodipine, Omeprazole, Levothyroxine
-- Metoprolol, Losartan, Gabapentin, Hydrochlorothiazide
-- Sertraline, Clopidogrel, Furosemide, Prednisone
-- Amoxicillin, Albuterol, Simvastatin
-
-#### Cache Implementation:
-
-**File:** `/lib/models/medical-knowledge.ts:426-529`
-
-```typescript
-private async getRxCUI(medicationName: string): Promise<{ name: string; rxcui: string | null }> {
-  const normalized = medicationName.toLowerCase().trim()
-
-  // 1. Try cache first
-  const cached = await this.getRxCUIFromCache(normalized)
-  if (cached) {
-    console.log(`✓ RxCUI cache hit for: ${medicationName}`)
-    return { name: medicationName, rxcui: cached }
-  }
-
-  // 2. Cache miss - call API
-  console.log(`⊗ RxCUI cache miss for: ${medicationName}, calling API...`)
-  const url = `https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${encodeURIComponent(medicationName)}`
-  const response = await fetch(url)
-  const data = await response.json()
-
-  if (data.idGroup?.rxnormId?.[0]) {
-    const rxcui = data.idGroup.rxnormId[0]
-
-    // 3. Save to cache for next time
-    await this.saveRxCUIToCache(medicationName, normalized, rxcui)
-
-    return { name: medicationName, rxcui }
-  }
-
-  return { name: medicationName, rxcui: null }
+**Response Extract:**
+```json
+{
+  "results": [{
+    "drug_interactions": [
+      "...ASPIRIN: The concomitant use of warfarin and aspirin or aspirin-containing
+      products may increase the risk of bleeding. Monitor the patient closely if
+      warfarin is administered concomitantly with aspirin..."
+    ]
+  }]
 }
 ```
 
-#### Performance Benefits:
+**Step 2: Parse and Structure**
+```typescript
+// System detects "aspirin" in warfarin's interaction text
+// Extracts surrounding context for description
+// Determines severity from keywords: "increase the risk of bleeding" = moderate-major
 
-| Scenario | Without Cache | With Cache | Speedup |
-|----------|--------------|------------|---------|
-| First lookup (Warfarin) | ~200ms | ~200ms | 1x |
-| Second lookup (Warfarin) | ~200ms | ~2ms | **100x** |
-| Common medication | ~200ms | ~2ms | **100x** |
-| Uncommon medication (first time) | ~200ms | ~200ms + 5ms save | 1x |
-| Uncommon medication (cached) | ~200ms | ~2ms | **100x** |
+const interaction: DrugInteraction = {
+  drug1: "warfarin",
+  drug2: "aspirin",
+  severity: "moderate",
+  description: "...ASPIRIN: The concomitant use of warfarin and aspirin...",
+  recommendation: "Monitor the patient closely if warfarin is administered concomitantly...",
+  source: "FDA openFDA"
+}
+```
 
 **Example Log Output:**
 ```
-⊗ RxCUI cache miss for: Warfarin, calling API...
-✓ Saved RxCUI to cache: Warfarin → 11289
-
-✓ RxCUI cache hit for: Warfarin     (subsequent lookup)
-✓ RxCUI cache hit for: Aspirin      (pre-seeded)
-⊗ RxCUI cache miss for: Apixaban, calling API...
-✓ Saved RxCUI to cache: Apixaban → 1364430
+🔍 Checking FDA drug labels for 2 medications
+  → Fetching FDA label for: warfarin
+    ⚠️ Interaction found: warfarin + aspirin (moderate)
+  → Fetching FDA label for: aspirin
+    ℹ️ No interaction data found in FDA label for aspirin
+✅ Found 1 interaction(s) in FDA labels
 ```
-
-### How It Works (With Caching):
-
-1. **Get RxCUI (Drug Identifiers)**
-   ```typescript
-   // Example: "Warfarin" → RxCUI: "11289"
-   GET https://rxnav.nlm.nih.gov/REST/rxcui.json?name=Warfarin
-   ```
-
-2. **Check Interactions**
-   ```typescript
-   // Check Warfarin + Ibuprofen interactions
-   GET https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=11289+5640
-   ```
-
-3. **Parse Response**
-   ```json
-   {
-     "fullInteractionTypeGroup": [{
-       "fullInteractionType": [{
-         "interactionPair": [{
-           "interactionConcept": [
-             {"minConceptItem": {"name": "Warfarin"}},
-             {"minConceptItem": {"name": "Ibuprofen"}}
-           ],
-           "severity": "high",
-           "description": "Concurrent use may increase risk of bleeding..."
-         }]
-       }]
-     }]
-   }
-   ```
-
-4. **Return Structured Data**
-   ```typescript
-   {
-     drug1: "Warfarin",
-     drug2: "Ibuprofen",
-     severity: "major",
-     description: "Concurrent use may increase risk of bleeding...",
-     recommendation: "Consult prescribing information and consider alternative therapy...",
-     source: "RxNorm/NLM"
-   }
-   ```
 
 ### Alternative APIs
 
@@ -782,16 +700,17 @@ private async getRxCUI(medicationName: string): Promise<{ name: string; rxcui: s
 ```typescript
 const checker = new DrugInteractionChecker('drugbank')
 // Requires: DRUGBANK_API_KEY environment variable
-// Provides: More detailed clinical recommendations
-// Cost: Subscription-based
+// Provides: More detailed clinical recommendations and severity ratings
+// Cost: Subscription-based ($$$)
+// Status: Available as premium alternative
 ```
 
-#### FDA openFDA (Free - Label Data)
+#### RxNorm (Discontinued - Historical Reference Only)
 ```typescript
-const checker = new DrugInteractionChecker('fda')
-// Requires: No API key
-// Provides: Interaction info from drug labels
-// Limitation: Only finds interactions mentioned in labels
+// NOTE: This API was discontinued on January 2, 2024
+// Previously used RxCUI identifiers to check drug interactions
+// Replaced by FDA openFDA API
+// See: /supabase/migrations/DEPRECATED_add_drug_rxcui_cache.md
 ```
 
 ### Usage Example
@@ -799,17 +718,18 @@ const checker = new DrugInteractionChecker('fda')
 ```typescript
 import { checkDrugInteractions } from '@/lib/models/medical-knowledge'
 
-const medications = ["Warfarin", "Lisinopril", "Metformin"]
+const medications = ["Warfarin", "Aspirin", "Metformin"]
 const interactions = await checkDrugInteractions(medications)
 
 // Returns:
 // [
 //   {
-//     drug1: "Lisinopril",
-//     drug2: "Potassium supplements",
+//     drug1: "warfarin",
+//     drug2: "aspirin",
 //     severity: "moderate",
-//     description: "May increase risk of hyperkalemia",
-//     source: "RxNorm/NLM"
+//     description: "...concomitant use may increase the risk of bleeding...",
+//     recommendation: "Monitor the patient closely if warfarin is administered concomitantly...",
+//     source: "FDA openFDA"
 //   }
 // ]
 ```
@@ -888,15 +808,6 @@ console.log("Selected Agents:", selectedAgents)
 
 ### Database Verification
 
-**Step 0: Apply Database Migration (REQUIRED)**
-```bash
-# Run the RxCUI cache migration
-supabase db push
-
-# Or if using raw SQL:
-psql -h your-db-host -d your-db-name -f supabase/migrations/add_drug_rxcui_cache.sql
-```
-
 **Step 1: Verify User Preferences**
 ```sql
 -- Check user preferences are saved
@@ -908,35 +819,22 @@ SELECT
   health_context
 FROM user_preferences
 WHERE user_id = 'your-user-id';
+
+-- Expected: Array values with your health data
 ```
 
-**Step 2: Verify RxCUI Cache**
-```sql
--- Check RxCUI cache has pre-seeded medications
-SELECT
-  drug_name,
-  rxcui,
-  created_at
-FROM drug_rxcui_cache
-ORDER BY drug_name;
-
--- Expected: 20 common medications (Warfarin, Aspirin, etc.)
+**Step 2: Monitor API Performance**
+```bash
+# Check server logs for drug interaction queries
+# Look for these log entries:
+🔍 Checking FDA drug labels for N medications
+  → Fetching FDA label for: [drug_name]
+    ⚠️ Interaction found: [drug1] + [drug2] ([severity])
+✅ Found N interaction(s) in FDA labels
 ```
 
-**Step 3: Monitor Cache Performance**
-```sql
--- Check which medications are being cached
-SELECT
-  drug_name,
-  rxcui,
-  last_verified_at,
-  created_at
-FROM drug_rxcui_cache
-ORDER BY last_verified_at DESC
-LIMIT 10;
-
--- See recently added medications (cache misses that were saved)
-```
+**Note on RxCUI Cache:**
+The `drug_rxcui_cache` table is no longer needed since the FDA API uses drug names directly instead of RxCUI identifiers. If you have this table from a previous version, it can be safely dropped or ignored.
 
 ---
 
@@ -1047,11 +945,12 @@ const warnings = {
    - Connected to existing user preferences hook (no additional code needed)
 
 4. **`/lib/models/medical-knowledge.ts`** (~380 lines added)
-   - Added `DrugInteractionChecker` class (lines 339-584)
-   - Implemented RxNorm API integration with caching (lines 366-529)
-   - Added DrugBank and FDA API support as alternatives (lines 451-543)
-   - Implemented database caching for RxCUI lookups (lines 466-529)
-   - Exported `checkDrugInteractions()` and `checkNewMedicationInteractions()` functions (lines 590-609)
+   - Added `DrugInteractionChecker` class (lines 339-707)
+   - **Updated (Oct 2025)**: Switched from RxNorm to FDA openFDA API
+   - Implemented FDA Drug Label API integration (lines 541-623)
+   - Added DrugBank API support as premium alternative
+   - Removed RxCUI caching (no longer needed with FDA API)
+   - Exported `checkDrugInteractions()` and `checkNewMedicationInteractions()` functions (lines 666-679)
 
 ### Files Created (2 files)
 
@@ -1059,16 +958,15 @@ const warnings = {
    - Complete educational documentation
    - Architecture diagrams and data flow
    - Code walkthroughs and examples
-   - API integration details
+   - API integration details with FDA openFDA
    - Testing instructions
    - Future enhancement ideas
+   - **Updated (Oct 2025)**: Reflects FDA API migration
 
-2. **`/supabase/migrations/add_drug_rxcui_cache.sql`** (~100 lines)
-   - Database table for RxCUI caching
-   - Indexes for fast lookups
-   - Row Level Security policies
-   - Pre-seeded with 20 common medications
-   - Automatic timestamp updates via triggers
+2. **`/supabase/migrations/DEPRECATED_add_drug_rxcui_cache.md`**
+   - Documentation explaining RxNorm API discontinuation
+   - Historical reference for previous RxCUI cache implementation
+   - Migration notes for users upgrading from older versions
 
 ### Statistics
 
@@ -1077,10 +975,9 @@ const warnings = {
 | **Total Lines Added** | ~670 lines |
 | **Files Modified** | 4 |
 | **Files Created** | 2 |
-| **APIs Integrated** | 3 (RxNorm, DrugBank, FDA) |
-| **Database Tables Added** | 1 (drug_rxcui_cache) |
-| **Common Medications Pre-Seeded** | 20 |
-| **Performance Improvement** | 100x for cached drugs (2ms vs 200ms) |
+| **APIs Integrated** | 2 (FDA openFDA, DrugBank) |
+| **Primary API** | FDA openFDA (free, maintained) |
+| **API Status** | RxNorm discontinued Jan 2024, migrated to FDA |
 | **Type Safety** | 100% (TypeScript strict mode passing) |
 | **Test Coverage** | Manual testing only (see Testing section) |
 
@@ -1090,12 +987,12 @@ const warnings = {
 
 1. **Data Flow is Critical**: Health context must flow from UI → DB → API → AI System Prompt
 2. **Type Safety Matters**: TypeScript caught several potential bugs during development
-3. **API Integration**: Using free, government-provided APIs (RxNorm) makes this sustainable
-4. **Caching is Essential**: Database caching reduces API calls by 100x for common medications
+3. **API Integration**: Using free, government-provided APIs (FDA openFDA) makes this sustainable
+4. **API Resilience**: When RxNorm was discontinued, architecture allowed easy migration to FDA API
 5. **Safety First**: Multiple layers of warnings (allergies, interactions) in system prompts
 6. **Intelligent Agent Selection**: Context-aware agent selection improves response quality
 7. **Scalable Architecture**: Easy to add more APIs or data sources in the future
-8. **Pre-Seeding Works**: Pre-loading 20 common medications provides instant results for most queries
+8. **Direct Drug Names**: FDA API's use of drug names (vs RxCUIs) simplifies implementation
 
 ---
 

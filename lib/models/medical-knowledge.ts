@@ -360,64 +360,16 @@ class DrugInteractionChecker {
 
   /**
    * Check for drug interactions using RxNorm Interaction API
+   * NOTE: RxNorm Drug Interaction API was DISCONTINUED on January 2, 2024
+   * This method now falls back to FDA openFDA API
    * https://lhncbc.nlm.nih.gov/RxNav/APIs/InteractionAPIs.html
-   * This is a FREE API from the National Library of Medicine
    */
   private async checkInteractionsRxNorm(medications: string[]): Promise<DrugInteraction[]> {
-    if (medications.length < 2) return []
+    console.warn('⚠️ RxNorm Drug Interaction API was discontinued on January 2, 2024')
+    console.log('→ Falling back to FDA openFDA API for drug interactions')
 
-    try {
-      const interactions: DrugInteraction[] = []
-
-      // First, get RxCUI (RxNorm Concept Unique Identifiers) for each medication
-      const rxcuis = await Promise.all(
-        medications.map(med => this.getRxCUI(med))
-      )
-
-      // Filter out medications that couldn't be found
-      const validMeds = rxcuis.filter(item => item.rxcui !== null)
-
-      if (validMeds.length < 2) return []
-
-      // Check interactions for each pair
-      for (let i = 0; i < validMeds.length; i++) {
-        const rxcuiList = validMeds
-          .filter((_, idx) => idx !== i)
-          .map(m => m.rxcui)
-          .join('+')
-
-        const url = `https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${validMeds[i].rxcui}+${rxcuiList}`
-
-        const response = await fetch(url)
-        const data = await response.json()
-
-        if (data.fullInteractionTypeGroup) {
-          for (const group of data.fullInteractionTypeGroup) {
-            if (group.fullInteractionType) {
-              for (const interactionType of group.fullInteractionType) {
-                if (interactionType.interactionPair) {
-                  for (const pair of interactionType.interactionPair) {
-                    interactions.push({
-                      drug1: pair.interactionConcept[0]?.minConceptItem?.name || validMeds[i].name,
-                      drug2: pair.interactionConcept[1]?.minConceptItem?.name || '',
-                      severity: this.mapSeverity(pair.severity),
-                      description: pair.description || 'Interaction detected',
-                      recommendation: 'Consult prescribing information and consider alternative therapy if interaction is significant.',
-                      source: 'RxNorm/NLM'
-                    })
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      return interactions
-    } catch (error) {
-      console.error('Error checking RxNorm interactions:', error)
-      return []
-    }
+    // Fallback to FDA API
+    return this.checkInteractionsFDA(medications)
   }
 
   /**
@@ -591,33 +543,76 @@ class DrugInteractionChecker {
 
     try {
       const interactions: DrugInteraction[] = []
+      console.log(`🔍 Checking FDA drug labels for ${medications.length} medications`)
 
       for (const med of medications) {
         const url = `https://api.fda.gov/drug/label.json?search=openfda.generic_name:"${encodeURIComponent(med)}"&limit=1`
+        console.log(`  → Fetching FDA label for: ${med}`)
 
         const response = await fetch(url)
-        if (response.ok) {
-          const data = await response.json()
+        if (!response.ok) {
+          console.warn(`    FDA API returned ${response.status} for ${med}`)
+          continue
+        }
 
-          if (data.results?.[0]?.drug_interactions) {
-            const interactionText = data.results[0].drug_interactions[0]
+        const data = await response.json()
 
-            // Parse interaction text to find mentions of other medications
-            const otherMeds = medications.filter(m => m !== med)
-            for (const otherMed of otherMeds) {
-              if (interactionText.toLowerCase().includes(otherMed.toLowerCase())) {
+        if (data.results?.[0]?.drug_interactions) {
+          const interactionTexts = data.results[0].drug_interactions
+          const fullInteractionText = Array.isArray(interactionTexts)
+            ? interactionTexts.join(' ').toLowerCase()
+            : String(interactionTexts).toLowerCase()
+
+          // Parse interaction text to find mentions of other medications
+          const otherMeds = medications.filter(m => m !== med)
+          for (const otherMed of otherMeds) {
+            const otherMedLower = otherMed.toLowerCase()
+
+            if (fullInteractionText.includes(otherMedLower)) {
+              // Try to extract relevant context around the mention
+              const contextStart = Math.max(0, fullInteractionText.indexOf(otherMedLower) - 100)
+              const contextEnd = Math.min(fullInteractionText.length, fullInteractionText.indexOf(otherMedLower) + otherMedLower.length + 200)
+              const context = fullInteractionText.substring(contextStart, contextEnd).trim()
+
+              // Determine severity from keywords
+              let severity: 'minor' | 'moderate' | 'major' | 'contraindicated' = 'moderate'
+              if (context.includes('contraindicated') || context.includes('should not')) {
+                severity = 'contraindicated'
+              } else if (context.includes('serious') || context.includes('severe') || context.includes('major')) {
+                severity = 'major'
+              } else if (context.includes('minor') || context.includes('may')) {
+                severity = 'minor'
+              }
+
+              console.log(`    ⚠️ Interaction found: ${med} + ${otherMed} (${severity})`)
+
+              // Avoid duplicate interactions (A+B is same as B+A)
+              const alreadyExists = interactions.some(i =>
+                (i.drug1 === med && i.drug2 === otherMed) ||
+                (i.drug1 === otherMed && i.drug2 === med)
+              )
+
+              if (!alreadyExists) {
                 interactions.push({
                   drug1: med,
                   drug2: otherMed,
-                  severity: 'moderate',
-                  description: `Interaction found in FDA label for ${med}`,
-                  recommendation: 'Review complete drug label for details.',
+                  severity,
+                  description: context || `Interaction found in FDA label for ${med}`,
+                  recommendation: 'Review complete drug label and consult healthcare provider. Consider alternative therapy if interaction is significant.',
                   source: 'FDA openFDA'
                 })
               }
             }
           }
+        } else {
+          console.log(`    ℹ️ No interaction data found in FDA label for ${med}`)
         }
+      }
+
+      if (interactions.length === 0) {
+        console.log(`✅ No interactions found between these medications in FDA labels`)
+      } else {
+        console.log(`✅ Found ${interactions.length} interaction(s) in FDA labels`)
       }
 
       return interactions
@@ -670,15 +665,16 @@ class DrugInteractionChecker {
 
 /**
  * Check for potential drug interactions in patient's medication list
- * Uses RxNorm API by default (free, no API key required)
+ * Uses FDA openFDA API by default (free, no API key required)
+ * NOTE: RxNorm Drug Interaction API was discontinued on January 2, 2024
  */
 export async function checkDrugInteractions(medications: string[]): Promise<DrugInteraction[]> {
   if (!medications || medications.length < 2) {
     return []
   }
 
-  // Use RxNorm by default (free NLM API)
-  const checker = new DrugInteractionChecker('rxnorm')
+  // Use FDA openFDA API by default (free, maintained by FDA)
+  const checker = new DrugInteractionChecker('fda')
   return await checker.checkInteractions(medications)
 }
 

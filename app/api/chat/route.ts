@@ -12,14 +12,14 @@ import {
   validateAndTrackUsage,
 } from "./api"
 import { createErrorResponse, extractErrorMessage } from "./utils"
-import { 
-  analyzeMedicalQuery, 
-  MedicalContext, 
+import {
+  analyzeMedicalQuery,
+  MedicalContext,
   AgentSelection,
   getHealthcareSystemPromptServer,
   orchestrateHealthcareAgents
 } from "@/lib/models/healthcare-agents"
-import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
+import { integrateMedicalKnowledge, checkDrugInteractions, DrugInteraction } from "@/lib/models/medical-knowledge"
 
 export const maxDuration = 60
 
@@ -145,6 +145,21 @@ export async function POST(req: Request) {
       systemPrompt
     )
 
+    // Check for drug interactions if user has medications
+    let drugInteractions: DrugInteraction[] = []
+    if (medications && medications.length >= 2) {
+      console.log("🔍 Checking drug interactions for medications:", medications)
+      try {
+        drugInteractions = await checkDrugInteractions(medications)
+        console.log(`✅ Drug interaction check complete. Found ${drugInteractions.length} interactions.`)
+        if (drugInteractions.length > 0) {
+          console.log("⚠️ Drug interactions found:", drugInteractions.map(i => `${i.drug1} + ${i.drug2} (${i.severity})`))
+        }
+      } catch (error) {
+        console.error("❌ Error checking drug interactions:", error)
+      }
+    }
+
     // Add health context to system prompt - IMPORTANT: For ALL users (general, doctor, medical_student)
     const hasHealthContext = healthContext || healthConditions || medications || allergies || familyHistory || lifestyleFactors
 
@@ -170,6 +185,25 @@ export async function POST(req: Request) {
         if (healthcarePrompt) {
           effectiveSystemPrompt = healthcarePrompt
         }
+
+        // Add drug interaction warnings for healthcare professionals
+        if (drugInteractions.length > 0) {
+          effectiveSystemPrompt += "\n\n=== ⚠️ DETECTED DRUG INTERACTIONS ==="
+          effectiveSystemPrompt += `\n\n${drugInteractions.length} potential drug interaction(s) detected in patient's current medication list:`
+
+          drugInteractions.forEach((interaction, index) => {
+            effectiveSystemPrompt += `\n\n${index + 1}. **${interaction.drug1}** + **${interaction.drug2}**`
+            effectiveSystemPrompt += `\n   - Severity: ${interaction.severity.toUpperCase()}`
+            effectiveSystemPrompt += `\n   - Description: ${interaction.description}`
+            effectiveSystemPrompt += `\n   - Recommendation: ${interaction.recommendation}`
+            if (interaction.source) {
+              effectiveSystemPrompt += `\n   - Source: ${interaction.source}`
+            }
+          })
+
+          effectiveSystemPrompt += "\n\n=== END DRUG INTERACTIONS ==="
+          effectiveSystemPrompt += "\n\n⚠️ CRITICAL: Consider these interactions when making any medication recommendations. Consult with pharmacist or use clinical decision support tools for comprehensive interaction checking."
+        }
       }
       // For general users: add health context with safety disclaimers
       else {
@@ -188,6 +222,20 @@ export async function POST(req: Request) {
         if (medications && medications.length > 0) {
           effectiveSystemPrompt += `\n\nCurrent Medications:\n${medications.map(m => `- ${m}`).join('\n')}`
           effectiveSystemPrompt += `\n\n⚠️ CRITICAL: The user is taking these medications. ALWAYS:\n- Warn about potential drug interactions before suggesting ANY new medication or supplement\n- Remind them to consult their doctor or pharmacist before starting anything new\n- Flag any obvious contraindications or risks`
+        }
+
+        // Add drug interaction warnings for general users
+        if (drugInteractions.length > 0) {
+          effectiveSystemPrompt += `\n\n⚠️ DETECTED DRUG INTERACTIONS IN YOUR MEDICATION LIST:`
+
+          drugInteractions.forEach((interaction, index) => {
+            effectiveSystemPrompt += `\n\n${index + 1}. **${interaction.drug1}** + **${interaction.drug2}**`
+            effectiveSystemPrompt += `\n   - Severity: ${interaction.severity.toUpperCase()}`
+            effectiveSystemPrompt += `\n   - ${interaction.description}`
+            effectiveSystemPrompt += `\n   - ${interaction.recommendation}`
+          })
+
+          effectiveSystemPrompt += `\n\n⚠️ IMPORTANT: You MUST inform the user about these detected interactions in your response, especially if they ask about their medications or any new treatments. Emphasize that they should discuss these interactions with their doctor or pharmacist.`
         }
 
         if (allergies && allergies.length > 0) {
