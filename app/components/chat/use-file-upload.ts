@@ -14,9 +14,11 @@ export const useFileUpload = () => {
   const handleFileUploads = async (
     uid: string,
     chatId: string,
-    isAuthenticated: boolean = false
+    isAuthenticated: boolean = false,
+    filesToUpload?: File[]
   ): Promise<Attachment[] | null> => {
-    if (files.length === 0) return []
+    const targetFiles = filesToUpload || files
+    if (targetFiles.length === 0) return []
 
     try {
       // Check limits in background (non-blocking)
@@ -30,7 +32,7 @@ export const useFileUpload = () => {
       })
 
       // Process files in parallel immediately
-      const processed = await processFiles(files, chatId, uid, isAuthenticated)
+      const processed = await processFiles(targetFiles, chatId, uid, isAuthenticated)
       
       // Wait for limit check to complete
       const allowed = await limitCheck
@@ -47,48 +49,69 @@ export const useFileUpload = () => {
     }
   }
 
-  const createOptimisticAttachments = async (files: File[]) => {
-    const attachments = []
-    
-    for (const file of files) {
+  const createOptimisticAttachments = (files: File[]): Attachment[] => {
+    // Use blob URLs immediately (non-blocking) instead of data URLs
+    // Blob URLs are fast and non-blocking for instant UI feedback
+    return files.map((file) => {
       if (file.type.startsWith("image/")) {
-        try {
-          // Convert file to data URL for AI SDK compatibility
-          const dataUrl = await fileToDataUrl(file)
-          attachments.push({
-            name: file.name,
-            contentType: file.type,
-            url: dataUrl,
-          })
-        } catch (error) {
-          console.error("Failed to convert file to data URL:", error)
-          // Fallback to blob URL for display only
-          attachments.push({
-            name: file.name,
-            contentType: file.type,
-            url: URL.createObjectURL(file),
-          })
+        return {
+          name: file.name,
+          contentType: file.type,
+          url: URL.createObjectURL(file), // Fast, non-blocking blob URL
         }
       } else {
-        attachments.push({
+        return {
           name: file.name,
           contentType: file.type,
           url: "",
-        })
+        }
       }
-    }
-    
-    return attachments
+    })
   }
 
   // Helper function to convert File to data URL
+  // Now deferred using requestIdleCallback when possible
   const fileToDataUrl = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.onerror = reject
-      reader.readAsDataURL(file)
+      const performRead = () => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      }
+
+      // Use requestIdleCallback to defer heavy FileReader operations
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(() => performRead(), { timeout: 1000 })
+      } else {
+        // Fallback for browsers without requestIdleCallback
+        setTimeout(performRead, 0)
+      }
     })
+  }
+
+  // Convert blob URLs to data URLs for AI SDK (called at submit time)
+  const convertBlobUrlsToDataUrls = async (
+    attachments: Attachment[],
+    files: File[]
+  ): Promise<Attachment[]> => {
+    return await Promise.all(
+      attachments.map(async (attachment, index) => {
+        // Only convert blob URLs for images
+        if (attachment.url?.startsWith("blob:") && attachment.contentType?.startsWith("image/")) {
+          try {
+            const file = files[index]
+            if (file) {
+              const dataUrl = await fileToDataUrl(file)
+              return { ...attachment, url: dataUrl }
+            }
+          } catch (error) {
+            console.error("Failed to convert blob URL to data URL:", error)
+          }
+        }
+        return attachment
+      })
+    )
   }
 
   const cleanupOptimisticAttachments = (attachments?: Array<{ url?: string }>) => {
@@ -198,6 +221,7 @@ export const useFileUpload = () => {
     setFiles,
     handleFileUploads,
     createOptimisticAttachments,
+    convertBlobUrlsToDataUrls,
     cleanupOptimisticAttachments,
     handleFileUpload,
     handleFileRemove,

@@ -1,5 +1,6 @@
 import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { toast } from "@/components/ui/toast"
+import { toast as sonnerToast } from "sonner"
 import { getOrCreateGuestUserId } from "@/lib/api"
 import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
@@ -19,7 +20,7 @@ type UseChatCoreProps = {
   files: File[]
   createOptimisticAttachments: (
     files: File[]
-  ) => Promise<Array<{ name: string; contentType: string; url: string }>>
+  ) => Attachment[]
   setFiles: (files: File[]) => void
   checkLimitsAndNotify: (uid: string) => Promise<boolean>
   cleanupOptimisticAttachments: (attachments?: Array<{ url?: string }>) => void
@@ -27,7 +28,8 @@ type UseChatCoreProps = {
   handleFileUploads: (
     uid: string,
     chatId: string,
-    isAuthenticated?: boolean
+    isAuthenticated?: boolean,
+    filesToUpload?: File[]
   ) => Promise<Attachment[] | null>
   selectedModel: string
   clearDraft: () => void
@@ -182,6 +184,7 @@ export function useChatCore({
       const options = {
         body: {
           chatId: chatId || "temp", // Use existing chatId or temp for immediate streaming
+          //chatId: chatId && !chatId.startsWith('temp') ? chatId : null,
           userId: uid,
           model: selectedModel,
           isAuthenticated: !!user?.id,
@@ -198,35 +201,46 @@ export function useChatCore({
         },
       }
      
-      // Create optimistic attachments for immediate display
-      const optimisticAttachments = currentFiles.length > 0 ? await createOptimisticAttachments(currentFiles) : undefined
-      
-      // Append message immediately with optimistic attachments for instant feedback
-      append({
-        role: "user",
-        content: currentInput,
-        experimental_attachments: optimisticAttachments,
-      }, options)
 
-      // Handle file uploads in background if there are files
+      // Handle file uploads first if there are files
+      let processedAttachments: Attachment[] | null = null
       if (currentFiles.length > 0) {
+        console.log("[DEBUG] Starting file upload process with", currentFiles.length, "files:", currentFiles.map(f => f.name))
+
+        // Show upload progress notification
+        const uploadingToastId = toast({
+          title: `Uploading ${currentFiles.length} file${currentFiles.length > 1 ? 's' : ''}...`,
+          description: "Please wait while your files are being uploaded",
+          status: "info",
+        })
+
         try {
           const currentChatId = await ensureChatExists(uid, currentInput)
+          console.log("[DEBUG] Chat ID ensured:", currentChatId)
+
           if (currentChatId) {
             // Update chatId if it changed
             if (currentChatId !== chatId) {
               bumpChat(currentChatId)
             }
-            
+
             // Upload files in background
-            const processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id)
-            console.log("File uploads completed:", processedAttachments?.length || 0, "files")
-            
-            // Note: The message is already sent with optimistic attachments
-            // The real attachments will be used for the AI response
+            processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id, currentFiles)
+            console.log("[DEBUG] File uploads completed:", processedAttachments?.length || 0, "files")
+            console.log("[DEBUG] Processed attachments:", processedAttachments)
+
+            // Dismiss upload progress and show success
+            sonnerToast.dismiss(uploadingToastId)
+            toast({
+              title: "Files uploaded successfully",
+              description: `${processedAttachments?.length || 0} file${(processedAttachments?.length || 0) > 1 ? 's' : ''} ready`,
+              status: "success",
+            })
           }
         } catch (error) {
           console.error("File upload failed:", error)
+          // Dismiss upload progress
+          sonnerToast.dismiss(uploadingToastId)
           toast({
             title: "File upload failed",
             description: "Your message was sent, but files couldn't be uploaded.",
@@ -235,6 +249,15 @@ export function useChatCore({
         }
       }
 
+      // Append message with processed attachments (or none if upload failed)
+      console.log("[DEBUG] About to append message with attachments:", processedAttachments)
+      console.log("[DEBUG] Attachment count:", processedAttachments?.length || 0)
+
+      append({
+        role: "user",
+        content: currentInput,
+        experimental_attachments: processedAttachments || undefined,
+      }, options)
     } catch (error) {
       console.error("Error in submit:", error)
       toast({

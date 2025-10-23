@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/tooltip"
 import { X } from "@phosphor-icons/react"
 import Image from "next/image"
-import { useState } from "react"
+import { useState, useMemo, useEffect } from "react"
 
 type FileItemProps = {
   file: File
@@ -23,7 +23,25 @@ export function FileItem({ file, onRemove }: FileItemProps) {
   const [isRemoving, setIsRemoving] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
 
+  // Memoize blob URL to prevent recreation on every render
+  const imageUrl = useMemo(() => {
+    return file.type.includes("image") ? URL.createObjectURL(file) : null
+  }, [file])
+
+  // Cleanup blob URL on unmount or when file changes
+  useEffect(() => {
+    return () => {
+      if (imageUrl) {
+        URL.revokeObjectURL(imageUrl)
+      }
+    }
+  }, [imageUrl])
+
   const handleRemove = () => {
+    // Cleanup blob URL immediately before removal
+    if (imageUrl) {
+      URL.revokeObjectURL(imageUrl)
+    }
     setIsRemoving(true)
     onRemove(file)
   }
@@ -37,9 +55,9 @@ export function FileItem({ file, onRemove }: FileItemProps) {
         <HoverCardTrigger className="w-full">
           <div className="bg-background hover:bg-accent border-input flex w-full items-center gap-3 rounded-2xl border p-2 pr-3 transition-colors">
             <div className="bg-accent-foreground flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-md">
-              {file.type.includes("image") ? (
+              {imageUrl ? (
                 <Image
-                  src={URL.createObjectURL(file)}
+                  src={imageUrl}
                   alt={file.name}
                   width={40}
                   height={40}
@@ -61,14 +79,16 @@ export function FileItem({ file, onRemove }: FileItemProps) {
           </div>
         </HoverCardTrigger>
         <HoverCardContent side="top">
-          <Image
-            src={URL.createObjectURL(file)}
-            alt={file.name}
-            width={200}
-            height={200}
-            className="h-full w-full object-cover"
-            unoptimized={true}
-          />
+          {imageUrl && (
+            <Image
+              src={imageUrl}
+              alt={file.name}
+              width={200}
+              height={200}
+              className="h-full w-full object-cover"
+              unoptimized={true}
+            />
+          )}
         </HoverCardContent>
       </HoverCard>
       {!isRemoving ? (
