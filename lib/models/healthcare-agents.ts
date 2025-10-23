@@ -396,20 +396,23 @@ Always consider the specialty context and coordinate with other specialties when
 // Query Analysis Functions
 export function analyzeMedicalQuery(query: string, context: MedicalContext): AgentSelection[] {
   const analysis = {
-    queryType: determineQueryType(query),
-    urgency: assessUrgency(query),
-    complexity: assessComplexity(query),
-    specialties: identifyRelevantSpecialties(query),
-    requiredCapabilities: identifyRequiredCapabilities(query)
+    queryType: determineQueryType(query, context),
+    urgency: assessUrgency(query, context),
+    complexity: assessComplexity(query, context),
+    specialties: identifyRelevantSpecialties(query, context),
+    requiredCapabilities: identifyRequiredCapabilities(query, context)
   }
 
-  const selectedAgents = selectAgents(analysis)
+  const selectedAgents = selectAgents(analysis, context)
   return prioritizeAgents(selectedAgents, analysis)
 }
 
-function determineQueryType(query: string): MedicalQueryType {
+function determineQueryType(query: string, context?: MedicalContext): MedicalQueryType {
   const queryLower = query.toLowerCase()
-  
+
+  // Check if patient has medications - medication queries need drug interaction checking
+  const hasMedications = context?.medications && context.medications.length > 0
+
   // Enhanced pattern recognition for medical queries
   const patterns = {
     diagnosis: [
@@ -443,25 +446,33 @@ function determineQueryType(query: string): MedicalQueryType {
       'recommendation', 'standard', 'protocol', 'consensus'
     ]
   }
-  
+
   // Check for comprehensive patterns that need multiple agents
   const comprehensivePatterns = [
     'complex', 'multiple', 'comprehensive', 'multidisciplinary', 'case',
     'patient', 'clinical', 'scenario', 'differential diagnosis'
   ]
-  
+
   // If query is long or has comprehensive patterns, use comprehensive approach
   if (query.length > 150 || comprehensivePatterns.some(pattern => queryLower.includes(pattern))) {
     return 'comprehensive'
   }
-  
+
+  // If patient has medications and query is about any treatment/medication, prioritize medication type
+  if (hasMedications && (
+    patterns.medication.some(keyword => queryLower.includes(keyword)) ||
+    patterns.treatment.some(keyword => queryLower.includes(keyword))
+  )) {
+    return 'medication'
+  }
+
   // Check each pattern type and return the most specific match
   for (const [type, keywords] of Object.entries(patterns)) {
     if (keywords.some(keyword => queryLower.includes(keyword))) {
       return type as MedicalQueryType
     }
   }
-  
+
   // Default to comprehensive for medical queries to ensure thorough analysis
   return 'comprehensive'
 }
@@ -470,29 +481,41 @@ function matchesPattern(text: string, patterns: string[]): boolean {
   return patterns.some(pattern => text.includes(pattern))
 }
 
-function assessUrgency(query: string): 'low' | 'medium' | 'high' {
-  const urgentKeywords = ['emergency', 'urgent', 'critical', 'acute', 'severe', 'immediate']
+function assessUrgency(query: string, context?: MedicalContext): 'low' | 'medium' | 'high' {
+  const urgentKeywords = ['emergency', 'urgent', 'critical', 'acute', 'severe', 'immediate', 'chest pain', 'difficulty breathing', 'bleeding']
+
+  // Increase urgency if patient has relevant chronic conditions
+  const hasChronicConditions = context?.healthConditions && context.healthConditions.length > 0
   const queryLower = query.toLowerCase()
   
   if (urgentKeywords.some(keyword => queryLower.includes(keyword))) {
     return 'high'
   }
-  
+
+  // Medium urgency if patient has chronic conditions and query is related
+  if (hasChronicConditions && query.length > 50) {
+    return 'medium'
+  }
+
   if (query.length > 150) {
     return 'medium'
   }
-  
+
   return 'low'
 }
 
-function assessComplexity(query: string): 'simple' | 'moderate' | 'complex' {
+function assessComplexity(query: string, context?: MedicalContext): 'simple' | 'moderate' | 'complex' {
   const complexKeywords = ['multiple', 'comorbid', 'complex', 'multidisciplinary', 'differential']
   const queryLower = query.toLowerCase()
-  
-  if (complexKeywords.some(keyword => queryLower.includes(keyword)) || query.length > 300) {
+
+  // Increase complexity if patient has multiple conditions or medications
+  const hasMultipleConditions = (context?.healthConditions && context.healthConditions.length > 2) ||
+                                 (context?.medications && context.medications.length > 3)
+
+  if (complexKeywords.some(keyword => queryLower.includes(keyword)) || query.length > 300 || hasMultipleConditions) {
     return 'complex'
   }
-  
+
   if (query.length > 100) {
     return 'moderate'
   }
@@ -500,10 +523,10 @@ function assessComplexity(query: string): 'simple' | 'moderate' | 'complex' {
   return 'simple'
 }
 
-function identifyRelevantSpecialties(query: string): string[] {
+function identifyRelevantSpecialties(query: string, context?: MedicalContext): string[] {
   const specialties: string[] = []
   const queryLower = query.toLowerCase()
-  
+
   // Map keywords to specialties
   const specialtyKeywords = {
     cardiology: ['cardiac', 'heart', 'cardiovascular', 'ecg', 'chest pain', 'arrhythmia'],
@@ -513,54 +536,75 @@ function identifyRelevantSpecialties(query: string): string[] {
     emergency_medicine: ['emergency', 'urgent', 'trauma', 'acute', 'critical'],
     internal_medicine: ['internal', 'general', 'adult', 'chronic', 'comprehensive']
   }
-  
+
   Object.entries(specialtyKeywords).forEach(([specialty, keywords]) => {
     if (keywords.some(keyword => queryLower.includes(keyword))) {
       specialties.push(specialty)
     }
   })
-  
+
+  // Add specialties based on patient's health conditions
+  if (context?.healthConditions) {
+    const conditionLower = context.healthConditions.join(' ').toLowerCase()
+    if (conditionLower.includes('diabetes') || conditionLower.includes('endocrine')) {
+      specialties.push('endocrinology')
+    }
+    if (conditionLower.includes('cardiac') || conditionLower.includes('heart') || conditionLower.includes('hypertension')) {
+      if (!specialties.includes('cardiology')) specialties.push('cardiology')
+    }
+    if (conditionLower.includes('kidney') || conditionLower.includes('renal')) {
+      specialties.push('nephrology')
+    }
+  }
+
   return specialties
 }
 
-function identifyRequiredCapabilities(query: string): string[] {
+function identifyRequiredCapabilities(query: string, context?: MedicalContext): string[] {
   const capabilities: string[] = []
   const queryLower = query.toLowerCase()
-  
+
   if (matchesPattern(queryLower, ['diagnosis', 'differential', 'symptoms'])) {
     capabilities.push('differential_diagnosis')
   }
-  
+
   if (matchesPattern(queryLower, ['medication', 'drug', 'pharmacology'])) {
     capabilities.push('drug_interactions')
   }
-  
+
+  // Always check drug interactions if patient is on medications
+  if (context?.medications && context.medications.length > 0) {
+    if (!capabilities.includes('drug_interactions')) {
+      capabilities.push('drug_interactions')
+    }
+  }
+
   if (matchesPattern(queryLower, ['imaging', 'radiology', 'scan'])) {
     capabilities.push('imaging_interpretation')
   }
-  
+
   if (matchesPattern(queryLower, ['lab', 'laboratory', 'test'])) {
     capabilities.push('laboratory_analysis')
   }
-  
+
   if (matchesPattern(queryLower, ['treatment', 'therapy', 'protocol'])) {
     capabilities.push('treatment_planning')
   }
-  
+
   if (matchesPattern(queryLower, ['risk', 'safety', 'complication'])) {
     capabilities.push('risk_assessment')
   }
-  
+
   if (matchesPattern(queryLower, ['guideline', 'evidence', 'research'])) {
     capabilities.push('medical_literature')
   }
-  
+
   return capabilities
 }
 
-function selectAgents(analysis: QueryAnalysis): AgentSelection[] {
+function selectAgents(analysis: QueryAnalysis, context?: MedicalContext): AgentSelection[] {
   const agents: AgentSelection[] = []
-  
+
   // Enhanced agent selection with better reasoning
   switch (analysis.queryType) {
     case 'diagnosis':
@@ -749,6 +793,13 @@ export type MedicalContext = {
   clinicalDecisionSupport?: boolean
   medicalLiteratureAccess?: boolean
   medicalComplianceMode?: boolean
+  // Patient health context
+  healthContext?: string
+  healthConditions?: string[]
+  medications?: string[]
+  allergies?: string[]
+  familyHistory?: string
+  lifestyleFactors?: string
 }
 
 // Server-side function to get healthcare system prompt (doesn't use hooks)
@@ -757,10 +808,18 @@ export function getHealthcareSystemPromptServer(
   medicalSpecialty?: string,
   clinicalDecisionSupport?: boolean,
   medicalLiteratureAccess?: boolean,
-  medicalComplianceMode?: boolean
+  medicalComplianceMode?: boolean,
+  healthContext?: {
+    healthContext?: string
+    healthConditions?: string[]
+    medications?: string[]
+    allergies?: string[]
+    familyHistory?: string
+    lifestyleFactors?: string
+  }
 ): string {
   console.log("getHealthcareSystemPromptServer called with userRole:", userRole)
-  
+
   if (userRole !== "doctor" && userRole !== "medical_student") {
     console.log("Not a doctor or medical student role, returning empty string")
     return ""
@@ -776,15 +835,58 @@ export function getHealthcareSystemPromptServer(
   if (medicalSpecialty) {
     systemPrompt += `\n\nSPECIALTY FOCUS: You are assisting a ${medicalSpecialty.replace(/_/g, " ")} specialist. Tailor your responses to this specialty context.`
   }
-  
+
   // Add enhanced capabilities if enabled
   if (clinicalDecisionSupport || medicalLiteratureAccess) {
     systemPrompt += "\n\nENHANCED CAPABILITIES: You have access to evidence-based algorithms, clinical guidelines, and latest medical research."
   }
-  
+
   // Add compliance mode
   if (medicalComplianceMode) {
     systemPrompt += "\n\nCOMPLIANCE MODE: Operating in strict medical compliance mode with enhanced safety protocols."
+  }
+
+  // Add patient health context if available
+  if (healthContext) {
+    const hasHealthData = healthContext.healthContext ||
+                          healthContext.healthConditions?.length ||
+                          healthContext.medications?.length ||
+                          healthContext.allergies?.length ||
+                          healthContext.familyHistory ||
+                          healthContext.lifestyleFactors
+
+    if (hasHealthData) {
+      systemPrompt += "\n\n=== PATIENT HEALTH CONTEXT ==="
+
+      if (healthContext.healthContext) {
+        systemPrompt += `\n\nGeneral Health Information:\n${healthContext.healthContext}`
+      }
+
+      if (healthContext.healthConditions && healthContext.healthConditions.length > 0) {
+        systemPrompt += `\n\nKnown Health Conditions:\n${healthContext.healthConditions.map(c => `- ${c}`).join('\n')}`
+      }
+
+      if (healthContext.medications && healthContext.medications.length > 0) {
+        systemPrompt += `\n\nCurrent Medications:\n${healthContext.medications.map(m => `- ${m}`).join('\n')}`
+        systemPrompt += `\n\n⚠️ CRITICAL: Always check for drug interactions with these medications before suggesting any new treatments.`
+      }
+
+      if (healthContext.allergies && healthContext.allergies.length > 0) {
+        systemPrompt += `\n\n🚨 ALLERGIES:\n${healthContext.allergies.map(a => `- ${a}`).join('\n')}`
+        systemPrompt += `\n\n⚠️ CRITICAL: Never recommend medications or treatments containing these allergens.`
+      }
+
+      if (healthContext.familyHistory) {
+        systemPrompt += `\n\nFamily Medical History:\n${healthContext.familyHistory}`
+      }
+
+      if (healthContext.lifestyleFactors) {
+        systemPrompt += `\n\nLifestyle Factors:\n${healthContext.lifestyleFactors}`
+      }
+
+      systemPrompt += "\n\n=== END PATIENT HEALTH CONTEXT ==="
+      systemPrompt += "\n\nIMPORTANT: Consider all patient health information above when providing medical guidance. Always prioritize patient safety by checking for contraindications, drug interactions, and allergy conflicts."
+    }
   }
   
   // Add critical instruction to never use patient-facing language

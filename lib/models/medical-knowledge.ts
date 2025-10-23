@@ -321,4 +321,374 @@ export async function integrateMedicalKnowledge(
   }
   
   return await knowledgeConnector.queryMedicalKnowledge(knowledgeQuery)
+}
+
+export interface DrugInteraction {
+  drug1: string
+  drug2: string
+  severity: 'minor' | 'moderate' | 'major' | 'contraindicated'
+  description: string
+  recommendation: string
+  source?: string
+}
+
+/**
+ * Drug Interaction API Connector
+ * Supports multiple drug interaction databases via API
+ */
+class DrugInteractionChecker {
+  private apiKey?: string
+  private apiType: 'drugbank' | 'rxnorm' | 'fda'
+
+  constructor(apiType: 'drugbank' | 'rxnorm' | 'fda' = 'rxnorm') {
+    this.apiType = apiType
+    // Get API key from environment based on type
+    switch (apiType) {
+      case 'drugbank':
+        this.apiKey = process.env.DRUGBANK_API_KEY
+        break
+      case 'rxnorm':
+        // RxNorm/RxNav is free and doesn't require API key
+        this.apiKey = undefined
+        break
+      case 'fda':
+        // FDA openFDA API is free
+        this.apiKey = process.env.FDA_API_KEY
+        break
+    }
+  }
+
+  /**
+   * Check for drug interactions using RxNorm Interaction API
+   * https://lhncbc.nlm.nih.gov/RxNav/APIs/InteractionAPIs.html
+   * This is a FREE API from the National Library of Medicine
+   */
+  private async checkInteractionsRxNorm(medications: string[]): Promise<DrugInteraction[]> {
+    if (medications.length < 2) return []
+
+    try {
+      const interactions: DrugInteraction[] = []
+
+      // First, get RxCUI (RxNorm Concept Unique Identifiers) for each medication
+      const rxcuis = await Promise.all(
+        medications.map(med => this.getRxCUI(med))
+      )
+
+      // Filter out medications that couldn't be found
+      const validMeds = rxcuis.filter(item => item.rxcui !== null)
+
+      if (validMeds.length < 2) return []
+
+      // Check interactions for each pair
+      for (let i = 0; i < validMeds.length; i++) {
+        const rxcuiList = validMeds
+          .filter((_, idx) => idx !== i)
+          .map(m => m.rxcui)
+          .join('+')
+
+        const url = `https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${validMeds[i].rxcui}+${rxcuiList}`
+
+        const response = await fetch(url)
+        const data = await response.json()
+
+        if (data.fullInteractionTypeGroup) {
+          for (const group of data.fullInteractionTypeGroup) {
+            if (group.fullInteractionType) {
+              for (const interactionType of group.fullInteractionType) {
+                if (interactionType.interactionPair) {
+                  for (const pair of interactionType.interactionPair) {
+                    interactions.push({
+                      drug1: pair.interactionConcept[0]?.minConceptItem?.name || validMeds[i].name,
+                      drug2: pair.interactionConcept[1]?.minConceptItem?.name || '',
+                      severity: this.mapSeverity(pair.severity),
+                      description: pair.description || 'Interaction detected',
+                      recommendation: 'Consult prescribing information and consider alternative therapy if interaction is significant.',
+                      source: 'RxNorm/NLM'
+                    })
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      return interactions
+    } catch (error) {
+      console.error('Error checking RxNorm interactions:', error)
+      return []
+    }
+  }
+
+  /**
+   * Get RxCUI for a medication name with database caching
+   */
+  private async getRxCUI(medicationName: string): Promise<{ name: string; rxcui: string | null }> {
+    const normalized = medicationName.toLowerCase().trim()
+
+    try {
+      // Try cache first (if in browser/edge runtime, skip cache)
+      if (typeof window === 'undefined') {
+        const cached = await this.getRxCUIFromCache(normalized)
+        if (cached) {
+          console.log(`✓ RxCUI cache hit for: ${medicationName}`)
+          return { name: medicationName, rxcui: cached }
+        }
+      }
+
+      // Cache miss - call API
+      console.log(`⊗ RxCUI cache miss for: ${medicationName}, calling API...`)
+      const url = `https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${encodeURIComponent(medicationName)}`
+      const response = await fetch(url)
+      const data = await response.json()
+
+      if (data.idGroup?.rxnormId?.[0]) {
+        const rxcui = data.idGroup.rxnormId[0]
+
+        // Save to cache for next time
+        if (typeof window === 'undefined') {
+          await this.saveRxCUIToCache(medicationName, normalized, rxcui)
+        }
+
+        return { name: medicationName, rxcui }
+      }
+
+      return { name: medicationName, rxcui: null }
+    } catch (error) {
+      console.error(`Error getting RxCUI for ${medicationName}:`, error)
+      return { name: medicationName, rxcui: null }
+    }
+  }
+
+  /**
+   * Get RxCUI from database cache
+   */
+  private async getRxCUIFromCache(normalizedName: string): Promise<string | null> {
+    try {
+      // Import Supabase client
+      const { createClient } = await import('@supabase/supabase-js')
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+      const supabase = createClient(supabaseUrl, supabaseKey)
+
+      const { data, error } = await supabase
+        .from('drug_rxcui_cache')
+        .select('rxcui')
+        .eq('drug_name_normalized', normalizedName)
+        .eq('source', 'rxnorm')
+        .single()
+
+      if (error || !data) {
+        return null
+      }
+
+      return data.rxcui
+    } catch (error) {
+      console.error('Error reading from RxCUI cache:', error)
+      return null
+    }
+  }
+
+  /**
+   * Save RxCUI to database cache
+   */
+  private async saveRxCUIToCache(
+    drugName: string,
+    normalizedName: string,
+    rxcui: string
+  ): Promise<void> {
+    try {
+      // Import Supabase client
+      const { createClient } = await import('@supabase/supabase-js')
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+      const supabase = createClient(supabaseUrl, supabaseKey)
+
+      const { error } = await supabase
+        .from('drug_rxcui_cache')
+        .upsert({
+          drug_name: drugName,
+          drug_name_normalized: normalizedName,
+          rxcui,
+          source: 'rxnorm',
+          last_verified_at: new Date().toISOString()
+        }, {
+          onConflict: 'drug_name_normalized,source'
+        })
+
+      if (error) {
+        console.error('Error saving to RxCUI cache:', error)
+      } else {
+        console.log(`✓ Saved RxCUI to cache: ${drugName} → ${rxcui}`)
+      }
+    } catch (error) {
+      console.error('Error saving to RxCUI cache:', error)
+    }
+  }
+
+  /**
+   * Check for drug interactions using DrugBank API
+   * https://docs.drugbank.com/v1/
+   * Requires API key (paid service)
+   */
+  private async checkInteractionsDrugBank(medications: string[]): Promise<DrugInteraction[]> {
+    if (!this.apiKey) {
+      console.warn('DrugBank API key not configured. Falling back to RxNorm.')
+      return this.checkInteractionsRxNorm(medications)
+    }
+
+    try {
+      // DrugBank API implementation would go here
+      // This requires a paid subscription
+      const interactions: DrugInteraction[] = []
+
+      for (let i = 0; i < medications.length; i++) {
+        for (let j = i + 1; j < medications.length; j++) {
+          const url = `https://api.drugbank.com/v1/ddi?drug1=${encodeURIComponent(medications[i])}&drug2=${encodeURIComponent(medications[j])}`
+
+          const response = await fetch(url, {
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Accept': 'application/json'
+            }
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+
+            if (data.interactions && data.interactions.length > 0) {
+              for (const interaction of data.interactions) {
+                interactions.push({
+                  drug1: medications[i],
+                  drug2: medications[j],
+                  severity: interaction.severity?.toLowerCase() || 'moderate',
+                  description: interaction.description || '',
+                  recommendation: interaction.recommendation || '',
+                  source: 'DrugBank'
+                })
+              }
+            }
+          }
+        }
+      }
+
+      return interactions
+    } catch (error) {
+      console.error('Error checking DrugBank interactions:', error)
+      return []
+    }
+  }
+
+  /**
+   * Check for drug interactions using FDA openFDA API
+   * https://open.fda.gov/apis/drug/
+   * Free API, no key required
+   */
+  private async checkInteractionsFDA(medications: string[]): Promise<DrugInteraction[]> {
+    if (medications.length < 2) return []
+
+    try {
+      const interactions: DrugInteraction[] = []
+
+      for (const med of medications) {
+        const url = `https://api.fda.gov/drug/label.json?search=openfda.generic_name:"${encodeURIComponent(med)}"&limit=1`
+
+        const response = await fetch(url)
+        if (response.ok) {
+          const data = await response.json()
+
+          if (data.results?.[0]?.drug_interactions) {
+            const interactionText = data.results[0].drug_interactions[0]
+
+            // Parse interaction text to find mentions of other medications
+            const otherMeds = medications.filter(m => m !== med)
+            for (const otherMed of otherMeds) {
+              if (interactionText.toLowerCase().includes(otherMed.toLowerCase())) {
+                interactions.push({
+                  drug1: med,
+                  drug2: otherMed,
+                  severity: 'moderate',
+                  description: `Interaction found in FDA label for ${med}`,
+                  recommendation: 'Review complete drug label for details.',
+                  source: 'FDA openFDA'
+                })
+              }
+            }
+          }
+        }
+      }
+
+      return interactions
+    } catch (error) {
+      console.error('Error checking FDA interactions:', error)
+      return []
+    }
+  }
+
+  /**
+   * Map various severity formats to standard levels
+   */
+  private mapSeverity(severity?: string): 'minor' | 'moderate' | 'major' | 'contraindicated' {
+    if (!severity) return 'moderate'
+
+    const severityLower = severity.toLowerCase()
+
+    if (severityLower.includes('contraindicated') || severityLower.includes('high')) {
+      return 'contraindicated'
+    }
+    if (severityLower.includes('major') || severityLower.includes('severe')) {
+      return 'major'
+    }
+    if (severityLower.includes('minor') || severityLower.includes('low')) {
+      return 'minor'
+    }
+    return 'moderate'
+  }
+
+  /**
+   * Main method to check drug interactions
+   */
+  async checkInteractions(medications: string[]): Promise<DrugInteraction[]> {
+    if (!medications || medications.length < 2) {
+      return []
+    }
+
+    // Route to appropriate API based on configuration
+    switch (this.apiType) {
+      case 'drugbank':
+        return this.checkInteractionsDrugBank(medications)
+      case 'fda':
+        return this.checkInteractionsFDA(medications)
+      case 'rxnorm':
+      default:
+        return this.checkInteractionsRxNorm(medications)
+    }
+  }
+}
+
+/**
+ * Check for potential drug interactions in patient's medication list
+ * Uses RxNorm API by default (free, no API key required)
+ */
+export async function checkDrugInteractions(medications: string[]): Promise<DrugInteraction[]> {
+  if (!medications || medications.length < 2) {
+    return []
+  }
+
+  // Use RxNorm by default (free NLM API)
+  const checker = new DrugInteractionChecker('rxnorm')
+  return await checker.checkInteractions(medications)
+}
+
+/**
+ * Check if a proposed new medication would interact with patient's current medications
+ */
+export async function checkNewMedicationInteractions(
+  currentMedications: string[],
+  proposedMedication: string
+): Promise<DrugInteraction[]> {
+  const allMedications = [...currentMedications, proposedMedication]
+  return checkDrugInteractions(allMedications)
 } 

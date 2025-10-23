@@ -98,6 +98,13 @@ type ChatRequest = {
   clinicalDecisionSupport?: boolean
   medicalLiteratureAccess?: boolean
   medicalComplianceMode?: boolean
+  // Patient health context
+  healthContext?: string
+  healthConditions?: string[]
+  medications?: string[]
+  allergies?: string[]
+  familyHistory?: string
+  lifestyleFactors?: string
 }
 
 export async function POST(req: Request) {
@@ -116,6 +123,12 @@ export async function POST(req: Request) {
       clinicalDecisionSupport,
       medicalLiteratureAccess,
       medicalComplianceMode,
+      healthContext,
+      healthConditions,
+      medications,
+      allergies,
+      familyHistory,
+      lifestyleFactors,
     } = (await req.json()) as ChatRequest
 
     if (!messages || !chatId || !userId) {
@@ -126,11 +139,78 @@ export async function POST(req: Request) {
     }
 
     // START STREAMING IMMEDIATELY - minimal blocking operations
-    const effectiveSystemPrompt = getCachedSystemPrompt(
-      userRole || "general", 
-      medicalSpecialty, 
+    let effectiveSystemPrompt = getCachedSystemPrompt(
+      userRole || "general",
+      medicalSpecialty,
       systemPrompt
     )
+
+    // Add health context to system prompt - IMPORTANT: For ALL users (general, doctor, medical_student)
+    const hasHealthContext = healthContext || healthConditions || medications || allergies || familyHistory || lifestyleFactors
+
+    if (hasHealthContext) {
+      // For healthcare professionals: use specialized healthcare prompt
+      if (userRole === "doctor" || userRole === "medical_student") {
+        const healthcarePrompt = getHealthcareSystemPromptServer(
+          userRole,
+          medicalSpecialty,
+          clinicalDecisionSupport,
+          medicalLiteratureAccess,
+          medicalComplianceMode,
+          {
+            healthContext,
+            healthConditions,
+            medications,
+            allergies,
+            familyHistory,
+            lifestyleFactors
+          }
+        )
+
+        if (healthcarePrompt) {
+          effectiveSystemPrompt = healthcarePrompt
+        }
+      }
+      // For general users: add health context with safety disclaimers
+      else {
+        effectiveSystemPrompt += "\n\n=== USER HEALTH INFORMATION ==="
+        effectiveSystemPrompt += "\n\nIMPORTANT: The user has provided the following health information. You MUST consider this in your responses, especially when discussing medications, treatments, or health advice."
+
+        if (healthContext) {
+          effectiveSystemPrompt += `\n\nGeneral Health Information:\n${healthContext}`
+        }
+
+        if (healthConditions && healthConditions.length > 0) {
+          effectiveSystemPrompt += `\n\nKnown Health Conditions:\n${healthConditions.map(c => `- ${c}`).join('\n')}`
+          effectiveSystemPrompt += `\n\n⚠️ CRITICAL: Always consider how advice might interact with these existing conditions.`
+        }
+
+        if (medications && medications.length > 0) {
+          effectiveSystemPrompt += `\n\nCurrent Medications:\n${medications.map(m => `- ${m}`).join('\n')}`
+          effectiveSystemPrompt += `\n\n⚠️ CRITICAL: The user is taking these medications. ALWAYS:\n- Warn about potential drug interactions before suggesting ANY new medication or supplement\n- Remind them to consult their doctor or pharmacist before starting anything new\n- Flag any obvious contraindications or risks`
+        }
+
+        if (allergies && allergies.length > 0) {
+          effectiveSystemPrompt += `\n\n🚨 ALLERGIES (NEVER RECOMMEND THESE):\n${allergies.map(a => `- ${a}`).join('\n')}`
+          effectiveSystemPrompt += `\n\n⚠️ CRITICAL: NEVER suggest medications, treatments, or substances that contain these allergens. This could be life-threatening.`
+        }
+
+        if (familyHistory) {
+          effectiveSystemPrompt += `\n\nFamily Medical History:\n${familyHistory}`
+        }
+
+        if (lifestyleFactors) {
+          effectiveSystemPrompt += `\n\nLifestyle Factors:\n${lifestyleFactors}`
+        }
+
+        effectiveSystemPrompt += "\n\n=== END USER HEALTH INFORMATION ==="
+        effectiveSystemPrompt += "\n\nREMINDER: You are NOT a doctor. However, you MUST use the health information above to:"
+        effectiveSystemPrompt += "\n1. Avoid recommending anything contraindicated by their medications, allergies, or conditions"
+        effectiveSystemPrompt += "\n2. Warn them about potential interactions or risks"
+        effectiveSystemPrompt += "\n3. Emphasize the importance of consulting their healthcare provider, especially given their specific health context"
+        effectiveSystemPrompt += "\n4. Provide safer, more personalized guidance that accounts for their situation"
+      }
+    }
     
     // INSTANT MODEL LOADING - no async operations, no delays
     console.log(`🔍 Looking for model: "${model}"`)
