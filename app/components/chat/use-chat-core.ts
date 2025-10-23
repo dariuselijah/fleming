@@ -198,6 +198,13 @@ export function useChatCore({
             userPreferences.preferences.medicalLiteratureAccess,
           medicalComplianceMode:
             userPreferences.preferences.medicalComplianceMode,
+          // Health context
+          healthContext: userPreferences.preferences.healthContext,
+          healthConditions: userPreferences.preferences.healthConditions,
+          medications: userPreferences.preferences.medications,
+          allergies: userPreferences.preferences.allergies,
+          familyHistory: userPreferences.preferences.familyHistory,
+          lifestyleFactors: userPreferences.preferences.lifestyleFactors,
         },
       }
      
