@@ -3,6 +3,7 @@ import { checkRateLimits } from "@/lib/api"
 import type { Chats } from "@/lib/chat-store/types"
 import { REMAINING_QUERY_ALERT_THRESHOLD } from "@/lib/config"
 import { Message } from "@ai-sdk/react"
+import { useRouter } from "next/navigation"
 import { useCallback, useRef } from "react"
 import { createNewChat } from "@/lib/chat-store/chats/api"
 
@@ -41,6 +42,7 @@ export function useChatOperations({
   setHasDialogAuth,
   setMessages,
 }: UseChatOperationsProps) {
+  const router = useRouter()
   // Use ref to track chat creation state
   const chatCreationInProgress = useRef(false)
   const lastChatCreationAttempt = useRef<number>(0)
@@ -148,13 +150,18 @@ export function useChatOperations({
         // Wait a short time for immediate creation (non-blocking for streaming)
         const immediateResult = await Promise.race([
           chatCreationPromise,
-          new Promise(resolve => setTimeout(() => resolve(null), 200)) // 200ms timeout
+          new Promise(resolve => setTimeout(() => resolve(null), 300)) // Shorter timeout for better UX
         ])
 
         if (immediateResult && typeof immediateResult === 'object' && 'id' in immediateResult) {
           const newChatId = (immediateResult as any).id
           if (isAuthenticated) {
-            window.history.pushState(null, "", `/c/${newChatId}`)
+            // Only navigate if we're not already on the correct chat page
+            const currentPath = window.location.pathname
+            const newPath = `/c/${newChatId}`
+            if (currentPath !== newPath) {
+              router.push(newPath)
+            }
           } else {
             localStorage.setItem("guestChatId", newChatId)
           }
@@ -168,14 +175,19 @@ export function useChatOperations({
         // If immediate creation didn't complete, return temp ID and continue in background
         const tempChatId = `temp-chat-${now}-${Math.random().toString(36).substring(2, 9)}`
         
-        // Process chat creation in background
+        // Process chat creation in background for all users
         Promise.resolve().then(async () => {
           try {
             const newChat = await chatCreationPromise
             if (!newChat) return
             
             if (isAuthenticated) {
-              window.history.pushState(null, "", `/c/${newChat.id}`)
+              // Only navigate if we're not already on the correct chat page
+              const currentPath = window.location.pathname
+              const newPath = `/c/${newChat.id}`
+              if (currentPath !== newPath) {
+                router.push(newPath)
+              }
             } else {
               localStorage.setItem("guestChatId", newChat.id)
             }
@@ -190,6 +202,7 @@ export function useChatOperations({
             }
           } catch (err) {
             // Don't show error toast - user is already streaming
+            console.warn("Background chat creation failed:", err)
           } finally {
             chatCreationInProgress.current = false
             lastChatCreationAttempt.current = 0
@@ -197,7 +210,7 @@ export function useChatOperations({
             globalLastChatCreationAttempt = 0
           }
         })
-
+        
         return tempChatId
       } catch (err: unknown) {
         chatCreationInProgress.current = false

@@ -45,6 +45,21 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     }
   }, [chatId])
 
+  // Listen for reset chat state events
+  useEffect(() => {
+    const handleResetChatState = () => {
+      setMessages([])
+      setIsLoading(false)
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resetChatState', handleResetChatState)
+      return () => {
+        window.removeEventListener('resetChatState', handleResetChatState)
+      }
+    }
+  }, [])
+
   useEffect(() => {
     if (!chatId) return
 

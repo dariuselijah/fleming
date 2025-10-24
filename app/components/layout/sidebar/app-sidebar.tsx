@@ -61,7 +61,14 @@ export function AppSidebar() {
             <button
               className="hover:bg-accent/80 hover:text-foreground text-primary group/new-chat relative inline-flex w-full items-center rounded-md bg-transparent px-2 py-2 text-sm transition-colors"
               type="button"
-              onClick={() => router.push("/")}
+              onClick={() => {
+                // Clear any local state before navigating
+                if (typeof window !== 'undefined') {
+                  localStorage.removeItem('chatDraft')
+                  window.dispatchEvent(new CustomEvent('resetChatState'))
+                }
+                router.push("/")
+              }}
             >
               <div className="flex items-center gap-2">
                 <NotePencilIcon size={20} />

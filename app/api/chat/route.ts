@@ -199,8 +199,12 @@ export async function POST(req: Request) {
         Promise.resolve().then(async () => {
           try {
             // Only process completion if we have a real userId and chatId
-            if (userId === "temp" || chatId === "temp" || chatId.startsWith("temp-chat-")) {
-              console.log("Skipping completion processing for temp userId or chatId")
+            // Skip for guest users with temp IDs, but allow authenticated users
+            // Also skip if chatId is literally "temp" (not a valid UUID)
+            if (userId === "temp" || 
+                (!isAuthenticated && (chatId === "temp" || chatId.startsWith("temp-chat-"))) ||
+                chatId === "temp") {
+              console.log("Skipping completion processing for temp userId or invalid chatId")
               return
             }
 

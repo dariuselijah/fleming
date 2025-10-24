@@ -180,11 +180,37 @@ export function useChatCore({
         return
       }
 
-      // Start streaming immediately with the message
+      // For authenticated users, ensure we have a chat ID before streaming
+      let currentChatId = chatId
+      if (isAuthenticated && (!chatId || chatId.startsWith('temp'))) {
+        // Try to get chat ID quickly, but don't block streaming
+        try {
+          const quickChatId = await Promise.race([
+            ensureChatExists(uid, currentInput),
+            new Promise(resolve => setTimeout(() => resolve(null), 500)) // 500ms max wait
+          ])
+          
+          if (quickChatId && !quickChatId.toString().startsWith('temp')) {
+            currentChatId = quickChatId.toString()
+            // Update chatId if it changed
+            if (currentChatId !== chatId) {
+              bumpChat(currentChatId)
+            }
+          } else {
+            // For authenticated users, if we can't get a real chat ID quickly,
+            // create a proper temp ID that won't cause UUID errors
+            currentChatId = `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+          }
+        } catch (error) {
+          console.warn("Quick chat creation failed, using temp ID:", error)
+          currentChatId = `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+        }
+      }
+
+      // Start streaming with the message
       const options = {
         body: {
-          chatId: chatId || "temp", // Use existing chatId or temp for immediate streaming
-          //chatId: chatId && !chatId.startsWith('temp') ? chatId : null,
+          chatId: currentChatId || "temp", // Use real chatId if available, temp for guests
           userId: uid,
           model: selectedModel,
           isAuthenticated: !!user?.id,
@@ -292,44 +318,67 @@ export function useChatCore({
     async (suggestion: string) => {
       setIsSubmitting(true)
 
-      // Start streaming immediately for instant feedback
-      const options = {
-        body: {
-          chatId: chatId || "temp", // Use existing chatId or temp for immediate streaming
-          userId: "temp", // Will be updated in background
-          model: selectedModel,
-          isAuthenticated,
-          systemPrompt: getSystemPromptByRole(userPreferences.preferences.userRole),
-        },
-      }
-
-      // Append message immediately
-      append(
-        {
-          role: "user",
-          content: suggestion,
-        },
-        options
-      )
-
       try {
         const uid = await getOrCreateGuestUserId(user)
         if (!uid) {
+          setIsSubmitting(false)
           return
         }
 
         const allowed = await checkLimitsAndNotify(uid)
         if (!allowed) {
+          setIsSubmitting(false)
           return
         }
 
-        const currentChatId = await ensureChatExists(uid, suggestion)
-        if (currentChatId && currentChatId !== chatId) {
-          bumpChat(currentChatId)
+        // For authenticated users, ensure we have a chat ID before streaming
+        let currentChatId = chatId
+        if (isAuthenticated && (!chatId || chatId.startsWith('temp'))) {
+          // Try to get chat ID quickly, but don't block streaming
+          try {
+            const quickChatId = await Promise.race([
+              ensureChatExists(uid, suggestion),
+              new Promise(resolve => setTimeout(() => resolve(null), 500)) // 500ms max wait
+            ])
+            
+            if (quickChatId && !quickChatId.toString().startsWith('temp')) {
+              currentChatId = quickChatId.toString()
+              // Update chatId if it changed
+              if (currentChatId !== chatId) {
+                bumpChat(currentChatId)
+              }
+            } else {
+              // For authenticated users, if we can't get a real chat ID quickly,
+              // create a proper temp ID that won't cause UUID errors
+              currentChatId = `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+            }
+          } catch (error) {
+            console.warn("Quick chat creation failed for suggestion, using temp ID:", error)
+            currentChatId = `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+          }
         }
+
+        // Start streaming immediately for instant feedback
+        const options = {
+          body: {
+            chatId: currentChatId || "temp", // Use real chatId if available, temp for guests
+            userId: uid,
+            model: selectedModel,
+            isAuthenticated,
+            systemPrompt: getSystemPromptByRole(userPreferences.preferences.userRole),
+          },
+        }
+
+        // Append message immediately
+        append(
+          {
+            role: "user",
+            content: suggestion,
+          },
+          options
+        )
       } catch {
         toast({ title: "Failed to send suggestion", status: "error" })
-      } finally {
         setIsSubmitting(false)
       }
     },

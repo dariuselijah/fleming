@@ -7,7 +7,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { NotePencilIcon } from "@phosphor-icons/react/dist/ssr"
-import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 
 export function ButtonNewChat() {
@@ -16,21 +15,40 @@ export function ButtonNewChat() {
 
   useKeyShortcut(
     (e) => (e.key === "u" || e.key === "U") && e.metaKey && e.shiftKey,
-    () => router.push("/")
+    () => {
+      // Clear any local state before navigating
+      if (typeof window !== 'undefined') {
+        // Clear any cached messages or drafts
+        localStorage.removeItem('chatDraft')
+        // Dispatch event to reset chat state
+        window.dispatchEvent(new CustomEvent('resetChatState'))
+      }
+      router.push("/")
+    }
   )
+
+  const handleNewChat = () => {
+    // Clear any local state before navigating
+    if (typeof window !== 'undefined') {
+      // Clear any cached messages or drafts
+      localStorage.removeItem('chatDraft')
+      // Dispatch event to reset chat state
+      window.dispatchEvent(new CustomEvent('resetChatState'))
+    }
+    router.push("/")
+  }
 
   if (pathname === "/") return null
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Link
-          href="/"
+        <button
+          onClick={handleNewChat}
           className="text-muted-foreground hover:text-foreground hover:bg-muted bg-background rounded-full p-1.5 transition-colors"
-          prefetch
           aria-label="New Chat"
         >
           <NotePencilIcon size={24} />
-        </Link>
+        </button>
       </TooltipTrigger>
       <TooltipContent>New Chat ⌘⇧U</TooltipContent>
     </Tooltip>

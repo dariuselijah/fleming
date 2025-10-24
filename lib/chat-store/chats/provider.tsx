@@ -56,6 +56,13 @@ export function ChatsProvider({
   const [isLoading, setIsLoading] = useState(true)
   const [chats, setChats] = useState<Chats[]>([])
 
+  const refresh = async () => {
+    if (!userId) return
+
+    const fresh = await fetchAndCacheChats(userId)
+    setChats(fresh)
+  }
+
   useEffect(() => {
     if (!userId) return
 
@@ -75,12 +82,22 @@ export function ChatsProvider({
     load()
   }, [userId])
 
-  const refresh = async () => {
-    if (!userId) return
+  // Listen for reset chat state events
+  useEffect(() => {
+    const handleResetChatState = () => {
+      // Don't reset chats on new chat, just refresh to get latest
+      if (userId) {
+        refresh()
+      }
+    }
 
-    const fresh = await fetchAndCacheChats(userId)
-    setChats(fresh)
-  }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resetChatState', handleResetChatState)
+      return () => {
+        window.removeEventListener('resetChatState', handleResetChatState)
+      }
+    }
+  }, [userId, refresh])
 
   const updateTitle = async (id: string, title: string) => {
     const prev = [...chats]
