@@ -80,6 +80,26 @@ export async function logUserMessage({
 }: LogUserMessageParams): Promise<void> {
   if (!supabase) return
 
+  // CRITICAL: Check if user message with this message_group_id already exists
+  // This prevents duplicate saves when onFinish is called multiple times
+  if (message_group_id) {
+    const { data: existingMessages, error: checkError } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("chat_id", chatId)
+      .eq("message_group_id", message_group_id)
+      .eq("role", "user")
+      .limit(1)
+
+    if (checkError) {
+      console.error("Error checking for existing user message:", checkError)
+      // Continue anyway - better to have duplicate than lose message
+    } else if (existingMessages && existingMessages.length > 0) {
+      console.log("User message already exists for message_group_id:", message_group_id, "- skipping save")
+      return
+    }
+  }
+
   const { error } = await supabase.from("messages").insert({
     chat_id: chatId,
     role: "user",

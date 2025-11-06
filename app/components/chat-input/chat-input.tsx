@@ -25,6 +25,8 @@ const MODAL_MAPPING = {
   grok3: "grok-3", // Grok-3 model
   o3: "o3", // o3 model
   gpt4o: "gpt-4o", // GPT-4o model
+  pi31: "pi-3.1", // Inflection AI Pi 3.1 model
+  pi31latest: "pi-3.1-latest", // Inflection AI Pi 3.1 Latest model
 } as const
 
 type ModalMode = keyof typeof MODAL_MAPPING
@@ -38,6 +40,11 @@ const getActualModelId = (modalMode: string): string => {
 const getModalModeFromModelId = (modelId: string): string => {
   const entry = Object.entries(MODAL_MAPPING).find(([_, actualId]) => actualId === modelId)
   return entry ? entry[0] : "grok4" // Default to grok4 if no match found
+}
+
+// Helper function to check if a model ID is an Inflection AI model
+const isInflectionModel = (modelId: string): boolean => {
+  return modelId === "pi-3.1" || modelId === "pi-3.1-latest"
 }
 
 type ChatInputProps = {
@@ -82,29 +89,32 @@ export function ChatInput({
   const [isButtonDisabled, setIsButtonDisabled] = useState(true);
   
   // Check if selectedModel is already an actual model ID or a modal mode
-  const isActualModelId = models.some(model => model.id === selectedModel)
+  // Always treat Inflection AI models as actual model IDs
+  const isActualModelId = models.some(model => model.id === selectedModel) || isInflectionModel(selectedModel)
   
   // Get the actual model ID - if selectedModel is already an actual ID, use it directly
   let actualModelId = isActualModelId ? selectedModel : getActualModelId(selectedModel)
   
   // Fix for old grok-4 model name
   if (actualModelId === 'grok-4') {
-    console.log("🔄 ChatInput: Converting old grok-4 model name to grok-4-fast-reasoning")
     actualModelId = 'grok-4-fast-reasoning'
   }
-  
-  console.log("🔧 ChatInput debug:", {
-    selectedModel,
-    isActualModelId,
-    actualModelId,
-    availableModels: models.map(m => m.id)
-  })
 
   // Validate that the mapped models exist in available models
+  // Always include Inflection AI models (hardcoded)
   const availableModalModes = useMemo(() => {
-    return Object.entries(MODAL_MAPPING).filter(([_, modelId]) => 
-      models.some(model => model.id === modelId)
-    )
+    const inflectionModels = [
+      ['pi31', 'pi-3.1'],
+      ['pi31latest', 'pi-3.1-latest']
+    ]
+    
+    const otherModels = Object.entries(MODAL_MAPPING)
+      .filter(([label, modelId]) => 
+        !label.startsWith('pi31') && models.some(model => model.id === modelId)
+      )
+    
+    // Always include Inflection AI models, plus other available models
+    return [...inflectionModels, ...otherModels]
   }, [models])
 
   // Fallback to first available model if current model is not available
@@ -118,14 +128,11 @@ export function ChatInput({
     
     // Final fix for old grok-4 model name
     if (result === 'grok-4') {
-      console.log("🔄 ChatInput effectiveModelId: Converting old grok-4 model name to grok-4-fast-reasoning")
       result = 'grok-4-fast-reasoning'
     }
     
     return result
   }, [availableModalModes.length, actualModelId, models, selectedModel])
-  
-  console.log("🎯 ChatInput effectiveModelId:", effectiveModelId)
 
   const selectModelConfig = getModelInfo(effectiveModelId)
   const hasSearchSupport = Boolean(selectModelConfig?.webSearch)
@@ -147,53 +154,34 @@ export function ChatInput({
   }, [selectedModel])
 
   const handleSend = useCallback(() => {
-    console.log("=== handleSend CALLED (button click) ===")
-    console.log("Current isSubmitting state:", isSubmitting)
-    console.log("Current status:", status)
-    
-    if (isSubmitting) {
-      console.log("Already submitting, ignoring button click")
-      return
-    }
+    if (isSubmitting) return
 
     if (status === "streaming") {
-      console.log("Streaming, stopping")
       stop()
       return
     }
 
-    console.log("Calling onSend from button click")
     onSend()
   }, [isSubmitting, onSend, status, stop])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      console.log("=== handleKeyDown CALLED ===")
-      console.log("Key pressed:", e.key)
-      console.log("Current isSubmitting state:", isSubmitting)
-      console.log("Current status:", status)
-      
       if (isSubmitting) {
-        console.log("Already submitting, preventing key event")
         e.preventDefault()
         return
       }
 
       if (e.key === "Enter" && status === "streaming") {
-        console.log("Streaming, preventing Enter key")
         e.preventDefault()
         return
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
         if (!value || isOnlyWhitespace(value)) {
-          console.log("Empty value or whitespace, ignoring Enter key")
           return
         }
 
-        console.log("=== handleKeyDown CALLED (Enter key) ===")
         e.preventDefault()
-        console.log("Calling onSend from Enter key")
         onSend()
       }
     },
@@ -292,14 +280,32 @@ export function ChatInput({
               />
               <Select onValueChange={handleModalModeChange} value={currentModalMode}>
                 <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Select Model" />
+                  <SelectValue placeholder="Select Model">
+                    {currentModalMode === 'pi31' ? 'Pi 3.1' :
+                     currentModalMode === 'pi31latest' ? 'Pi 3.1 Latest' :
+                     currentModalMode === 'grok4' ? 'Grok-4 Fast Reasoning' :
+                     currentModalMode === 'grok3' ? 'Grok-3' :
+                     currentModalMode === 'o3' ? 'o3' :
+                     currentModalMode === 'gpt4o' ? 'GPT-4o' :
+                     'Select Model'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {availableModalModes.map(([label, modelId]) => (
-                    <SelectItem key={modelId} value={label}>
-                      {label === 'grok4' ? 'Grok-4 Fast Reasoning' : label === 'grok3' ? 'Grok-3' : label === 'o3' ? 'o3' : 'GPT-4o'}
-                    </SelectItem>
-                  ))}
+                  {availableModalModes.map(([label, modelId]) => {
+                    const displayName = 
+                      label === 'grok4' ? 'Grok-4 Fast Reasoning' :
+                      label === 'grok3' ? 'Grok-3' :
+                      label === 'o3' ? 'o3' :
+                      label === 'gpt4o' ? 'GPT-4o' :
+                      label === 'pi31' ? 'Pi 3.1' :
+                      label === 'pi31latest' ? 'Pi 3.1 Latest' :
+                      label
+                    return (
+                      <SelectItem key={modelId} value={label}>
+                        {displayName}
+                      </SelectItem>
+                    )
+                  })}
                 </SelectContent>
               </Select>
               {hasSearchSupport ? (

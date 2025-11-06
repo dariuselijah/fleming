@@ -33,17 +33,8 @@ export function useModel({
     
     // Fix for old grok-4 model name
     if (effectiveModel === 'grok-4') {
-      console.log("🔄 Converting old grok-4 model name to grok-4-fast-reasoning")
       effectiveModel = 'grok-4-fast-reasoning'
     }
-    
-    console.log("🔍 Model selection debug:", {
-      currentChatModel: currentChat?.model,
-      firstFavoriteModel,
-      modelDefault: MODEL_DEFAULT,
-      effectiveModel,
-      userId: user?.id
-    })
     
     return effectiveModel
   }, [currentChat?.model, user?.favorite_models])
@@ -55,8 +46,6 @@ export function useModel({
 
   // The actual selected model: local override or computed effective model
   const selectedModel = localSelectedModel || getEffectiveModel()
-  
-  console.log("🎯 Final selectedModel:", selectedModel, "localSelectedModel:", localSelectedModel)
 
   // Function to handle model changes with proper validation and error handling
   const handleModelChange = useCallback(

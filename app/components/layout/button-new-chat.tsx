@@ -32,6 +32,20 @@ export function ButtonNewChat() {
     if (typeof window !== 'undefined') {
       // Clear any cached messages or drafts
       localStorage.removeItem('chatDraft')
+      
+      // CRITICAL: Clear all sessionStorage flags related to chats
+      const keys = Object.keys(sessionStorage)
+      keys.forEach(key => {
+        if (key.startsWith('hasSentMessage:') || key.startsWith('messages:')) {
+          sessionStorage.removeItem(key)
+        }
+      })
+      
+      // Clear any global chat creation state
+      if ((window as any).__lastMessagesForMigration) {
+        delete (window as any).__lastMessagesForMigration
+      }
+      
       // Dispatch event to reset chat state
       window.dispatchEvent(new CustomEvent('resetChatState'))
     }

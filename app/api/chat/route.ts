@@ -195,15 +195,15 @@ export async function POST(req: Request) {
         console.error("Streaming error occurred:", err)
       },
       onFinish: async ({ response }) => {
-        // Handle completion in background
+        // Handle completion in background - CRITICAL: Ensure this always runs
         Promise.resolve().then(async () => {
           try {
             // Only process completion if we have a real userId and chatId
-            // Skip for guest users with temp IDs, but allow authenticated users
+            // Skip for any user (guest or authenticated) if chatId is temporary
             // Also skip if chatId is literally "temp" (not a valid UUID)
             if (userId === "temp" || 
-                (!isAuthenticated && (chatId === "temp" || chatId.startsWith("temp-chat-"))) ||
-                chatId === "temp") {
+                chatId === "temp" || 
+                chatId.startsWith("temp-chat-")) {
               console.log("Skipping completion processing for temp userId or invalid chatId")
               return
             }
@@ -215,34 +215,69 @@ export async function POST(req: Request) {
             })
 
             if (supabase) {
-              await incrementMessageCount({ supabase, userId })
-              
+              // Save user message first (if not already saved)
               const userMessage = messages[messages.length - 1]
               if (userMessage?.role === "user") {
-                await logUserMessage({
-                  supabase,
-                  userId,
-                  chatId,
-                  content: userMessage.content,
-                  attachments: userMessage.experimental_attachments as Attachment[],
-                  model,
-                  isAuthenticated,
-                  message_group_id,
-                })
+                try {
+                  await logUserMessage({
+                    supabase,
+                    userId,
+                    chatId,
+                    content: userMessage.content,
+                    attachments: userMessage.experimental_attachments as Attachment[],
+                    model,
+                    isAuthenticated,
+                    message_group_id,
+                  })
+                } catch (error) {
+                  console.error("Failed to save user message:", error)
+                  // Continue even if user message save fails
+                }
               }
 
-              await storeAssistantMessage({
-                supabase,
-                chatId,
-                messages:
-                  response.messages as unknown as import("@/app/types/api.types").Message[],
-                message_group_id,
-                model,
-              })
+              // Save assistant message with retry logic
+              try {
+                await storeAssistantMessage({
+                  supabase,
+                  chatId,
+                  messages:
+                    response.messages as unknown as import("@/app/types/api.types").Message[],
+                  message_group_id,
+                  model,
+                })
+              } catch (error) {
+                console.error("Failed to save assistant message:", error)
+                // Try one more time after a short delay
+                await new Promise(resolve => setTimeout(resolve, 1000))
+                try {
+                  await storeAssistantMessage({
+                    supabase,
+                    chatId,
+                    messages:
+                      response.messages as unknown as import("@/app/types/api.types").Message[],
+                    message_group_id,
+                    model,
+                  })
+                } catch (retryError) {
+                  console.error("Retry also failed to save assistant message:", retryError)
+                }
+              }
+
+              // Increment message count after successful save
+              try {
+                await incrementMessageCount({ supabase, userId })
+              } catch (error) {
+                console.error("Failed to increment message count:", error)
+                // Non-critical, continue
+              }
             }
           } catch (error) {
-            console.warn("Background operations failed:", error)
+            console.error("Background operations failed:", error)
+            // Don't throw - errors are logged but shouldn't break the stream
           }
+        }).catch((error) => {
+          // Extra safety net for any unhandled errors
+          console.error("Unhandled error in onFinish:", error)
         })
       },
     })

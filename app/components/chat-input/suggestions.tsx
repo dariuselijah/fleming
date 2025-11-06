@@ -23,11 +23,6 @@ export const Suggestions = memo(function Suggestions({
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const { preferences } = useUserPreferences()
 
-  // Debug logging to check for duplicate renders
-  useEffect(() => {
-    console.log("Suggestions component rendered - preferences:", preferences)
-  })
-
   if (!value && activeCategory !== null) {
     setActiveCategory(null)
   }

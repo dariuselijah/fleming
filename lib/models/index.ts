@@ -3,6 +3,7 @@ import { claudeModels } from "./data/claude"
 import { deepseekModels } from "./data/deepseek"
 import { geminiModels } from "./data/gemini"
 import { grokModels } from "./data/grok"
+import { inflectionModels } from "./data/inflection"
 import { mistralModels } from "./data/mistral"
 import { openaiModels } from "./data/openai"
 import { openrouterModels } from "./data/openrouter"
@@ -19,6 +20,7 @@ const STATIC_MODELS: ModelConfig[] = [
   ...perplexityModels,
   ...geminiModels,
   ...openrouterModels,
+  ...inflectionModels,
 ]
 
 // INSTANT MODEL LOADING - no dynamic loading, no delays

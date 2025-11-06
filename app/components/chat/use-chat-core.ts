@@ -8,8 +8,8 @@ import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { UserProfile } from "@/lib/user/types"
 import type { Message } from "@ai-sdk/react"
 import { useChat } from "@ai-sdk/react"
-import { useSearchParams } from "next/navigation"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
 
 type UseChatCoreProps = {
   initialMessages: Message[]
@@ -55,6 +55,7 @@ export function useChatCore({
   bumpChat,
   setHasDialogAuth,
 }: UseChatCoreProps) {
+  const router = useRouter()
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
@@ -65,8 +66,28 @@ export function useChatCore({
 
   // Refs and derived state
   const hasSentFirstMessageRef = useRef(false)
-  const prevChatIdRef = useRef<string | null>(chatId)
+  // CRITICAL: Initialize to null, not chatId, so we can detect transitions properly
+  const prevChatIdRef = useRef<string | null>(null)
+  const lastUsedTempChatIdRef = useRef<string | null>(null)
+  const messagesRef = useRef<Message[]>([])
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
+  
+  // Track sent messages in sessionStorage to persist across navigation
+  const sessionKey = `hasSentMessage:${chatId || 'none'}`
+  const checkHasSentMessage = () => {
+    if (typeof window === 'undefined') return false
+    const stored = sessionStorage.getItem(sessionKey)
+    if (stored === 'true') {
+      hasSentFirstMessageRef.current = true
+      return true
+    }
+    return false
+  }
+  
+  // Check on mount if we've already sent a message in this chat
+  useEffect(() => {
+    checkHasSentMessage()
+  }, [chatId])
   
   // Optimized system prompt determination - simplified for faster streaming
   const systemPrompt = useMemo(() => {
@@ -103,6 +124,91 @@ export function useChatCore({
     })
   }, [])
 
+  // Track the last saved message count to detect new messages during streaming
+  const lastSavedMessageCountRef = useRef(0)
+  const currentChatIdForSavingRef = useRef<string | null>(null)
+  const isStreamingRef = useRef(false)
+  const messagesBeforeNavigationRef = useRef<Message[]>([])
+  const stableChatIdRef = useRef<string | undefined>(undefined) // Stable ID for useChat to prevent resets
+  
+  // CRITICAL: Determine stable chatId for useChat
+  // Strategy: Allow reset when navigating to a NEW chat, but prevent reset during streaming
+  const stableChatId = useMemo(() => {
+    // CRITICAL: If we're actively streaming, NEVER change the id - this prevents reset
+    if (isStreamingRef.current && stableChatIdRef.current) {
+      return stableChatIdRef.current
+    }
+    
+    // If we have a real chatId, use it (this allows reset when navigating to new chat)
+    // This is OK because we've stored messages in sessionStorage and they'll be in initialMessages
+    if (chatId && !chatId.startsWith('temp-chat-')) {
+      stableChatIdRef.current = chatId
+      return chatId
+    }
+    
+    // For temp chats or null, keep previous stable ID or use undefined
+    return stableChatIdRef.current || undefined
+  }, [chatId])
+  
+  // CRITICAL: Get messages from sessionStorage BEFORE useChat initializes
+  // This ensures messages are available when useChat resets due to id change
+  // CRITICAL: Don't restore messages if we're on home page (chatId is null) - clear them instead
+  const restoredInitialMessages = useMemo(() => {
+    // CRITICAL: If we're on home page (no chatId), don't restore any messages
+    // This prevents old messages from being restored when starting a new chat
+    // Server always has no messages on home page, so client should match
+    if (!chatId) {
+      return []
+    }
+    
+    // First, try to get from "latest" key (most recent messages before navigation)
+    if (typeof window !== 'undefined' && chatId) {
+      const latest = sessionStorage.getItem('pendingMessages:latest')
+      if (latest) {
+        try {
+          const latestData = JSON.parse(latest)
+          if (latestData.messages && Array.isArray(latestData.messages) && latestData.messages.length > 0) {
+            // Only restore if messages match current chatId (not from a different chat)
+            const matchesChatId = latestData.chatId === chatId
+            const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 10000)
+            if (matchesChatId && isRecent) {
+              console.log('[🐛 RESTORE] Found', latestData.messages.length, 'messages in latest key for chatId:', chatId)
+              return latestData.messages
+            } else {
+              // Clear stale messages that don't match
+              sessionStorage.removeItem('pendingMessages:latest')
+            }
+          }
+        } catch (e) {
+          console.error('[🐛 RESTORE] Failed to parse latest messages:', e)
+          sessionStorage.removeItem('pendingMessages:latest')
+        }
+      }
+      
+      // Second, try with current chatId
+      const pendingKey = `pendingMessages:${chatId}`
+      const pending = sessionStorage.getItem(pendingKey)
+      if (pending) {
+        try {
+          const parsed = JSON.parse(pending)
+          if (parsed.length > 0) {
+            console.log('[🐛 RESTORE] Found', parsed.length, 'messages for chatId:', chatId)
+            return parsed
+          }
+        } catch (e) {
+          console.error('[🐛 RESTORE] Failed to parse pending messages:', e)
+          sessionStorage.removeItem(pendingKey)
+        }
+      }
+    }
+    
+    // Fallback to initialMessages from provider
+    return initialMessages
+  }, [chatId, initialMessages])
+  
+  // CRITICAL: Track previous chatId to detect navigation
+  const prevChatIdForRestoreRef = useRef<string | null>(null)
+
   // Initialize useChat with optimized settings
   const {
     messages,
@@ -116,19 +222,621 @@ export function useChatCore({
     setInput,
     append,
   } = useChat({
+    id: stableChatId, // CRITICAL: Use stable ID to prevent resets during streaming
     api: API_ROUTE_CHAT,
-    initialMessages,
+    initialMessages: restoredInitialMessages.length > 0 ? restoredInitialMessages : undefined, // CRITICAL: Restore from sessionStorage
     initialInput: draftValue,
-    onError: handleError,
+    onError: (error) => {
+      // CRITICAL: Reset submitting state on error
+      setIsSubmitting(false)
+      handleError(error)
+    },
     // Optimize for streaming performance
-    onFinish: () => {
-      // Handle completion without blocking
+    onFinish: async (message) => {
+      // CRITICAL: Save all messages when streaming completes
+      // Use the real chatId (not temp) if available
+      const realChatId = chatId && !chatId.startsWith('temp-chat-') ? chatId : currentChatIdForSavingRef.current
+      if (realChatId && !realChatId.startsWith('temp-chat-') && messagesRef.current.length > 0) {
+        try {
+          const { setMessages: saveMessagesToDb } = await import("@/lib/chat-store/messages/api")
+          await saveMessagesToDb(realChatId, messagesRef.current)
+          console.log('[🐛 onFinish] Saved', messagesRef.current.length, 'messages to chatId:', realChatId)
+        } catch (error) {
+          console.error('[🐛 onFinish] Failed to save messages:', error)
+        }
+      }
+      
+      // CRITICAL: Update URL after message is fully sent and saved
+      // This prevents useChat from resetting during message submission
+      if (realChatId && !realChatId.startsWith('temp-chat-') && typeof window !== 'undefined') {
+        const currentPath = window.location.pathname
+        const expectedPath = `/c/${realChatId}`
+        if (currentPath !== expectedPath) {
+          // Use a small delay to ensure all state updates are complete
+          setTimeout(() => {
+            startTransition(() => {
+              router.replace(expectedPath, { scroll: false })
+            })
+          }, 100)
+        }
+      }
+      
+      setIsSubmitting(false)
     },
     // Ensure immediate status updates
     onResponse: () => {
       // This ensures status changes to "streaming" immediately
     },
   })
+  
+  // CRITICAL: Save messages incrementally during streaming
+  // This ensures messages are saved even if navigation happens before onFinish
+  useEffect(() => {
+    // Only save if we have a real chatId (not temp) and messages have increased
+    const realChatId = chatId && !chatId.startsWith('temp-chat-') ? chatId : currentChatIdForSavingRef.current
+    if (!realChatId || realChatId.startsWith('temp-chat-')) {
+      return // Don't save for temp chats
+    }
+    
+    // Only save if we have new messages and we're streaming or just finished
+    // CRITICAL: Only save assistant messages that are complete (have content)
+    if (messages.length > lastSavedMessageCountRef.current && (status === 'streaming' || status === 'ready')) {
+      const newMessages = messages.slice(lastSavedMessageCountRef.current)
+      const assistantMessagesToSave = newMessages.filter(
+        m => m.role === 'assistant' && m.content && (typeof m.content === 'string' ? m.content.length > 0 : true)
+      )
+      
+      if (assistantMessagesToSave.length === 0) {
+        // Update count even if no messages to save (to avoid re-checking)
+        lastSavedMessageCountRef.current = messages.length
+        return
+      }
+      
+      // Save new messages incrementally
+      Promise.resolve().then(async () => {
+        try {
+          const { saveMessageIncremental } = await import("@/lib/chat-store/messages/api")
+          for (const message of assistantMessagesToSave) {
+            await saveMessageIncremental(realChatId, message)
+          }
+          lastSavedMessageCountRef.current = messages.length
+          console.log('[🐛 STREAMING] Saved', assistantMessagesToSave.length, 'new assistant messages incrementally to chatId:', realChatId)
+        } catch (error) {
+          console.error('[🐛 STREAMING] Failed to save messages incrementally:', error)
+        }
+      })
+    }
+  }, [messages, chatId, status])
+  
+  // CRITICAL: Track if we're streaming and preserve messages during navigation
+  useEffect(() => {
+    isStreamingRef.current = status === 'streaming' || isSubmitting
+    // Only store backup when streaming AND messages change significantly
+    if ((status === 'streaming' || isSubmitting) && messages.length > 0) {
+      const prevCount = messagesBeforeNavigationRef.current.length
+      // Only update if message count increased (new messages arrived)
+      if (messages.length > prevCount) {
+        messagesBeforeNavigationRef.current = [...messages]
+        console.log('[🐛 STREAMING TRACK] Stored', messages.length, 'messages before potential navigation')
+      }
+    }
+  }, [status, isSubmitting, messages.length]) // Only depend on length, not full messages array
+  
+  // CRITICAL: Store messages in sessionStorage before navigation to prevent loss
+  // This must be AFTER useChat hook so messages is defined
+  // DEBOUNCED: Only store when messages actually change, not on every render
+  const lastStoredMessagesRef = useRef<string>('')
+  useEffect(() => {
+    if (messages.length > 0 && typeof window !== 'undefined') {
+      // Serialize messages to check if they actually changed
+      const messagesKey = JSON.stringify(messages.map(m => ({ id: m.id, role: m.role, content: typeof m.content === 'string' ? m.content.substring(0, 50) : '' })))
+      
+      // Only store if messages actually changed
+      if (messagesKey !== lastStoredMessagesRef.current) {
+        const key = chatId || 'pending'
+        sessionStorage.setItem(`pendingMessages:${key}`, JSON.stringify(messages))
+        sessionStorage.setItem('pendingMessages:latest', JSON.stringify({ chatId: key, messages, timestamp: Date.now() }))
+        messagesBeforeNavigationRef.current = [...messages]
+        lastStoredMessagesRef.current = messagesKey
+        console.log('[🐛 STORE] Stored', messages.length, 'messages to sessionStorage with key:', key)
+      }
+    }
+  }, [messages.length, chatId]) // Only depend on length and chatId
+  
+  // Keep messages ref in sync with messages from useChat
+  useEffect(() => {
+    messagesRef.current = messages
+    // CRITICAL: If messages were cleared but we have them in the backup ref, restore them immediately
+    // This prevents blank screen when useChat resets during navigation
+    if (messages.length === 0 && messagesBeforeNavigationRef.current.length > 0) {
+      const isCurrentlyStreaming = status === 'streaming' || isSubmitting
+      if (isCurrentlyStreaming) {
+        console.log('[🐛 MESSAGE RESTORE] ⚠️ CRITICAL: Messages cleared during streaming, restoring from backup:', messagesBeforeNavigationRef.current.length)
+        // Use setTimeout to ensure this runs after useChat's internal state update
+        setTimeout(() => {
+          setMessages(messagesBeforeNavigationRef.current)
+        }, 0)
+      }
+    }
+  }, [messages, status, isSubmitting, setMessages])
+  
+  // CRITICAL: Watch status changes and ensure isSubmitting resets properly
+  useEffect(() => {
+    if (status === 'ready' || status === 'error') {
+      setIsSubmitting(false)
+      // CRITICAL: Reset streaming ref when status becomes ready
+      isStreamingRef.current = false
+    } else if (status === 'streaming' || status === 'submitted') {
+      isStreamingRef.current = true
+    }
+  }, [status])
+  
+  // CRITICAL: Clear sessionStorage and reset state when navigating to home page
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !chatId) {
+      // Clear all pending messages when on home page
+      sessionStorage.removeItem('pendingMessages:latest')
+      const keys = Object.keys(sessionStorage)
+      keys.forEach(key => {
+        if (key.startsWith('pendingMessages:')) {
+          sessionStorage.removeItem(key)
+        }
+      })
+      // Reset streaming state and clear messages
+      isStreamingRef.current = false
+      messagesBeforeNavigationRef.current = []
+      // CRITICAL: Reset status if stuck
+      if (status !== 'ready' && status !== 'error') {
+        // Force reset by clearing messages if status is stuck
+        if (messages.length === 0) {
+          // Status should reset naturally, but ensure it does
+        }
+      }
+    }
+  }, [chatId, status, messages.length])
+  
+  // CRITICAL: Update currentChatIdForSavingRef when chatId changes from temp to real
+  useEffect(() => {
+    if (chatId && !chatId.startsWith('temp-chat-')) {
+      currentChatIdForSavingRef.current = chatId
+      // Reset message count when chatId changes to start fresh
+      lastSavedMessageCountRef.current = 0
+      console.log('[🐛 CHATID UPDATE] Updated currentChatIdForSavingRef to real chatId:', chatId)
+    }
+  }, [chatId])
+
+  // CRITICAL: Listen for chatCreated event to update chatId ref when chat is created
+  useEffect(() => {
+    const handleChatCreated = (event: CustomEvent<{ chatId: string }>) => {
+      const newChatId = event.detail.chatId
+      if (newChatId && !newChatId.startsWith('temp-chat-')) {
+        currentChatIdForSavingRef.current = newChatId
+        console.log('[🐛 CHAT CREATED] Updated currentChatIdForSavingRef from event:', newChatId)
+      }
+    }
+    
+    if (typeof window !== 'undefined') {
+      window.addEventListener('chatCreated', handleChatCreated as EventListener)
+      return () => {
+        window.removeEventListener('chatCreated', handleChatCreated as EventListener)
+      }
+    }
+  }, [])
+  
+  // CRITICAL: Track if this is the first render
+  const isFirstRenderRef = useRef(true)
+  
+  // CRITICAL: Initialize prevChatIdRef on first render, but only if chatId is null
+  // If chatId is already set (from URL), we want to detect the transition from null
+  useEffect(() => {
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false
+      // Don't set prevChatIdRef if chatId is already set - we want to detect the transition
+      // Only set it if chatId is null (we're on home page)
+      if (chatId === null) {
+        prevChatIdRef.current = null
+      }
+      // Otherwise, leave it as null so we can detect the transition when chatId changes
+    }
+  }, [])
+  
+  // CRITICAL: Update prevChatIdRef FIRST, before any logic
+  // This ensures we can detect transitions properly on the next render
+  useEffect(() => {
+    const prev = prevChatIdRef.current
+    if (chatId !== prev) {
+      prevChatIdRef.current = chatId
+      console.log('[🐛 PREV CHATID] Updated:', { from: prev, to: chatId })
+    }
+  }, [chatId])
+  
+  // CRITICAL: Consolidated message syncing - SINGLE SOURCE OF TRUTH
+  // This prevents race conditions and conflicting effects
+  useEffect(() => {
+    // CRITICAL: Capture prevChatId at the VERY START
+    const prevChatId = prevChatIdRef.current
+    
+    // Calculate all transition states
+    const chatIdChanged = prevChatId !== chatId
+    const isNavigatingToHome = prevChatId !== null && chatId === null
+    const isNavigatingFromHome = prevChatId === null && chatId !== null && !chatId.startsWith('temp-chat-')
+    const isStreamingOrSubmitting = status === 'streaming' || isSubmitting
+    const hasSentMessage = typeof window !== 'undefined' && chatId 
+      ? sessionStorage.getItem(`hasSentMessage:${chatId}`) === 'true'
+      : false
+    const isTransitioningFromTemp = prevChatId?.startsWith('temp-chat-') && chatId && !chatId.startsWith('temp-chat-')
+    
+    // Use ref to get current messages without causing re-renders
+    const currentMessages = messagesRef.current
+    const currentMessagesLength = currentMessages.length
+    
+    // CRITICAL: Try to restore from sessionStorage IMMEDIATELY if messages are empty
+    // This handles the case where useChat reset cleared messages
+    if (messages.length === 0 && typeof window !== 'undefined') {
+      // First, try "latest" key (most recent messages before navigation)
+      const latest = sessionStorage.getItem('pendingMessages:latest')
+      if (latest) {
+        try {
+          const latestData = JSON.parse(latest)
+          if (latestData.messages && Array.isArray(latestData.messages) && latestData.messages.length > 0) {
+            // Check if these messages are recent (within last 10 seconds)
+            const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 10000)
+            if (isRecent) {
+              console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring', latestData.messages.length, 'messages from latest key (useChat reset)')
+              setMessages(latestData.messages)
+              messagesBeforeNavigationRef.current = latestData.messages
+              // Don't remove yet - keep for next render if needed
+              return // Don't continue - we've restored messages
+            }
+          }
+        } catch (e) {
+          console.error('[🐛 MESSAGE SYNC] Failed to parse latest messages:', e)
+        }
+      }
+      
+      // Second, try with current chatId
+      if (chatId) {
+        const pendingKey = `pendingMessages:${chatId}`
+        const pending = sessionStorage.getItem(pendingKey)
+        if (pending) {
+          try {
+            const parsed = JSON.parse(pending)
+            if (parsed.length > 0) {
+              console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring', parsed.length, 'messages from sessionStorage for chatId:', chatId)
+              setMessages(parsed)
+              messagesBeforeNavigationRef.current = parsed
+              sessionStorage.removeItem(pendingKey)
+              return // Don't continue - we've restored messages
+            }
+          } catch (e) {
+            console.error('[🐛 MESSAGE SYNC] Failed to restore from sessionStorage:', e)
+          }
+        }
+      }
+    }
+    
+    // CRITICAL: Log the state for debugging
+    if (chatIdChanged || isNavigatingFromHome || isTransitioningFromTemp || (messages.length === 0 && currentMessagesLength > 0)) {
+      console.log('[🐛 MESSAGE SYNC] State check:', {
+        chatId,
+        prevChatId,
+        chatIdChanged,
+        isNavigatingToHome,
+        isNavigatingFromHome,
+        isTransitioningFromTemp,
+        isStreamingOrSubmitting,
+        hasSentMessage,
+        messagesCount: currentMessagesLength,
+        messagesInState: messages.length,
+        initialMessagesCount: initialMessages.length,
+        status,
+        hasBackupMessages: messagesBeforeNavigationRef.current.length,
+        stableChatId
+      })
+    }
+    
+    // 1. NAVIGATING TO HOME: Clear messages only when going to home page
+    if (isNavigatingToHome && currentMessagesLength > 0) {
+      console.log('[🐛 MESSAGE SYNC] Navigating to home, clearing messages')
+      setMessages([])
+      return
+    }
+    
+    // 2. NAVIGATING FROM HOME (null) TO REAL CHAT: This happens when chat is created and we navigate
+    // CRITICAL: Preserve messages if we're streaming or have messages
+    if (isNavigatingFromHome) {
+      console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Navigating from home to real chat!', {
+        messagesCount: currentMessagesLength,
+        messagesInState: messages.length,
+        isStreaming: isStreamingOrSubmitting,
+        initialMessagesCount: initialMessages.length,
+        hasBackupMessages: messagesBeforeNavigationRef.current.length
+      })
+      
+      // CRITICAL: Priority order:
+      // 1. Messages in state (from streaming) - highest priority
+      // 2. Messages in ref (backup) - second priority
+      // 3. initialMessages (from database) - third priority
+      
+      if (messages.length > 0) {
+        // We have messages in state - preserve them
+        console.log('[🐛 MESSAGE SYNC] ✅ Preserving messages in state:', messages.length)
+        messagesBeforeNavigationRef.current = [...messages]
+        // Don't sync - keep current messages
+        return
+      } else if (currentMessagesLength > 0) {
+        // We have messages in ref but not in state - restore them
+        console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from ref after navigation:', currentMessagesLength)
+        setMessages(currentMessages)
+        messagesBeforeNavigationRef.current = currentMessages
+        return
+      } else if (messagesBeforeNavigationRef.current.length > 0) {
+        // We have backup messages - restore them
+        console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring backup messages after navigation:', messagesBeforeNavigationRef.current.length)
+        setMessages(messagesBeforeNavigationRef.current)
+        return
+      } else if (initialMessages.length > 0) {
+        // Use initialMessages from database
+        console.log('[🐛 MESSAGE SYNC] Using initialMessages after navigation from home:', initialMessages.length)
+      setMessages(initialMessages)
+        return
+      } else {
+        // No messages anywhere - might still be streaming, wait
+        console.log('[🐛 MESSAGE SYNC] ⚠️ No messages found after navigation, waiting for streaming...')
+        // Don't clear - wait for messages to arrive
+        return
+      }
+    }
+    
+    // 3. TRANSITIONING FROM TEMP TO REAL CHAT: Preserve messages
+    if (isTransitioningFromTemp) {
+      console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Transitioning from temp to real chat!', {
+        prevChatId,
+        chatId,
+        messagesInState: messages.length,
+        messagesInRef: currentMessagesLength,
+        hasBackup: messagesBeforeNavigationRef.current.length,
+        initialMessagesCount: initialMessages.length
+      })
+      
+      // CRITICAL: Priority order for messages during temp-to-real transition:
+      // 1. Messages in state (from streaming) - highest priority
+      // 2. Messages in ref (backup) - second priority  
+      // 3. Messages in backup ref - third priority
+      // 4. sessionStorage for this chatId - fourth priority
+      // 5. initialMessages (from database) - fifth priority
+      
+      if (messages.length > 0) {
+        // We have messages in state - preserve them
+        console.log('[🐛 MESSAGE SYNC] ✅ Preserving messages in state during transition:', messages.length)
+        messagesBeforeNavigationRef.current = [...messages]
+        // Cache to new chat ID
+        if (chatId) {
+          Promise.resolve().then(async () => {
+            try {
+              const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
+              await writeToIndexedDB("messages", { id: chatId, messages })
+              if (typeof window !== 'undefined') {
+                (window as any).__lastMessagesForMigration = { chatId, messages }
+              }
+            } catch (error) {
+              console.error('[🐛 MESSAGE SYNC] Failed to cache messages:', error)
+            }
+          })
+        }
+        return // Don't sync - preserve current messages
+      } else if (currentMessagesLength > 0) {
+        // We have messages in ref but not in state - restore them
+        console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from ref during transition:', currentMessagesLength)
+        setMessages(currentMessages)
+        messagesBeforeNavigationRef.current = currentMessages
+        // Cache to new chat ID
+        if (chatId) {
+          Promise.resolve().then(async () => {
+            try {
+              const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
+              await writeToIndexedDB("messages", { id: chatId, messages: currentMessages })
+              if (typeof window !== 'undefined') {
+                (window as any).__lastMessagesForMigration = { chatId, messages: currentMessages }
+              }
+            } catch (error) {
+              console.error('[🐛 MESSAGE SYNC] Failed to cache messages:', error)
+            }
+          })
+        }
+        return // Don't sync - preserve restored messages
+      } else if (messagesBeforeNavigationRef.current.length > 0) {
+        // We have backup messages - restore them
+        console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring backup messages during transition:', messagesBeforeNavigationRef.current.length)
+        setMessages(messagesBeforeNavigationRef.current)
+        // Cache to new chat ID
+        if (chatId) {
+          Promise.resolve().then(async () => {
+            try {
+              const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
+              await writeToIndexedDB("messages", { id: chatId, messages: messagesBeforeNavigationRef.current })
+              if (typeof window !== 'undefined') {
+                (window as any).__lastMessagesForMigration = { chatId, messages: messagesBeforeNavigationRef.current }
+              }
+            } catch (error) {
+              console.error('[🐛 MESSAGE SYNC] Failed to cache messages:', error)
+            }
+          })
+        }
+        return // Don't sync - preserve restored messages
+      } else if (typeof window !== 'undefined' && chatId) {
+        // Try to get messages from sessionStorage for this chatId
+        const sessionKey = `messages:${chatId}`
+        const sessionData = sessionStorage.getItem(sessionKey)
+        if (sessionData) {
+          try {
+            const sessionMessages = JSON.parse(sessionData)
+            if (Array.isArray(sessionMessages) && sessionMessages.length > 0) {
+              console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from sessionStorage during transition:', sessionMessages.length)
+              setMessages(sessionMessages)
+              messagesBeforeNavigationRef.current = sessionMessages
+              return // Don't sync - preserve restored messages
+            }
+          } catch (e) {
+            console.error('[🐛 MESSAGE SYNC] Failed to parse sessionStorage messages:', e)
+          }
+        }
+      }
+      
+      // If we still don't have messages, check initialMessages but don't overwrite if we're streaming
+      if (initialMessages.length > 0 && !isStreamingOrSubmitting) {
+        console.log('[🐛 MESSAGE SYNC] Using initialMessages during transition:', initialMessages.length)
+        setMessages(initialMessages)
+        messagesBeforeNavigationRef.current = initialMessages
+        return
+      }
+      
+      // If we're streaming, wait for messages to arrive
+      if (isStreamingOrSubmitting) {
+        console.log('[🐛 MESSAGE SYNC] Streaming in progress during transition, waiting for messages...')
+        return // Don't clear - wait for messages
+      }
+      
+      // Last resort: if no messages found anywhere, log warning but don't clear
+      console.warn('[🐛 MESSAGE SYNC] ⚠️ No messages found during temp-to-real transition!')
+      return // Don't sync - preserve whatever we have
+    }
+    
+    // 4. CHAT ID CHANGED: Sync from initialMessages if available
+    // CRITICAL: NEVER clear messages if initialMessages is empty - wait for async load
+    if (chatIdChanged) {
+      // CRITICAL: If we're streaming, preserve current messages - don't sync yet
+      if (isStreamingOrSubmitting && currentMessagesLength > 0) {
+        console.log('[🐛 MESSAGE SYNC] ⚠️ Streaming in progress, preserving', currentMessagesLength, 'messages during chatId change')
+        // Ensure messages are set if they got cleared
+        if (messages.length === 0) {
+          setMessages(currentMessages)
+        }
+        return
+      }
+      
+      if (initialMessages.length > 0) {
+        // We have initialMessages - sync them
+        const currentMessageIds = new Set(currentMessages.map(m => m.id))
+        const initialMessageIds = new Set(initialMessages.map(m => m.id))
+        const areDifferent = 
+          currentMessageIds.size !== initialMessageIds.size ||
+          Array.from(currentMessageIds).some(id => !initialMessageIds.has(id))
+        
+        if (areDifferent) {
+          console.log('[🐛 MESSAGE SYNC] ✅ Syncing messages from initialMessages after chatId change:', initialMessages.length)
+          setMessages(initialMessages)
+        } else if (messages.length === 0 && currentMessagesLength > 0) {
+          // Messages got cleared but we have them in ref - restore them
+          console.log('[🐛 MESSAGE SYNC] ⚠️ Messages were cleared, restoring from ref:', currentMessagesLength)
+          setMessages(currentMessages)
+        }
+      } else if (currentMessagesLength === 0 && !hasSentMessage && !isStreamingOrSubmitting) {
+        // No messages, no initialMessages, haven't sent message, not streaming
+        // This is a new empty chat - keep it empty
+        console.log('[🐛 MESSAGE SYNC] New empty chat, keeping messages empty')
+      } else if (currentMessagesLength > 0) {
+        // CRITICAL: We have messages - preserve them even if initialMessages is empty
+        // This prevents the blank screen bug!
+        if (messages.length === 0) {
+          console.log('[🐛 MESSAGE SYNC] ⚠️ Restoring messages from ref (preventing blank screen):', currentMessagesLength)
+          setMessages(currentMessages)
+        } else {
+          console.log('[🐛 MESSAGE SYNC] ⚠️ Preserving messages during chatId change (preventing blank screen), waiting for initialMessages to load')
+        }
+      }
+      return
+    }
+    
+    // 5. CHAT ID UNCHANGED: Sync if initialMessages loaded and we have no messages
+    // CRITICAL: Only sync if we're not streaming and messages are truly empty
+    // BUT: Don't sync if we have messages in ref (they might have just been cleared by useChat reset)
+    if (!chatIdChanged && initialMessages.length > 0 && messages.length === 0 && !isStreamingOrSubmitting) {
+      // CRITICAL: Check if we have messages in ref first - if so, restore them instead of syncing
+      if (currentMessagesLength > 0) {
+        console.log('[🐛 MESSAGE SYNC] ⚠️ Messages cleared but ref has them, restoring from ref instead of syncing:', currentMessagesLength)
+        setMessages(currentMessages)
+        return
+      }
+      
+      // Also check if we have messages in sessionStorage for this chatId
+      if (typeof window !== 'undefined' && chatId) {
+        const sessionKey = `pendingMessages:${chatId}`
+        const latestKey = 'pendingMessages:latest'
+        const sessionData = sessionStorage.getItem(sessionKey) || sessionStorage.getItem(latestKey)
+        if (sessionData) {
+          try {
+            const sessionMessages = JSON.parse(sessionData)
+            if (Array.isArray(sessionMessages.messages) && sessionMessages.messages.length > 0) {
+              // Check if these messages are recent (within last 30 seconds)
+              const isRecent = !sessionMessages.timestamp || (Date.now() - sessionMessages.timestamp < 30000)
+              if (isRecent) {
+                console.log('[🐛 MESSAGE SYNC] ⚠️ Found recent messages in sessionStorage, restoring instead of syncing:', sessionMessages.messages.length)
+                setMessages(sessionMessages.messages)
+                messagesRef.current = sessionMessages.messages
+                return
+              }
+            }
+          } catch (e) {
+            console.error('[🐛 MESSAGE SYNC] Failed to parse sessionStorage messages:', e)
+          }
+        }
+      }
+      
+      // Only sync if we truly have no messages anywhere
+      console.log('[🐛 MESSAGE SYNC] ✅ Syncing initialMessages to empty messages state:', initialMessages.length)
+      setMessages(initialMessages)
+      return
+    }
+    
+    // 6. CRITICAL: If messages are empty but we have backup messages, restore them
+    // This handles the case where useChat reset cleared messages during navigation
+    if (messages.length === 0 && messagesBeforeNavigationRef.current.length > 0) {
+      const isCurrentlyStreaming = status === 'streaming' || isSubmitting
+      if (isCurrentlyStreaming || chatId) {
+        console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from backup ref:', {
+          backupCount: messagesBeforeNavigationRef.current.length,
+          isStreaming: isCurrentlyStreaming,
+          chatId
+        })
+        setMessages(messagesBeforeNavigationRef.current)
+        return
+      }
+    }
+    
+    // 7. CRITICAL: If we have messages in ref but not in state, and we have a chatId, restore them
+    // This handles cases where messages got cleared but we have them cached
+    if (messages.length === 0 && currentMessagesLength > 0 && chatId && !isStreamingOrSubmitting) {
+      console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from ref (messages cleared but ref has them):', currentMessagesLength)
+      setMessages(currentMessages)
+      return
+    }
+    
+  }, [chatId, initialMessages, status, isSubmitting, setMessages, messages, stableChatId]) // Include messages to detect when they're cleared
+  
+  // Cache messages to temp chat ID as they come in (for migration)
+  useEffect(() => {
+    if (chatId && chatId.startsWith('temp-chat-') && messages.length > 0) {
+      Promise.resolve().then(async () => {
+        try {
+          const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
+          await writeToIndexedDB("messages", { id: chatId, messages })
+          if (typeof window !== 'undefined') {
+            (window as any).__lastMessagesForMigration = { chatId, messages }
+          }
+        } catch (error) {
+          console.error('[useChatCore] Failed to cache messages:', error)
+        }
+      })
+    }
+  }, [chatId, messages])
+  
+  // Clear migration data when no longer needed
+  useEffect(() => {
+    if (chatId && !chatId.startsWith('temp-chat-') && typeof window !== 'undefined') {
+      delete (window as any).__lastMessagesForMigration
+    }
+  }, [chatId])
 
   // Handle search params on mount
   useEffect(() => {
@@ -136,18 +844,6 @@ export function useChatCore({
       requestAnimationFrame(() => setInput(prompt))
     }
   }, [prompt, setInput])
-
-  // Reset messages when navigating from a chat to home
-  useEffect(() => {
-    if (
-      prevChatIdRef.current !== null &&
-      chatId === null &&
-      messages.length > 0
-    ) {
-      setMessages([])
-    }
-    prevChatIdRef.current = chatId
-  }, [chatId, messages.length, setMessages])
 
   // Submit action - optimized for immediate response
   const submit = useCallback(async () => {
@@ -182,29 +878,201 @@ export function useChatCore({
 
       // For authenticated users, ensure we have a chat ID before streaming
       let currentChatId = chatId
-      if (isAuthenticated && (!chatId || chatId.startsWith('temp'))) {
-        // Try to get chat ID quickly, but don't block streaming
+      let chatIdFromEnsure = null
+      
+      // CRITICAL: Check if we're on a chat route (/c/chatid) - if so, use that chatId
+      const isOnChatRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/c/')
+      const chatIdFromUrl = isOnChatRoute ? window.location.pathname.split('/c/')[1] : null
+      const isOnHomePage = typeof window !== 'undefined' && window.location.pathname === "/"
+      
+      // CRITICAL: Check if we already have a chatId from a previous message in this session
+      // This prevents creating a new chat on every message when URL hasn't updated yet
+      // Also check sessionStorage for the chatId from the last message sent
+      const existingChatIdFromRef = currentChatIdForSavingRef.current
+      const hasExistingMessages = messages.length > 0
+      
+      // CRITICAL: Also check sessionStorage for chatId from previous messages
+      // This is a backup in case the ref gets cleared
+      // BUT: Only use it if it matches the current chatId from props/URL to avoid using old chats
+      let chatIdFromSessionStorage: string | null = null
+      if (typeof window !== 'undefined') {
+        // First, check if current chatId has a hasSentMessage flag (most reliable)
+        if (chatId && !chatId.startsWith('temp-chat-')) {
+          const hasSentMessage = sessionStorage.getItem(`hasSentMessage:${chatId}`)
+          if (hasSentMessage === 'true') {
+            chatIdFromSessionStorage = chatId // Use current chatId if it has sent messages
+          }
+        }
+        
+        // If no match, check for any hasSentMessage keys (fallback)
+        if (!chatIdFromSessionStorage) {
+          const keys = Object.keys(sessionStorage)
+          const sentMessageKeys = keys.filter(k => k.startsWith('hasSentMessage:') && !k.includes('temp-chat-'))
+          if (sentMessageKeys.length > 0) {
+            // Get the most recent one (they should all be the same, but just in case)
+            const mostRecentKey = sentMessageKeys[sentMessageKeys.length - 1]
+            const candidateChatId = mostRecentKey.replace('hasSentMessage:', '')
+            // CRITICAL: Only use if it matches current chatId or URL to avoid using old chats
+            if (candidateChatId === chatId || candidateChatId === chatIdFromUrl) {
+              chatIdFromSessionStorage = candidateChatId
+            }
+          }
+        }
+      }
+      
+      // Use sessionStorage chatId as fallback if ref is empty AND it matches current context
+      // CRITICAL: Only use effectiveExistingChatId if it matches current chatId/URL to prevent navigation to old chats
+      const effectiveExistingChatId = existingChatIdFromRef || 
+        (chatIdFromSessionStorage && (chatIdFromSessionStorage === chatId || chatIdFromSessionStorage === chatIdFromUrl) 
+          ? chatIdFromSessionStorage 
+          : null)
+      
+      console.log('[🐛 SUBMIT DEBUG] Chat ID decision:', {
+        chatIdFromProp: chatId,
+        chatIdFromUrl,
+        existingChatIdFromRef,
+        chatIdFromSessionStorage,
+        effectiveExistingChatId,
+        pathname: typeof window !== 'undefined' ? window.location.pathname : 'N/A',
+        isOnChatRoute,
+        isOnHomePage,
+        isAuthenticated,
+        messagesCount: messages.length,
+        hasExistingMessages,
+        isTempId: chatId?.startsWith('temp')
+      })
+      
+      // CRITICAL: Priority order for chatId (check in this exact order):
+      // 1. chatId from URL (if on /c/chatid route) - highest priority
+      // 2. chatId from prop (from useChatSession) - second priority  
+      // 3. chatId from ref (from previous message in this session) - third priority
+      // 4. Only create new chat if we have NO chatId anywhere and NO messages (truly new conversation)
+      // CRITICAL: Never use effectiveExistingChatId if we have a valid chatId from props/URL to avoid old chats
+      
+      if (chatIdFromUrl && chatIdFromUrl !== chatId) {
+        // We're on a chat route - use that chatId
+        console.log('[🐛 SUBMIT] Using chatId from URL:', chatIdFromUrl)
+        currentChatId = chatIdFromUrl
+        if (chatIdFromUrl !== chatId) {
+          bumpChat(chatIdFromUrl)
+        }
+      } else if (chatId && !chatId.startsWith('temp')) {
+        // We have a valid chatId from prop - use it, NEVER create new chat or use old chats
+        console.log('[🐛 SUBMIT] ✅ Using existing valid chatId from prop (preventing new chat):', chatId)
+        currentChatId = chatId
+        // CRITICAL: Update ref to match current chatId to prevent using old chats
+        if (currentChatIdForSavingRef.current !== chatId) {
+          currentChatIdForSavingRef.current = chatId
+        }
+      } else if (effectiveExistingChatId && !effectiveExistingChatId.startsWith('temp-chat-') && 
+                 (!chatId || chatId.startsWith('temp'))) {
+        // CRITICAL: Only use effectiveExistingChatId if we don't have a valid chatId from props
+        // This prevents using old chats when we have a current valid chatId
+        // CRITICAL: We have a chatId from a previous message (ref or sessionStorage) - use it
+        // This prevents creating a new chat on every message when URL hasn't updated yet
+        console.log('[🐛 SUBMIT] ✅ Using existing chatId from previous message (preventing new chat):', effectiveExistingChatId)
+        currentChatId = effectiveExistingChatId
+        // Update the ref if it was empty but we found it in sessionStorage
+        if (!existingChatIdFromRef) {
+          currentChatIdForSavingRef.current = effectiveExistingChatId
+        }
+        // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
+        // URL will be updated after message is fully sent and saved
+        // We'll update it in the onFinish callback instead
+      } else if (hasExistingMessages) {
+        // CRITICAL: We have messages - we're in an existing conversation
+        // Don't create a new chat, use the effective chatId if available
+        console.log('[🐛 SUBMIT] ✅ Have existing messages - using chatId to prevent new chat')
+        if (effectiveExistingChatId && !effectiveExistingChatId.startsWith('temp-chat-')) {
+          currentChatId = effectiveExistingChatId
+          // Update the ref if it was empty
+          if (!existingChatIdFromRef) {
+            currentChatIdForSavingRef.current = effectiveExistingChatId
+          }
+          // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
+          // URL will be updated after message is fully sent and saved in onFinish callback
+        } else {
+          console.error('[🐛 SUBMIT] ⚠️ Have messages but no valid chatId found! This should not happen.')
+          setIsSubmitting(false)
+          return
+        }
+      } else if (isAuthenticated && isOnHomePage && messages.length === 0 && !effectiveExistingChatId) {
+        // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
+        // URL will be updated after message is fully sent and saved in onFinish callback
+        // CRITICAL: Only create new chat if:
+        // - We're on home page
+        // - We have no messages
+        // - We have NO existing chatId in ref (truly new conversation)
+        console.log('[🐛 SUBMIT] On home page with no messages and no existing chatId - creating new chat')
         try {
-          const quickChatId = await Promise.race([
-            ensureChatExists(uid, currentInput),
-            new Promise(resolve => setTimeout(() => resolve(null), 500)) // 500ms max wait
-          ])
+          chatIdFromEnsure = await ensureChatExists(uid, currentInput)
           
-          if (quickChatId && !quickChatId.toString().startsWith('temp')) {
-            currentChatId = quickChatId.toString()
+          if (chatIdFromEnsure && !chatIdFromEnsure.toString().startsWith('temp')) {
+            currentChatId = chatIdFromEnsure.toString()
+            console.log('[🐛 SUBMIT] Got real chatId from ensureChatExists:', currentChatId)
             // Update chatId if it changed
             if (currentChatId !== chatId) {
               bumpChat(currentChatId)
             }
+            // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
+            // URL will be updated after message is fully sent and saved in onFinish callback
+          } else if (chatIdFromEnsure) {
+            console.warn('[🐛 SUBMIT] ⚠️ Got temp chatId for authenticated user (unexpected):', chatIdFromEnsure)
+            currentChatId = chatIdFromEnsure.toString()
           } else {
-            // For authenticated users, if we can't get a real chat ID quickly,
-            // create a proper temp ID that won't cause UUID errors
-            currentChatId = `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+            console.error('[🐛 SUBMIT] Chat creation failed - cannot proceed without chatId')
+            setIsSubmitting(false)
+            return
           }
         } catch (error) {
-          console.warn("Quick chat creation failed, using temp ID:", error)
-          currentChatId = `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+          console.error('[🐛 SUBMIT] Chat creation failed:', error)
+          setIsSubmitting(false)
+          return
         }
+      } else if (isAuthenticated && !isOnHomePage && (!chatId || chatId.startsWith('temp'))) {
+        // We're not on home page but don't have a valid chatId
+        // Try to use effective chatId, otherwise fail
+        if (effectiveExistingChatId && !effectiveExistingChatId.startsWith('temp-chat-')) {
+          console.log('[🐛 SUBMIT] Using chatId from ref/sessionStorage (not on home page):', effectiveExistingChatId)
+          currentChatId = effectiveExistingChatId
+          // Update the ref if it was empty
+          if (!existingChatIdFromRef) {
+            currentChatIdForSavingRef.current = effectiveExistingChatId
+          }
+          // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
+          // URL will be updated after message is fully sent and saved in onFinish callback
+        } else {
+          console.warn('[🐛 SUBMIT] ⚠️ NOT on home page but no valid chatId! Cannot proceed.')
+          setIsSubmitting(false)
+          return
+        }
+      } else {
+        // Fallback: if we somehow get here and have no chatId, we can't proceed
+        console.error('[🐛 SUBMIT] ⚠️ No valid chatId found and cannot create new chat. State:', {
+          chatId,
+          chatIdFromUrl,
+          existingChatIdFromRef,
+          chatIdFromSessionStorage,
+          effectiveExistingChatId,
+          hasExistingMessages,
+          isOnHomePage,
+          messagesLength: messages.length
+        })
+        setIsSubmitting(false)
+        return
+      }
+      
+      console.log('[🐛 SUBMIT] Final currentChatId:', currentChatId)
+      
+      // CRITICAL: Store the chatId for saving messages (use real chatId if available)
+      // This ref is used to prevent creating new chats on subsequent messages
+      if (currentChatId && !currentChatId.startsWith('temp-chat-')) {
+        currentChatIdForSavingRef.current = currentChatId
+        console.log('[🐛 SUBMIT] Stored chatId in ref for future messages:', currentChatId)
+      } else if (currentChatId && currentChatId.startsWith('temp-chat-')) {
+        lastUsedTempChatIdRef.current = currentChatId
+        // Wait for real chatId to be available
+        currentChatIdForSavingRef.current = null
       }
 
       // Start streaming with the message
@@ -241,15 +1109,10 @@ export function useChatCore({
         })
 
         try {
-          const currentChatId = await ensureChatExists(uid, currentInput)
-          console.log("[DEBUG] Chat ID ensured:", currentChatId)
+          // Use the already-determined currentChatId from above, don't call ensureChatExists again
+          console.log("[DEBUG] Using currentChatId for file upload:", currentChatId)
 
           if (currentChatId) {
-            // Update chatId if it changed
-            if (currentChatId !== chatId) {
-              bumpChat(currentChatId)
-            }
-
             // Upload files in background
             processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id, currentFiles)
             console.log("[DEBUG] File uploads completed:", processedAttachments?.length || 0, "files")
@@ -278,6 +1141,37 @@ export function useChatCore({
       // Append message with processed attachments (or none if upload failed)
       console.log("[DEBUG] About to append message with attachments:", processedAttachments)
       console.log("[DEBUG] Attachment count:", processedAttachments?.length || 0)
+
+      // Mark that we've sent the first message to prevent redirect
+      hasSentFirstMessageRef.current = true
+      if (typeof window !== 'undefined') {
+        // Set for BOTH the current chat ID (temp or real) AND the chatId from props
+        // This ensures it works regardless of when navigation happens
+        if (currentChatId) {
+          sessionStorage.setItem(`hasSentMessage:${currentChatId}`, 'true')
+          // CRITICAL: Cache the user message immediately to temp chat ID for migration
+          if (currentChatId.startsWith('temp-chat-')) {
+            try {
+              const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
+              // Save the user message to temp chat ID so it can be migrated later
+              const userMessage = {
+                role: "user" as const,
+                content: currentInput,
+                id: `msg-${Date.now()}`,
+                experimental_attachments: processedAttachments,
+                createdAt: new Date()
+              }
+              await writeToIndexedDB("messages", { id: currentChatId, messages: [userMessage] })
+              console.log('[useChatCore] Cached user message to temp chat ID:', currentChatId)
+            } catch (error) {
+              console.error('[useChatCore] Failed to cache user message to temp chat ID:', error)
+            }
+          }
+        }
+        if (chatId && chatId !== currentChatId) {
+          sessionStorage.setItem(`hasSentMessage:${chatId}`, 'true')
+        }
+      }
 
       append({
         role: "user",
@@ -332,14 +1226,15 @@ export function useChatCore({
         }
 
         // For authenticated users, ensure we have a chat ID before streaming
+        // CRITICAL: Use existing chatId if we have one - don't create new chat for suggestions
         let currentChatId = chatId
-        if (isAuthenticated && (!chatId || chatId.startsWith('temp'))) {
-          // Try to get chat ID quickly, but don't block streaming
+        const isOnHomePage = typeof window !== 'undefined' && window.location.pathname === "/"
+        
+        // Only create new chat if we're on home page AND don't have a valid chatId
+        if (isAuthenticated && isOnHomePage && (!chatId || chatId.startsWith('temp'))) {
+          // For authenticated users, wait for real chat creation (no temp chats)
           try {
-            const quickChatId = await Promise.race([
-              ensureChatExists(uid, suggestion),
-              new Promise(resolve => setTimeout(() => resolve(null), 500)) // 500ms max wait
-            ])
+            const quickChatId = await ensureChatExists(uid, suggestion)
             
             if (quickChatId && !quickChatId.toString().startsWith('temp')) {
               currentChatId = quickChatId.toString()
@@ -347,15 +1242,28 @@ export function useChatCore({
               if (currentChatId !== chatId) {
                 bumpChat(currentChatId)
               }
+            } else if (quickChatId) {
+              // This shouldn't happen for authenticated users, but handle it
+              console.warn('[🐛 SUGGESTION] ⚠️ Got temp chatId for authenticated user (unexpected):', quickChatId)
+              currentChatId = quickChatId.toString()
             } else {
-              // For authenticated users, if we can't get a real chat ID quickly,
-              // create a proper temp ID that won't cause UUID errors
-              currentChatId = `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+              // Chat creation failed - don't create temp chat for authenticated users
+              console.error('[🐛 SUGGESTION] Chat creation failed - cannot proceed without chatId')
+              return
             }
           } catch (error) {
-            console.warn("Quick chat creation failed for suggestion, using temp ID:", error)
-            currentChatId = `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+            console.error('[🐛 SUGGESTION] Chat creation failed:', error)
+            return
           }
+        } else if (chatId && !chatId.startsWith('temp')) {
+          // We already have a valid chatId - use it, never create a new chat
+          console.log('[🐛 SUGGESTION] Using existing valid chatId (no new chat):', currentChatId)
+          currentChatId = chatId
+        } else if (!isOnHomePage && (!chatId || chatId.startsWith('temp'))) {
+          // We're not on home page but don't have a valid chatId
+          // This shouldn't normally happen, but handle it gracefully
+          console.warn('[🐛 SUGGESTION] ⚠️ NOT on home page but no valid chatId! Cannot proceed.')
+          return
         }
 
         // Start streaming immediately for instant feedback
@@ -367,6 +1275,12 @@ export function useChatCore({
             isAuthenticated,
             systemPrompt: getSystemPromptByRole(userPreferences.preferences.userRole),
           },
+        }
+
+        // Mark that we've sent the first message to prevent redirect
+        hasSentFirstMessageRef.current = true
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(`hasSentMessage:${currentChatId || chatId}`, 'true')
         }
 
         // Append message immediately

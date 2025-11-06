@@ -6,9 +6,11 @@ import { createPerplexity, perplexity } from "@ai-sdk/perplexity"
 import type { LanguageModelV1 } from "@ai-sdk/provider"
 import { createXai, xai } from "@ai-sdk/xai"
 import { getProviderForModel } from "./provider-map"
+import { createInflectionModel } from "./inflection-adapter"
 import type {
   AnthropicModel,
   GeminiModel,
+  InflectionModel,
   MistralModel,
   OpenAIModel,
   PerplexityModel,
@@ -22,6 +24,7 @@ type GoogleGenerativeAIProviderSettings = Parameters<typeof google>[1]
 type PerplexityProviderSettings = Parameters<typeof perplexity>[0]
 type AnthropicProviderSettings = Parameters<typeof anthropic>[1]
 type XaiProviderSettings = Parameters<typeof xai>[1]
+type InflectionProviderSettings = undefined
 type ModelSettings<T extends SupportedModel> = T extends OpenAIModel
   ? OpenAIChatSettings
   : T extends MistralModel
@@ -34,7 +37,9 @@ type ModelSettings<T extends SupportedModel> = T extends OpenAIModel
           ? AnthropicProviderSettings
           : T extends XaiModel
             ? XaiProviderSettings
-            : never
+            : T extends InflectionModel
+              ? InflectionProviderSettings
+              : never
 
 export type OpenProvidersOptions<T extends SupportedModel> = ModelSettings<T>
 
@@ -121,6 +126,9 @@ export function openproviders<T extends SupportedModel>(
     return xai(modelId as XaiModel, settings as XaiProviderSettings)
   }
 
+  if (provider === "inflection") {
+    return createInflectionModel(modelId as InflectionModel, apiKey)
+  }
 
   throw new Error(`Unsupported model: ${modelId}`)
 }

@@ -124,10 +124,18 @@ function PromptInputTextarea({
   const maxHeightStyle =
     typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight
 
+  // CRITICAL: Prevent hydration mismatch by only autoFocusing on client
+  const [shouldAutoFocus, setShouldAutoFocus] = useState(false)
+  
+  useEffect(() => {
+    // Only autoFocus after mount to prevent hydration mismatch
+    setShouldAutoFocus(true)
+  }, [])
+
   return (
     <Textarea
       ref={textareaRef}
-      autoFocus
+      autoFocus={shouldAutoFocus}
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={handleKeyDown}

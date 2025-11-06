@@ -55,8 +55,20 @@ export async function GET() {
 
     const userProviders = data?.map((k) => k.provider) || []
 
-    if (userProviders.length === 0) {
-      const models = await getModelsWithAccessFlags()
+    // Get all models with access flags first
+    const allModels = await getModelsWithAccessFlags()
+    
+    // If user has provider keys, mark those provider models as accessible
+    if (userProviders.length > 0) {
+      const userProviderModels = await getModelsForUserProviders(userProviders)
+      const userProviderModelIds = new Set(userProviderModels.map(m => m.id))
+      
+      // Update accessible flag for models where user has keys
+      const models = allModels.map(model => ({
+        ...model,
+        accessible: model.accessible || userProviderModelIds.has(model.id)
+      }))
+      
       return new Response(JSON.stringify({ models }), {
         status: 200,
         headers: {
@@ -65,9 +77,8 @@ export async function GET() {
       })
     }
 
-    const models = await getModelsForUserProviders(userProviders)
-
-    return new Response(JSON.stringify({ models }), {
+    // If no user keys, return all models with access flags
+    return new Response(JSON.stringify({ models: allModels }), {
       status: 200,
       headers: {
         "Content-Type": "application/json",

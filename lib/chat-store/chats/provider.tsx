@@ -91,10 +91,39 @@ export function ChatsProvider({
       }
     }
 
+    const handleChatCreated = async (event: Event) => {
+      // Refresh chats when a new chat is created in the background
+      if (userId) {
+        refresh()
+      }
+      
+      // Update sessionStorage when chat is created in background
+      const customEvent = event as CustomEvent
+      if (customEvent.detail?.chatId && typeof window !== 'undefined') {
+        const newChatId = customEvent.detail.chatId
+        
+        // Find sessionStorage keys that start with 'hasSentMessage:'
+        // and move them to the new chatId
+        const keys = Object.keys(sessionStorage)
+        const messageKeys = keys.filter(k => k.startsWith('hasSentMessage:'))
+        for (const key of messageKeys) {
+          const value = sessionStorage.getItem(key)
+          if (value === 'true') {
+            // Clear old key and set new key
+            sessionStorage.removeItem(key)
+            sessionStorage.setItem(`hasSentMessage:${newChatId}`, 'true')
+            break
+          }
+        }
+      }
+    }
+
     if (typeof window !== 'undefined') {
       window.addEventListener('resetChatState', handleResetChatState)
+      window.addEventListener('chatCreated', handleChatCreated)
       return () => {
         window.removeEventListener('resetChatState', handleResetChatState)
+        window.removeEventListener('chatCreated', handleChatCreated)
       }
     }
   }, [userId, refresh])
@@ -145,7 +174,28 @@ export function ChatsProvider({
     if (!userId) return
     const prev = [...chats]
 
+    // CRITICAL: Check if chat with same title/content already exists to prevent duplicates
+    // This prevents creating multiple chats when ensureChatExists is called multiple times
+    const existingChat = chats.find(
+      (c) => c.title === (title || "New Chat") && 
+             c.user_id === userId &&
+             Math.abs(new Date(c.created_at).getTime() - Date.now()) < 5000 // Created within last 5 seconds
+    )
+    
+    if (existingChat && !existingChat.id.startsWith('optimistic-')) {
+      console.log('[createNewChat] Chat with same title already exists, returning existing:', existingChat.id)
+      return existingChat
+    }
+
     const optimisticId = `optimistic-${Date.now().toString()}`
+    
+    // CRITICAL: Check if optimistic chat with same ID already exists
+    const existingOptimistic = chats.find((c) => c.id === optimisticId)
+    if (existingOptimistic) {
+      console.log('[createNewChat] Optimistic chat already exists, skipping duplicate:', optimisticId)
+      return existingOptimistic
+    }
+    
     const optimisticChat = {
       id: optimisticId,
       title: title || "New Chat",
@@ -157,7 +207,16 @@ export function ChatsProvider({
       updated_at: new Date().toISOString(),
       project_id: null,
     }
-    setChats((prev) => [optimisticChat, ...prev])
+    
+    // CRITICAL: Only add if it doesn't already exist
+    setChats((prev) => {
+      const exists = prev.some((c) => c.id === optimisticId)
+      if (exists) {
+        console.log('[createNewChat] Optimistic chat already in state, skipping')
+        return prev
+      }
+      return [optimisticChat, ...prev]
+    })
 
     try {
       const newChat = await createNewChatFromDb(

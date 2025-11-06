@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils"
 import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
 import { redirect } from "next/navigation"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
@@ -89,6 +89,7 @@ export function Chat() {
       setHasDialogAuth,
       setMessages: () => {},
       setInput: () => {},
+      bumpChat,
     })
 
   // Core chat functionality (initialization + state + actions)
@@ -185,19 +186,112 @@ export function Chat() {
 
   // Handle redirect for invalid chatId - only redirect if we're certain the chat doesn't exist
   // and we're not in a transient state during chat creation
-  if (
+  // Track when we should prevent redirect due to recent chat creation
+  const preventRedirectRef = useRef(false)
+  const [chatIdChangedTime, setChatIdChangedTime] = useState<number | null>(null)
+  
+  // Track when chatId changes
+  useEffect(() => {
+    if (chatId) {
+      setChatIdChangedTime(Date.now())
+    }
+  }, [chatId])
+  
+  // Don't redirect if:
+  // - We're submitting a message (chat might be in the process of being created)
+  // - We're streaming a response (status is streaming)
+  // - We have messages (even if loading failed, we should show them)
+  // - We've sent a message in this session
+  // - The chatId is a temporary ID (chat being created)
+  // - We're still loading chats (wait for background chat creation to complete)
+  // - We just navigated to a new chat (give it time to load)
+  const isTemporaryChat = chatId?.startsWith("temp-chat-")
+  const hasMessages = messages.length > 0
+  const isStreaming = status === "streaming"
+  
+  // Calculate time since chatId changed - CRITICAL to prevent immediate redirects
+  const timeSinceChatIdChange = chatIdChangedTime ? Date.now() - chatIdChangedTime : Infinity
+  const recentlyNavigated = timeSinceChatIdChange < 5000 // Within last 5 seconds
+  
+  // Check sessionStorage for sent message state
+  const hasSentMessageInStorage = useMemo(() => {
+    if (typeof window === 'undefined' || !chatId) return false
+    return sessionStorage.getItem(`hasSentMessage:${chatId}`) === 'true'
+  }, [chatId])
+  
+  // Check if messages are being migrated (stored in sessionStorage)
+  const hasMigratedMessages = useMemo(() => {
+    if (typeof window === 'undefined' || !chatId) return false
+    return sessionStorage.getItem(`messages:${chatId}`) !== null
+  }, [chatId])
+  
+  // Only redirect in very specific circumstances - avoid redirecting after sending a message or recent navigation
+  const shouldRedirect = 
     chatId &&
     !isChatsLoading &&
     !currentChat &&
     !isSubmitting &&
     status === "ready" &&
-    messages.length === 0 &&
-    !hasSentFirstMessageRef.current // Don't redirect if we've already sent a message in this session
-  ) {
+    !hasMessages &&
+    !hasSentFirstMessageRef?.current &&
+    !hasSentMessageInStorage &&
+    !isTemporaryChat &&
+    !isStreaming &&
+    !preventRedirectRef.current &&
+    !recentlyNavigated && // CRITICAL: Don't redirect if we just navigated to this chat
+    !hasMigratedMessages // CRITICAL: Don't redirect if messages are being migrated
+  
+  if (shouldRedirect) {
+    console.log("[REDIRECT] Redirecting because:", {
+      chatId,
+      isChatsLoading,
+      currentChat: !!currentChat,
+      isSubmitting,
+      status,
+      hasMessages,
+      hasSentFirstMessage: hasSentFirstMessageRef?.current,
+      hasSentMessageInStorage,
+      isTemporaryChat,
+      isStreaming,
+      recentlyNavigated,
+      hasMigratedMessages,
+      timeSinceChatIdChange: timeSinceChatIdChange.toFixed(0) + 'ms'
+    })
     return redirect("/")
   }
 
-  const showOnboarding = !chatId && messages.length === 0
+  // CRITICAL: Prevent hydration mismatch
+  // Server always renders with messages.length === 0 (no sessionStorage access)
+  // Client might restore messages from sessionStorage, causing mismatch
+  // Solution: Always start with server state (no messages), then update after mount
+  const [isMounted, setIsMounted] = useState(false)
+  
+  // CRITICAL: Initial state MUST match server (always true if no chatId)
+  // Server has no access to sessionStorage, so it always renders with messages.length === 0
+  const [showOnboarding, setShowOnboarding] = useState(!chatId)
+
+  // Update after mount to reflect actual client state
+  useEffect(() => {
+    setIsMounted(true)
+    // After mount, check actual state
+    // CRITICAL: Only show onboarding if no chatId AND no messages
+    // This prevents hydration mismatch because we start with server state
+    setShowOnboarding(!chatId && messages.length === 0)
+  }, [chatId, messages.length])
+  
+  // CRITICAL: Clear sessionStorage on home page to prevent stale messages
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !chatId && isMounted) {
+      // Clear all pending messages when on home page after mount
+      sessionStorage.removeItem('pendingMessages:latest')
+      const keys = Object.keys(sessionStorage)
+      keys.forEach(key => {
+        if (key.startsWith('pendingMessages:')) {
+          sessionStorage.removeItem(key)
+        }
+      })
+    }
+  }, [chatId, isMounted])
 
   return (
     <>
