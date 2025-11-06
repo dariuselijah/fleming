@@ -34,6 +34,9 @@ type UseChatOperationsProps = {
   ) => void
   setInput: (input: string) => void
   bumpChat?: (id: string) => Promise<void>
+  setHasRateLimitPaywall?: (value: boolean) => void
+  setRateLimitWaitTime?: (value: number | null) => void
+  setRateLimitType?: (value: "hourly" | "daily") => void
 }
 
 export function useChatOperations({
@@ -45,7 +48,11 @@ export function useChatOperations({
   createNewChat,
   setHasDialogAuth,
   setMessages,
+  setInput,
   bumpChat,
+  setHasRateLimitPaywall,
+  setRateLimitWaitTime,
+  setRateLimitType,
 }: UseChatOperationsProps) {
   const router = useRouter()
   // Use ref to track chat creation state
@@ -57,6 +64,16 @@ export function useChatOperations({
   const checkLimitsAndNotify = async (uid: string) => {
     try {
       const rateData = await checkRateLimits(uid, isAuthenticated)
+
+      // Check hourly rate limit first (ChatGPT-style)
+      if (rateData.remainingHourly !== undefined && rateData.remainingHourly <= 0) {
+        if (setHasRateLimitPaywall && setRateLimitWaitTime && setRateLimitType) {
+          setRateLimitWaitTime(rateData.waitTimeSeconds || null)
+          setRateLimitType("hourly")
+          setHasRateLimitPaywall(true)
+        }
+        return false
+      }
 
       if (rateData.remaining === 0 && !isAuthenticated) {
         setHasDialogAuth(true)

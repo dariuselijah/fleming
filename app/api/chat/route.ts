@@ -20,6 +20,7 @@ import {
   orchestrateHealthcareAgents
 } from "@/lib/models/healthcare-agents"
 import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
+import { anonymizeMessages } from "@/lib/anonymize"
 
 export const maxDuration = 60
 
@@ -123,6 +124,34 @@ export async function POST(req: Request) {
         JSON.stringify({ error: "Error, missing information" }),
         { status: 400 }
       )
+    }
+
+    // CRITICAL: Check rate limits BEFORE streaming starts
+    // Skip for temp users/chats
+    if (userId !== "temp" && chatId !== "temp" && !chatId.startsWith("temp-chat-")) {
+      try {
+        const supabase = await validateAndTrackUsage({
+          userId,
+          model,
+          isAuthenticated,
+        })
+        // If validation fails, it will throw an error with waitTimeSeconds
+      } catch (error: any) {
+        // If it's a rate limit error with wait time, return it with proper status
+        if (error.code === "DAILY_LIMIT_REACHED" || error.limitType === "hourly") {
+          return new Response(
+            JSON.stringify({
+              error: error.message,
+              code: error.code || "RATE_LIMIT_EXCEEDED",
+              waitTimeSeconds: error.waitTimeSeconds || null,
+              limitType: error.limitType || "daily",
+            }),
+            { status: 429 }
+          )
+        }
+        // Re-throw other errors
+        throw error
+      }
     }
 
     // Check for images when Fleming 3.5 is selected and switch to Fleming 4
@@ -230,6 +259,11 @@ export async function POST(req: Request) {
       return message
     })
 
+    // CRITICAL: Anonymize messages before sending to LLM providers
+    // This ensures no PII/PHI is sent to third-party LLM services (HIPAA compliance)
+    const anonymizedMessages = anonymizeMessages(filteredMessages) as MessageAISDK[]
+    console.log("🔒 Messages anonymized before sending to LLM provider")
+
     // START STREAMING IMMEDIATELY with basic prompt
     console.log("🚀 Starting streaming immediately...")
     const startTime = performance.now()
@@ -239,7 +273,7 @@ export async function POST(req: Request) {
         enableSearch
       }),
       system: effectiveSystemPrompt,
-      messages: filteredMessages,
+      messages: anonymizedMessages, // Use anonymized messages for LLM
       tools: {} as ToolSet,
       maxSteps: 10,
       onError: (err: unknown) => {
@@ -267,6 +301,7 @@ export async function POST(req: Request) {
 
             if (supabase) {
               // Save user message first (if not already saved)
+              // Use original (non-anonymized) message for storage - it will be encrypted
               const userMessage = messages[messages.length - 1]
               if (userMessage?.role === "user") {
                 try {

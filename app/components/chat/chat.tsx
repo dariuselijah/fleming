@@ -30,6 +30,11 @@ const DialogAuth = dynamic(
   { ssr: false }
 )
 
+const RateLimitPaywall = dynamic(
+  () => import("./rate-limit-paywall").then((mod) => mod.RateLimitPaywall),
+  { ssr: false }
+)
+
 export function Chat() {
   const { chatId } = useChatSession()
   const {
@@ -71,6 +76,9 @@ export function Chat() {
 
   // State to pass between hooks
   const [hasDialogAuth, setHasDialogAuth] = useState(false)
+  const [hasRateLimitPaywall, setHasRateLimitPaywall] = useState(false)
+  const [rateLimitWaitTime, setRateLimitWaitTime] = useState<number | null>(null)
+  const [rateLimitType, setRateLimitType] = useState<"hourly" | "daily">("hourly")
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
   const systemPrompt = useMemo(
     () => getSystemPromptByRole(preferences?.userRole || "general", user?.system_prompt || undefined),
@@ -90,6 +98,9 @@ export function Chat() {
       setMessages: () => {},
       setInput: () => {},
       bumpChat,
+      setHasRateLimitPaywall,
+      setRateLimitWaitTime,
+      setRateLimitType,
     })
 
   // Core chat functionality (initialization + state + actions)
@@ -123,6 +134,9 @@ export function Chat() {
     clearDraft,
     bumpChat,
     setHasDialogAuth,
+    setHasRateLimitPaywall,
+    setRateLimitWaitTime,
+    setRateLimitType,
   })
 
   // Memoize the conversation props to prevent unnecessary rerenders
@@ -321,6 +335,13 @@ export function Chat() {
       </div>
 
       <DialogAuth open={hasDialogAuth} setOpen={setHasDialogAuth} />
+
+      <RateLimitPaywall
+        open={hasRateLimitPaywall}
+        setOpen={setHasRateLimitPaywall}
+        waitTimeSeconds={rateLimitWaitTime}
+        limitType={rateLimitType}
+      />
 
       <FeedbackWidget />
       

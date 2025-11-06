@@ -19,6 +19,10 @@ export const REMAINING_QUERY_ALERT_THRESHOLD = 2
 export const DAILY_FILE_UPLOAD_LIMIT = 25
 export const DAILY_LIMIT_PRO_MODELS = 500
 
+// Hourly rate limits (ChatGPT-style)
+export const NON_AUTH_HOURLY_MESSAGE_LIMIT = 3
+export const AUTH_HOURLY_MESSAGE_LIMIT = 50
+
 export const NON_AUTH_ALLOWED_MODELS = ["fleming-4", "grok-3", "o3", "gpt-4o"]
 
 export const FREE_MODELS_IDS = [

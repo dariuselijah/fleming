@@ -35,6 +35,9 @@ type UseChatCoreProps = {
   clearDraft: () => void
   bumpChat: (chatId: string) => void
   setHasDialogAuth: (value: boolean) => void
+  setHasRateLimitPaywall?: (value: boolean) => void
+  setRateLimitWaitTime?: (value: number | null) => void
+  setRateLimitType?: (value: "hourly" | "daily") => void
 }
 
 export function useChatCore({
@@ -54,6 +57,9 @@ export function useChatCore({
   clearDraft,
   bumpChat,
   setHasDialogAuth,
+  setHasRateLimitPaywall,
+  setRateLimitWaitTime,
+  setRateLimitType,
 }: UseChatCoreProps) {
   const router = useRouter()
   // State management
@@ -110,6 +116,35 @@ export function useChatCore({
     console.error("Error message:", error.message)
     let errorMsg = error.message || "Something went wrong."
 
+    // Check if this is a rate limit error with wait time
+    // The error might have waitTimeSeconds attached if it came from our API
+    const errorAny = error as any
+    if (
+      errorMsg.includes("Rate limit") ||
+      errorMsg.includes("rate limit") ||
+      errorMsg.includes("429") ||
+      errorAny.statusCode === 429 ||
+      errorAny.code === "RATE_LIMIT_EXCEEDED"
+    ) {
+      // Try to extract wait time from error
+      const waitTime = errorAny.waitTimeSeconds || errorAny.waitTime || null
+      const limitType = errorAny.limitType || "hourly"
+      
+      // Show paywall if we have the setters
+      if (setHasRateLimitPaywall && setRateLimitWaitTime && setRateLimitType) {
+        setRateLimitWaitTime(waitTime)
+        setRateLimitType(limitType)
+        setHasRateLimitPaywall(true)
+      } else {
+        // Fallback to toast if paywall setters not available
+        toast({
+          title: errorMsg,
+          status: "error",
+        })
+      }
+      return
+    }
+
     // Handle specific image-related errors
     if (errorMsg.includes("Fetching image failed") || errorMsg.includes("400 Bad Request")) {
       errorMsg = "There was an issue with image search results. The chat will continue without images."
@@ -122,7 +157,7 @@ export function useChatCore({
       title: errorMsg,
       status: "error",
     })
-  }, [])
+  }, [setHasRateLimitPaywall, setRateLimitWaitTime, setRateLimitType])
 
   // Track the last saved message count to detect new messages during streaming
   const lastSavedMessageCountRef = useRef(0)
@@ -1205,6 +1240,9 @@ export function useChatCore({
     setInput,
     setFiles,
     userPreferences,
+    setHasRateLimitPaywall,
+    setRateLimitWaitTime,
+    setRateLimitType,
   ]);
 
   // Handle suggestion - optimized for immediate response

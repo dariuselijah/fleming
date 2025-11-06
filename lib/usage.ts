@@ -1,9 +1,11 @@
 import { UsageLimitError } from "@/lib/api"
 import {
   AUTH_DAILY_MESSAGE_LIMIT,
+  AUTH_HOURLY_MESSAGE_LIMIT,
   DAILY_LIMIT_PRO_MODELS,
   FREE_MODELS_IDS,
   NON_AUTH_DAILY_MESSAGE_LIMIT,
+  NON_AUTH_HOURLY_MESSAGE_LIMIT,
 } from "@/lib/config"
 import { SupabaseClient } from "@supabase/supabase-js"
 
@@ -205,12 +207,128 @@ export async function incrementProUsage(
   }
 }
 
+/**
+ * Checks hourly rate limits (ChatGPT-style)
+ * Returns wait time in seconds if limit is reached
+ */
+export async function checkHourlyUsage(
+  supabase: SupabaseClient,
+  userId: string,
+  isAuthenticated: boolean
+): Promise<{ hourlyCount: number; hourlyLimit: number; waitTimeSeconds: number | null }> {
+  const { data: userData, error: userDataError } = await supabase
+    .from("users")
+    .select("hourly_message_count, hourly_reset, anonymous")
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (userDataError) {
+    throw new Error("Error fetching user data: " + userDataError.message)
+  }
+  if (!userData) {
+    throw new Error("User record not found for id: " + userId)
+  }
+
+  const isAnonymous = userData.anonymous || !isAuthenticated
+  const hourlyLimit = isAnonymous
+    ? NON_AUTH_HOURLY_MESSAGE_LIMIT
+    : AUTH_HOURLY_MESSAGE_LIMIT
+
+  const now = new Date()
+  let hourlyCount = userData.hourly_message_count || 0
+  const lastReset = userData.hourly_reset ? new Date(userData.hourly_reset) : null
+
+  // Check if an hour has passed (using UTC)
+  const isNewHour =
+    !lastReset ||
+    now.getTime() - lastReset.getTime() >= 60 * 60 * 1000 // 1 hour in milliseconds
+
+  if (isNewHour) {
+    hourlyCount = 0
+    const { error: resetError } = await supabase
+      .from("users")
+      .update({ hourly_message_count: 0, hourly_reset: now.toISOString() })
+      .eq("id", userId)
+
+    if (resetError) {
+      throw new Error("Failed to reset hourly count: " + resetError.message)
+    }
+  }
+
+  // Calculate wait time if limit is reached
+  let waitTimeSeconds: number | null = null
+  if (hourlyCount >= hourlyLimit && lastReset) {
+    const timeSinceReset = now.getTime() - new Date(lastReset).getTime()
+    const timeUntilReset = 60 * 60 * 1000 - timeSinceReset // 1 hour - time elapsed
+    waitTimeSeconds = Math.ceil(timeUntilReset / 1000)
+  }
+
+  return {
+    hourlyCount,
+    hourlyLimit,
+    waitTimeSeconds,
+  }
+}
+
+/**
+ * Increments hourly message counter
+ */
+export async function incrementHourlyUsage(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<void> {
+  const { data: userData, error: userDataError } = await supabase
+    .from("users")
+    .select("hourly_message_count, hourly_reset")
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (userDataError || !userData) {
+    throw new Error(
+      "Error fetching user data: " +
+        (userDataError?.message || "User not found")
+    )
+  }
+
+  const now = new Date()
+  const lastReset = userData.hourly_reset ? new Date(userData.hourly_reset) : null
+  const isNewHour =
+    !lastReset ||
+    now.getTime() - lastReset.getTime() >= 60 * 60 * 1000
+
+  const hourlyCount = isNewHour ? 1 : (userData.hourly_message_count || 0) + 1
+
+  const { error: updateError } = await supabase
+    .from("users")
+    .update({
+      hourly_message_count: hourlyCount,
+      hourly_reset: isNewHour ? now.toISOString() : userData.hourly_reset,
+      last_active_at: now.toISOString(),
+    })
+    .eq("id", userId)
+
+  if (updateError) {
+    throw new Error("Failed to update hourly usage data: " + updateError.message)
+  }
+}
+
 export async function checkUsageByModel(
   supabase: SupabaseClient,
   userId: string,
   modelId: string,
   isAuthenticated: boolean
 ) {
+  // First check hourly limits (ChatGPT-style)
+  const hourlyUsage = await checkHourlyUsage(supabase, userId, isAuthenticated)
+  if (hourlyUsage.hourlyCount >= hourlyUsage.hourlyLimit) {
+    const error = new UsageLimitError(
+      `Rate limit exceeded. Please wait ${Math.ceil((hourlyUsage.waitTimeSeconds || 3600) / 60)} minutes.`
+    )
+    ;(error as any).waitTimeSeconds = hourlyUsage.waitTimeSeconds
+    ;(error as any).limitType = "hourly"
+    throw error
+  }
+
   if (isProModel(modelId)) {
     if (!isAuthenticated) {
       throw new UsageLimitError("You must log in to use this model.")
@@ -227,6 +345,9 @@ export async function incrementUsageByModel(
   modelId: string,
   isAuthenticated: boolean
 ) {
+  // Increment hourly usage
+  await incrementHourlyUsage(supabase, userId)
+
   if (isProModel(modelId)) {
     if (!isAuthenticated) return
     return await incrementProUsage(supabase, userId)
