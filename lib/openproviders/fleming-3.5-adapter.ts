@@ -1,14 +1,11 @@
 import type { LanguageModelV1, LanguageModelV1CallOptions, LanguageModelV1StreamPart } from "@ai-sdk/provider"
-import { streamText } from "ai"
 import { createInflectionModel } from "./inflection-adapter"
 import { openproviders } from "./index"
-import { FLEMING_3_5_IMAGE_ANALYSIS_PROMPT } from "@/lib/config"
 
 /**
  * Creates a composite LanguageModelV1 adapter for Fleming 3.5
- * - Uses Grok-4-fast-reasoning for image analysis when images are present
- * - Uses Pi 3.1 latest for conversation (with image descriptions if images were analyzed)
- * - Uses Pi 3.1 latest directly when no images are present
+ * - Uses Grok-4-fast-reasoning directly when images are present
+ * - Uses Pi 3.1 latest for normal conversation (no images)
  */
 export function createFleming35Model(
   apiKey?: string,
@@ -44,24 +41,132 @@ export function createFleming35Model(
     return false
   }
 
+  // Helper function to validate and prepare image URLs for Grok
+  // Grok can accept data URLs (base64) and HTTPS URLs, but not blob URLs
+  async function prepareImageUrl(url: string | null | undefined): Promise<string | null> {
+    if (!url || typeof url !== "string") {
+      console.warn("[Fleming 3.5] Invalid URL provided to prepareImageUrl:", typeof url, url)
+      return null
+    }
+    
+    // Data URLs (base64) - use directly
+    if (url.startsWith("data:image/") || url.startsWith("data:application/")) {
+      return url
+    }
+    
+    // HTTPS URLs (signed URLs) - use directly
+    if (url.startsWith("https://")) {
+      return url
+    }
+    
+    // Blob URLs - cannot be accessed from server, need to be converted on client
+    // Return null to skip this image instead of throwing
+    if (url.startsWith("blob:")) {
+      console.warn("[Fleming 3.5] Blob URL detected - skipping. Blob URLs must be converted to data URLs or signed URLs before sending to server:", url.substring(0, 50))
+      return null
+    }
+    
+    // HTTP URLs - log warning but try to use
+    if (url.startsWith("http://")) {
+      console.warn("[Fleming 3.5] HTTP URL detected (not HTTPS):", url.substring(0, 50))
+      return url
+    }
+    
+    // Unknown format - log warning but try to use
+    console.warn("[Fleming 3.5] Unknown URL format:", url.substring(0, 50))
+    return url
+  }
+
   // Helper function to extract image attachments from messages
-  function extractImageAttachments(messages: Array<{ role: string; content?: any; experimental_attachments?: any[] }>): Array<{ url: string; contentType?: string }> {
+  async function extractImageAttachments(messages: Array<{ role: string; content?: any; experimental_attachments?: any[] }>): Promise<Array<{ url: string; contentType?: string }>> {
     const images: Array<{ url: string; contentType?: string }> = []
     for (const message of messages) {
+      // Check experimental_attachments first
       if (message.experimental_attachments) {
         for (const att of message.experimental_attachments) {
           if (att.contentType?.startsWith("image/") || att.contentType?.startsWith("application/")) {
             if (att.url) {
-              images.push({ url: att.url, contentType: att.contentType })
+              try {
+                const preparedUrl = await prepareImageUrl(att.url)
+                if (preparedUrl) {
+                  images.push({ url: preparedUrl, contentType: att.contentType })
+                }
+                // If preparedUrl is null, skip this image (likely a blob URL)
+              } catch (error) {
+                console.error("[Fleming 3.5] Failed to prepare image URL:", error)
+                // Skip this image but continue processing others
+              }
             }
           }
         }
       }
-      // Also check content for image URLs
+      
+      // Check content array format (AI SDK format with image parts)
+      if (message.content && Array.isArray(message.content)) {
+        console.log(`[Fleming 3.5] Checking content array with ${message.content.length} parts`)
+        for (const part of message.content) {
+          if (part.type === "image") {
+            try {
+              // Handle string URLs, URL objects, and nested object structures
+              let imageUrl: string | null = null
+              
+              if (typeof part.image === "string") {
+                imageUrl = part.image
+                console.log(`[Fleming 3.5] Found string image URL: ${imageUrl ? imageUrl.substring(0, 50) + '...' : 'null'}`)
+              } else if (part.image instanceof URL) {
+                // AI SDK converts string URLs to URL objects - extract href
+                imageUrl = part.image.href
+                console.log(`[Fleming 3.5] Found URL object, extracted href: ${imageUrl ? imageUrl.substring(0, 50) + '...' : 'null'}`)
+              } else if (part.image && typeof part.image === "object") {
+                // Try various possible object structures
+                if ("href" in part.image && typeof part.image.href === "string") {
+                  imageUrl = part.image.href
+                  console.log(`[Fleming 3.5] Found image URL in object.href: ${imageUrl ? imageUrl.substring(0, 50) + '...' : 'null'}`)
+                } else if ("url" in part.image && typeof part.image.url === "string") {
+                  imageUrl = part.image.url
+                  console.log(`[Fleming 3.5] Found image URL in object.url: ${imageUrl ? imageUrl.substring(0, 50) + '...' : 'null'}`)
+                } else if ("image" in part.image && typeof part.image.image === "string") {
+                  imageUrl = part.image.image
+                  console.log(`[Fleming 3.5] Found image URL in object.image: ${imageUrl ? imageUrl.substring(0, 50) + '...' : 'null'}`)
+                } else if ("toString" in part.image && typeof part.image.toString === "function") {
+                  // Try toString() as fallback for URL-like objects
+                  imageUrl = part.image.toString()
+                  console.log(`[Fleming 3.5] Extracted URL using toString(): ${imageUrl ? imageUrl.substring(0, 50) + '...' : 'null'}`)
+                } else {
+                  console.warn("[Fleming 3.5] Image part has object but no recognizable URL property:", part.image)
+                }
+              }
+              
+              if (imageUrl && typeof imageUrl === "string") {
+                const preparedUrl = await prepareImageUrl(imageUrl)
+                if (preparedUrl) {
+                  images.push({ url: preparedUrl, contentType: part.contentType || "image/jpeg" })
+                  console.log(`[Fleming 3.5] Successfully prepared image URL`)
+                } else {
+                  console.warn(`[Fleming 3.5] Failed to prepare image URL: ${imageUrl.substring(0, 50)}...`)
+                }
+              } else {
+                console.warn("[Fleming 3.5] Invalid image format in content array:", typeof part.image, part.image)
+              }
+            } catch (error) {
+              console.error("[Fleming 3.5] Failed to prepare image URL from content array:", error, "part.image:", part.image)
+            }
+          }
+        }
+      }
+      
+      // Also check content for image URLs in string format
       if (message.content && typeof message.content === "string") {
         const imageUrlMatch = message.content.match(/https?:\/\/.*\.(jpg|jpeg|png|gif|webp)/i)
         if (imageUrlMatch) {
-          images.push({ url: imageUrlMatch[0] })
+          try {
+            const preparedUrl = await prepareImageUrl(imageUrlMatch[0])
+            if (preparedUrl) {
+              images.push({ url: preparedUrl })
+            }
+          } catch (error) {
+            console.error("[Fleming 3.5] Failed to prepare image URL from content:", error)
+          }
         }
       }
     }
@@ -89,273 +194,92 @@ export function createFleming35Model(
     provider: "fleming",
     defaultObjectGenerationMode: undefined,
     supportsUrl: () => false,
-    supportsImageUrls: true, // Fleming 3.5 supports images via Grok
+    supportsImageUrls: false, // Fleming 3.5 does not support images - use Fleming 4 instead
     supportsStructuredOutputs: false,
 
     doStream: async function(options: LanguageModelV1CallOptions) {
+      console.log("[Fleming 3.5] doStream called - using Pi 3.1 for text-only processing")
       try {
-        const { prompt, abortSignal } = options
+        const { prompt } = options
         const messages = prompt
+        console.log(`[Fleming 3.5] Received ${messages.length} messages`)
 
-        // Check if there are images in the messages
-        const hasImageAttachments = hasImages(messages)
-
-        if (hasImageAttachments) {
-          // Image analysis flow: Use Grok to analyze images, then Pi for conversation
-          async function* imageAnalysisStream() {
-            try {
-              // Get the last user message (most recent)
-              const lastUserMessage = [...messages].reverse().find(m => m.role === "user")
-              if (!lastUserMessage) {
-                throw new Error("No user message found")
+        // Fleming 3.5 does not support images - always use Pi 3.1
+        // Images should be handled by switching to Fleming 4 in the API route
+        // Clean messages to remove any attachments and use text-only content
+        const cleanedMessages = messages.map(msg => {
+          const textContent = getTextContent(msg)
+          if (msg.role === "system") {
+            return {
+              role: msg.role,
+              content: typeof msg.content === "string" ? msg.content : textContent,
+            }
+          } else if (msg.role === "user" || msg.role === "assistant") {
+            if (textContent) {
+              return {
+                role: msg.role,
+                content: textContent,
               }
-
-              // Extract images and text
-              const images = extractImageAttachments(messages)
-              const userText = getTextContent(lastUserMessage)
-
-              // Prepare messages for Grok image analysis
-              const grokMessages: Array<{ role: "user" | "assistant" | "system"; content: any }> = [
-                {
-                  role: "system",
-                  content: FLEMING_3_5_IMAGE_ANALYSIS_PROMPT
-                },
-                {
-                  role: "user",
-                  content: [
-                    ...images.map(img => ({
-                      type: "image" as const,
-                      image: img.url
-                    })),
-                    {
-                      type: "text" as const,
-                      text: userText || "Please analyze these images comprehensively and extract all relevant information."
-                    }
-                  ]
-                }
-              ]
-
-              // Use Grok to analyze images
-              const grokModel = openproviders("grok-4-fast-reasoning", undefined, grokApiKey)
-              
-              // Stream image analysis using Grok and collect the full text
-              let imageAnalysis = ""
-              try {
-                const grokStream = await streamText({
-                  model: grokModel,
-                  messages: grokMessages,
-                  abortSignal
-                })
-                
-                // Collect the full text from the stream
-                for await (const chunk of grokStream.textStream) {
-                  imageAnalysis += chunk
-                }
-              } catch (error) {
-                console.error("[Fleming 3.5] Error analyzing images with Grok:", error)
-                imageAnalysis = "Unable to analyze images. Please describe the images in your message."
+            } else if (typeof msg.content === "string") {
+              return {
+                role: msg.role,
+                content: msg.content,
               }
-
-              // Now prepare messages for Pi with image analysis included
-              const piMessages = messages.map(msg => {
-                if (msg.role === "user" && msg === lastUserMessage) {
-                  // Replace the last user message with text + image analysis
-                  const originalText = getTextContent(msg)
-                  const combinedText = originalText 
-                    ? `${originalText}\n\n[Image Analysis]: ${imageAnalysis}`
-                    : `[Image Analysis]: ${imageAnalysis}`
-                  
-                  return {
-                    ...msg,
-                    content: combinedText,
-                    experimental_attachments: undefined // Remove attachments since we've analyzed them
-                  }
-                }
-                return {
-                  ...msg,
-                  experimental_attachments: undefined // Remove attachments from all messages
-                }
-              })
-
-              // Stream from Pi with the combined message
-              const piStreamResult = await piModel.doStream({
-                ...options,
-                prompt: piMessages
-              })
-
-              // Forward Pi's stream
-              for await (const chunk of piStreamResult.stream) {
-                if (abortSignal?.aborted) {
-                  throw new Error("Request was aborted")
-                }
-                yield chunk
-              }
-            } catch (error: unknown) {
-              console.error("[Fleming 3.5] Error in image analysis stream:", error)
-              const errorMessage = error instanceof Error ? error.message : String(error)
-              throw new Error(`Fleming 3.5 image analysis failed: ${errorMessage}`)
             }
           }
-
-          const stream = new ReadableStream<LanguageModelV1StreamPart>({
-            async start(controller) {
-              try {
-                for await (const chunk of imageAnalysisStream()) {
-                  controller.enqueue(chunk)
-                }
-                controller.close()
-              } catch (error) {
-                controller.error(error)
-              }
-            },
-          })
-
-          return {
-            stream,
-            rawCall: {
-              rawPrompt: JSON.stringify({ messages, hasImages: true }),
-              rawSettings: {},
-            },
-            warnings: undefined,
-          }
-        } else {
-          // Direct flow: No images, use Pi directly
-          // Remove any attachments from messages before passing to Pi
-          const cleanedMessages = messages.map(msg => ({
-            ...msg,
-            experimental_attachments: undefined
-          }))
-
-          return await piModel.doStream({
-            ...options,
-            prompt: cleanedMessages
-          })
-        }
-      } catch (syncError: unknown) {
-        console.error("[Fleming 3.5] Synchronous error in doStream:", syncError)
-        
-        async function* errorGenerator() {
-          const error = syncError instanceof Error 
-            ? syncError 
-            : new Error(String(syncError))
-          throw error
-        }
-
-        const errorStream = new ReadableStream<LanguageModelV1StreamPart>({
-          async start(controller) {
-            try {
-              for await (const chunk of errorGenerator()) {
-                controller.enqueue(chunk)
-              }
-              controller.close()
-            } catch (error) {
-              controller.error(error)
-            }
-          },
+          const { experimental_attachments, ...rest } = msg as any
+          return rest
         })
-
-        return {
-          stream: errorStream,
-          rawCall: {
-            rawPrompt: JSON.stringify({ messages: [] }),
-            rawSettings: {},
-          },
-          warnings: undefined,
-        }
+        
+        return await piModel.doStream({
+          ...options,
+          prompt: cleanedMessages
+        })
+      } catch (error) {
+        console.error("[Fleming 3.5] Error in doStream:", error)
+        throw error
       }
     },
 
-    doGenerate: async function(options) {
-      const { prompt, abortSignal } = options
-      const messages = prompt
+    doGenerate: async function(options: LanguageModelV1CallOptions) {
+      console.log("[Fleming 3.5] doGenerate called - using Pi 3.1 for text-only processing")
+      try {
+        const { prompt } = options
+        const messages = prompt
 
-      // Check if there are images
-      const hasImageAttachments = hasImages(messages)
-
-      if (hasImageAttachments) {
-        // Image analysis flow
-        const lastUserMessage = [...messages].reverse().find(m => m.role === "user")
-        if (!lastUserMessage) {
-          throw new Error("No user message found")
-        }
-
-        const images = extractImageAttachments(messages)
-        const userText = getTextContent(lastUserMessage)
-
-        // Analyze images with Grok
-        const grokModel = openproviders("grok-4-fast-reasoning", undefined, grokApiKey)
-        const grokMessages: Array<{ role: "user" | "assistant" | "system"; content: any }> = [
-          {
-            role: "system",
-            content: FLEMING_3_5_IMAGE_ANALYSIS_PROMPT
-          },
-          {
-            role: "user",
-            content: [
-              ...images.map(img => ({
-                type: "image" as const,
-                image: img.url
-              })),
-              {
-                type: "text" as const,
-                text: userText || "Please analyze these images comprehensively and extract all relevant information."
-              }
-            ]
-          }
-        ]
-
-        let imageAnalysis = ""
-        try {
-          const grokStream = await streamText({
-            model: grokModel,
-            messages: grokMessages,
-            abortSignal
-          })
-          
-          // Collect the full text from the stream
-          for await (const chunk of grokStream.textStream) {
-            imageAnalysis += chunk
-          }
-        } catch (error) {
-          console.error("[Fleming 3.5] Error analyzing images with Grok:", error)
-          imageAnalysis = "Unable to analyze images. Please describe the images in your message."
-        }
-
-        // Prepare messages for Pi
-        const piMessages = messages.map(msg => {
-          if (msg.role === "user" && msg === lastUserMessage) {
-            const originalText = getTextContent(msg)
-            const combinedText = originalText 
-              ? `${originalText}\n\n[Image Analysis]: ${imageAnalysis}`
-              : `[Image Analysis]: ${imageAnalysis}`
-            
+        // Fleming 3.5 does not support images - always use Pi 3.1
+        // Clean messages to remove any attachments and use text-only content
+        const cleanedMessages = messages.map(msg => {
+          const textContent = getTextContent(msg)
+          if (msg.role === "system") {
             return {
-              ...msg,
-              content: combinedText,
-              experimental_attachments: undefined
+              role: msg.role,
+              content: typeof msg.content === "string" ? msg.content : textContent,
+            }
+          } else if (msg.role === "user" || msg.role === "assistant") {
+            if (textContent) {
+              return {
+                role: msg.role,
+                content: textContent,
+              }
+            } else if (typeof msg.content === "string") {
+              return {
+                role: msg.role,
+                content: msg.content,
+              }
             }
           }
-          return {
-            ...msg,
-            experimental_attachments: undefined
-          }
+          const { experimental_attachments, ...rest } = msg as any
+          return rest
         })
-
-        return await piModel.doGenerate({
-          ...options,
-          prompt: piMessages
-        })
-      } else {
-        // Direct flow: No images, use Pi directly
-        const cleanedMessages = messages.map(msg => ({
-          ...msg,
-          experimental_attachments: undefined
-        }))
-
+        
         return await piModel.doGenerate({
           ...options,
           prompt: cleanedMessages
         })
+      } catch (error) {
+        console.error("[Fleming 3.5] Error in doGenerate:", error)
+        throw error
       }
     },
   }
@@ -363,3 +287,9 @@ export function createFleming35Model(
   return model
 }
 
+// Legacy function - kept for backward compatibility but images are not supported
+// Images are now handled by switching to Fleming 4 in the API route
+function hasImages(messages: Array<{ role: string; content?: any; experimental_attachments?: any[] }>): boolean {
+  // This function is no longer used but kept for backward compatibility
+  return false
+}

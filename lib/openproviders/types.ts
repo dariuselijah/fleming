@@ -114,6 +114,7 @@ export type XaiModel =
   | "grok-2-latest"
   | "grok-vision-beta"
   | "grok-beta"
+  | "grok-4-fast-reasoning"
   | "o3"
 
 export type OpenRouterModel =
@@ -127,6 +128,7 @@ export type OpenRouterModel =
 
 export type InflectionModel =
   | "pi-3.1"
+  | "pi-3.1-latest"
   | "fleming-3.5"
 
 // OLLAMA COMPLETELY REMOVED for instant streaming

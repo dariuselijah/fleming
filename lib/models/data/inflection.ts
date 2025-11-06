@@ -57,10 +57,9 @@ const inflectionModels: ModelConfig[] = [
     modelPage: "https://inflection.ai/pi",
     releasedAt: "2024-01-01",
     icon: "inflection",
-    apiSdk: (apiKey?: string, opts?: { enableSearch?: boolean }) => {
-      // Get Grok API key - try environment variable first, then fallback
-      // In the future, this could be enhanced to get from user keys
-      const grokApiKey = process.env.XAI_API_KEY || undefined
+    apiSdk: (apiKey?: string, opts?: { enableSearch?: boolean; grokApiKey?: string }) => {
+      // Get Grok API key from opts (user keys) or environment variable as fallback
+      const grokApiKey = opts?.grokApiKey || process.env.XAI_API_KEY || undefined
       return createFleming35Model(apiKey, grokApiKey)
     },
   },

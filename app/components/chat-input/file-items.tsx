@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/tooltip"
 import { X } from "@phosphor-icons/react"
 import Image from "next/image"
-import { useState, useMemo, useEffect } from "react"
+import { useState, useEffect } from "react"
 
 type FileItemProps = {
   file: File
@@ -22,26 +22,33 @@ type FileItemProps = {
 export function FileItem({ file, onRemove }: FileItemProps) {
   const [isRemoving, setIsRemoving] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
 
-  // Memoize blob URL to prevent recreation on every render
-  const imageUrl = useMemo(() => {
-    return file.type.includes("image") ? URL.createObjectURL(file) : null
-  }, [file])
-
-  // Cleanup blob URL on unmount or when file changes
+  // Convert file to data URL for stable preview (data URLs don't need cleanup)
   useEffect(() => {
-    return () => {
-      if (imageUrl) {
-        URL.revokeObjectURL(imageUrl)
+    if (!file.type.includes("image")) {
+      setImageUrl(null)
+      return
+    }
+
+    // Use FileReader to convert File to data URL
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const result = e.target?.result
+      if (typeof result === "string") {
+        setImageUrl(result)
       }
     }
-  }, [imageUrl])
+    reader.onerror = () => {
+      console.error("Failed to read file for preview")
+      setImageUrl(null)
+    }
+    reader.readAsDataURL(file)
+
+    // No cleanup needed for data URLs
+  }, [file])
 
   const handleRemove = () => {
-    // Cleanup blob URL immediately before removal
-    if (imageUrl) {
-      URL.revokeObjectURL(imageUrl)
-    }
     setIsRemoving(true)
     onRemove(file)
   }

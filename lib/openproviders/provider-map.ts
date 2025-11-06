@@ -124,6 +124,7 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
 
   // Inflection AI
   "pi-3.1": "inflection",
+  "pi-3.1-latest": "inflection",
   "fleming-3.5": "inflection",
 }
 

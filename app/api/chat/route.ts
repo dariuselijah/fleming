@@ -125,24 +125,65 @@ export async function POST(req: Request) {
       )
     }
 
+    // Check for images when Fleming 3.5 is selected and switch to Fleming 4
+    let effectiveModel = model
+    let hasImages = false
+    
+    if (model === "fleming-3.5") {
+      // Check messages for images
+      for (const message of messages) {
+        // Check experimental_attachments
+        if (message.experimental_attachments && message.experimental_attachments.length > 0) {
+          const imageAttachments = message.experimental_attachments.filter(
+            (att: any) => att.contentType?.startsWith("image/") || att.contentType?.startsWith("application/")
+          )
+          if (imageAttachments.length > 0) {
+            hasImages = true
+            break
+          }
+        }
+        
+        // Check content array for image parts
+        if (Array.isArray(message.content)) {
+          const hasImagePart = message.content.some(
+            (part: any) => part.type === "image"
+          )
+          if (hasImagePart) {
+            hasImages = true
+            break
+          }
+        }
+      }
+      
+      if (hasImages) {
+        console.log(`[Fleming 3.5] Images detected - switching to Fleming 4`)
+        effectiveModel = "fleming-4"
+      }
+    }
+    
     // START STREAMING IMMEDIATELY - minimal blocking operations
     // Apply enhanced system prompts for Fleming models
-    let effectiveSystemPrompt = getCachedSystemPrompt(
-      userRole || "general", 
-      medicalSpecialty, 
-      systemPrompt
-    )
-    
-    // Override with Fleming-specific prompts if using Fleming models
-    if (model === "fleming-3.5") {
-      effectiveSystemPrompt = systemPrompt || FLEMING_3_5_SYSTEM_PROMPT
-    } else if (model === "fleming-4") {
-      effectiveSystemPrompt = systemPrompt || FLEMING_4_SYSTEM_PROMPT
+    // CRITICAL: For Fleming models, always use Fleming-specific prompts (ignore systemPrompt parameter)
+    // This ensures Fleming models behave as AI doctors without disclaimers
+    let effectiveSystemPrompt: string
+    if (effectiveModel === "fleming-3.5") {
+      effectiveSystemPrompt = FLEMING_3_5_SYSTEM_PROMPT
+      console.log(`[Fleming 3.5] Using Fleming 3.5 system prompt (AI doctor mode)`)
+    } else if (effectiveModel === "fleming-4") {
+      effectiveSystemPrompt = FLEMING_4_SYSTEM_PROMPT
+      console.log(`[Fleming 4] Using Fleming 4 system prompt (AI doctor mode)`)
+    } else {
+      // For non-Fleming models, use the standard prompt logic
+      effectiveSystemPrompt = getCachedSystemPrompt(
+        userRole || "general", 
+        medicalSpecialty, 
+        systemPrompt
+      )
     }
     
     // INSTANT MODEL LOADING - no async operations, no delays
-    console.log(`🔍 Looking for model: "${model}"`)
-    const modelConfig = getModelInfo(model)
+    console.log(`🔍 Looking for model: "${effectiveModel}"${effectiveModel !== model ? ` (switched from ${model})` : ''}`)
+    const modelConfig = getModelInfo(effectiveModel)
     console.log(`📋 Model config found:`, modelConfig ? `${modelConfig.id} (${modelConfig.name})` : 'null')
 
     if (!modelConfig || !modelConfig.apiSdk) {
@@ -152,16 +193,10 @@ export async function POST(req: Request) {
 
     // Get API key if needed (this is fast) - only for real users
     let apiKey: string | undefined
-    let grokApiKey: string | undefined
     if (isAuthenticated && userId && userId !== "temp") {
       const { getEffectiveApiKey } = await import("@/lib/user-keys")
-      const provider = getProviderForModel(model)
+      const provider = getProviderForModel(effectiveModel)
       apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
-      
-      // For Fleming 3.5, also get Grok API key (needed for image analysis)
-      if (model === "fleming-3.5") {
-        grokApiKey = (await getEffectiveApiKey(userId, "xai" as ProviderWithoutOllama)) || undefined
-      }
     }
 
     // Filter out invalid attachments but keep data URLs and blob URLs for vision models
@@ -200,7 +235,9 @@ export async function POST(req: Request) {
     const startTime = performance.now()
     
     const result = streamText({
-      model: modelConfig.apiSdk(apiKey, { enableSearch }),
+      model: modelConfig.apiSdk(apiKey, { 
+        enableSearch
+      }),
       system: effectiveSystemPrompt,
       messages: filteredMessages,
       tools: {} as ToolSet,
@@ -224,7 +261,7 @@ export async function POST(req: Request) {
 
             const supabase = await validateAndTrackUsage({
               userId,
-              model,
+              model: effectiveModel,
               isAuthenticated,
             })
 
@@ -239,7 +276,7 @@ export async function POST(req: Request) {
                     chatId,
                     content: userMessage.content,
                     attachments: userMessage.experimental_attachments as Attachment[],
-                    model,
+                    model: effectiveModel,
                     isAuthenticated,
                     message_group_id,
                   })
@@ -257,7 +294,7 @@ export async function POST(req: Request) {
                   messages:
                     response.messages as unknown as import("@/app/types/api.types").Message[],
                   message_group_id,
-                  model,
+                  model: effectiveModel,
                 })
               } catch (error) {
                 console.error("Failed to save assistant message:", error)
@@ -270,7 +307,7 @@ export async function POST(req: Request) {
                     messages:
                       response.messages as unknown as import("@/app/types/api.types").Message[],
                     message_group_id,
-                    model,
+                    model: effectiveModel,
                   })
                 } catch (retryError) {
                   console.error("Retry also failed to save assistant message:", retryError)

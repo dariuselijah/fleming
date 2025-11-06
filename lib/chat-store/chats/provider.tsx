@@ -179,6 +179,7 @@ export function ChatsProvider({
     const existingChat = chats.find(
       (c) => c.title === (title || "New Chat") && 
              c.user_id === userId &&
+             c.created_at &&
              Math.abs(new Date(c.created_at).getTime() - Date.now()) < 5000 // Created within last 5 seconds
     )
     
