@@ -94,7 +94,7 @@ export type AnthropicModel =
   | "claude-3-haiku-20240307"
 
 export type XaiModel =
-  | "grok-4-fast-reasoning"
+  | "fleming-4"
   | "grok-3"
   | "grok-3-latest"
   | "grok-3-fast"
@@ -127,7 +127,7 @@ export type OpenRouterModel =
 
 export type InflectionModel =
   | "pi-3.1"
-  | "pi-3.1-latest"
+  | "fleming-3.5"
 
 // OLLAMA COMPLETELY REMOVED for instant streaming
 

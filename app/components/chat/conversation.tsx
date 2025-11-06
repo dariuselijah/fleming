@@ -27,6 +27,11 @@ export function Conversation({
 
   // Memoize message rendering for streaming performance
   const renderedMessages = useMemo(() => {
+    // Handle empty messages
+    if (!messages || messages.length === 0) {
+      return null
+    }
+    
     // Filter out duplicate messages by ID to prevent React key conflicts
     const uniqueMessages = messages.filter((message, index, self) => 
       index === self.findIndex(m => m.id === message.id)
@@ -63,8 +68,9 @@ export function Conversation({
   const memoizedOnEdit = useCallback(onEdit, [onEdit])
   const memoizedOnReload = useCallback(onReload, [onReload])
 
-  if (!messages || messages.length === 0)
-    return <div className="h-full w-full"></div>
+  // Always render the same structure to prevent hydration mismatches
+  // Don't use early return - always render full structure
+  const hasMessages = messages && messages.length > 0
 
   return (
     <div className="relative flex h-full w-full flex-col items-center overflow-x-hidden overflow-y-auto">
@@ -80,11 +86,11 @@ export function Conversation({
             scrollbarWidth: "none",
           }}
         >
-          {renderedMessages}
+          {hasMessages && renderedMessages}
           {/* Show loading immediately when user sends message or when streaming */}
           {(status === "submitted" || status === "streaming" || 
-            (messages.length > 0 && messages[messages.length - 1].role === "user" && status === "ready")) &&
-            messages.length > 0 &&
+            (hasMessages && messages[messages.length - 1].role === "user" && status === "ready")) &&
+            hasMessages &&
             messages[messages.length - 1].role === "user" && (
               <div className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
                 <Loader>Processing...</Loader>

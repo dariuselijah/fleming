@@ -18,13 +18,13 @@ export function createInflectionModel(
     )
   }
 
-  // Map model IDs to Inflection AI config names
-  const configMap: Record<InflectionModel, string> = {
+  // Map model IDs to Inflection AI API config names
+  const modelMap: Record<InflectionModel, string> = {
     "pi-3.1": "Pi-3.1",
-    "pi-3.1-latest": "Pi-3.1",
+    "fleming-3.5": "Pi-3.1", // Fleming 3.5 uses Pi model
   }
 
-  const config = configMap[modelId] || "Pi-3.1"
+  const apiConfigName = modelMap[modelId] || "Pi-3.1"
 
   const model: LanguageModelV1 = {
     specificationVersion: 'v1',
@@ -41,75 +41,74 @@ export function createInflectionModel(
       try {
         const { prompt, abortSignal } = options
         const messages = prompt
-        // Extract system message if present (first message with role 'system')
+        
+        // Extract system message if present
         const systemMessage = messages.find(m => m.role === 'system')
         const system = systemMessage && typeof systemMessage.content === 'string' ? systemMessage.content : undefined
-        // Filter out system messages from the messages array for Inflection API
-        const messagesWithoutSystem = messages.filter(m => m.role !== 'system')
 
-        // Create async generator that handles both success and error cases
-        // All async work must happen inside the generator to ensure proper error handling
-        async function* streamGenerator() {
-          let context: Array<{ text: string; type: "Human" | "AI" }> = []
-          
-          try {
-            // Convert messages to Inflection AI format
-            context = []
+        // Convert messages to Inflection AI /external/api/inference format
+        // Format: { context: [{ text: "...", type: "Instruction" | "Human" | "AI" }], config: "Pi-3.1" }
+        const context: Array<{ text: string; type: string }> = []
 
-            // Add system message if present
-            if (system) {
+        // Add system message as first context item if present
+        // Note: Use "Instruction" type for system messages per Inflection API spec
+        if (system) {
+          context.push({
+            text: system,
+            type: "Instruction"
+          })
+        }
+
+        // Convert AI SDK messages to Inflection format
+        for (const message of messages) {
+          if (message.role === "user" || message.role === "assistant") {
+            const content =
+              typeof message.content === "string"
+                ? message.content
+                : message.content
+                    .map((part) => {
+                      if (part.type === "text") return part.text
+                      return ""
+                    })
+                    .join("")
+            if (content) {
               context.push({
-                text: system,
-                type: "Human",
+                text: content,
+                type: message.role === "user" ? "Human" : "AI"
               })
             }
+          }
+        }
 
-            // Convert AI SDK messages to Inflection format
-            for (const message of messagesWithoutSystem) {
-              if (message.role === "user") {
-                const content =
-                  typeof message.content === "string"
-                    ? message.content
-                    : message.content
-                        .map((part) => {
-                          if (part.type === "text") return part.text
-                          return ""
-                        })
-                        .join("")
-                if (content) {
-                  context.push({ text: content, type: "Human" })
-                }
-              } else if (message.role === "assistant") {
-                const content =
-                  typeof message.content === "string"
-                    ? message.content
-                    : message.content
-                        .map((part) => {
-                          if (part.type === "text") return part.text
-                          return ""
-                        })
-                        .join("")
-                if (content) {
-                  context.push({ text: content, type: "AI" })
-                }
-              }
-            }
-
-            // Make the API request
+        // Create async generator that handles streaming from Inflection AI
+        // Use /external/api/inference/streaming for real streaming support
+        async function* streamGenerator() {
+          try {
             let response: Response
             try {
+              const requestBody = {
+                context: context,
+                config: apiConfigName,
+              }
+              
+              console.log("[Inflection Adapter] Making streaming request to /external/api/inference/streaming:", {
+                url: "https://api.inflection.ai/external/api/inference/streaming",
+                config: apiConfigName,
+                contextCount: context.length,
+                hasApiKey: !!effectiveApiKey,
+                apiKeyPrefix: effectiveApiKey?.substring(0, 10) + "..."
+              })
+              
               response = await fetch(
-                "https://api.inflection.ai/external/api/inference",
+                "https://api.inflection.ai/external/api/inference/streaming",
                 {
                   method: "POST",
                   headers: {
                     Authorization: `Bearer ${effectiveApiKey}`,
                     "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
                   },
-                  body: JSON.stringify({
-                    context,
-                    config,
-                  }),
+                  body: JSON.stringify(requestBody),
                   signal: abortSignal,
                 }
               )
@@ -118,13 +117,13 @@ export function createInflectionModel(
               if (fetchError instanceof Error && fetchError.name === "AbortError") {
                 throw new Error("Request was aborted")
               }
-              // Re-throw as a proper Error object
               const errorMessage = fetchError instanceof Error 
                 ? fetchError.message 
                 : "Network error occurred"
               throw new Error(`Inflection AI API request failed: ${errorMessage}`)
             }
 
+            // Check response status
             if (!response.ok) {
               let errorText = ""
               try {
@@ -132,99 +131,100 @@ export function createInflectionModel(
               } catch {
                 errorText = response.statusText
               }
+              
+              console.error("[Inflection Adapter] API error:", {
+                status: response.status,
+                statusText: response.statusText,
+                errorText,
+                config: apiConfigName,
+                contextCount: context.length
+              })
+              
               const error = new Error(
                 `Inflection AI API error: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ""}`
               )
-              // Add status code for better error handling
               ;(error as any).statusCode = response.status
               throw error
             }
 
-            // Inflection AI returns JSON response, not streaming
-            // Parse the response and convert to streaming format
-            let data: any
+            // Parse Server-Sent Events (SSE) stream from /external/api/inference/streaming
+            // Format: data: {"created": ..., "idx": 0, "text": "...", "tool_calls": null}
+            if (!response.body) {
+              throw new Error("Response body is null - cannot stream")
+            }
+
+            const reader = response.body.getReader()
+            const decoder = new TextDecoder()
+            let buffer = ""
+
             try {
-              const responseText = await response.text()
-              console.log("[Inflection Adapter] Raw API response:", responseText.substring(0, 500))
-              try {
-                data = JSON.parse(responseText)
-                console.log("[Inflection Adapter] Parsed response data:", JSON.stringify(data).substring(0, 500))
-              } catch {
-                // If JSON parsing fails, treat the text as the response
-                data = responseText
-              }
-            } catch (parseError) {
-              console.error("[Inflection Adapter] Failed to read response:", parseError)
-              throw new Error(`Failed to read Inflection AI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`)
-            }
-            
-            // Extract text from response - try multiple possible fields
-            // Based on Inflection AI docs, the response might be in different formats
-            let text = ""
-            if (typeof data === "string") {
-              text = data
-            } else if (data && typeof data === "object") {
-              // Try common response field names (check output first as it's most likely)
-              text = data.output || data.text || data.content || data.message || data.response || data.data || ""
-              
-              // If response is an array, try to extract text from first item
-              if (!text && Array.isArray(data) && data.length > 0) {
-                const firstItem = data[0]
-                if (typeof firstItem === "string") {
-                  text = firstItem
-                } else if (firstItem && typeof firstItem === "object") {
-                  text = firstItem.output || firstItem.text || firstItem.content || firstItem.message || ""
+              while (true) {
+                if (abortSignal?.aborted) {
+                  throw new Error("Request was aborted")
+                }
+
+                const { done, value } = await reader.read()
+                if (done) {
+                  // Process any remaining buffer
+                  if (buffer.trim()) {
+                    const lines = buffer.split("\n")
+                    for (const line of lines) {
+                      if (line.trim() && line.startsWith("data: ")) {
+                        const data = line.slice(6).trim()
+                        if (data && data !== "[DONE]") {
+                          try {
+                            const parsed = JSON.parse(data)
+                            if (parsed.text) {
+                              yield {
+                                type: "text-delta" as const,
+                                textDelta: parsed.text,
+                              }
+                            }
+                          } catch (parseError) {
+                            // Skip invalid JSON
+                          }
+                        }
+                      }
+                    }
+                  }
+                  break
+                }
+
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split("\n")
+                buffer = lines.pop() || "" // Keep incomplete line in buffer
+
+                for (const line of lines) {
+                  const trimmedLine = line.trim()
+                  if (!trimmedLine) continue
+                  
+                  if (trimmedLine.startsWith("data: ")) {
+                    const data = trimmedLine.slice(6).trim()
+                    if (data === "[DONE]") {
+                      return
+                    }
+                    if (!data) continue
+                    
+                    try {
+                      const parsed = JSON.parse(data)
+                      // Streaming format: {"created": ..., "idx": 0, "text": "...", "tool_calls": null}
+                      if (parsed.text) {
+                        yield {
+                          type: "text-delta" as const,
+                          textDelta: parsed.text,
+                        }
+                      }
+                    } catch (parseError) {
+                      // Skip invalid JSON lines - log for debugging
+                      if (data.length < 100) {
+                        console.warn("[Inflection Adapter] Failed to parse SSE data:", data)
+                      }
+                    }
+                  }
                 }
               }
-              
-              // Log if we couldn't find text in expected fields
-              if (!text) {
-                console.warn("[Inflection Adapter] Could not find text in response, available keys:", Object.keys(data))
-              }
-            }
-            
-            // If still no text, stringify the whole response as fallback
-            if (!text && data) {
-              if (typeof data === "string") {
-                text = data
-              } else {
-                // Try to find any string value in the object
-                const stringValues = Object.values(data).filter(v => typeof v === "string" && v.length > 0)
-                if (stringValues.length > 0) {
-                  text = stringValues[0] as string
-                } else {
-                  text = JSON.stringify(data)
-                }
-              }
-            }
-            
-            // Ensure we have at least some text
-            if (!text) {
-              console.error("[Inflection Adapter] No text found in response, data:", data)
-              text = "No response received from Inflection AI"
-            }
-            
-            console.log("[Inflection Adapter] Extracted text length:", text.length)
-            
-            // Stream text immediately in small chunks for better perceived responsiveness
-            // Since Inflection AI returns complete JSON (not streaming), we simulate streaming
-            // by chunking the response immediately after receiving it
-            // Use 2-character chunks for fast, smooth streaming
-            const chunkSize = 2
-            for (let i = 0; i < text.length; i += chunkSize) {
-              // Check if aborted before yielding each chunk
-              if (abortSignal?.aborted) {
-                throw new Error("Request was aborted")
-              }
-              
-              // Yield small chunks for fast perceived streaming
-              const chunk = text.slice(i, i + chunkSize)
-              if (chunk) {
-                yield {
-                  type: "text-delta" as const,
-                  textDelta: chunk,
-                }
-              }
+            } finally {
+              reader.releaseLock()
             }
           } catch (error: unknown) {
             // Log the error for debugging
@@ -261,16 +261,16 @@ export function createInflectionModel(
           },
         })
         
-        // Always return immediately with a stream
-        // The generator will handle all async work and errors
-        return {
-          stream,
-          rawCall: {
-            rawPrompt: JSON.stringify({ context: [], config }),
-            rawSettings: {},
-          },
-          warnings: undefined,
-        }
+          // Always return immediately with a stream
+          // The generator will handle all async work and errors
+          return {
+            stream,
+            rawCall: {
+              rawPrompt: JSON.stringify({ context, config: apiConfigName }),
+              rawSettings: { stream: true }, // Real streaming from /external/api/inference/streaming
+            },
+            warnings: undefined,
+          }
       } catch (syncError: unknown) {
         // This should never happen, but if it does, create an error generator
         console.error("[Inflection Adapter] Synchronous error in doStream (this should not happen):", syncError)
@@ -298,8 +298,8 @@ export function createInflectionModel(
         return {
           stream: errorStream,
           rawCall: {
-            rawPrompt: JSON.stringify({ context: [], config }),
-            rawSettings: {},
+            rawPrompt: JSON.stringify({ context: [], config: apiConfigName }),
+            rawSettings: { stream: false },
           },
           warnings: undefined,
         }
@@ -310,24 +310,24 @@ export function createInflectionModel(
       try {
         const { prompt, abortSignal } = options
         const messages = prompt
-        // Extract system message if present (first message with role 'system')
+
+        // Convert messages to Inflection AI /external/api/inference format
+        const context: Array<{ text: string; type: string }> = []
+
+        // Extract and add system message
+        // Note: Use "Instruction" type for system messages per Inflection API spec
         const systemMessage = messages.find(m => m.role === 'system')
         const system = systemMessage && typeof systemMessage.content === 'string' ? systemMessage.content : undefined
-        // Filter out system messages from the messages array for Inflection API
-        const messagesWithoutSystem = messages.filter(m => m.role !== 'system')
-
-        // Convert messages to Inflection AI format
-        const context: Array<{ text: string; type: "Human" | "AI" }> = []
-
         if (system) {
           context.push({
             text: system,
-            type: "Human",
+            type: "Instruction"
           })
         }
 
+        // Convert other messages
         for (const message of messages) {
-          if (message.role === "user") {
+          if (message.role === "user" || message.role === "assistant") {
             const content =
               typeof message.content === "string"
                 ? message.content
@@ -338,20 +338,10 @@ export function createInflectionModel(
                     })
                     .join("")
             if (content) {
-              context.push({ text: content, type: "Human" })
-            }
-          } else if (message.role === "assistant") {
-            const content =
-              typeof message.content === "string"
-                ? message.content
-                : message.content
-                    .map((part: { type: string; text?: string }) => {
-                      if (part.type === "text") return part.text || ""
-                      return ""
-                    })
-                    .join("")
-            if (content) {
-              context.push({ text: content, type: "AI" })
+              context.push({
+                text: content,
+                type: message.role === "user" ? "Human" : "AI"
+              })
             }
           }
         }
@@ -367,18 +357,16 @@ export function createInflectionModel(
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                context,
-                config,
+                context: context,
+                config: apiConfigName,
               }),
               signal: abortSignal,
             }
           )
         } catch (fetchError: unknown) {
-          // Handle network errors and abort signals
           if (fetchError instanceof Error && fetchError.name === "AbortError") {
             throw new Error("Request was aborted")
           }
-          // Re-throw as a proper Error object
           const errorMessage = fetchError instanceof Error 
             ? fetchError.message 
             : "Network error occurred"
@@ -395,7 +383,6 @@ export function createInflectionModel(
           const error = new Error(
             `Inflection AI API error: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ""}`
           )
-          // Add status code for better error handling
           ;(error as any).statusCode = response.status
           throw error
         }
@@ -413,18 +400,18 @@ export function createInflectionModel(
           throw new Error(`Failed to parse Inflection AI response: ${text}`)
         }
 
-        const text = data.text || data.content || data.message || data.response || ""
+        const text = data.text || ""
 
         return {
           text,
-          finishReason: "stop" as const,
+          finishReason: "stop",
           usage: {
-            promptTokens: data.usage?.prompt_tokens || data.usage?.promptTokens || 0,
-            completionTokens: data.usage?.completion_tokens || data.usage?.completionTokens || 0,
+            promptTokens: 0,
+            completionTokens: 0,
           },
           rawCall: {
-            rawPrompt: JSON.stringify({ context, config }),
-            rawSettings: {},
+            rawPrompt: JSON.stringify({ context, config: apiConfigName }),
+            rawSettings: { stream: false },
           },
           warnings: undefined,
         }

@@ -3,14 +3,14 @@ import { ModelConfig } from "../types"
 
 const grokModels: ModelConfig[] = [
   {
-    id: "grok-4-fast-reasoning",
-    name: "Grok-4 Fast Reasoning",
+    id: "fleming-4",
+    name: "Fleming 4",
     provider: "xAI",
     providerId: "xai",
-    modelFamily: "Grok",
+    modelFamily: "Fleming",
     baseProviderId: "xai",
-    description: "Latest generation Grok model with advanced capabilities",
-    tags: ["latest", "advanced", "reasoning", "conversational"],
+    description: "In-depth model for comprehensive analysis and detailed responses.",
+    tags: ["latest", "advanced", "reasoning", "conversational", "students", "professionals", "depth"],
     contextWindow: 200000,
     inputCost: 3.5,
     outputCost: 18.0,

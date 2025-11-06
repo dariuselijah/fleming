@@ -100,6 +100,7 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "claude-3-haiku-20240307": "anthropic",
 
   // XAI
+  "fleming-4": "xai",
   "grok-3": "xai",
   "grok-3-latest": "xai",
   "grok-3-fast": "xai",
@@ -123,7 +124,7 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
 
   // Inflection AI
   "pi-3.1": "inflection",
-  "pi-3.1-latest": "inflection",
+  "fleming-3.5": "inflection",
 }
 
 // OLLAMA COMPLETELY REMOVED for instant streaming

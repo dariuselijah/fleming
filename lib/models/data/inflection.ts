@@ -1,5 +1,6 @@
 import { ModelConfig } from "../types"
 import { createInflectionModel } from "@/lib/openproviders/inflection-adapter"
+import { createFleming35Model } from "@/lib/openproviders/fleming-3.5-adapter"
 
 const inflectionModels: ModelConfig[] = [
   {
@@ -31,20 +32,20 @@ const inflectionModels: ModelConfig[] = [
     apiSdk: (apiKey?: string, opts?: { enableSearch?: boolean }) => createInflectionModel("pi-3.1", apiKey),
   },
   {
-    id: "pi-3.1-latest",
-    name: "Pi 3.1 Latest",
-    provider: "Inflection AI",
+    id: "fleming-3.5",
+    name: "Fleming 3.5",
+    provider: "Fleming",
     providerId: "inflection",
-    modelFamily: "Pi",
+    modelFamily: "Fleming",
     baseProviderId: "inflection",
     description:
-      "Inflection AI's Pi 3.1 model (latest version) - a conversational AI assistant optimized for helpful, harmless, and honest interactions.",
-    tags: ["conversational", "assistant"],
+      "Conversational model for natural dialogue and quick queries.",
+    tags: ["conversational", "assistant", "vision", "emotional-intelligence"],
     contextWindow: 128000,
     inputCost: 0,
     outputCost: 0,
     priceUnit: "per 1M tokens",
-    vision: false,
+    vision: true, // Supports images via Grok
     tools: false,
     audio: false,
     reasoning: false,
@@ -56,7 +57,12 @@ const inflectionModels: ModelConfig[] = [
     modelPage: "https://inflection.ai/pi",
     releasedAt: "2024-01-01",
     icon: "inflection",
-    apiSdk: (apiKey?: string, opts?: { enableSearch?: boolean }) => createInflectionModel("pi-3.1-latest", apiKey),
+    apiSdk: (apiKey?: string, opts?: { enableSearch?: boolean }) => {
+      // Get Grok API key - try environment variable first, then fallback
+      // In the future, this could be enhanced to get from user keys
+      const grokApiKey = process.env.XAI_API_KEY || undefined
+      return createFleming35Model(apiKey, grokApiKey)
+    },
   },
 ]
 

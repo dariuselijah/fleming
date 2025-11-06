@@ -124,11 +124,16 @@ export function ModelSelector({
     )
   }
 
-  // Get the hovered model data
-  const hoveredModelData = models.find((model) => model.id === hoveredModel)
+  // Only show Fleming 3.5 and Fleming 4 models
+  const flemingModels = models.filter(
+    (model) => model.id === "fleming-3.5" || model.id === "fleming-4"
+  )
+
+  // Get the hovered model data from Fleming models
+  const hoveredModelData = flemingModels.find((model) => model.id === hoveredModel)
 
   const filteredModels = filterAndSortModels(
-    models,
+    flemingModels,
     favoriteModels || [],
     searchQuery,
     isModelHidden

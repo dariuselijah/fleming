@@ -1,4 +1,4 @@
-import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole } from "@/lib/config"
+import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole, FLEMING_3_5_SYSTEM_PROMPT, FLEMING_4_SYSTEM_PROMPT } from "@/lib/config"
 import { getAllModels, getModelInfo } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { SupportedModel } from "@/lib/openproviders/types"
@@ -126,11 +126,19 @@ export async function POST(req: Request) {
     }
 
     // START STREAMING IMMEDIATELY - minimal blocking operations
-    const effectiveSystemPrompt = getCachedSystemPrompt(
+    // Apply enhanced system prompts for Fleming models
+    let effectiveSystemPrompt = getCachedSystemPrompt(
       userRole || "general", 
       medicalSpecialty, 
       systemPrompt
     )
+    
+    // Override with Fleming-specific prompts if using Fleming models
+    if (model === "fleming-3.5") {
+      effectiveSystemPrompt = systemPrompt || FLEMING_3_5_SYSTEM_PROMPT
+    } else if (model === "fleming-4") {
+      effectiveSystemPrompt = systemPrompt || FLEMING_4_SYSTEM_PROMPT
+    }
     
     // INSTANT MODEL LOADING - no async operations, no delays
     console.log(`🔍 Looking for model: "${model}"`)
@@ -144,10 +152,16 @@ export async function POST(req: Request) {
 
     // Get API key if needed (this is fast) - only for real users
     let apiKey: string | undefined
+    let grokApiKey: string | undefined
     if (isAuthenticated && userId && userId !== "temp") {
       const { getEffectiveApiKey } = await import("@/lib/user-keys")
       const provider = getProviderForModel(model)
       apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
+      
+      // For Fleming 3.5, also get Grok API key (needed for image analysis)
+      if (model === "fleming-3.5") {
+        grokApiKey = (await getEffectiveApiKey(userId, "xai" as ProviderWithoutOllama)) || undefined
+      }
     }
 
     // Filter out invalid attachments but keep data URLs and blob URLs for vision models
