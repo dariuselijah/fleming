@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { convertFromApiFormat, convertToApiFormat, defaultPreferences } from "@/lib/user-preference-store/utils"
+import { encryptHealthData, decryptHealthData, isEncryptionEnabled } from "@/lib/encryption"
 
 export async function GET(request: NextRequest) {
   console.log("GET /api/user-preferences called")
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
 
     console.log("User authenticated:", user.id)
 
-    // Fetch user preferences from database
+    // Fetch user preferences from database (including IV columns for encrypted data)
     const { data: preferences, error } = await supabase
       .from("user_preferences")
       .select("*")
@@ -58,6 +59,30 @@ export async function GET(request: NextRequest) {
     if (!preferences) {
       console.log("No preferences found, returning defaults")
       return NextResponse.json(convertToApiFormat(defaultPreferences))
+    }
+
+    // Decrypt health data if encrypted
+    if (isEncryptionEnabled()) {
+      const prefs = preferences as any
+      if (prefs.health_context && prefs.health_context_iv) {
+        prefs.health_context = decryptHealthData(prefs.health_context, prefs.health_context_iv)
+      }
+      if (prefs.health_conditions && prefs.health_conditions_iv) {
+        prefs.health_conditions = decryptHealthData(prefs.health_conditions, prefs.health_conditions_iv)
+      }
+      if (prefs.medications && prefs.medications_iv) {
+        prefs.medications = decryptHealthData(prefs.medications, prefs.medications_iv)
+      }
+      if (prefs.allergies && prefs.allergies_iv) {
+        prefs.allergies = decryptHealthData(prefs.allergies, prefs.allergies_iv)
+      }
+      if (prefs.family_history && prefs.family_history_iv) {
+        prefs.family_history = decryptHealthData(prefs.family_history, prefs.family_history_iv)
+      }
+      if (prefs.lifestyle_factors && prefs.lifestyle_factors_iv) {
+        prefs.lifestyle_factors = decryptHealthData(prefs.lifestyle_factors, prefs.lifestyle_factors_iv)
+      }
+      console.log("🔓 Health data decrypted during retrieval")
     }
 
     console.log("Returning user preferences:", preferences)
@@ -110,9 +135,48 @@ export async function PUT(request: NextRequest) {
     // Parse the request body
     const body = await request.json()
     console.log("PUT request body received:", body)
-    const apiData = body
+    let apiData = body
     console.log("API data received:", apiData)
     console.log("User role being set to:", apiData.user_role)
+
+    // Encrypt health data before storing (if encryption is enabled)
+    if (isEncryptionEnabled()) {
+      const encryptedData: any = { ...apiData }
+      
+      if (apiData.health_context) {
+        const encrypted = encryptHealthData(apiData.health_context)
+        encryptedData.health_context = encrypted.encrypted
+        encryptedData.health_context_iv = encrypted.iv
+      }
+      if (apiData.health_conditions) {
+        const encrypted = encryptHealthData(apiData.health_conditions)
+        encryptedData.health_conditions = encrypted.encrypted
+        encryptedData.health_conditions_iv = encrypted.iv
+      }
+      if (apiData.medications) {
+        const encrypted = encryptHealthData(apiData.medications)
+        encryptedData.medications = encrypted.encrypted
+        encryptedData.medications_iv = encrypted.iv
+      }
+      if (apiData.allergies) {
+        const encrypted = encryptHealthData(apiData.allergies)
+        encryptedData.allergies = encrypted.encrypted
+        encryptedData.allergies_iv = encrypted.iv
+      }
+      if (apiData.family_history) {
+        const encrypted = encryptHealthData(apiData.family_history)
+        encryptedData.family_history = encrypted.encrypted
+        encryptedData.family_history_iv = encrypted.iv
+      }
+      if (apiData.lifestyle_factors) {
+        const encrypted = encryptHealthData(apiData.lifestyle_factors)
+        encryptedData.lifestyle_factors = encrypted.encrypted
+        encryptedData.lifestyle_factors_iv = encrypted.iv
+      }
+      
+      apiData = encryptedData
+      console.log("🔒 Health data encrypted before storage")
+    }
 
     // Check if preferences exist
     const { data: existingPreferences, error: checkError } = await supabase

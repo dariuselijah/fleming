@@ -39,8 +39,8 @@ const inflectionModels: ModelConfig[] = [
     modelFamily: "Fleming",
     baseProviderId: "inflection",
     description:
-      "Conversational model for natural dialogue and quick queries.",
-    tags: ["conversational", "assistant", "vision", "emotional-intelligence"],
+      "Clinically focused AI physician for rapid history-taking, differential building, and safety netting.",
+    tags: ["clinical", "doctor", "assistant", "vision"],
     contextWindow: 128000,
     inputCost: 0,
     outputCost: 0,

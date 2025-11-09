@@ -3,6 +3,7 @@ import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { loadAttachmentsWithSignedUrls } from "@/lib/file-handling"
 import type { Message as MessageAISDK } from "ai"
 import { readFromIndexedDB, writeToIndexedDB } from "../persist"
+import { decryptMessage } from "@/lib/encryption"
 
 export async function getMessagesFromDb(
   chatId: string,
@@ -56,10 +57,32 @@ export async function getMessagesFromDb(
             }
           }
 
+          // Decrypt message content if encrypted
+          // Note: content_iv column may not exist in database yet (migration pending)
+          let decryptedContent = message.content ?? ""
+          try {
+            // Try to get content_iv if it exists (using raw query or type assertion)
+            const messageWithIv = message as any
+            const contentIv = messageWithIv.content_iv
+            if (contentIv && message.content) {
+              try {
+                decryptedContent = decryptMessage(message.content, contentIv)
+                console.log("🔓 Message decrypted during retrieval")
+              } catch (error) {
+                console.error("Error decrypting message:", error)
+                // If decryption fails, use original content (might be plaintext)
+                decryptedContent = message.content
+              }
+            }
+          } catch (error) {
+            // If content_iv column doesn't exist yet, content is plaintext
+            // This is fine for backward compatibility
+          }
+
           return {
             ...message,
             id: String(message.id),
-            content: message.content ?? "",
+            content: decryptedContent,
             createdAt: new Date(message.created_at || ""),
             parts: (message?.parts as MessageAISDK["parts"]) || undefined,
             message_group_id: message.message_group_id,

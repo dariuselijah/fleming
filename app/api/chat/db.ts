@@ -1,6 +1,7 @@
 import type { ContentPart, Message } from "@/app/types/api.types"
 import type { Database, Json } from "@/app/types/database.types"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { encryptMessage, isEncryptionEnabled } from "@/lib/encryption"
 
 const DEFAULT_STEP = 0
 
@@ -74,14 +75,26 @@ export async function saveFinalAssistantMessage(
 
   const finalPlainText = textParts.join("\n\n")
 
+  // Encrypt assistant message content before storing (if encryption is enabled)
+  let encryptedContent = finalPlainText || ""
+  let contentIv: string | null = null
+
+  if (isEncryptionEnabled() && finalPlainText) {
+    const encrypted = encryptMessage(finalPlainText)
+    encryptedContent = encrypted.encrypted
+    contentIv = encrypted.iv
+    console.log("🔒 Assistant message encrypted before storage")
+  }
+
   const { error } = await supabase.from("messages").insert({
     chat_id: chatId,
     role: "assistant",
-    content: finalPlainText || "",
+    content: encryptedContent,
+    content_iv: contentIv,
     parts: parts as unknown as Json,
     message_group_id,
     model,
-  })
+  } as any) // Type assertion needed for content_iv column
 
   if (error) {
     console.error("Error saving final assistant message:", error)

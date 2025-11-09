@@ -11,6 +11,7 @@ import { sanitizeUserInput } from "@/lib/sanitize"
 import { validateUserIdentity } from "@/lib/server/api"
 import { checkUsageByModel, incrementUsage } from "@/lib/usage"
 import { getEffectiveApiKey, type ProviderWithoutOllama } from "@/lib/user-keys"
+import { encryptMessage, isEncryptionEnabled } from "@/lib/encryption"
 
 export async function validateAndTrackUsage({
   userId,
@@ -101,14 +102,27 @@ export async function logUserMessage({
     }
   }
 
+  // Encrypt message content before storing (if encryption is enabled)
+  const sanitizedContent = sanitizeUserInput(content)
+  let encryptedContent = sanitizedContent
+  let contentIv: string | null = null
+
+  if (isEncryptionEnabled() && sanitizedContent) {
+    const encrypted = encryptMessage(sanitizedContent)
+    encryptedContent = encrypted.encrypted
+    contentIv = encrypted.iv
+    console.log("🔒 User message encrypted before storage")
+  }
+
   const { error } = await supabase.from("messages").insert({
     chat_id: chatId,
     role: "user",
-    content: sanitizeUserInput(content),
+    content: encryptedContent,
+    content_iv: contentIv,
     experimental_attachments: attachments,
     user_id: userId,
     message_group_id,
-  })
+  } as any) // Type assertion needed for content_iv column
 
   if (error) {
     console.error("Error saving user message:", error)
