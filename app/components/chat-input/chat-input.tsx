@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react"
 import { getModelInfo } from "@/lib/models"
 import { useModel } from "@/lib/model-store/provider"
-import { ModelSelector } from "@/components/common/model-selector/base"
 import {
   PromptInput,
   PromptInputAction,
@@ -16,33 +15,8 @@ import { PromptSystem } from "../suggestions/prompt-system"
 import { ButtonFileUpload } from "./button-file-upload"
 import { ButtonSearch } from "./button-search"
 import { FileList } from "./file-list"
-import { Select } from "@/components/ui/select"
-import { SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
-// Multi-modal configuration - maps user-friendly labels to actual model IDs
-// Only Fleming models are available
-const MODAL_MAPPING = {
-  fleming35: "fleming-3.5", // Fleming 3.5 model
-  fleming4: "fleming-4", // Fleming 4 model
-} as const
-
-type ModalMode = keyof typeof MODAL_MAPPING
-
-// Helper function to get the actual model ID from modal mode
-const getActualModelId = (modalMode: string): string => {
-  return MODAL_MAPPING[modalMode as ModalMode] || modalMode
-}
-
-// Helper function to get modal mode from actual model ID
-const getModalModeFromModelId = (modelId: string): string => {
-  const entry = Object.entries(MODAL_MAPPING).find(([_, actualId]) => actualId === modelId)
-  return entry ? entry[0] : "fleming35" // Default to fleming35 if no match found
-}
-
-// Helper function to check if a model ID is a Fleming model
-const isFlemingModel = (modelId: string): boolean => {
-  return modelId === "fleming-3.5" || modelId === "fleming-4"
-}
+// Fleming 3.5 has been removed - only Fleming 4 is available
 
 type ChatInputProps = {
   value: string
@@ -62,6 +36,8 @@ type ChatInputProps = {
   status?: "submitted" | "streaming" | "ready" | "error"
   setEnableSearch: (enabled: boolean) => void
   enableSearch: boolean
+  setEnableEvidence?: (enabled: boolean) => void
+  enableEvidence?: boolean
 }
 
 export function ChatInput({
@@ -81,47 +57,20 @@ export function ChatInput({
   status,
   setEnableSearch,
   enableSearch,
+  setEnableEvidence,
+  enableEvidence = false,
 }: ChatInputProps) {
   const { models } = useModel()
   const [isButtonDisabled, setIsButtonDisabled] = useState(true);
   
-  // Check if selectedModel is already an actual model ID or a modal mode
-  // Always treat Fleming models as actual model IDs
-  const isActualModelId = models.some(model => model.id === selectedModel) || isFlemingModel(selectedModel)
-  
-  // Get the actual model ID - if selectedModel is already an actual ID, use it directly
-  let actualModelId = isActualModelId ? selectedModel : getActualModelId(selectedModel)
-  
-  // Fix for old grok-4 model name - migrate to fleming-3.5 (new default)
-  if (actualModelId === 'grok-4' || actualModelId === 'grok-4-fast-reasoning') {
-    actualModelId = 'fleming-3.5'
-  }
-
-  // Only show Fleming 3.5 and Fleming 4 models
-  const availableModalModes = useMemo(() => {
-    // Only include Fleming models
-    return Object.entries(MODAL_MAPPING).filter(([_, modelId]) => {
-      // Check if model exists in available models or is a Fleming model
-      return models.some(model => model.id === modelId) || isFlemingModel(modelId)
-    })
-  }, [models])
-
-  // Fallback to first available model if current model is not available
+  // Use selectedModel directly - no model selector needed since only Fleming 4 is available
+  // Migrate old model names to fleming-4
   const effectiveModelId = useMemo(() => {
-    let result
-    if (availableModalModes.length === 0) {
-      result = models[0]?.id || selectedModel
-    } else {
-      result = actualModelId
+    if (selectedModel === 'grok-4' || selectedModel === 'grok-4-fast-reasoning' || selectedModel === 'fleming-3.5') {
+      return 'fleming-4'
     }
-    
-    // Final fix for old grok-4 model name - migrate to fleming-3.5 (new default)
-    if (result === 'grok-4' || result === 'grok-4-fast-reasoning') {
-      result = 'fleming-3.5'
-    }
-    
-    return result
-  }, [availableModalModes.length, actualModelId, models, selectedModel])
+    return selectedModel || 'fleming-4'
+  }, [selectedModel])
 
   const selectModelConfig = getModelInfo(effectiveModelId)
   const hasSearchSupport = Boolean(selectModelConfig?.webSearch)
@@ -129,18 +78,6 @@ export function ChatInput({
     if (!text) return true
     return !/[^\s]/.test(text)
   }
-
-  // Handle modal mode selection
-  const handleModalModeChange = useCallback((modalMode: string) => {
-    const actualModelId = getActualModelId(modalMode)
-    onSelectModel(actualModelId)
-  }, [onSelectModel])
-
-  // Get the current modal mode for display - ensure it has a default value
-  const currentModalMode = useMemo(() => {
-    const mode = getModalModeFromModelId(selectedModel)
-    return mode || "fleming35" // Ensure we always have a valid mode
-  }, [selectedModel])
 
   const handleSend = useCallback(() => {
     if (isSubmitting) return
@@ -267,37 +204,6 @@ export function ChatInput({
                 isUserAuthenticated={isUserAuthenticated}
                 model={effectiveModelId}
               />
-              <Select onValueChange={handleModalModeChange} value={currentModalMode}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Select Model">
-                    {currentModalMode === 'fleming35' ? 'Fleming 3.5' :
-                     currentModalMode === 'fleming4' ? 'Fleming 4' :
-                     'Select Model'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent className="min-w-[280px]">
-                  {availableModalModes.map(([label, modelId]) => {
-                    const displayName = 
-                      label === 'fleming35' ? 'Fleming 3.5' :
-                      label === 'fleming4' ? 'Fleming 4' :
-                      label
-                    const modelInfo = getModelInfo(modelId)
-                    const description = modelInfo?.description || ''
-                    return (
-                      <SelectItem key={`${label}-${modelId}`} value={label} className="py-2 items-start">
-                        <div className="flex flex-col gap-0.5 pr-6">
-                          <span className="font-medium">{displayName}</span>
-                          {description && (
-                            <span className="text-muted-foreground text-xs leading-relaxed">
-                              {description}
-                            </span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    )
-                  })}
-                </SelectContent>
-              </Select>
               {hasSearchSupport ? (
                 <ButtonSearch
                   isSelected={enableSearch}

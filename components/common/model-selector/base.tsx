@@ -124,9 +124,9 @@ export function ModelSelector({
     )
   }
 
-  // Only show Fleming 3.5 and Fleming 4 models
+  // Only show Fleming 4 model (Fleming 3.5 has been removed)
   const flemingModels = models.filter(
-    (model) => model.id === "fleming-3.5" || model.id === "fleming-4"
+    (model) => model.id === "fleming-4"
   )
 
   // Get the hovered model data from Fleming models

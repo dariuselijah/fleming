@@ -1,4 +1,4 @@
-import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole, FLEMING_3_5_SYSTEM_PROMPT, FLEMING_4_SYSTEM_PROMPT } from "@/lib/config"
+import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole, FLEMING_4_SYSTEM_PROMPT } from "@/lib/config"
 import { getAllModels, getModelInfo } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { SupportedModel } from "@/lib/openproviders/types"
@@ -21,6 +21,8 @@ import {
 } from "@/lib/models/healthcare-agents"
 import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
 import { anonymizeMessages } from "@/lib/anonymize"
+import { synthesizeEvidence, buildEvidenceSystemPrompt } from "@/lib/evidence"
+import { synthesizeEvidenceEnhanced } from "@/lib/evidence/synthesis-enhanced"
 
 export const maxDuration = 60
 
@@ -93,6 +95,7 @@ type ChatRequest = {
   isAuthenticated: boolean
   systemPrompt: string
   enableSearch: boolean
+  enableEvidence?: boolean  // NEW: Enable evidence-backed responses
   message_group_id?: string
   userRole?: "doctor" | "general" | "medical_student"
   medicalSpecialty?: string
@@ -110,7 +113,8 @@ export async function POST(req: Request) {
       model,
       isAuthenticated,
       systemPrompt,
-      enableSearch,
+      enableSearch: enableSearchFromClient,
+      enableEvidence: enableEvidenceFromClient,
       message_group_id,
       userRole,
       medicalSpecialty,
@@ -154,51 +158,13 @@ export async function POST(req: Request) {
       }
     }
 
-    // Check for images when Fleming 3.5 is selected and switch to Fleming 4
-    let effectiveModel = model
-    let hasImages = false
-    
-    if (model === "fleming-3.5") {
-      // Check messages for images
-      for (const message of messages) {
-        // Check experimental_attachments
-        if (message.experimental_attachments && message.experimental_attachments.length > 0) {
-          const imageAttachments = message.experimental_attachments.filter(
-            (att: any) => att.contentType?.startsWith("image/") || att.contentType?.startsWith("application/")
-          )
-          if (imageAttachments.length > 0) {
-            hasImages = true
-            break
-          }
-        }
-        
-        // Check content array for image parts
-        if (Array.isArray(message.content)) {
-          const hasImagePart = message.content.some(
-            (part: any) => part.type === "image"
-          )
-          if (hasImagePart) {
-            hasImages = true
-            break
-          }
-        }
-      }
-      
-      if (hasImages) {
-        console.log(`[Fleming 3.5] Images detected - switching to Fleming 4`)
-        effectiveModel = "fleming-4"
-      }
-    }
-    
     // START STREAMING IMMEDIATELY - minimal blocking operations
     // Apply enhanced system prompts for Fleming models
     // CRITICAL: For Fleming models, always use Fleming-specific prompts (ignore systemPrompt parameter)
     // This ensures Fleming models behave as AI doctors without disclaimers
+    let effectiveModel = model
     let effectiveSystemPrompt: string
-    if (effectiveModel === "fleming-3.5") {
-      effectiveSystemPrompt = FLEMING_3_5_SYSTEM_PROMPT
-      console.log(`[Fleming 3.5] Using Fleming 3.5 system prompt (AI doctor mode)`)
-    } else if (effectiveModel === "fleming-4") {
+    if (effectiveModel === "fleming-4") {
       effectiveSystemPrompt = FLEMING_4_SYSTEM_PROMPT
       console.log(`[Fleming 4] Using Fleming 4 system prompt (AI doctor mode)`)
     } else {
@@ -214,18 +180,77 @@ export async function POST(req: Request) {
     console.log(`🔍 Looking for model: "${effectiveModel}"${effectiveModel !== model ? ` (switched from ${model})` : ''}`)
     const modelConfig = getModelInfo(effectiveModel)
     console.log(`📋 Model config found:`, modelConfig ? `${modelConfig.id} (${modelConfig.name})` : 'null')
-
+    
+    // Auto-enable web search for healthcare professionals using Fleming 4
+    const isHealthcareMode = userRole === "doctor" || userRole === "medical_student"
+    const isFleming4 = effectiveModel === "fleming-4"
+    const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
+    const finalEnableSearch = enableSearchFromClient || (isHealthcareMode && isFleming4 && hasWebSearchSupport)
+    
+    // EVIDENCE MODE: Auto-enable for healthcare professionals or if explicitly requested
+    const finalEnableEvidence = enableEvidenceFromClient || (isHealthcareMode && medicalLiteratureAccess)
+    
     if (!modelConfig || !modelConfig.apiSdk) {
       console.error(`❌ Model "${model}" not found or missing apiSdk`)
       throw new Error(`Model ${model} not found`)
     }
 
     // Get API key if needed (this is fast) - only for real users
+    // Get it early so it can be used for evidence synthesis
     let apiKey: string | undefined
+    let evidenceApiKey: string | undefined
     if (isAuthenticated && userId && userId !== "temp") {
       const { getEffectiveApiKey } = await import("@/lib/user-keys")
       const provider = getProviderForModel(effectiveModel)
       apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
+      
+      // Get OpenAI key for evidence synthesis (LLM-based query understanding and reranking)
+      if (finalEnableEvidence) {
+        evidenceApiKey = (await getEffectiveApiKey(userId, 'openai' as ProviderWithoutOllama)) || undefined
+        // Fallback to main API key if OpenAI key not available
+        if (!evidenceApiKey) {
+          evidenceApiKey = apiKey
+        }
+      }
+    }
+    
+    // If evidence mode is enabled, synthesize evidence from medical_evidence table
+    // Use enhanced contextual relevance system for world-class citation attribution
+    let evidenceContext: Awaited<ReturnType<typeof synthesizeEvidenceEnhanced>> | null = null
+    if (finalEnableEvidence) {
+      try {
+        // Get the last user message for evidence search
+        const lastUserMessage = messages.filter(m => m.role === 'user').pop()
+        const queryText = typeof lastUserMessage?.content === 'string' 
+          ? lastUserMessage.content 
+          : ''
+        
+        if (queryText.length > 0) {
+          console.log("📚 EVIDENCE MODE: Enhanced contextual search for:", queryText.substring(0, 100))
+          
+          evidenceContext = await synthesizeEvidenceEnhanced({
+            query: queryText,
+            maxResults: 8,
+            minEvidenceLevel: 5, // Include all evidence levels
+            enableReranking: true, // Enable contextual reranking
+            minContextualScore: 0.6, // Balanced relevance threshold (was 0.75, too strict)
+            apiKey: evidenceApiKey,
+          })
+          
+          if (evidenceContext.shouldUseEvidence) {
+            console.log(`📚 EVIDENCE MODE: Found ${evidenceContext.context.citations.length} highly relevant sources in ${evidenceContext.searchTimeMs.toFixed(0)}ms`)
+            console.log(`📚 Intent: ${evidenceContext.queryUnderstanding.primaryIntent}, Specificity: ${evidenceContext.queryUnderstanding.specificity}`)
+            console.log(`📚 Reranking: ${evidenceContext.rerankingStats.initialCount} → ${evidenceContext.rerankingStats.afterReranking} (avg score: ${evidenceContext.rerankingStats.averageContextualScore.toFixed(2)})`)
+            // Enhance system prompt with evidence
+            effectiveSystemPrompt = buildEvidenceSystemPrompt(effectiveSystemPrompt, evidenceContext.context)
+          } else {
+            console.log("📚 EVIDENCE MODE: Query not medical or no evidence found")
+          }
+        }
+      } catch (error) {
+        console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", error)
+        // Continue without evidence - don't block the chat
+      }
     }
 
     // Filter out invalid attachments but keep data URLs and blob URLs for vision models
@@ -265,13 +290,20 @@ export async function POST(req: Request) {
     console.log("🔒 Messages anonymized before sending to LLM provider")
 
     // START STREAMING IMMEDIATELY with basic prompt
-    console.log("🚀 Starting streaming immediately...")
     const startTime = performance.now()
     
+    // Create model with REAL web search settings
+    // When enableSearch=true, this passes { web_search: true } to xAI API
+    const modelWithSearch = modelConfig.apiSdk(apiKey, { 
+      enableSearch: finalEnableSearch // REAL web search flag - passed to xAI API
+    })
+    
+    if (finalEnableSearch) {
+      console.log("✅ WEB SEARCH ENABLED - Using real web search from xAI/Grok")
+    }
+    
     const result = streamText({
-      model: modelConfig.apiSdk(apiKey, { 
-        enableSearch
-      }),
+      model: modelWithSearch,
       system: effectiveSystemPrompt,
       messages: anonymizedMessages, // Use anonymized messages for LLM
       tools: {} as ToolSet,
@@ -280,6 +312,56 @@ export async function POST(req: Request) {
         console.error("Streaming error occurred:", err)
       },
       onFinish: async ({ response }) => {
+        // Extract citations from xAI response if available
+        const xaiCitations = (response as any).experimental_providerMetadata?.citations || 
+                            (response as any).citations || 
+                            []
+        
+        // Check if sources are in message parts
+        const allParts = (response as any).messages?.flatMap((m: any) => m.parts || []) || []
+        const sourceParts = allParts.filter((p: any) => p.type === 'source')
+        const toolInvocationParts = allParts.filter((p: any) => p.type === 'tool-invocation')
+        
+        // Log full response structure for debugging
+        console.log('\n' + '='.repeat(80))
+        console.log('[WEB SEARCH DEBUG] Response structure:')
+        console.log('  - experimental_providerMetadata:', (response as any).experimental_providerMetadata ? 'EXISTS' : 'undefined')
+        console.log('  - citations:', (response as any).citations ? 'EXISTS' : 'undefined')
+        console.log('  - messages count:', (response as any).messages?.length || 0)
+        console.log('  - total parts:', allParts.length)
+        console.log('  - source parts:', sourceParts.length)
+        console.log('  - tool invocations:', toolInvocationParts.length)
+        
+        if (xaiCitations.length > 0) {
+          console.log(`[WEB SEARCH] ✅ Found ${xaiCitations.length} citations:`, xaiCitations.slice(0, 5))
+        }
+        
+        if (sourceParts.length > 0) {
+          console.log(`[WEB SEARCH] ✅ Found ${sourceParts.length} source parts:`, sourceParts.map((p: any) => p.source).slice(0, 3))
+        }
+        
+        if (toolInvocationParts.length > 0) {
+          console.log(`[WEB SEARCH] ✅ Found ${toolInvocationParts.length} tool invocations`)
+          toolInvocationParts.forEach((p: any, i: number) => {
+            console.log(`  Tool ${i + 1}:`, p.toolInvocation?.toolName, 'state:', p.toolInvocation?.state)
+            if (p.toolInvocation?.result) {
+              console.log(`    Result keys:`, Object.keys(p.toolInvocation.result))
+            }
+          })
+        }
+        
+        // Check message content for URLs
+        const lastMessage = (response as any).messages?.[(response as any).messages.length - 1]
+        if (lastMessage?.content) {
+          const content = typeof lastMessage.content === 'string' ? lastMessage.content : JSON.stringify(lastMessage.content)
+          const urlMatches = content.match(/https?:\/\/[^\s\)\]\[]+/g) || []
+          if (urlMatches.length > 0) {
+            console.log(`[WEB SEARCH] Found ${urlMatches.length} URLs in message content:`, urlMatches.slice(0, 5))
+          }
+        }
+        
+        console.log('='.repeat(80) + '\n')
+        
         // Handle completion in background - CRITICAL: Ensure this always runs
         Promise.resolve().then(async () => {
           try {
@@ -322,6 +404,10 @@ export async function POST(req: Request) {
               }
 
               // Save assistant message with retry logic
+              // Include evidence citations if available
+              const assistantMessage = response.messages[response.messages.length - 1]
+              const citationsToSave = evidenceContext?.context?.citations || []
+              
               try {
                 await storeAssistantMessage({
                   supabase,
@@ -330,6 +416,7 @@ export async function POST(req: Request) {
                     response.messages as unknown as import("@/app/types/api.types").Message[],
                   message_group_id,
                   model: effectiveModel,
+                  evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
                 })
               } catch (error) {
                 console.error("Failed to save assistant message:", error)
@@ -343,6 +430,7 @@ export async function POST(req: Request) {
                       response.messages as unknown as import("@/app/types/api.types").Message[],
                     message_group_id,
                     model: effectiveModel,
+                    evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
                   })
                 } catch (retryError) {
                   console.error("Retry also failed to save assistant message:", retryError)
@@ -427,16 +515,34 @@ export async function POST(req: Request) {
     }
 
     console.log("✅ Streaming response ready, returning to client")
+    
+    // Build response headers - include evidence citations if available
+    const responseHeaders: Record<string, string> = {
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked',
+      // CRITICAL: Expose custom header to JavaScript
+      'Access-Control-Expose-Headers': 'X-Evidence-Citations',
+    }
+    
+    // Add evidence citations to headers for frontend rendering
+    if (evidenceContext?.context?.citations && evidenceContext.context.citations.length > 0) {
+      try {
+        // Encode citations as base64 to handle special characters
+        const citationsJson = JSON.stringify(evidenceContext.context.citations)
+        responseHeaders['X-Evidence-Citations'] = Buffer.from(citationsJson).toString('base64')
+        console.log(`📚 EVIDENCE MODE: Sending ${evidenceContext.context.citations.length} citations to client`)
+      } catch (e) {
+        console.error('Failed to encode evidence citations:', e)
+      }
+    }
+    
     return result.toDataStreamResponse({
       sendReasoning: true,
       sendSources: true,
       // Optimize streaming response
-      headers: {
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Transfer-Encoding': 'chunked',
-      },
+      headers: responseHeaders,
       getErrorMessage: (error: unknown) => {
         console.error("Error forwarded to client:", error)
         return extractErrorMessage(error)

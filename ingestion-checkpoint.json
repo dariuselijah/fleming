@@ -1,0 +1,2184 @@
+{
+  "version": "1.0",
+  "startTime": "2025-12-30T06:34:11.887Z",
+  "lastUpdate": "2026-01-03T15:53:42.409Z",
+  "topics": [
+    {
+      "topic": "hypertension treatment",
+      "status": "failed",
+      "articlesProcessed": 1065,
+      "chunksCreated": 2390,
+      "errors": 1,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:36:08.409Z"
+    },
+    {
+      "topic": "hypertension management",
+      "status": "failed",
+      "articlesProcessed": 1788,
+      "chunksCreated": 3986,
+      "errors": 6,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:37:12.926Z"
+    },
+    {
+      "topic": "atrial fibrillation",
+      "status": "failed",
+      "articlesProcessed": 9980,
+      "chunksCreated": 24678,
+      "errors": 124,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:37:50.778Z"
+    },
+    {
+      "topic": "atrial fibrillation management",
+      "status": "completed",
+      "articlesProcessed": 129,
+      "chunksCreated": 253,
+      "errors": 0,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:34:27.309Z"
+    },
+    {
+      "topic": "heart failure",
+      "status": "failed",
+      "articlesProcessed": 9762,
+      "chunksCreated": 22907,
+      "errors": 114,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:38:40.460Z"
+    },
+    {
+      "topic": "heart failure therapy",
+      "status": "completed",
+      "articlesProcessed": 447,
+      "chunksCreated": 769,
+      "errors": 0,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:34:50.408Z"
+    },
+    {
+      "topic": "coronary artery disease",
+      "status": "failed",
+      "articlesProcessed": 9953,
+      "chunksCreated": 23779,
+      "errors": 119,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:38:12.570Z"
+    },
+    {
+      "topic": "coronary artery disease treatment",
+      "status": "completed",
+      "articlesProcessed": 40,
+      "chunksCreated": 79,
+      "errors": 0,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:34:26.327Z"
+    },
+    {
+      "topic": "myocardial infarction",
+      "status": "failed",
+      "articlesProcessed": 9743,
+      "chunksCreated": 23786,
+      "errors": 120,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:38:10.662Z"
+    },
+    {
+      "topic": "acute coronary syndrome",
+      "status": "failed",
+      "articlesProcessed": 9981,
+      "chunksCreated": 23552,
+      "errors": 108,
+      "startedAt": "2025-12-30T06:34:11.887Z",
+      "completedAt": "2025-12-30T06:40:27.300Z"
+    },
+    {
+      "topic": "hyperlipidemia",
+      "status": "failed",
+      "articlesProcessed": 9574,
+      "chunksCreated": 21305,
+      "errors": 89,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:58:37.454Z"
+    },
+    {
+      "topic": "hyperlipidemia treatment",
+      "status": "completed",
+      "articlesProcessed": 48,
+      "chunksCreated": 107,
+      "errors": 0,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:44:56.780Z"
+    },
+    {
+      "topic": "statin therapy",
+      "status": "failed",
+      "articlesProcessed": 5727,
+      "chunksCreated": 13405,
+      "errors": 68,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:46:36.094Z"
+    },
+    {
+      "topic": "anticoagulation",
+      "status": "failed",
+      "articlesProcessed": 9560,
+      "chunksCreated": 21658,
+      "errors": 111,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:53:14.903Z"
+    },
+    {
+      "topic": "antiplatelet therapy",
+      "status": "failed",
+      "articlesProcessed": 9744,
+      "chunksCreated": 22165,
+      "errors": 111,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:50:04.562Z"
+    },
+    {
+      "topic": "arrhythmia treatment",
+      "status": "completed",
+      "articlesProcessed": 66,
+      "chunksCreated": 114,
+      "errors": 0,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:44:56.884Z"
+    },
+    {
+      "topic": "valvular heart disease",
+      "status": "failed",
+      "articlesProcessed": 3276,
+      "chunksCreated": 6743,
+      "errors": 32,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:47:02.031Z"
+    },
+    {
+      "topic": "peripheral artery disease",
+      "status": "failed",
+      "articlesProcessed": 6791,
+      "chunksCreated": 15893,
+      "errors": 81,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:51:49.381Z"
+    },
+    {
+      "topic": "stroke prevention",
+      "status": "failed",
+      "articlesProcessed": 5148,
+      "chunksCreated": 11713,
+      "errors": 58,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:50:48.165Z"
+    },
+    {
+      "topic": "stroke treatment",
+      "status": "failed",
+      "articlesProcessed": 2169,
+      "chunksCreated": 4941,
+      "errors": 14,
+      "startedAt": "2025-12-30T06:44:39.006Z",
+      "completedAt": "2025-12-30T06:54:34.717Z"
+    },
+    {
+      "topic": "type 2 diabetes",
+      "status": "failed",
+      "articlesProcessed": 9808,
+      "chunksCreated": 23006,
+      "errors": 116,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:03:02.280Z"
+    },
+    {
+      "topic": "type 2 diabetes management",
+      "status": "failed",
+      "articlesProcessed": 305,
+      "chunksCreated": 693,
+      "errors": 3,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:00:47.882Z"
+    },
+    {
+      "topic": "diabetes mellitus treatment",
+      "status": "failed",
+      "articlesProcessed": 147,
+      "chunksCreated": 309,
+      "errors": 2,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T06:59:43.595Z"
+    },
+    {
+      "topic": "diabetes complications",
+      "status": "failed",
+      "articlesProcessed": 3004,
+      "chunksCreated": 7158,
+      "errors": 33,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:05:34.560Z"
+    },
+    {
+      "topic": "insulin therapy",
+      "status": "failed",
+      "articlesProcessed": 5254,
+      "chunksCreated": 11910,
+      "errors": 60,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:00:08.589Z"
+    },
+    {
+      "topic": "diabetic nephropathy",
+      "status": "failed",
+      "articlesProcessed": 8750,
+      "chunksCreated": 17208,
+      "errors": 77,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:10:48.980Z"
+    },
+    {
+      "topic": "diabetic retinopathy",
+      "status": "failed",
+      "articlesProcessed": 9981,
+      "chunksCreated": 22645,
+      "errors": 114,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:08:41.063Z"
+    },
+    {
+      "topic": "obesity",
+      "status": "failed",
+      "articlesProcessed": 9874,
+      "chunksCreated": 22448,
+      "errors": 113,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:03:00.757Z"
+    },
+    {
+      "topic": "obesity treatment",
+      "status": "failed",
+      "articlesProcessed": 2095,
+      "chunksCreated": 4378,
+      "errors": 17,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:06:59.837Z"
+    },
+    {
+      "topic": "obesity pharmacotherapy",
+      "status": "failed",
+      "articlesProcessed": 170,
+      "chunksCreated": 266,
+      "errors": 1,
+      "startedAt": "2025-12-30T06:58:37.465Z",
+      "completedAt": "2025-12-30T07:00:01.611Z"
+    },
+    {
+      "topic": "metabolic syndrome",
+      "status": "failed",
+      "articlesProcessed": 9635,
+      "chunksCreated": 20656,
+      "errors": 105,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:26:14.049Z"
+    },
+    {
+      "topic": "thyroid disorders",
+      "status": "failed",
+      "articlesProcessed": 1710,
+      "chunksCreated": 3569,
+      "errors": 17,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:24:06.969Z"
+    },
+    {
+      "topic": "hypothyroidism",
+      "status": "failed",
+      "articlesProcessed": 9970,
+      "chunksCreated": 21935,
+      "errors": 104,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:29:17.477Z"
+    },
+    {
+      "topic": "hyperthyroidism",
+      "status": "failed",
+      "articlesProcessed": 5255,
+      "chunksCreated": 11165,
+      "errors": 52,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:28:17.538Z"
+    },
+    {
+      "topic": "thyroid cancer",
+      "status": "failed",
+      "articlesProcessed": 9993,
+      "chunksCreated": 21419,
+      "errors": 108,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:14:36.474Z"
+    },
+    {
+      "topic": "adrenal disorders",
+      "status": "failed",
+      "articlesProcessed": 349,
+      "chunksCreated": 481,
+      "errors": 3,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:13:11.184Z"
+    },
+    {
+      "topic": "osteoporosis",
+      "status": "failed",
+      "articlesProcessed": 4018,
+      "chunksCreated": 9032,
+      "errors": 34,
+      "startedAt": "2026-01-01T23:35:07.844Z",
+      "completedAt": "2026-01-02T00:05:18.324Z"
+    },
+    {
+      "topic": "osteoporosis treatment",
+      "status": "failed",
+      "articlesProcessed": 1270,
+      "chunksCreated": 2969,
+      "errors": 16,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:22:51.829Z"
+    },
+    {
+      "topic": "osteoporosis prevention",
+      "status": "failed",
+      "articlesProcessed": 419,
+      "chunksCreated": 893,
+      "errors": 5,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:16:31.412Z"
+    },
+    {
+      "topic": "asthma",
+      "status": "failed",
+      "articlesProcessed": 9972,
+      "chunksCreated": 22733,
+      "errors": 114,
+      "startedAt": "2025-12-30T07:10:48.983Z",
+      "completedAt": "2025-12-30T07:15:05.438Z"
+    },
+    {
+      "topic": "asthma treatment",
+      "status": "failed",
+      "articlesProcessed": 1376,
+      "chunksCreated": 3082,
+      "errors": 15,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:35:27.135Z"
+    },
+    {
+      "topic": "asthma management",
+      "status": "failed",
+      "articlesProcessed": 2260,
+      "chunksCreated": 5219,
+      "errors": 27,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:31:48.503Z"
+    },
+    {
+      "topic": "COPD",
+      "status": "failed",
+      "articlesProcessed": 9963,
+      "chunksCreated": 24189,
+      "errors": 120,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:37:47.753Z"
+    },
+    {
+      "topic": "COPD treatment",
+      "status": "failed",
+      "articlesProcessed": 474,
+      "chunksCreated": 1087,
+      "errors": 3,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:32:11.819Z"
+    },
+    {
+      "topic": "COPD exacerbation",
+      "status": "failed",
+      "articlesProcessed": 1428,
+      "chunksCreated": 3773,
+      "errors": 19,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:30:42.871Z"
+    },
+    {
+      "topic": "pneumonia",
+      "status": "failed",
+      "articlesProcessed": 9944,
+      "chunksCreated": 23212,
+      "errors": 117,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:32:40.154Z"
+    },
+    {
+      "topic": "pneumonia treatment",
+      "status": "failed",
+      "articlesProcessed": 186,
+      "chunksCreated": 460,
+      "errors": 1,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:30:51.211Z"
+    },
+    {
+      "topic": "pneumonia antibiotic",
+      "status": "completed",
+      "articlesProcessed": 18,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-01-01T23:35:07.843Z",
+      "completedAt": "2026-01-01T23:35:10.973Z"
+    },
+    {
+      "topic": "pulmonary embolism",
+      "status": "failed",
+      "articlesProcessed": 9965,
+      "chunksCreated": 23339,
+      "errors": 109,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:41:02.969Z"
+    },
+    {
+      "topic": "interstitial lung disease",
+      "status": "failed",
+      "articlesProcessed": 9992,
+      "chunksCreated": 22067,
+      "errors": 111,
+      "startedAt": "2025-12-30T07:29:17.479Z",
+      "completedAt": "2025-12-30T07:32:28.513Z"
+    },
+    {
+      "topic": "sleep apnea",
+      "status": "failed",
+      "articlesProcessed": 9915,
+      "chunksCreated": 23739,
+      "errors": 119,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:45:06.022Z"
+    },
+    {
+      "topic": "sleep apnea treatment",
+      "status": "completed",
+      "articlesProcessed": 161,
+      "chunksCreated": 387,
+      "errors": 0,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:42:07.874Z"
+    },
+    {
+      "topic": "bronchiectasis",
+      "status": "failed",
+      "articlesProcessed": 4851,
+      "chunksCreated": 10595,
+      "errors": 52,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:52:29.163Z"
+    },
+    {
+      "topic": "cystic fibrosis",
+      "status": "failed",
+      "articlesProcessed": 9991,
+      "chunksCreated": 20149,
+      "errors": 101,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:45:49.268Z"
+    },
+    {
+      "topic": "COVID-19",
+      "status": "failed",
+      "articlesProcessed": 9561,
+      "chunksCreated": 22165,
+      "errors": 113,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:45:53.802Z"
+    },
+    {
+      "topic": "COVID-19 treatment",
+      "status": "failed",
+      "articlesProcessed": 1714,
+      "chunksCreated": 3286,
+      "errors": 15,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:51:07.034Z"
+    },
+    {
+      "topic": "COVID-19 vaccine",
+      "status": "failed",
+      "articlesProcessed": 9992,
+      "chunksCreated": 21577,
+      "errors": 108,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:47:49.215Z"
+    },
+    {
+      "topic": "sepsis",
+      "status": "failed",
+      "articlesProcessed": 9739,
+      "chunksCreated": 22140,
+      "errors": 112,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:46:29.612Z"
+    },
+    {
+      "topic": "sepsis treatment",
+      "status": "failed",
+      "articlesProcessed": 410,
+      "chunksCreated": 833,
+      "errors": 4,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:43:59.076Z"
+    },
+    {
+      "topic": "urinary tract infection",
+      "status": "failed",
+      "articlesProcessed": 9967,
+      "chunksCreated": 24514,
+      "errors": 123,
+      "startedAt": "2025-12-30T07:41:02.978Z",
+      "completedAt": "2025-12-30T07:51:57.141Z"
+    },
+    {
+      "topic": "urinary tract infection antibiotic",
+      "status": "completed",
+      "articlesProcessed": 4,
+      "chunksCreated": 6,
+      "errors": 0,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T07:52:42.713Z"
+    },
+    {
+      "topic": "skin infection",
+      "status": "failed",
+      "articlesProcessed": 1515,
+      "chunksCreated": 2885,
+      "errors": 15,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T07:58:51.733Z"
+    },
+    {
+      "topic": "soft tissue infection",
+      "status": "failed",
+      "articlesProcessed": 1843,
+      "chunksCreated": 3757,
+      "errors": 19,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T07:59:05.804Z"
+    },
+    {
+      "topic": "cellulitis",
+      "status": "failed",
+      "articlesProcessed": 4128,
+      "chunksCreated": 8463,
+      "errors": 43,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T07:53:54.895Z"
+    },
+    {
+      "topic": "pneumonia antibiotic",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "meningitis",
+      "status": "failed",
+      "articlesProcessed": 9987,
+      "chunksCreated": 20029,
+      "errors": 101,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T07:57:26.671Z"
+    },
+    {
+      "topic": "endocarditis",
+      "status": "failed",
+      "articlesProcessed": 9976,
+      "chunksCreated": 19200,
+      "errors": 96,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T07:55:16.040Z"
+    },
+    {
+      "topic": "osteomyelitis",
+      "status": "failed",
+      "articlesProcessed": 7543,
+      "chunksCreated": 14453,
+      "errors": 64,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T08:01:24.570Z"
+    },
+    {
+      "topic": "tuberculosis",
+      "status": "failed",
+      "articlesProcessed": 9172,
+      "chunksCreated": 19576,
+      "errors": 102,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T07:55:55.962Z"
+    },
+    {
+      "topic": "tuberculosis treatment",
+      "status": "failed",
+      "articlesProcessed": 2771,
+      "chunksCreated": 6564,
+      "errors": 33,
+      "startedAt": "2025-12-30T07:52:29.166Z",
+      "completedAt": "2025-12-30T07:57:52.277Z"
+    },
+    {
+      "topic": "HIV",
+      "status": "failed",
+      "articlesProcessed": 9569,
+      "chunksCreated": 21470,
+      "errors": 110,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:07:27.298Z"
+    },
+    {
+      "topic": "HIV treatment",
+      "status": "failed",
+      "articlesProcessed": 4711,
+      "chunksCreated": 10711,
+      "errors": 54,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:12:30.556Z"
+    },
+    {
+      "topic": "hepatitis C",
+      "status": "failed",
+      "articlesProcessed": 9780,
+      "chunksCreated": 21236,
+      "errors": 108,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:06:40.353Z"
+    },
+    {
+      "topic": "hepatitis C treatment",
+      "status": "failed",
+      "articlesProcessed": 900,
+      "chunksCreated": 2043,
+      "errors": 10,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:10:24.666Z"
+    },
+    {
+      "topic": "hepatitis B",
+      "status": "failed",
+      "articlesProcessed": 9974,
+      "chunksCreated": 21368,
+      "errors": 107,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:13:05.608Z"
+    },
+    {
+      "topic": "influenza",
+      "status": "failed",
+      "articlesProcessed": 9983,
+      "chunksCreated": 18866,
+      "errors": 95,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:10:24.045Z"
+    },
+    {
+      "topic": "influenza vaccine",
+      "status": "failed",
+      "articlesProcessed": 7494,
+      "chunksCreated": 16064,
+      "errors": 81,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:13:01.894Z"
+    },
+    {
+      "topic": "major depressive disorder",
+      "status": "failed",
+      "articlesProcessed": 9979,
+      "chunksCreated": 22514,
+      "errors": 113,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:12:06.266Z"
+    },
+    {
+      "topic": "depression treatment",
+      "status": "failed",
+      "articlesProcessed": 1672,
+      "chunksCreated": 3975,
+      "errors": 20,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:17:27.966Z"
+    },
+    {
+      "topic": "antidepressant",
+      "status": "failed",
+      "articlesProcessed": 9585,
+      "chunksCreated": 21259,
+      "errors": 109,
+      "startedAt": "2025-12-30T08:01:24.572Z",
+      "completedAt": "2025-12-30T08:16:16.835Z"
+    },
+    {
+      "topic": "generalized anxiety disorder",
+      "status": "failed",
+      "articlesProcessed": 6771,
+      "chunksCreated": 16668,
+      "errors": 70,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:27:30.330Z"
+    },
+    {
+      "topic": "anxiety treatment",
+      "status": "failed",
+      "articlesProcessed": 312,
+      "chunksCreated": 687,
+      "errors": 4,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:20:11.202Z"
+    },
+    {
+      "topic": "bipolar disorder",
+      "status": "failed",
+      "articlesProcessed": 9983,
+      "chunksCreated": 22418,
+      "errors": 113,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:21:57.905Z"
+    },
+    {
+      "topic": "bipolar disorder treatment",
+      "status": "failed",
+      "articlesProcessed": 58,
+      "chunksCreated": 132,
+      "errors": 1,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:18:21.291Z"
+    },
+    {
+      "topic": "schizophrenia",
+      "status": "failed",
+      "articlesProcessed": 9977,
+      "chunksCreated": 21370,
+      "errors": 107,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:21:49.460Z"
+    },
+    {
+      "topic": "schizophrenia treatment",
+      "status": "failed",
+      "articlesProcessed": 329,
+      "chunksCreated": 667,
+      "errors": 4,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:20:52.849Z"
+    },
+    {
+      "topic": "insomnia",
+      "status": "failed",
+      "articlesProcessed": 9773,
+      "chunksCreated": 23209,
+      "errors": 118,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:21:35.632Z"
+    },
+    {
+      "topic": "insomnia treatment",
+      "status": "failed",
+      "articlesProcessed": 362,
+      "chunksCreated": 890,
+      "errors": 5,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:21:05.639Z"
+    },
+    {
+      "topic": "PTSD",
+      "status": "failed",
+      "articlesProcessed": 9993,
+      "chunksCreated": 21438,
+      "errors": 108,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:23:25.587Z"
+    },
+    {
+      "topic": "PTSD treatment",
+      "status": "failed",
+      "articlesProcessed": 800,
+      "chunksCreated": 1574,
+      "errors": 9,
+      "startedAt": "2025-12-30T08:17:27.969Z",
+      "completedAt": "2025-12-30T08:22:27.746Z"
+    },
+    {
+      "topic": "ADHD",
+      "status": "failed",
+      "articlesProcessed": 9170,
+      "chunksCreated": 18983,
+      "errors": 85,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T14:57:43.264Z"
+    },
+    {
+      "topic": "ADHD treatment",
+      "status": "failed",
+      "articlesProcessed": 423,
+      "chunksCreated": 958,
+      "errors": 5,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T10:37:06.369Z"
+    },
+    {
+      "topic": "autism spectrum disorder",
+      "status": "failed",
+      "articlesProcessed": 9384,
+      "chunksCreated": 17065,
+      "errors": 88,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T14:52:24.255Z"
+    },
+    {
+      "topic": "eating disorders",
+      "status": "failed",
+      "articlesProcessed": 9177,
+      "chunksCreated": 19779,
+      "errors": 101,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T13:56:20.166Z"
+    },
+    {
+      "topic": "substance use disorder",
+      "status": "failed",
+      "articlesProcessed": 8091,
+      "chunksCreated": 18857,
+      "errors": 89,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T14:53:52.578Z"
+    },
+    {
+      "topic": "chronic pain",
+      "status": "failed",
+      "articlesProcessed": 9280,
+      "chunksCreated": 21578,
+      "errors": 111,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T13:56:23.918Z"
+    },
+    {
+      "topic": "chronic pain management",
+      "status": "failed",
+      "articlesProcessed": 1145,
+      "chunksCreated": 2528,
+      "errors": 11,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T13:55:32.880Z"
+    },
+    {
+      "topic": "migraine",
+      "status": "failed",
+      "articlesProcessed": 9163,
+      "chunksCreated": 21925,
+      "errors": 114,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T13:56:04.741Z"
+    },
+    {
+      "topic": "migraine treatment",
+      "status": "failed",
+      "articlesProcessed": 841,
+      "chunksCreated": 1949,
+      "errors": 10,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T13:54:53.472Z"
+    },
+    {
+      "topic": "neuropathic pain",
+      "status": "failed",
+      "articlesProcessed": 9382,
+      "chunksCreated": 18787,
+      "errors": 97,
+      "startedAt": "2025-12-30T08:27:30.332Z",
+      "completedAt": "2025-12-30T13:55:50.482Z"
+    },
+    {
+      "topic": "neuropathic pain treatment",
+      "status": "failed",
+      "articlesProcessed": 98,
+      "chunksCreated": 163,
+      "errors": 1,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T14:58:23.872Z"
+    },
+    {
+      "topic": "fibromyalgia",
+      "status": "failed",
+      "articlesProcessed": 6763,
+      "chunksCreated": 15425,
+      "errors": 78,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T15:01:15.532Z"
+    },
+    {
+      "topic": "fibromyalgia treatment",
+      "status": "failed",
+      "articlesProcessed": 70,
+      "chunksCreated": 167,
+      "errors": 1,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T14:58:26.861Z"
+    },
+    {
+      "topic": "osteoarthritis pain",
+      "status": "failed",
+      "articlesProcessed": 525,
+      "chunksCreated": 1220,
+      "errors": 9,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T15:02:13.196Z"
+    },
+    {
+      "topic": "rheumatoid arthritis pain",
+      "status": "failed",
+      "articlesProcessed": 19,
+      "chunksCreated": 40,
+      "errors": 3,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T14:58:35.223Z"
+    },
+    {
+      "topic": "GERD",
+      "status": "failed",
+      "articlesProcessed": 5718,
+      "chunksCreated": 14119,
+      "errors": 72,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T15:02:58.360Z"
+    },
+    {
+      "topic": "GERD treatment",
+      "status": "failed",
+      "articlesProcessed": 76,
+      "chunksCreated": 163,
+      "errors": 1,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T14:58:27.500Z"
+    },
+    {
+      "topic": "peptic ulcer disease",
+      "status": "failed",
+      "articlesProcessed": 1662,
+      "chunksCreated": 3577,
+      "errors": 18,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T15:07:38.919Z"
+    },
+    {
+      "topic": "inflammatory bowel disease",
+      "status": "failed",
+      "articlesProcessed": 9971,
+      "chunksCreated": 20812,
+      "errors": 98,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T15:14:55.415Z"
+    },
+    {
+      "topic": "Crohn disease",
+      "status": "failed",
+      "articlesProcessed": 2355,
+      "chunksCreated": 5117,
+      "errors": 26,
+      "startedAt": "2025-12-30T14:57:43.267Z",
+      "completedAt": "2025-12-30T15:00:51.670Z"
+    },
+    {
+      "topic": "ulcerative colitis",
+      "status": "failed",
+      "articlesProcessed": 9478,
+      "chunksCreated": 21325,
+      "errors": 108,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:19:28.021Z"
+    },
+    {
+      "topic": "irritable bowel syndrome",
+      "status": "failed",
+      "articlesProcessed": 7940,
+      "chunksCreated": 17736,
+      "errors": 90,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:40:15.251Z"
+    },
+    {
+      "topic": "IBS treatment",
+      "status": "failed",
+      "articlesProcessed": 81,
+      "chunksCreated": 171,
+      "errors": 1,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:15:31.356Z"
+    },
+    {
+      "topic": "hepatitis",
+      "status": "failed",
+      "articlesProcessed": 9623,
+      "chunksCreated": 20216,
+      "errors": 103,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:20:43.791Z"
+    },
+    {
+      "topic": "liver cirrhosis",
+      "status": "failed",
+      "articlesProcessed": 9771,
+      "chunksCreated": 21112,
+      "errors": 107,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:19:17.480Z"
+    },
+    {
+      "topic": "nonalcoholic fatty liver disease",
+      "status": "failed",
+      "articlesProcessed": 9945,
+      "chunksCreated": 19997,
+      "errors": 100,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:29:44.523Z"
+    },
+    {
+      "topic": "pancreatitis",
+      "status": "failed",
+      "articlesProcessed": 9738,
+      "chunksCreated": 21698,
+      "errors": 110,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:32:07.479Z"
+    },
+    {
+      "topic": "gastrointestinal bleeding",
+      "status": "failed",
+      "articlesProcessed": 7935,
+      "chunksCreated": 17803,
+      "errors": 90,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:39:33.069Z"
+    },
+    {
+      "topic": "osteoarthritis",
+      "status": "failed",
+      "articlesProcessed": 9732,
+      "chunksCreated": 23857,
+      "errors": 121,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:18:52.254Z"
+    },
+    {
+      "topic": "osteoarthritis treatment",
+      "status": "completed",
+      "articlesProcessed": 298,
+      "chunksCreated": 529,
+      "errors": 0,
+      "startedAt": "2025-12-30T15:14:55.418Z",
+      "completedAt": "2025-12-30T15:16:20.523Z"
+    },
+    {
+      "topic": "rheumatoid arthritis",
+      "status": "failed",
+      "articlesProcessed": 9909,
+      "chunksCreated": 21172,
+      "errors": 192,
+      "startedAt": "2025-12-30T15:59:59.709Z",
+      "completedAt": "2025-12-30T18:59:14.089Z"
+    },
+    {
+      "topic": "rheumatoid arthritis treatment",
+      "status": "completed",
+      "articlesProcessed": 219,
+      "chunksCreated": 434,
+      "errors": 0,
+      "startedAt": "2025-12-30T18:59:14.099Z",
+      "completedAt": "2025-12-30T18:59:53.284Z"
+    },
+    {
+      "topic": "gout",
+      "status": "failed",
+      "articlesProcessed": 6088,
+      "chunksCreated": 12595,
+      "errors": 81,
+      "startedAt": "2025-12-30T18:59:14.099Z",
+      "completedAt": "2025-12-31T00:45:04.312Z"
+    },
+    {
+      "topic": "gout treatment",
+      "status": "completed",
+      "articlesProcessed": 163,
+      "chunksCreated": 340,
+      "errors": 0,
+      "startedAt": "2025-12-30T18:59:14.099Z",
+      "completedAt": "2025-12-30T18:59:59.743Z"
+    },
+    {
+      "topic": "systemic lupus erythematosus",
+      "status": "failed",
+      "articlesProcessed": 4548,
+      "chunksCreated": 9594,
+      "errors": 50,
+      "startedAt": "2025-12-31T00:50:48.216Z",
+      "completedAt": "2025-12-31T01:26:26.224Z"
+    },
+    {
+      "topic": "ankylosing spondylitis",
+      "status": "failed",
+      "articlesProcessed": 4690,
+      "chunksCreated": 10848,
+      "errors": 88,
+      "startedAt": "2025-12-31T00:50:48.216Z",
+      "completedAt": "2025-12-31T09:32:40.498Z"
+    },
+    {
+      "topic": "psoriatic arthritis",
+      "status": "failed",
+      "articlesProcessed": 4727,
+      "chunksCreated": 10672,
+      "errors": 134,
+      "startedAt": "2025-12-31T00:50:48.216Z",
+      "completedAt": "2025-12-31T15:29:48.819Z"
+    },
+    {
+      "topic": "osteoporosis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "fracture prevention",
+      "status": "failed",
+      "articlesProcessed": 1179,
+      "chunksCreated": 2884,
+      "errors": 97,
+      "startedAt": "2025-12-31T00:50:48.216Z",
+      "completedAt": "2025-12-31T15:30:15.480Z"
+    },
+    {
+      "topic": "back pain",
+      "status": "failed",
+      "articlesProcessed": 4942,
+      "chunksCreated": 12733,
+      "errors": 88,
+      "startedAt": "2025-12-31T00:50:48.216Z",
+      "completedAt": "2025-12-31T17:50:29.170Z"
+    },
+    {
+      "topic": "low back pain",
+      "status": "failed",
+      "articlesProcessed": 4763,
+      "chunksCreated": 12410,
+      "errors": 65,
+      "startedAt": "2025-12-31T00:50:48.216Z",
+      "completedAt": "2025-12-31T01:27:19.293Z"
+    },
+    {
+      "topic": "breast cancer",
+      "status": "failed",
+      "articlesProcessed": 4651,
+      "chunksCreated": 9388,
+      "errors": 67,
+      "startedAt": "2025-12-31T17:50:31.192Z",
+      "completedAt": "2025-12-31T20:22:16.367Z"
+    },
+    {
+      "topic": "breast cancer treatment",
+      "status": "failed",
+      "articlesProcessed": 4596,
+      "chunksCreated": 9030,
+      "errors": 62,
+      "startedAt": "2025-12-31T17:50:31.193Z",
+      "completedAt": "2026-01-01T05:22:39.287Z"
+    },
+    {
+      "topic": "breast cancer screening",
+      "status": "failed",
+      "articlesProcessed": 100,
+      "chunksCreated": 241,
+      "errors": 45,
+      "startedAt": "2025-12-31T17:50:31.193Z",
+      "completedAt": "2025-12-31T17:55:33.981Z"
+    },
+    {
+      "topic": "colorectal cancer",
+      "status": "failed",
+      "articlesProcessed": 4597,
+      "chunksCreated": 9331,
+      "errors": 60,
+      "startedAt": "2025-12-31T17:50:31.193Z",
+      "completedAt": "2026-01-01T05:31:30.491Z"
+    },
+    {
+      "topic": "colorectal cancer treatment",
+      "status": "failed",
+      "articlesProcessed": 587,
+      "chunksCreated": 1107,
+      "errors": 1,
+      "startedAt": "2025-12-31T17:50:31.193Z",
+      "completedAt": "2025-12-31T19:23:44.847Z"
+    },
+    {
+      "topic": "colorectal cancer screening",
+      "status": "failed",
+      "articlesProcessed": 4433,
+      "chunksCreated": 10980,
+      "errors": 76,
+      "startedAt": "2025-12-31T17:50:31.193Z",
+      "completedAt": "2025-12-31T21:59:40.463Z"
+    },
+    {
+      "topic": "lung cancer",
+      "status": "failed",
+      "articlesProcessed": 4535,
+      "chunksCreated": 9533,
+      "errors": 57,
+      "startedAt": "2025-12-31T17:50:31.193Z",
+      "completedAt": "2026-01-01T02:34:43.442Z"
+    },
+    {
+      "topic": "lung cancer treatment",
+      "status": "failed",
+      "articlesProcessed": 1730,
+      "chunksCreated": 3121,
+      "errors": 21,
+      "startedAt": "2025-12-31T17:50:31.193Z",
+      "completedAt": "2025-12-31T21:35:48.344Z"
+    },
+    {
+      "topic": "lung cancer screening",
+      "status": "failed",
+      "articlesProcessed": 2733,
+      "chunksCreated": 6475,
+      "errors": 27,
+      "startedAt": "2026-01-01T23:35:07.844Z",
+      "completedAt": "2026-01-01T23:54:28.315Z"
+    },
+    {
+      "topic": "prostate cancer",
+      "status": "failed",
+      "articlesProcessed": 4672,
+      "chunksCreated": 10087,
+      "errors": 50,
+      "startedAt": "2026-01-01T23:35:07.844Z",
+      "completedAt": "2026-01-01T23:40:23.132Z"
+    },
+    {
+      "topic": "prostate cancer treatment",
+      "status": "completed",
+      "articlesProcessed": 1275,
+      "chunksCreated": 2774,
+      "errors": 0,
+      "startedAt": "2026-01-01T23:35:07.844Z",
+      "completedAt": "2026-01-02T00:03:07.531Z"
+    },
+    {
+      "topic": "prostate cancer screening",
+      "status": "completed",
+      "articlesProcessed": 909,
+      "chunksCreated": 2244,
+      "errors": 0,
+      "startedAt": "2026-01-02T00:05:21.335Z",
+      "completedAt": "2026-01-02T00:18:47.133Z"
+    },
+    {
+      "topic": "pancreatic cancer",
+      "status": "failed",
+      "articlesProcessed": 4414,
+      "chunksCreated": 8649,
+      "errors": 44,
+      "startedAt": "2026-01-02T00:05:21.335Z",
+      "completedAt": "2026-01-02T00:07:31.309Z"
+    },
+    {
+      "topic": "liver cancer",
+      "status": "failed",
+      "articlesProcessed": 3929,
+      "chunksCreated": 7506,
+      "errors": 29,
+      "startedAt": "2026-01-02T00:05:21.335Z",
+      "completedAt": "2026-01-02T00:21:35.768Z"
+    },
+    {
+      "topic": "gastric cancer",
+      "status": "failed",
+      "articlesProcessed": 4473,
+      "chunksCreated": 9720,
+      "errors": 49,
+      "startedAt": "2026-01-02T00:05:21.335Z",
+      "completedAt": "2026-01-02T00:07:25.276Z"
+    },
+    {
+      "topic": "ovarian cancer",
+      "status": "failed",
+      "articlesProcessed": 3988,
+      "chunksCreated": 7906,
+      "errors": 28,
+      "startedAt": "2026-01-02T00:05:21.335Z",
+      "completedAt": "2026-01-02T00:24:27.305Z"
+    },
+    {
+      "topic": "cervical cancer",
+      "status": "failed",
+      "articlesProcessed": 4842,
+      "chunksCreated": 10961,
+      "errors": 55,
+      "startedAt": "2026-01-02T00:24:30.313Z",
+      "completedAt": "2026-01-02T00:26:51.371Z"
+    },
+    {
+      "topic": "endometrial cancer",
+      "status": "failed",
+      "articlesProcessed": 4878,
+      "chunksCreated": 11012,
+      "errors": 44,
+      "startedAt": "2026-01-02T00:24:30.313Z",
+      "completedAt": "2026-01-02T00:44:26.692Z"
+    },
+    {
+      "topic": "leukemia",
+      "status": "failed",
+      "articlesProcessed": 4904,
+      "chunksCreated": 8184,
+      "errors": 41,
+      "startedAt": "2026-01-02T00:24:30.313Z",
+      "completedAt": "2026-01-02T00:26:39.142Z"
+    },
+    {
+      "topic": "lymphoma",
+      "status": "failed",
+      "articlesProcessed": 4860,
+      "chunksCreated": 8853,
+      "errors": 39,
+      "startedAt": "2026-01-02T00:24:30.313Z",
+      "completedAt": "2026-01-02T00:38:48.947Z"
+    },
+    {
+      "topic": "melanoma",
+      "status": "failed",
+      "articlesProcessed": 4865,
+      "chunksCreated": 8765,
+      "errors": 44,
+      "startedAt": "2026-01-02T00:24:30.313Z",
+      "completedAt": "2026-01-02T00:26:51.799Z"
+    },
+    {
+      "topic": "cancer immunotherapy",
+      "status": "failed",
+      "articlesProcessed": 4742,
+      "chunksCreated": 6241,
+      "errors": 30,
+      "startedAt": "2026-01-02T00:44:29.695Z",
+      "completedAt": "2026-01-02T01:07:24.164Z"
+    },
+    {
+      "topic": "chemotherapy",
+      "status": "failed",
+      "articlesProcessed": 3844,
+      "chunksCreated": 8085,
+      "errors": 288,
+      "startedAt": "2026-01-02T00:44:29.695Z",
+      "completedAt": "2026-01-03T15:49:54.860Z"
+    },
+    {
+      "topic": "targeted therapy",
+      "status": "failed",
+      "articlesProcessed": 4541,
+      "chunksCreated": 7852,
+      "errors": 65,
+      "startedAt": "2026-01-02T00:44:29.695Z",
+      "completedAt": "2026-01-02T05:08:03.436Z"
+    },
+    {
+      "topic": "chronic kidney disease",
+      "status": "failed",
+      "articlesProcessed": 4712,
+      "chunksCreated": 10915,
+      "errors": 282,
+      "startedAt": "2026-01-02T00:44:29.695Z",
+      "completedAt": "2026-01-03T15:53:39.399Z"
+    },
+    {
+      "topic": "CKD treatment",
+      "status": "completed",
+      "articlesProcessed": 173,
+      "chunksCreated": 352,
+      "errors": 0,
+      "startedAt": "2026-01-02T00:44:29.695Z",
+      "completedAt": "2026-01-02T00:47:32.504Z"
+    },
+    {
+      "topic": "end stage renal disease",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-01-03T15:53:42.409Z"
+    },
+    {
+      "topic": "dialysis",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-01-03T15:53:42.409Z"
+    },
+    {
+      "topic": "kidney transplantation",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-01-03T15:53:42.409Z"
+    },
+    {
+      "topic": "acute kidney injury",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-01-03T15:53:42.409Z"
+    },
+    {
+      "topic": "nephrotic syndrome",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-01-03T15:53:42.409Z"
+    },
+    {
+      "topic": "glomerulonephritis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hypertension kidney",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "Alzheimer disease",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "Alzheimer treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "dementia",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "dementia treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "Parkinson disease",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "Parkinson treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "epilepsy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "epilepsy treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "multiple sclerosis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "MS treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "stroke",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "stroke treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "transient ischemic attack",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "migraine",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "headache",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "peripheral neuropathy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "psoriasis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "psoriasis treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "atopic dermatitis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "eczema",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acne",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acne treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "melanoma",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "basal cell carcinoma",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "squamous cell carcinoma",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "benign prostatic hyperplasia",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "BPH treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "prostate cancer",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "kidney stones",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "urinary incontinence",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "erectile dysfunction",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "overactive bladder",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "vaccination",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "immunization",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "screening",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "preventive care",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "health promotion",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "cardiovascular prevention",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "cancer prevention",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "aspirin prevention",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "sepsis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "shock",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "trauma",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "cardiac arrest",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acute coronary syndrome",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "stroke acute",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "pulmonary embolism",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "pediatric asthma",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "pediatric diabetes",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "pediatric obesity",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "ADHD",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "autism",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "vaccination",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "febrile seizure",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "bronchiolitis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "menopause",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hormone replacement therapy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "osteoporosis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "breast cancer",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "cervical cancer",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "endometriosis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "polycystic ovary syndrome",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "PCOS",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "preeclampsia",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "frailty",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "falls prevention",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "polypharmacy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "delirium",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "dementia",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "geriatric care",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hypertension",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "diabetes",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hyperlipidemia",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "depression",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "anxiety",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "chronic pain",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "preventive care",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "screening",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "surgical outcomes",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "perioperative care",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "surgical complications",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "minimally invasive surgery",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "robotic surgery",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "sepsis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acute respiratory distress syndrome",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "ARDS",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "mechanical ventilation",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "shock",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "multiple organ failure",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "drug interactions",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "adverse drug reactions",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "pharmacogenomics",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "medication safety",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "polypharmacy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "drug efficacy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "systematic review",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "meta-analysis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "randomized controlled trial",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "clinical guidelines",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "evidence-based practice",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "clinical decision making",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    }
+  ],
+  "stats": {
+    "totalTopics": 265,
+    "completedTopics": 162,
+    "totalArticles": 815502,
+    "totalChunks": 1794882,
+    "totalErrors": 9948
+  }
+}

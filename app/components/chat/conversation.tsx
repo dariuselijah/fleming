@@ -5,7 +5,7 @@ import {
 import { Loader } from "@/components/prompt-kit/loader"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
 import { Message as MessageType } from "@ai-sdk/react"
-import { useRef, useMemo, useCallback } from "react"
+import { useRef, useMemo, useCallback, useEffect } from "react"
 import { Message } from "./message"
 
 type ConversationProps = {
@@ -14,6 +14,7 @@ type ConversationProps = {
   onDelete: (id: string) => void
   onEdit: (id: string, newText: string) => void
   onReload: () => void
+  evidenceCitations?: any[]
 }
 
 export function Conversation({
@@ -22,10 +23,13 @@ export function Conversation({
   onDelete,
   onEdit,
   onReload,
+  evidenceCitations = [],
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
 
   // Memoize message rendering for streaming performance
+  // React.memo on Message components will prevent re-renders of unchanged messages
+  // Only the last message will re-render during streaming
   const renderedMessages = useMemo(() => {
     // Handle empty messages
     if (!messages || messages.length === 0) {
@@ -43,6 +47,28 @@ export function Conversation({
       const hasScrollAnchor =
         isLast && uniqueMessages.length > initialMessageCount.current
 
+      // CRITICAL: Each message should get its own evidence citations
+      // 1. For the last message during streaming, use citations from props (from onResponse header)
+      // 2. For loaded messages, use citations from the message's evidenceCitations field (from DB)
+      // 3. Also check message.parts for metadata containing evidence citations
+      let messageEvidenceCitations: any[] = []
+      
+      // Priority 1: For last message during streaming/ready, use props citations
+      if (isLast && evidenceCitations.length > 0) {
+        messageEvidenceCitations = evidenceCitations
+      } 
+      // Priority 2: Check if message has evidenceCitations field (added by getMessagesFromDb)
+      else if ((message as any).evidenceCitations && Array.isArray((message as any).evidenceCitations)) {
+        messageEvidenceCitations = (message as any).evidenceCitations
+      }
+      // Priority 3: Extract from message.parts metadata (fallback)
+      else if (message.parts && Array.isArray(message.parts)) {
+        const metadataPart = message.parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
+        if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
+          messageEvidenceCitations = (metadataPart as any).metadata.evidenceCitations
+        }
+      }
+
       return (
         <Message
           key={message.id}
@@ -56,12 +82,13 @@ export function Conversation({
           hasScrollAnchor={hasScrollAnchor}
           parts={message.parts}
           status={status}
+          evidenceCitations={messageEvidenceCitations}
         >
           {message.content}
         </Message>
       )
     })
-  }, [messages, status, onDelete, onEdit, onReload])
+  }, [messages, status, onDelete, onEdit, onReload, evidenceCitations])
 
   // Memoize handlers to prevent unnecessary re-renders
   const memoizedOnDelete = useCallback(onDelete, [onDelete])

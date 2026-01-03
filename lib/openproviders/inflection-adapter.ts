@@ -22,7 +22,6 @@ export function createInflectionModel(
   const modelMap: Record<InflectionModel, string> = {
     "pi-3.1": "Pi-3.1",
     "pi-3.1-latest": "Pi-3.1",
-    "fleming-3.5": "Pi-3.1", // Fleming 3.5 uses Pi model
   }
 
   const apiConfigName = modelMap[modelId] || "Pi-3.1"

@@ -10,6 +10,7 @@ import type { Message } from "@ai-sdk/react"
 import { useChat } from "@ai-sdk/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
+import { getModelInfo } from "@/lib/models"
 
 type UseChatCoreProps = {
   initialMessages: Message[]
@@ -65,10 +66,182 @@ export function useChatCore({
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
+  const [enableEvidence, setEnableEvidence] = useState(true) // Always enabled by default
+  
+  // Evidence citations from server - indexed by message ID or last response
+  // Use ref to persist across hook reinitializations (e.g., URL changes)
+  // CRITICAL: Track citations per message to ensure follow-up messages also save their citations
+  const evidenceCitationsRef = useRef<any[]>([])
+  const evidenceCitationsByMessageRef = useRef<Map<string, any[]>>(new Map()) // Track citations per message ID
+  const [evidenceCitations, setEvidenceCitationsState] = useState<any[]>([])
+  
+  // Wrapper to update both state, ref, and sessionStorage
+  const setEvidenceCitations = useCallback((citations: any[], messageId?: string) => {
+    console.log('📚 [EVIDENCE] Setting evidence citations:', citations.length, messageId ? `for message ${messageId}` : '')
+    evidenceCitationsRef.current = citations
+    setEvidenceCitationsState(citations)
+    
+    // CRITICAL: Store citations per message ID for follow-up messages
+    if (messageId && citations.length > 0) {
+      evidenceCitationsByMessageRef.current.set(messageId, citations)
+      console.log('📚 [EVIDENCE] Stored citations for message:', messageId, citations.length)
+    }
+    
+    // Store in sessionStorage for persistence across restores
+    if (typeof window !== 'undefined' && citations.length > 0) {
+      const key = chatId || 'pending'
+      try {
+        sessionStorage.setItem(`evidenceCitations:${key}`, JSON.stringify(citations))
+        sessionStorage.setItem('evidenceCitations:latest', JSON.stringify({ chatId: key, citations, timestamp: Date.now() }))
+        console.log('📚 [EVIDENCE] Stored citations to sessionStorage for key:', key)
+      } catch (e) {
+        console.error('📚 [EVIDENCE] Failed to store citations to sessionStorage:', e)
+      }
+    }
+  }, [chatId])
+  
+  // Track which chatId we've already restored citations for to prevent duplicate restores
+  const restoredChatIdRef = useRef<string | null>(null)
+  const isRestoringRef = useRef(false) // Prevent concurrent restores
+  
+  // Reset restore tracking when navigating away (chatId becomes null)
+  useEffect(() => {
+    if (!chatId && restoredChatIdRef.current !== null) {
+      restoredChatIdRef.current = null
+      isRestoringRef.current = false
+    }
+  }, [chatId])
+  
+  // Extract evidence citations from loaded messages (from database)
+  useEffect(() => {
+    if (!initialMessages || initialMessages.length === 0) return
+    
+    // Find the last assistant message with evidence citations
+    for (let i = initialMessages.length - 1; i >= 0; i--) {
+      const msg = initialMessages[i] as any
+      if (msg.role === 'assistant' && msg.evidenceCitations && Array.isArray(msg.evidenceCitations) && msg.evidenceCitations.length > 0) {
+        console.log(`📚 [RESTORE] Found ${msg.evidenceCitations.length} evidence citations in loaded message`)
+        evidenceCitationsRef.current = msg.evidenceCitations
+        setEvidenceCitationsState(msg.evidenceCitations)
+        
+        // Also store in sessionStorage for persistence
+        if (typeof window !== 'undefined' && chatId) {
+          try {
+            sessionStorage.setItem(`evidenceCitations:${chatId}`, JSON.stringify(msg.evidenceCitations))
+            sessionStorage.setItem('evidenceCitations:latest', JSON.stringify({ chatId, citations: msg.evidenceCitations, timestamp: Date.now() }))
+            restoredChatIdRef.current = chatId
+          } catch (e) {
+            console.error('📚 [RESTORE] Failed to store citations to sessionStorage:', e)
+          }
+        }
+        break // Only restore from the most recent assistant message
+      }
+    }
+  }, [initialMessages, chatId])
+  
+  // Restore evidence citations from sessionStorage when chatId changes (only once per chatId)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (isRestoringRef.current) return // Prevent concurrent restores
+    
+    // Skip if we've already restored for this chatId
+    if (chatId && restoredChatIdRef.current === chatId) {
+      return
+    }
+    
+    isRestoringRef.current = true
+    
+    try {
+      // Skip if we already have citations in ref (they were set from onResponse)
+      if (evidenceCitationsRef.current.length > 0 && chatId && restoredChatIdRef.current === null) {
+        // Citations already exist from onResponse, just mark as restored
+        restoredChatIdRef.current = chatId
+        return
+      }
+      
+      // First try to restore from current chatId
+      if (chatId) {
+        const key = `evidenceCitations:${chatId}`
+        const stored = sessionStorage.getItem(key)
+        if (stored) {
+          try {
+            const citations = JSON.parse(stored)
+            if (Array.isArray(citations) && citations.length > 0) {
+              // Only update if different from current ref
+              const currentIds = evidenceCitationsRef.current.map(c => c.index).sort().join(',')
+              const newIds = citations.map(c => c.index).sort().join(',')
+              if (currentIds !== newIds) {
+                console.log('📚 [EVIDENCE] Restored citations from sessionStorage for chatId:', chatId, citations.length)
+                evidenceCitationsRef.current = citations
+                setEvidenceCitationsState(citations)
+              }
+              restoredChatIdRef.current = chatId
+              return
+            }
+          } catch (e) {
+            console.error('📚 [EVIDENCE] Failed to parse stored citations:', e)
+          }
+        }
+      }
+      
+      // Fallback to latest (only if we don't have a chatId or haven't restored yet)
+      if (!chatId || restoredChatIdRef.current === null) {
+        const latest = sessionStorage.getItem('evidenceCitations:latest')
+        if (latest) {
+          try {
+            const latestData = JSON.parse(latest)
+            if (latestData.citations && Array.isArray(latestData.citations) && latestData.citations.length > 0) {
+              // Only use if recent (within last 30 seconds) or matches current chatId
+              const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 30000)
+              const matchesChatId = !chatId || latestData.chatId === chatId
+              
+              if (isRecent || matchesChatId) {
+                // Only update if different from current ref
+                const currentIds = evidenceCitationsRef.current.map(c => c.index).sort().join(',')
+                const newIds = latestData.citations.map(c => c.index).sort().join(',')
+                if (currentIds !== newIds) {
+                  console.log('📚 [EVIDENCE] Restored citations from latest sessionStorage:', latestData.citations.length)
+                  evidenceCitationsRef.current = latestData.citations
+                  setEvidenceCitationsState(latestData.citations)
+                }
+                if (chatId) {
+                  restoredChatIdRef.current = chatId
+                }
+                return
+              }
+            }
+          } catch (e) {
+            console.error('📚 [EVIDENCE] Failed to parse latest citations:', e)
+          }
+        }
+      }
+      
+      // Mark as restored even if we didn't find anything (prevents infinite loops)
+      if (chatId) {
+        restoredChatIdRef.current = chatId
+      }
+    } finally {
+      // Always reset the restoring flag
+      isRestoringRef.current = false
+    }
+  }, [chatId]) // Only depend on chatId, NOT evidenceCitations
 
   // Get user preferences at the top level
   const { useUserPreferences } = require("@/lib/user-preference-store/provider")
   const userPreferences = useUserPreferences()
+
+  // Auto-enable web search for healthcare professionals using Fleming 4
+  useEffect(() => {
+    const isHealthcareMode = userPreferences.preferences.userRole === "doctor" || 
+                            userPreferences.preferences.userRole === "medical_student"
+    const isFleming4 = selectedModel === "fleming-4"
+    const modelConfig = getModelInfo(selectedModel)
+    const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
+    
+    if (isHealthcareMode && isFleming4 && hasWebSearchSupport && !enableSearch) {
+      setEnableSearch(true)
+    }
+  }, [selectedModel, userPreferences.preferences.userRole, enableSearch, setEnableSearch])
 
   // Refs and derived state
   const hasSentFirstMessageRef = useRef(false)
@@ -268,14 +441,73 @@ export function useChatCore({
     },
     // Optimize for streaming performance
     onFinish: async (message) => {
+      // CRITICAL: Associate citations with this message ID for follow-up messages
+      // The citations were set in onResponse, now we associate them with the message ID
+      if (message.id && evidenceCitationsRef.current.length > 0) {
+        evidenceCitationsByMessageRef.current.set(message.id, evidenceCitationsRef.current)
+        console.log('📚 [onFinish] Associated', evidenceCitationsRef.current.length, 'citations with message ID:', message.id)
+      }
+      
       // CRITICAL: Save all messages when streaming completes
       // Use the real chatId (not temp) if available
       const realChatId = chatId && !chatId.startsWith('temp-chat-') ? chatId : currentChatIdForSavingRef.current
       if (realChatId && !realChatId.startsWith('temp-chat-') && messagesRef.current.length > 0) {
         try {
           const { setMessages: saveMessagesToDb } = await import("@/lib/chat-store/messages/api")
-          await saveMessagesToDb(realChatId, messagesRef.current)
-          console.log('[🐛 onFinish] Saved', messagesRef.current.length, 'messages to chatId:', realChatId)
+          
+          // CRITICAL: Get evidence citations for THIS specific message (follow-up messages)
+          // Try to get citations by message ID first, then fall back to ref
+          let citationsToSave: any[] | undefined = undefined
+          
+          // Priority 1: Get citations by message ID (for follow-up messages)
+          if (message.id) {
+            const messageCitations = evidenceCitationsByMessageRef.current.get(message.id)
+            if (messageCitations && messageCitations.length > 0) {
+              citationsToSave = messageCitations
+              console.log('📚 [onFinish] Found citations for message ID:', message.id, citationsToSave.length)
+            }
+          }
+          
+          // Priority 2: Get from ref (current citations)
+          if (!citationsToSave && evidenceCitationsRef.current.length > 0) {
+            citationsToSave = evidenceCitationsRef.current
+            console.log('📚 [onFinish] Using citations from ref:', citationsToSave.length)
+          }
+          
+          // Fallback 1: Check sessionStorage if ref is empty
+          if (!citationsToSave && typeof window !== 'undefined') {
+            try {
+              const latest = sessionStorage.getItem('evidenceCitations:latest')
+              if (latest) {
+                const latestData = JSON.parse(latest)
+                if (latestData.citations && Array.isArray(latestData.citations) && latestData.citations.length > 0) {
+                  const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 60000) // 1 minute
+                  const matchesChatId = !realChatId || latestData.chatId === realChatId || !latestData.chatId
+                  if (isRecent && matchesChatId) {
+                    citationsToSave = latestData.citations
+                    console.log('📚 [onFinish] Restored citations from sessionStorage for save:', citationsToSave.length)
+                  }
+                }
+              }
+            } catch (e) {
+              console.error('📚 [onFinish] Failed to parse sessionStorage citations:', e)
+            }
+          }
+          
+          // Fallback 2: Extract from the last assistant message's parts if available
+          if (!citationsToSave && messagesRef.current.length > 0) {
+            const lastAssistantMessage = [...messagesRef.current].reverse().find(m => m.role === 'assistant')
+            if (lastAssistantMessage?.parts && Array.isArray(lastAssistantMessage.parts)) {
+              const metadataPart = lastAssistantMessage.parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
+              if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
+                citationsToSave = (metadataPart as any).metadata.evidenceCitations
+                console.log('📚 [onFinish] Extracted citations from message parts for save:', citationsToSave.length)
+              }
+            }
+          }
+          
+          await saveMessagesToDb(realChatId, messagesRef.current, citationsToSave)
+          console.log('[🐛 onFinish] Saved', messagesRef.current.length, 'messages to chatId:', realChatId, citationsToSave ? `with ${citationsToSave.length} citations` : '')
         } catch (error) {
           console.error('[🐛 onFinish] Failed to save messages:', error)
         }
@@ -298,11 +530,50 @@ export function useChatCore({
       
       setIsSubmitting(false)
     },
-    // Ensure immediate status updates
-    onResponse: () => {
+    // Ensure immediate status updates and extract evidence citations from headers
+    onResponse: (response) => {
       // This ensures status changes to "streaming" immediately
+      // Also extract evidence citations from response headers
+      console.log('📚 [EVIDENCE] onResponse called, checking headers...')
+      console.log('📚 [EVIDENCE] Available headers:', [...response.headers.keys()])
+      
+      try {
+        const evidenceHeader = response.headers.get('X-Evidence-Citations')
+        console.log('📚 [EVIDENCE] X-Evidence-Citations header:', evidenceHeader ? `${evidenceHeader.substring(0, 50)}...` : 'NOT FOUND')
+        
+        if (evidenceHeader) {
+          // Decode base64 and parse JSON
+          const citationsJson = atob(evidenceHeader)
+          const citations = JSON.parse(citationsJson)
+          console.log(`📚 [EVIDENCE] Successfully parsed ${citations.length} citations from server`)
+          
+          // CRITICAL: Store citations - they will be associated with message ID in onFinish
+          // For follow-up messages, we need to track citations per message
+          // The message ID will be available in onFinish callback
+          setEvidenceCitations(citations)
+        } else {
+          console.log('📚 [EVIDENCE] No evidence citations header found in response')
+          // CRITICAL: Clear citations for this response if no header (follow-up message without citations)
+          // This ensures we don't save old citations with new messages
+          setEvidenceCitations([])
+        }
+      } catch (e) {
+        console.error('📚 [EVIDENCE] Failed to parse evidence citations from header:', e)
+      }
     },
   })
+  
+  // CRITICAL: Clear citations when a new message starts (status changes to "submitted")
+  // This ensures follow-up messages don't inherit citations from previous messages
+  useEffect(() => {
+    if (status === 'submitted') {
+      // Clear citations when a new message is submitted
+      // They will be set again in onResponse if the new message has citations
+      console.log('📚 [EVIDENCE] Clearing citations for new message submission')
+      evidenceCitationsRef.current = []
+      setEvidenceCitationsState([])
+    }
+  }, [status])
   
   // CRITICAL: Save messages incrementally during streaming
   // This ensures messages are saved even if navigation happens before onFinish
@@ -327,12 +598,64 @@ export function useChatCore({
         return
       }
       
-      // Save new messages incrementally
+          // Save new messages incrementally
       Promise.resolve().then(async () => {
         try {
           const { saveMessageIncremental } = await import("@/lib/chat-store/messages/api")
+          
           for (const message of assistantMessagesToSave) {
-            await saveMessageIncremental(realChatId, message)
+            // CRITICAL: Get evidence citations for THIS specific message (follow-up messages)
+            // Try to get citations by message ID first, then fall back to ref
+            let citationsToSave: any[] | undefined = undefined
+            
+            // Priority 1: Get citations by message ID (for follow-up messages)
+            if (message.id) {
+              const messageCitations = evidenceCitationsByMessageRef.current.get(message.id)
+              if (messageCitations && messageCitations.length > 0) {
+                citationsToSave = messageCitations
+                console.log('📚 [STREAMING] Found citations for message ID:', message.id, citationsToSave.length)
+              }
+            }
+            
+            // Priority 2: Get from ref (current citations)
+            if (!citationsToSave && evidenceCitationsRef.current.length > 0) {
+              citationsToSave = evidenceCitationsRef.current
+              console.log('📚 [STREAMING] Using citations from ref:', citationsToSave.length)
+            }
+            
+            // Fallback 1: Check sessionStorage if ref is empty
+            if (!citationsToSave && typeof window !== 'undefined') {
+              try {
+                const latest = sessionStorage.getItem('evidenceCitations:latest')
+                if (latest) {
+                  const latestData = JSON.parse(latest)
+                  if (latestData.citations && Array.isArray(latestData.citations) && latestData.citations.length > 0) {
+                    const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 60000) // 1 minute
+                    const matchesChatId = !realChatId || latestData.chatId === realChatId || !latestData.chatId
+                    if (isRecent && matchesChatId) {
+                      citationsToSave = latestData.citations
+                      console.log('📚 [STREAMING] Restored citations from sessionStorage for save:', citationsToSave.length)
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('📚 [STREAMING] Failed to parse sessionStorage citations:', e)
+              }
+            }
+            
+            // Fallback 2: Extract from the message being saved if available
+            if (!citationsToSave && message?.parts && Array.isArray(message.parts)) {
+              const metadataPart = message.parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
+              if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
+                citationsToSave = (metadataPart as any).metadata.evidenceCitations
+                console.log('📚 [STREAMING] Extracted citations from message parts for save:', citationsToSave.length)
+              }
+            }
+            
+            await saveMessageIncremental(realChatId, message, citationsToSave)
+            if (citationsToSave && citationsToSave.length > 0) {
+              console.log('[🐛 STREAMING] Saved message', message.id, 'with', citationsToSave.length, 'citations')
+            }
           }
           lastSavedMessageCountRef.current = messages.length
           console.log('[🐛 STREAMING] Saved', assistantMessagesToSave.length, 'new assistant messages incrementally to chatId:', realChatId)
@@ -1119,6 +1442,7 @@ export function useChatCore({
           isAuthenticated: !!user?.id,
           systemPrompt,
           enableSearch,
+          enableEvidence,
           userRole: userPreferences.preferences.userRole,
           medicalSpecialty: userPreferences.preferences.medicalSpecialty,
           clinicalDecisionSupport:
@@ -1234,6 +1558,7 @@ export function useChatCore({
     selectedModel,
     systemPrompt,
     enableSearch,
+    enableEvidence,
     bumpChat,
     clearDraft,
     setHasDialogAuth,
@@ -1396,7 +1721,12 @@ export function useChatCore({
     isSubmitting,
     setIsSubmitting,
     enableSearch,
+    enableEvidence,
+    setEnableEvidence,
     setEnableSearch,
+    
+    // Evidence citations from medical evidence database
+    evidenceCitations,
 
     // Actions
     submit,

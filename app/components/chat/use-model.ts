@@ -31,9 +31,9 @@ export function useModel({
     const firstFavoriteModel = user?.favorite_models?.[0]
     let effectiveModel = currentChat?.model || firstFavoriteModel || MODEL_DEFAULT
     
-    // Fix for old grok-4 model name - migrate to fleming-3.5 (new default)
-    if (effectiveModel === 'grok-4' || effectiveModel === 'grok-4-fast-reasoning') {
-      effectiveModel = 'fleming-3.5'
+    // Migrate old model names to fleming-4
+    if (effectiveModel === 'grok-4' || effectiveModel === 'grok-4-fast-reasoning' || effectiveModel === 'fleming-3.5') {
+      effectiveModel = 'fleming-4'
     }
     
     return effectiveModel

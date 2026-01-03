@@ -10,7 +10,8 @@ export async function saveFinalAssistantMessage(
   chatId: string,
   messages: Message[],
   message_group_id?: string,
-  model?: string
+  model?: string,
+  evidenceCitations?: any[]
 ) {
   const parts: ContentPart[] = []
   const toolMap = new Map<string, ContentPart>()
@@ -72,6 +73,19 @@ export async function saveFinalAssistantMessage(
 
   // Merge tool parts at the end
   parts.push(...toolMap.values())
+  
+  // Add evidence citations as metadata part if available
+  // Store in parts as a custom metadata object
+  if (evidenceCitations && evidenceCitations.length > 0) {
+    const metadataPart: any = {
+      type: "metadata",
+      metadata: {
+        evidenceCitations: evidenceCitations,
+      },
+    }
+    parts.push(metadataPart)
+    console.log(`📚 [SAVE] Storing ${evidenceCitations.length} evidence citations with message`)
+  }
 
   const finalPlainText = textParts.join("\n\n")
 

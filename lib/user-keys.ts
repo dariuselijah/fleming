@@ -47,7 +47,6 @@ export async function getEffectiveApiKey(
     anthropic: env.ANTHROPIC_API_KEY,
     xai: env.XAI_API_KEY,
     openrouter: env.OPENROUTER_API_KEY,
-    inflection: env.INFLECTION_AI_API_KEY,
   }
 
   return envKeyMap[provider] || null

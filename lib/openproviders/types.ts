@@ -126,11 +126,6 @@ export type OpenRouterModel =
   | "openrouter:x-ai/grok-3-mini-beta"
   | "openrouter:google/gemini-2.5-flash-preview-05-20"
 
-export type InflectionModel =
-  | "pi-3.1"
-  | "pi-3.1-latest"
-  | "fleming-3.5"
-
 // OLLAMA COMPLETELY REMOVED for instant streaming
 
 export type Provider =
@@ -141,7 +136,6 @@ export type Provider =
   | "anthropic"
   | "xai"
   | "openrouter"
-  | "inflection"
 
 export type SupportedModel =
   | OpenAIModel
@@ -151,4 +145,3 @@ export type SupportedModel =
   | AnthropicModel
   | XaiModel
   | OpenRouterModel
-  | InflectionModel

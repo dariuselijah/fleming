@@ -121,11 +121,6 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "grok-vision-beta": "xai",
   "grok-beta": "xai",
   "grok-4-fast-reasoning": "xai",
-
-  // Inflection AI
-  "pi-3.1": "inflection",
-  "pi-3.1-latest": "inflection",
-  "fleming-3.5": "inflection",
 }
 
 // OLLAMA COMPLETELY REMOVED for instant streaming

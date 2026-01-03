@@ -113,6 +113,9 @@ export function Chat() {
     isSubmitting,
     enableSearch,
     setEnableSearch,
+    enableEvidence,
+    setEnableEvidence,
+    evidenceCitations,
     submit,
     handleSuggestion,
     handleReload,
@@ -147,8 +150,9 @@ export function Chat() {
       onDelete: handleDelete,
       onEdit: handleEdit,
       onReload: handleReload,
+      evidenceCitations,
     }),
-    [messages, status, handleDelete, handleEdit, handleReload]
+    [messages, status, handleDelete, handleEdit, handleReload, evidenceCitations]
   )
 
   // Memoize the chat input props
@@ -174,6 +178,8 @@ export function Chat() {
         status,
         setEnableSearch,
         enableSearch,
+        setEnableEvidence,
+        enableEvidence,
       }
     },
     [
@@ -195,6 +201,8 @@ export function Chat() {
       status,
       setEnableSearch,
       enableSearch,
+      setEnableEvidence,
+      enableEvidence,
     ]
   )
 

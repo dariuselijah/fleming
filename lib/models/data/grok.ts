@@ -19,6 +19,7 @@ const grokModels: ModelConfig[] = [
     tools: true,
     audio: false,
     reasoning: true,
+    webSearch: true, // Supports REAL web search via xAI API (not simulated)
     openSource: false,
     speed: "Medium",
     intelligence: "High",
@@ -28,7 +29,15 @@ const grokModels: ModelConfig[] = [
     releasedAt: "2024-12-01",
     icon: "xai",
     accessible: true,
-    apiSdk: (apiKey?: string) => openproviders("grok-4-fast-reasoning", undefined, apiKey),
+    apiSdk: (apiKey?: string, opts?: { enableSearch?: boolean }) => {
+      if (opts?.enableSearch) {
+        // REAL web search - passes web_search: true to xAI API
+        // This enables actual web search via xAI's infrastructure, not simulated
+        console.log("[Fleming 4] ✅ Enabling REAL web search via xAI API (web_search: true)")
+        return openproviders("grok-4-fast-reasoning", { web_search: true }, apiKey)
+      }
+      return openproviders("grok-4-fast-reasoning", undefined, apiKey)
+    },
   },
   {
     id: "grok-3",
