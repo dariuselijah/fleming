@@ -39,8 +39,12 @@ export class DocumentIngestionPipeline {
     // 1. Extract text with page boundaries preserved
     const pdfData = await this.extractPDFWithPages(file)
 
+    if (!supabase) {
+      throw new Error("Supabase client not available")
+    }
+
     // 2. Store document in database
-    const { data: document, error: docError } = await supabase
+    const { data: document, error: docError } = await (supabase as any)
       .from('citation_documents')
       .insert({
         title: metadata.title,
@@ -67,54 +71,57 @@ export class DocumentIngestionPipeline {
     }
 
     try {
+      const docInsert = document as any
       // 3. Chunk with page preservation
-      const chunks = await this.chunkWithPageTracking(pdfData, document.id)
+      const chunks = await this.chunkWithPageTracking(pdfData, docInsert.id)
 
       // 4. Generate embeddings
       const chunksWithEmbeddings = await this.generateEmbeddingsForChunks(
         chunks,
         apiKey
-      )
+      ) as any
 
       // 5. Store chunks in database
-      await this.storeChunks(chunksWithEmbeddings, document.id)
+      await this.storeChunks(chunksWithEmbeddings, docInsert.id)
 
       // 6. Update document status
-      await supabase
+      await (supabase as any)
         .from('citation_documents')
         .update({
           processing_status: 'completed',
           chunk_count: chunksWithEmbeddings.length,
         })
-        .eq('id', document.id)
+        .eq('id', docInsert.id)
 
+      const docReturn = document as any
       return {
-        id: document.id,
-        title: document.title,
-        document_type: document.document_type,
-        author: document.author,
-        publisher: document.publisher,
-        publication_date: document.publication_date,
-        isbn: document.isbn,
-        doi: document.doi,
-        journal_name: document.journal_name,
-        volume: document.volume,
-        issue: document.issue,
-        url: document.url,
-        metadata: document.metadata || {},
-        file_path: document.file_path,
-        file_url: document.file_url,
+        id: docReturn.id,
+        title: docReturn.title,
+        document_type: docReturn.document_type,
+        author: docReturn.author,
+        publisher: docReturn.publisher,
+        publication_date: docReturn.publication_date,
+        isbn: docReturn.isbn,
+        doi: docReturn.doi,
+        journal_name: docReturn.journal_name,
+        volume: docReturn.volume,
+        issue: docReturn.issue,
+        url: docReturn.url,
+        metadata: docReturn.metadata || {},
+        file_path: docReturn.file_path,
+        file_url: docReturn.file_url,
         processing_status: 'completed',
         chunk_count: chunksWithEmbeddings.length,
-        created_at: document.created_at,
-        updated_at: document.updated_at,
+        created_at: docReturn.created_at,
+        updated_at: docReturn.updated_at,
       }
     } catch (error) {
       // Update document status to failed
-      await supabase
+      const docFailed = document as any
+      await (supabase as any)
         .from('citation_documents')
         .update({ processing_status: 'failed' })
-        .eq('id', document.id)
+        .eq('id', docFailed.id)
 
       throw error
     }
@@ -338,12 +345,16 @@ export class DocumentIngestionPipeline {
   ): Promise<void> {
     const supabase = await this.getSupabase()
 
+    if (!supabase) {
+      throw new Error("Supabase client not available")
+    }
+
     // Insert chunks in batches
     const batchSize = 100
     for (let i = 0; i < chunks.length; i += batchSize) {
       const batch = chunks.slice(i, i + batchSize)
 
-      const insertData = batch.map((chunk) => ({
+      const insertData = batch.map((chunk: any) => ({
         document_id: chunk.document_id,
         chunk_text: chunk.chunk_text,
         page_number: chunk.page_number,
@@ -354,9 +365,9 @@ export class DocumentIngestionPipeline {
         chunk_index: chunk.chunk_index,
         embedding: `[${chunk.embedding.join(',')}]`, // Convert to PostgreSQL vector format
         metadata: chunk.metadata,
-      }))
+      })) as any
 
-      const { error } = await supabase.from('citation_document_chunks').insert(insertData)
+      const { error } = await (supabase as any).from('citation_document_chunks').insert(insertData)
 
       if (error) {
         console.error(`Error inserting chunk batch ${i / batchSize + 1}:`, error)

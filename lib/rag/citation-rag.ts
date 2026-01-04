@@ -43,6 +43,10 @@ export class CitationRAGSystem {
     // Stage 1: Generate query embedding
     const queryEmbedding = await generateEmbedding(queryText, apiKey)
 
+    if (!supabase) {
+      throw new Error("Supabase client not available")
+    }
+
     // Stage 2: Vector similarity search using pgvector
     // We need to use a database function for vector similarity search
     // Create a SQL query that finds similar chunks
@@ -74,7 +78,7 @@ export class CitationRAGSystem {
 
     // Use fallback approach: fetch chunks and calculate similarity
     // In production, you'd create a database function for vector search
-    const { data: allChunks, error: fetchError } = await supabase
+    const { data: allChunks, error: fetchError } = await (supabase as any)
       .from('citation_document_chunks')
       .select(`
         *,
@@ -201,7 +205,7 @@ export class CitationRAGSystem {
       relevance_score: citation.relevanceScore || null,
     }))
 
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('response_citations')
       .insert(citationInserts)
       .select()
@@ -228,7 +232,11 @@ export class CitationRAGSystem {
   async getCitationsForMessage(messageId: number): Promise<ResponseCitation[]> {
     const supabase = await this.getSupabase()
 
-    const { data, error } = await supabase
+    if (!supabase) {
+      throw new Error("Supabase client not available")
+    }
+
+    const { data, error } = await (supabase as any)
       .from('response_citations')
       .select(`
         *,

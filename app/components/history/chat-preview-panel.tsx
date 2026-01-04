@@ -100,7 +100,7 @@ function MessageBubble({ content, role, evidenceCitations }: MessageBubbleProps)
             {content}
           </MessageContent>
         )}
-        {hasValidCitations && (
+        {hasValidCitations && evidenceCitations && (
           <EvidenceReferencesSection citations={evidenceCitations} />
         )}
       </div>

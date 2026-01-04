@@ -42,14 +42,14 @@ export async function getMessagesFromDb(
 
       // Process messages and load fresh signed URLs for attachments
       const processedMessages = await Promise.all(
-        data.map(async (message) => {
+        data.map(async (message: any) => {
           let processedAttachments = message.experimental_attachments || []
           
           // If there are attachments, load fresh signed URLs
           if (processedAttachments.length > 0) {
             try {
               processedAttachments = await loadAttachmentsWithSignedUrls(
-                processedAttachments.map(a => ({ ...a, name: a.name || "", contentType: a.contentType || "" }))
+                processedAttachments.map((a: any) => ({ ...a, name: a.name || "", contentType: a.contentType || "" }))
               )
             } catch (error) {
               console.error("Error loading attachments with signed URLs:", error)
@@ -62,7 +62,7 @@ export async function getMessagesFromDb(
           let decryptedContent: string = ""
           try {
             // Ensure we have a valid string to work with
-            const rawContent = message.content
+            const rawContent = (message as any).content
             if (typeof rawContent === 'string') {
               decryptedContent = rawContent
             } else if (rawContent === null || rawContent === undefined) {
@@ -104,25 +104,29 @@ export async function getMessagesFromDb(
             : (decryptedContent ? String(decryptedContent) : '')
 
           // Extract evidence citations from parts if available
-          const parts = (message?.parts as MessageAISDK["parts"]) || undefined
+          const parts = ((message as any)?.parts as MessageAISDK["parts"]) || undefined
           let evidenceCitations: any[] | undefined = undefined
           
           if (parts && Array.isArray(parts)) {
-            const metadataPart = parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
-            if (metadataPart && metadataPart.metadata?.evidenceCitations) {
-              evidenceCitations = metadataPart.metadata.evidenceCitations
-              console.log(`📚 [LOAD] Found ${evidenceCitations.length} evidence citations in message ${message.id}`)
+            const metadataPart = parts.find((p: any) => p.type === "metadata" && (p as any).metadata?.evidenceCitations)
+            if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
+              evidenceCitations = (metadataPart as any).metadata.evidenceCitations
+              const messageId = (message as any).id
+              if (evidenceCitations) {
+                console.log(`📚 [LOAD] Found ${evidenceCitations.length} evidence citations in message ${messageId}`)
+              }
             }
           }
 
+          const messageAny = message as any
           return {
-            ...message,
-            id: String(message.id),
+            ...messageAny,
+            id: String(messageAny.id),
             content: normalizedContent,
-            createdAt: new Date(message.created_at || ""),
+            createdAt: new Date(messageAny.created_at || ""),
             parts: parts,
-            message_group_id: message.message_group_id,
-            model: message.model,
+            message_group_id: messageAny.message_group_id,
+            model: messageAny.model,
             experimental_attachments: processedAttachments,
             // Store evidence citations in a custom field for easy access
             evidenceCitations: evidenceCitations,
@@ -179,8 +183,8 @@ async function insertMessageToDb(chatId: string, message: MessageAISDK, retries 
         created_at: createdAt,
         message_group_id: (message as any).message_group_id || null,
         model: (message as any).model || null,
-        parts: message.parts || null,
-      })
+        parts: (message.parts as any) || null,
+      } as any)
 
       if (error) {
         throw error
@@ -232,13 +236,13 @@ async function insertMessagesToDb(chatId: string, messages: MessageAISDK[], retr
       created_at: createdAt,
       message_group_id: (message as any).message_group_id || null,
       model: (message as any).model || null,
-      parts: message.parts || null,
-    }
+      parts: (message.parts as any) || null,
+    } as any
   })
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const { error } = await supabase.from("messages").insert(payload)
+      const { error } = await supabase.from("messages").insert(payload as any)
       if (error) {
         throw error
       }
@@ -362,16 +366,16 @@ function addEvidenceCitationsToMessage(
     // Update existing metadata part
     const updatedParts = [...parts]
     updatedParts[existingMetadataIndex] = {
-      type: "metadata",
+      type: "metadata" as any,
       metadata: {
         evidenceCitations: evidenceCitations,
       },
-    }
+    } as any
     return { ...message, parts: updatedParts }
   } else {
     // Add new metadata part
     const metadataPart: any = {
-      type: "metadata",
+      type: "metadata" as any,
       metadata: {
         evidenceCitations: evidenceCitations,
       },

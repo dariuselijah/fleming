@@ -55,7 +55,7 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
   const [isPopupOpen, setIsPopupOpen] = useState(false)
   const [activeCitationIndex, setActiveCitationIndex] = useState(0)
   const [isHovering, setIsHovering] = useState(false)
-  const anchorRef = useRef<HTMLAnchorElement | HTMLSpanElement>(null)
+  const anchorRef = useRef<HTMLElement>(null)
   
   if (citations.length === 0) return null
   
@@ -117,7 +117,7 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
           href={citationUrl}
           target="_blank"
           rel="noopener noreferrer"
-          ref={anchorRef}
+          ref={anchorRef as React.RefObject<HTMLAnchorElement>}
           className={cn(
             "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200",
             "hover:bg-green-200 dark:hover:bg-green-900/50",

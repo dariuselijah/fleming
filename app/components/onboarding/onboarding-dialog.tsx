@@ -671,7 +671,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
 }
 
 interface DemographicOptionProps {
-  icon: React.ComponentType<{ className?: string }>
+  icon: React.ComponentType<{ className?: string; weight?: "fill" | "regular" | "bold" | "duotone" | "light" }>
   title: string
   description: string
   selected: boolean

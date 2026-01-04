@@ -189,8 +189,8 @@ export function useChatCore({
               
               if (isRecent || matchesChatId) {
                 // Only update if different from current ref
-                const currentIds = evidenceCitationsRef.current.map(c => c.index).sort().join(',')
-                const newIds = latestData.citations.map(c => c.index).sort().join(',')
+                const currentIds = evidenceCitationsRef.current.map((c: any) => c.index).sort().join(',')
+                const newIds = latestData.citations.map((c: any) => c.index).sort().join(',')
                 if (currentIds !== newIds) {
                   console.log('📚 [EVIDENCE] Restored citations from latest sessionStorage:', latestData.citations.length)
                   evidenceCitationsRef.current = latestData.citations
@@ -453,7 +453,7 @@ export function useChatCore({
                   const matchesChatId = !realChatId || latestData.chatId === realChatId || !latestData.chatId
                   if (isRecent && matchesChatId) {
                     citationsToSave = latestData.citations
-                    console.log('📚 [onFinish] Restored citations from sessionStorage for save:', citationsToSave.length)
+                    console.log('📚 [onFinish] Restored citations from sessionStorage for save:', citationsToSave?.length ?? 0)
                   }
                 }
               }
@@ -469,7 +469,7 @@ export function useChatCore({
               const metadataPart = lastAssistantMessage.parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
               if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
                 citationsToSave = (metadataPart as any).metadata.evidenceCitations
-                console.log('📚 [onFinish] Extracted citations from message parts for save:', citationsToSave.length)
+                console.log('📚 [onFinish] Extracted citations from message parts for save:', citationsToSave?.length ?? 0)
               }
             }
           }
@@ -565,7 +565,7 @@ export function useChatCore({
                   const matchesChatId = !realChatId || latestData.chatId === realChatId || !latestData.chatId
                   if (isRecent && matchesChatId) {
                     citationsToSave = latestData.citations
-                    console.log('📚 [STREAMING] Restored citations from sessionStorage for save:', citationsToSave.length)
+                    console.log('📚 [STREAMING] Restored citations from sessionStorage for save:', citationsToSave?.length ?? 0)
                   }
                 }
               }
@@ -581,7 +581,7 @@ export function useChatCore({
               const metadataPart = messageToCheck.parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
               if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
                 citationsToSave = (metadataPart as any).metadata.evidenceCitations
-                console.log('📚 [STREAMING] Extracted citations from message parts for save:', citationsToSave.length)
+                console.log('📚 [STREAMING] Extracted citations from message parts for save:', citationsToSave?.length ?? 0)
               }
             }
           }
