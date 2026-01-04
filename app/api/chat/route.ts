@@ -151,8 +151,9 @@ export async function POST(req: Request) {
           
           if (prefs?.user_role) {
             const validRoles = ["doctor", "general", "medical_student"] as const
-            if (validRoles.includes(prefs.user_role as typeof validRoles[number])) {
-              effectiveUserRole = prefs.user_role as typeof effectiveUserRole
+            type ValidRole = typeof validRoles[number]
+            if (validRoles.includes(prefs.user_role as ValidRole)) {
+              effectiveUserRole = prefs.user_role as ValidRole
               console.log(`📚 [EVIDENCE] ✅ Fetched userRole from DB: ${effectiveUserRole}`)
             } else {
               console.log(`📚 [EVIDENCE] ⚠️ Invalid user_role value from DB: ${prefs.user_role}`)
