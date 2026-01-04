@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "startTime": "2025-12-30T06:34:11.887Z",
-  "lastUpdate": "2026-01-03T15:53:42.409Z",
+  "lastUpdate": "2026-01-03T22:43:12.863Z",
   "topics": [
     {
       "topic": "hypertension treatment",
@@ -176,11 +176,11 @@
     },
     {
       "topic": "stroke treatment",
-      "status": "failed",
+      "status": "processing",
       "articlesProcessed": 2169,
       "chunksCreated": 4941,
       "errors": 14,
-      "startedAt": "2025-12-30T06:44:39.006Z",
+      "startedAt": "2026-01-03T22:43:12.863Z",
       "completedAt": "2025-12-30T06:54:34.717Z"
     },
     {
@@ -1414,134 +1414,162 @@
     },
     {
       "topic": "end stage renal disease",
-      "status": "processing",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0,
-      "startedAt": "2026-01-03T15:53:42.409Z"
+      "status": "failed",
+      "articlesProcessed": 4600,
+      "chunksCreated": 10463,
+      "errors": 25,
+      "startedAt": "2026-01-03T15:53:42.409Z",
+      "completedAt": "2026-01-03T17:08:34.791Z"
     },
     {
       "topic": "dialysis",
-      "status": "processing",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0,
-      "startedAt": "2026-01-03T15:53:42.409Z"
+      "status": "failed",
+      "articlesProcessed": 4560,
+      "chunksCreated": 11172,
+      "errors": 58,
+      "startedAt": "2026-01-03T15:53:42.409Z",
+      "completedAt": "2026-01-03T15:59:27.298Z"
     },
     {
       "topic": "kidney transplantation",
-      "status": "processing",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0,
-      "startedAt": "2026-01-03T15:53:42.409Z"
+      "status": "failed",
+      "articlesProcessed": 4720,
+      "chunksCreated": 10581,
+      "errors": 49,
+      "startedAt": "2026-01-03T15:53:42.409Z",
+      "completedAt": "2026-01-03T16:13:06.241Z"
     },
     {
       "topic": "acute kidney injury",
-      "status": "processing",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0,
-      "startedAt": "2026-01-03T15:53:42.409Z"
+      "status": "failed",
+      "articlesProcessed": 4489,
+      "chunksCreated": 10222,
+      "errors": 55,
+      "startedAt": "2026-01-03T15:53:42.409Z",
+      "completedAt": "2026-01-03T15:59:16.556Z"
     },
     {
       "topic": "nephrotic syndrome",
+      "status": "failed",
+      "articlesProcessed": 4700,
+      "chunksCreated": 9174,
+      "errors": 46,
+      "startedAt": "2026-01-03T15:53:42.409Z",
+      "completedAt": "2026-01-03T16:05:52.929Z"
+    },
+    {
+      "topic": "glomerulonephritis",
+      "status": "failed",
+      "articlesProcessed": 4611,
+      "chunksCreated": 8630,
+      "errors": 38,
+      "startedAt": "2026-01-03T17:08:37.794Z",
+      "completedAt": "2026-01-03T17:30:58.221Z"
+    },
+    {
+      "topic": "hypertension kidney",
+      "status": "completed",
+      "articlesProcessed": 106,
+      "chunksCreated": 208,
+      "errors": 0,
+      "startedAt": "2026-01-03T17:08:37.794Z",
+      "completedAt": "2026-01-03T17:13:11.362Z"
+    },
+    {
+      "topic": "Alzheimer disease",
+      "status": "failed",
+      "articlesProcessed": 4482,
+      "chunksCreated": 9851,
+      "errors": 22,
+      "startedAt": "2026-01-03T17:08:37.794Z",
+      "completedAt": "2026-01-03T18:06:51.726Z"
+    },
+    {
+      "topic": "Alzheimer treatment",
+      "status": "completed",
+      "articlesProcessed": 11,
+      "chunksCreated": 16,
+      "errors": 0,
+      "startedAt": "2026-01-03T17:08:37.794Z",
+      "completedAt": "2026-01-03T17:09:22.252Z"
+    },
+    {
+      "topic": "dementia",
+      "status": "failed",
+      "articlesProcessed": 4402,
+      "chunksCreated": 10479,
+      "errors": 20,
+      "startedAt": "2026-01-03T17:08:37.794Z",
+      "completedAt": "2026-01-03T18:13:27.308Z"
+    },
+    {
+      "topic": "dementia treatment",
+      "status": "completed",
+      "articlesProcessed": 126,
+      "chunksCreated": 304,
+      "errors": 0,
+      "startedAt": "2026-01-03T18:13:30.317Z",
+      "completedAt": "2026-01-03T18:16:09.763Z"
+    },
+    {
+      "topic": "Parkinson disease",
+      "status": "failed",
+      "articlesProcessed": 4473,
+      "chunksCreated": 10079,
+      "errors": 26,
+      "startedAt": "2026-01-03T18:13:30.317Z",
+      "completedAt": "2026-01-03T22:20:29.878Z"
+    },
+    {
+      "topic": "Parkinson treatment",
+      "status": "completed",
+      "articlesProcessed": 12,
+      "chunksCreated": 20,
+      "errors": 0,
+      "startedAt": "2026-01-03T18:13:30.317Z",
+      "completedAt": "2026-01-03T18:14:06.908Z"
+    },
+    {
+      "topic": "epilepsy",
+      "status": "failed",
+      "articlesProcessed": 4698,
+      "chunksCreated": 10349,
+      "errors": 22,
+      "startedAt": "2026-01-03T18:13:30.317Z",
+      "completedAt": "2026-01-03T22:43:09.854Z"
+    },
+    {
+      "topic": "epilepsy treatment",
+      "status": "completed",
+      "articlesProcessed": 702,
+      "chunksCreated": 1412,
+      "errors": 0,
+      "startedAt": "2026-01-03T18:13:30.317Z",
+      "completedAt": "2026-01-03T19:16:27.646Z"
+    },
+    {
+      "topic": "multiple sclerosis",
       "status": "processing",
       "articlesProcessed": 0,
       "chunksCreated": 0,
       "errors": 0,
-      "startedAt": "2026-01-03T15:53:42.409Z"
-    },
-    {
-      "topic": "glomerulonephritis",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "hypertension kidney",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "Alzheimer disease",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "Alzheimer treatment",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "dementia",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "dementia treatment",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "Parkinson disease",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "Parkinson treatment",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "epilepsy",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "epilepsy treatment",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
-    },
-    {
-      "topic": "multiple sclerosis",
-      "status": "pending",
-      "articlesProcessed": 0,
-      "chunksCreated": 0,
-      "errors": 0
+      "startedAt": "2026-01-03T22:43:12.863Z"
     },
     {
       "topic": "MS treatment",
-      "status": "pending",
+      "status": "processing",
       "articlesProcessed": 0,
       "chunksCreated": 0,
-      "errors": 0
+      "errors": 0,
+      "startedAt": "2026-01-03T22:43:12.863Z"
     },
     {
       "topic": "stroke",
-      "status": "pending",
+      "status": "processing",
       "articlesProcessed": 0,
       "chunksCreated": 0,
-      "errors": 0
+      "errors": 0,
+      "startedAt": "2026-01-03T22:43:12.863Z"
     },
     {
       "topic": "stroke treatment",
@@ -1552,10 +1580,11 @@
     },
     {
       "topic": "transient ischemic attack",
-      "status": "pending",
+      "status": "processing",
       "articlesProcessed": 0,
       "chunksCreated": 0,
-      "errors": 0
+      "errors": 0,
+      "startedAt": "2026-01-03T22:43:12.863Z"
     },
     {
       "topic": "migraine",
@@ -2176,9 +2205,9 @@
   ],
   "stats": {
     "totalTopics": 265,
-    "completedTopics": 162,
-    "totalArticles": 815502,
-    "totalChunks": 1794882,
-    "totalErrors": 9948
+    "completedTopics": 177,
+    "totalArticles": 862194,
+    "totalChunks": 1897842,
+    "totalErrors": 10309
   }
 }

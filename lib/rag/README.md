@@ -176,3 +176,4 @@ const hallucinationCheck = await verifier.detectHallucinations(
 - PDF parsing is placeholder - needs implementation
 - Citation verification uses text similarity (can be enhanced with embeddings)
 
+

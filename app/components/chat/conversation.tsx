@@ -2,10 +2,10 @@ import {
   ChatContainerContent,
   ChatContainerRoot,
 } from "@/components/prompt-kit/chat-container"
-import { Loader } from "@/components/prompt-kit/loader"
+import { ProcessingLoader } from "@/components/prompt-kit/processing-loader"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
 import { Message as MessageType } from "@ai-sdk/react"
-import { useRef, useMemo, useCallback, useEffect } from "react"
+import { useRef, useMemo, useCallback } from "react"
 import { Message } from "./message"
 
 type ConversationProps = {
@@ -28,8 +28,6 @@ export function Conversation({
   const initialMessageCount = useRef(messages.length)
 
   // Memoize message rendering for streaming performance
-  // React.memo on Message components will prevent re-renders of unchanged messages
-  // Only the last message will re-render during streaming
   const renderedMessages = useMemo(() => {
     // Handle empty messages
     if (!messages || messages.length === 0) {
@@ -120,7 +118,7 @@ export function Conversation({
             hasMessages &&
             messages[messages.length - 1].role === "user" && (
               <div className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
-                <Loader>Processing...</Loader>
+                <ProcessingLoader />
               </div>
             )}
           <div className="absolute bottom-0 flex w-full max-w-3xl flex-1 items-end justify-end gap-4 px-6 pb-2">

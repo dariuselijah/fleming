@@ -362,12 +362,16 @@ export function CommandHistory({
 
       setHoveredChatId(chatId)
 
-      // Fetch preview when hovering over a chat
-      if (chatId) {
-        fetchPreview(chatId)
+      // Clear preview when hovering away
+      if (!chatId) {
+        clearPreview()
+        return
       }
+
+      // Fetch preview when hovering over a chat
+      fetchPreview(chatId)
     },
-    [preferences.showConversationPreviews, fetchPreview]
+    [preferences.showConversationPreviews, fetchPreview, clearPreview]
   )
 
   const handlePreviewHover = useCallback(
@@ -440,8 +444,8 @@ export function CommandHistory({
     [chatHistory, searchQuery]
   )
 
-  const activePreviewChatId =
-    hoveredChatId || (isPreviewPanelHovered ? hoveredChatId : null)
+  // Only show preview when hovering over a chat
+  const activePreviewChatId = hoveredChatId
 
   const renderChatItem = useCallback(
     (chat: Chats) => {

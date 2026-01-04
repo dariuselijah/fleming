@@ -8,7 +8,9 @@ import {
   CaretUp, 
   Book, 
   Star,
-  ArrowSquareOut 
+  ArrowSquareOut,
+  ThumbsUp,
+  ThumbsDown
 } from "@phosphor-icons/react"
 import type { EvidenceCitation } from "@/lib/evidence/types"
 import { 
@@ -31,6 +33,8 @@ export function EvidenceReferencesSection({
   className,
 }: EvidenceReferencesSectionProps) {
   const [isExpanded, setIsExpanded] = useState(false)
+  // Track which citations have been rated (for UI feedback only)
+  const [ratedCitations, setRatedCitations] = useState<Map<number, 'up' | 'down'>>(new Map())
 
   if (citations.length === 0) return null
 
@@ -54,6 +58,34 @@ export function EvidenceReferencesSection({
     if (authors.length === 0) return ''
     if (authors.length === 1) return authors[0]
     return `${authors[0]} et al.`
+  }
+
+  const handleCitationRating = (citation: EvidenceCitation, rating: 'up' | 'down') => {
+    // Log the rating action
+    console.log('📊 [CITATION RATING]', {
+      action: rating === 'up' ? 'thumbs_up' : 'thumbs_down',
+      citationIndex: citation.index,
+      citationTitle: citation.title,
+      citationPmid: citation.pmid,
+      citationDoi: citation.doi,
+      citationJournal: citation.journal,
+      citationYear: citation.year,
+      evidenceLevel: citation.evidenceLevel,
+      studyType: citation.studyType,
+      timestamp: new Date().toISOString(),
+    })
+
+    // Update UI state for visual feedback
+    setRatedCitations(prev => {
+      const newMap = new Map(prev)
+      // Toggle if clicking the same rating, otherwise set new rating
+      if (newMap.get(citation.index) === rating) {
+        newMap.delete(citation.index)
+      } else {
+        newMap.set(citation.index, rating)
+      }
+      return newMap
+    })
   }
 
   return (
@@ -136,52 +168,103 @@ export function EvidenceReferencesSection({
 
                     {/* Citations in this level */}
                     <div className="space-y-2 pl-2 border-l-2 border-border">
-                      {levelCitations.map((citation) => (
-                        <div
-                          key={citation.index}
-                          className="group flex items-start gap-2 text-xs"
-                        >
-                          <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded bg-primary/10 text-primary text-[10px] font-semibold">
-                            {citation.index}
-                          </span>
-                          
-                          <div className="flex-1 min-w-0">
-                            {citation.url ? (
-                              <a
-                                href={citation.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block font-medium text-foreground hover:text-primary transition-colors line-clamp-1"
-                              >
-                                {citation.title}
-                                <ArrowSquareOut className="inline ml-1 h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                              </a>
-                            ) : (
-                              <span className="block font-medium text-foreground line-clamp-1">
-                                {citation.title}
-                              </span>
-                            )}
+                      {levelCitations.map((citation) => {
+                        const rating = ratedCitations.get(citation.index)
+                        return (
+                          <div
+                            key={citation.index}
+                            className="group flex items-start gap-2 text-xs"
+                          >
+                            <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded bg-primary/10 text-primary text-[10px] font-semibold">
+                              {citation.index}
+                            </span>
                             
-                            <div className="flex items-center gap-2 text-muted-foreground mt-0.5">
-                              <span>{formatAuthors(citation.authors)}</span>
-                              {citation.authors.length > 0 && <span>•</span>}
-                              <span>{citation.journal}</span>
-                              {citation.year && (
-                                <>
-                                  <span>•</span>
-                                  <span>{citation.year}</span>
-                                </>
+                            <div className="flex-1 min-w-0">
+                              {citation.url ? (
+                                <a
+                                  href={citation.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block font-medium text-foreground hover:text-primary transition-colors line-clamp-1"
+                                >
+                                  {citation.title}
+                                  <ArrowSquareOut className="inline ml-1 h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </a>
+                              ) : (
+                                <span className="block font-medium text-foreground line-clamp-1">
+                                  {citation.title}
+                                </span>
                               )}
-                              {citation.sampleSize && (
-                                <>
-                                  <span>•</span>
-                                  <span>n={citation.sampleSize.toLocaleString()}</span>
-                                </>
-                              )}
+                              
+                              <div className="flex items-center gap-2 text-muted-foreground mt-0.5">
+                                <span>{formatAuthors(citation.authors)}</span>
+                                {citation.authors.length > 0 && <span>•</span>}
+                                <span>{citation.journal}</span>
+                                {citation.year && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{citation.year}</span>
+                                  </>
+                                )}
+                                {citation.sampleSize && (
+                                  <>
+                                    <span>•</span>
+                                    <span>n={citation.sampleSize.toLocaleString()}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Thumbs up/down buttons */}
+                            <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  handleCitationRating(citation, 'up')
+                                }}
+                                className={cn(
+                                  "p-1.5 rounded hover:bg-accent transition-colors",
+                                  rating === 'up' && "bg-green-500/10"
+                                )}
+                                title="This citation was helpful"
+                                aria-label="Thumbs up"
+                              >
+                                <ThumbsUp 
+                                  className={cn(
+                                    "h-3.5 w-3.5 transition-colors",
+                                    rating === 'up' 
+                                      ? "fill-green-500 text-green-500" 
+                                      : "text-muted-foreground"
+                                  )} 
+                                />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  handleCitationRating(citation, 'down')
+                                }}
+                                className={cn(
+                                  "p-1.5 rounded hover:bg-accent transition-colors",
+                                  rating === 'down' && "bg-red-500/10"
+                                )}
+                                title="This citation was not helpful"
+                                aria-label="Thumbs down"
+                              >
+                                <ThumbsDown 
+                                  className={cn(
+                                    "h-3.5 w-3.5 transition-colors",
+                                    rating === 'down' 
+                                      ? "fill-red-500 text-red-500" 
+                                      : "text-muted-foreground"
+                                  )} 
+                                />
+                              </button>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )

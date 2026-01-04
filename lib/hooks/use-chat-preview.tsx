@@ -4,12 +4,14 @@ import {
   getMessagesFromDb,
 } from "@/lib/chat-store/messages/api"
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { EvidenceCitation } from "@/lib/evidence/types"
 
 interface ChatMessage {
   id: string
   content: string
   role: "user" | "assistant"
   created_at: string
+  evidenceCitations?: EvidenceCitation[]
 }
 
 interface UseChatPreviewReturn {
@@ -27,11 +29,50 @@ export function useChatPreview(): UseChatPreviewReturn {
 
   // Track current request to prevent race conditions
   const currentRequestRef = useRef<string | null>(null)
+  const lastFetchedChatIdRef = useRef<string | null>(null) // Track last fetched chatId to prevent duplicate fetches
+  const messagesRef = useRef<ChatMessage[]>([]) // Track messages in ref to avoid closure issues
   const abortControllerRef = useRef<AbortController | null>(null)
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Keep messagesRef in sync with messages state
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  // Helper function to validate and normalize evidenceCitations
+  const normalizeEvidenceCitations = (citations: any): EvidenceCitation[] | undefined => {
+    if (!citations) return undefined
+    if (!Array.isArray(citations) || citations.length === 0) return undefined
+    
+    // Validate that citations have required fields
+    const validCitations = citations.filter((c: any) => 
+      c && 
+      typeof c.index === 'number' && 
+      c.title && 
+      typeof c.title === 'string'
+    )
+    
+    return validCitations.length > 0 ? validCitations : undefined
+  }
+
   const fetchPreview = useCallback(async (chatId: string) => {
-    if (!chatId) return
+    if (!chatId) {
+      setMessages([])
+      lastFetchedChatIdRef.current = null
+      messagesRef.current = []
+      return
+    }
+
+    // CRITICAL: If this is the same chatId we just fetched, skip to prevent duplicate fetches
+    if (chatId === lastFetchedChatIdRef.current && messagesRef.current.length > 0) {
+      return
+    }
+
+    // CRITICAL: Clear messages immediately when switching to a different chat
+    if (chatId !== lastFetchedChatIdRef.current) {
+      setMessages([])
+      setIsLoading(true)
+    }
 
     // Clear any existing debounce timeout
     if (debounceTimeoutRef.current) {
@@ -64,20 +105,48 @@ export function useChatPreview(): UseChatPreviewReturn {
             currentRequestRef.current === chatId &&
             !controller.signal.aborted
           ) {
-            const cachedMessages = cached
+            // Deduplicate by ID and get last 5 unique messages
+            const seen = new Set<string>()
+            const uniqueCached = cached.filter((msg) => {
+              if (seen.has(msg.id)) return false
+              seen.add(msg.id)
+              return true
+            })
+            
+            const cachedMessages = uniqueCached
               .slice(-5) // Get last 5 messages
-              .map((msg) => ({
-                id: msg.id,
-                content: msg.content,
-                role: msg.role as "user" | "assistant",
-                created_at:
-                  msg.createdAt?.toISOString() || new Date().toISOString(),
-              }))
-            setMessages(cachedMessages)
+              .map((msg) => {
+                // Validate and normalize evidenceCitations
+                const evidenceCitations = normalizeEvidenceCitations((msg as any).evidenceCitations)
+                
+                return {
+                  id: String(msg.id),
+                  content: String(msg.content || ''),
+                  role: msg.role as "user" | "assistant",
+                  created_at:
+                    msg.createdAt?.toISOString() || new Date().toISOString(),
+                  evidenceCitations,
+                }
+              })
+              // Sort by created_at to ensure chronological order
+              .sort((a, b) => {
+                const timeA = new Date(a.created_at).getTime()
+                const timeB = new Date(b.created_at).getTime()
+                return timeA - timeB
+              })
+            
+            if (currentRequestRef.current === chatId && !controller.signal.aborted) {
+              lastFetchedChatIdRef.current = chatId
+              messagesRef.current = cachedMessages
+              setMessages(cachedMessages)
+              setIsLoading(false)
+            }
           }
         } else {
           // No cache, fetch from database
-          setIsLoading(true)
+          if (currentRequestRef.current === chatId && !controller.signal.aborted) {
+            setIsLoading(true)
+          }
 
           const fresh = await getMessagesFromDb(chatId)
           if (
@@ -88,16 +157,41 @@ export function useChatPreview(): UseChatPreviewReturn {
             // Cache the fresh messages
             await cacheMessages(chatId, fresh)
 
-            const freshMessages = fresh
+            // Deduplicate by ID and get last 5 unique messages
+            const seen = new Set<string>()
+            const uniqueFresh = fresh.filter((msg) => {
+              if (seen.has(msg.id)) return false
+              seen.add(msg.id)
+              return true
+            })
+
+            const freshMessages = uniqueFresh
               .slice(-5) // Get last 5 messages
-              .map((msg) => ({
-                id: msg.id,
-                content: msg.content,
-                role: msg.role as "user" | "assistant",
-                created_at:
-                  msg.createdAt?.toISOString() || new Date().toISOString(),
-              }))
-            setMessages(freshMessages)
+              .map((msg) => {
+                // Validate and normalize evidenceCitations
+                const evidenceCitations = normalizeEvidenceCitations((msg as any).evidenceCitations)
+                
+                return {
+                  id: String(msg.id),
+                  content: String(msg.content || ''),
+                  role: msg.role as "user" | "assistant",
+                  created_at:
+                    msg.createdAt?.toISOString() || new Date().toISOString(),
+                  evidenceCitations,
+                }
+              })
+              // Sort by created_at to ensure chronological order
+              .sort((a, b) => {
+                const timeA = new Date(a.created_at).getTime()
+                const timeB = new Date(b.created_at).getTime()
+                return timeA - timeB
+              })
+            
+            if (currentRequestRef.current === chatId && !controller.signal.aborted) {
+              lastFetchedChatIdRef.current = chatId
+              messagesRef.current = freshMessages
+              setMessages(freshMessages)
+            }
           }
         }
       } catch (err) {
@@ -111,6 +205,8 @@ export function useChatPreview(): UseChatPreviewReturn {
             err instanceof Error ? err.message : "Unknown error occurred"
           )
           setMessages([])
+          messagesRef.current = []
+          lastFetchedChatIdRef.current = null
         }
       } finally {
         // Only update loading state if this is still the current request
@@ -122,7 +218,7 @@ export function useChatPreview(): UseChatPreviewReturn {
         }
       }
     }, 200) // 200ms debounce to prevent rapid calls
-  }, [])
+  }, []) // No dependencies - use refs for state that needs to be checked
 
   const clearPreview = useCallback(() => {
     // Clear debounce timeout
@@ -139,6 +235,8 @@ export function useChatPreview(): UseChatPreviewReturn {
 
     // Clear current request tracking
     currentRequestRef.current = null
+    lastFetchedChatIdRef.current = null // Clear last fetched chatId
+    messagesRef.current = [] // Clear messages ref
 
     // Reset state
     setMessages([])

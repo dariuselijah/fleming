@@ -21,8 +21,7 @@ import {
 } from "@/lib/models/healthcare-agents"
 import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
 import { anonymizeMessages } from "@/lib/anonymize"
-import { synthesizeEvidence, buildEvidenceSystemPrompt } from "@/lib/evidence"
-import { synthesizeEvidenceEnhanced } from "@/lib/evidence/synthesis-enhanced"
+import { synthesizeEvidence, buildEvidenceSystemPrompt, extractReferencedCitations } from "@/lib/evidence"
 
 export const maxDuration = 60
 
@@ -130,6 +129,43 @@ export async function POST(req: Request) {
       )
     }
 
+    // CRITICAL: Fetch userRole from database if not provided (needed for evidence mode)
+    // This must happen BEFORE evidence mode check
+    let effectiveUserRole = userRole
+    console.log(`📚 [EVIDENCE] Initial userRole check: userRole=${userRole}, isAuthenticated=${isAuthenticated}, userId=${userId}`)
+    
+    if (!effectiveUserRole && isAuthenticated && userId !== "temp") {
+      console.log(`📚 [EVIDENCE] Attempting to fetch userRole from DB for userId: ${userId}`)
+      try {
+        const { createClient } = await import("@/lib/supabase/server")
+        const supabase = await createClient()
+        
+        if (supabase) {
+          const { data: prefs, error: fetchError } = await supabase
+            .from("user_preferences")
+            .select("user_role")
+            .eq("user_id", userId)
+            .single()
+          
+          console.log(`📚 [EVIDENCE] DB fetch result: prefs=${JSON.stringify(prefs)}, error=${fetchError?.message || 'none'}`)
+          
+          if (prefs?.user_role) {
+            effectiveUserRole = prefs.user_role
+            console.log(`📚 [EVIDENCE] ✅ Fetched userRole from DB: ${effectiveUserRole}`)
+          } else {
+            console.log(`📚 [EVIDENCE] ⚠️ No user_role found in preferences for userId: ${userId}`)
+          }
+        } else {
+          console.warn("📚 [EVIDENCE] ⚠️ Supabase client not available")
+        }
+      } catch (e) {
+        // Non-critical - continue with undefined userRole
+        console.warn("📚 [EVIDENCE] ❌ Failed to fetch userRole from DB:", e)
+      }
+    } else {
+      console.log(`📚 [EVIDENCE] Skipping DB fetch: effectiveUserRole=${effectiveUserRole}, isAuthenticated=${isAuthenticated}, userId=${userId}`)
+    }
+
     // CRITICAL: Check rate limits BEFORE streaming starts
     // Skip for temp users/chats
     if (userId !== "temp" && chatId !== "temp" && !chatId.startsWith("temp-chat-")) {
@@ -170,7 +206,7 @@ export async function POST(req: Request) {
     } else {
       // For non-Fleming models, use the standard prompt logic
       effectiveSystemPrompt = getCachedSystemPrompt(
-        userRole || "general", 
+        effectiveUserRole || "general", 
         medicalSpecialty, 
         systemPrompt
       )
@@ -182,41 +218,24 @@ export async function POST(req: Request) {
     console.log(`📋 Model config found:`, modelConfig ? `${modelConfig.id} (${modelConfig.name})` : 'null')
     
     // Auto-enable web search for healthcare professionals using Fleming 4
-    const isHealthcareMode = userRole === "doctor" || userRole === "medical_student"
+    // Use effectiveUserRole (from request or DB fallback)
+    const isHealthcareMode = effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
     const isFleming4 = effectiveModel === "fleming-4"
     const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
     const finalEnableSearch = enableSearchFromClient || (isHealthcareMode && isFleming4 && hasWebSearchSupport)
     
     // EVIDENCE MODE: Auto-enable for healthcare professionals or if explicitly requested
-    const finalEnableEvidence = enableEvidenceFromClient || (isHealthcareMode && medicalLiteratureAccess)
+    // CRITICAL: Enable by default for healthcare professionals (doctors/medical students)
+    // Only disable if explicitly set to false
+    const finalEnableEvidence = enableEvidenceFromClient !== false && (
+      enableEvidenceFromClient === true || 
+      isHealthcareMode
+    )
     
-    if (!modelConfig || !modelConfig.apiSdk) {
-      console.error(`❌ Model "${model}" not found or missing apiSdk`)
-      throw new Error(`Model ${model} not found`)
-    }
-
-    // Get API key if needed (this is fast) - only for real users
-    // Get it early so it can be used for evidence synthesis
-    let apiKey: string | undefined
-    let evidenceApiKey: string | undefined
-    if (isAuthenticated && userId && userId !== "temp") {
-      const { getEffectiveApiKey } = await import("@/lib/user-keys")
-      const provider = getProviderForModel(effectiveModel)
-      apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
-      
-      // Get OpenAI key for evidence synthesis (LLM-based query understanding and reranking)
-      if (finalEnableEvidence) {
-        evidenceApiKey = (await getEffectiveApiKey(userId, 'openai' as ProviderWithoutOllama)) || undefined
-        // Fallback to main API key if OpenAI key not available
-        if (!evidenceApiKey) {
-          evidenceApiKey = apiKey
-        }
-      }
-    }
+    console.log(`📚 [EVIDENCE] Mode check: userRole=${effectiveUserRole} (from request: ${userRole}), enableEvidenceFromClient=${enableEvidenceFromClient}, isHealthcareMode=${isHealthcareMode}, medicalLiteratureAccess=${medicalLiteratureAccess}, finalEnableEvidence=${finalEnableEvidence}`)
     
     // If evidence mode is enabled, synthesize evidence from medical_evidence table
-    // Use enhanced contextual relevance system for world-class citation attribution
-    let evidenceContext: Awaited<ReturnType<typeof synthesizeEvidenceEnhanced>> | null = null
+    let evidenceContext: Awaited<ReturnType<typeof synthesizeEvidence>> | null = null
     if (finalEnableEvidence) {
       try {
         // Get the last user message for evidence search
@@ -226,21 +245,15 @@ export async function POST(req: Request) {
           : ''
         
         if (queryText.length > 0) {
-          console.log("📚 EVIDENCE MODE: Enhanced contextual search for:", queryText.substring(0, 100))
-          
-          evidenceContext = await synthesizeEvidenceEnhanced({
+          console.log("📚 EVIDENCE MODE: Searching medical evidence for:", queryText.substring(0, 100))
+          evidenceContext = await synthesizeEvidence({
             query: queryText,
             maxResults: 8,
             minEvidenceLevel: 5, // Include all evidence levels
-            enableReranking: true, // Enable contextual reranking
-            minContextualScore: 0.6, // Balanced relevance threshold (was 0.75, too strict)
-            apiKey: evidenceApiKey,
           })
           
           if (evidenceContext.shouldUseEvidence) {
-            console.log(`📚 EVIDENCE MODE: Found ${evidenceContext.context.citations.length} highly relevant sources in ${evidenceContext.searchTimeMs.toFixed(0)}ms`)
-            console.log(`📚 Intent: ${evidenceContext.queryUnderstanding.primaryIntent}, Specificity: ${evidenceContext.queryUnderstanding.specificity}`)
-            console.log(`📚 Reranking: ${evidenceContext.rerankingStats.initialCount} → ${evidenceContext.rerankingStats.afterReranking} (avg score: ${evidenceContext.rerankingStats.averageContextualScore.toFixed(2)})`)
+            console.log(`📚 EVIDENCE MODE: Found ${evidenceContext.context.citations.length} sources in ${evidenceContext.searchTimeMs.toFixed(0)}ms`)
             // Enhance system prompt with evidence
             effectiveSystemPrompt = buildEvidenceSystemPrompt(effectiveSystemPrompt, evidenceContext.context)
           } else {
@@ -251,6 +264,19 @@ export async function POST(req: Request) {
         console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", error)
         // Continue without evidence - don't block the chat
       }
+    }
+
+    if (!modelConfig || !modelConfig.apiSdk) {
+      console.error(`❌ Model "${model}" not found or missing apiSdk`)
+      throw new Error(`Model ${model} not found`)
+    }
+
+    // Get API key if needed (this is fast) - only for real users
+    let apiKey: string | undefined
+    if (isAuthenticated && userId && userId !== "temp") {
+      const { getEffectiveApiKey } = await import("@/lib/user-keys")
+      const provider = getProviderForModel(effectiveModel)
+      apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
     }
 
     // Filter out invalid attachments but keep data URLs and blob URLs for vision models
@@ -300,6 +326,14 @@ export async function POST(req: Request) {
     
     if (finalEnableSearch) {
       console.log("✅ WEB SEARCH ENABLED - Using real web search from xAI/Grok")
+    }
+    
+    // CRITICAL: Capture evidenceContext in a const to ensure it's available in closure
+    const capturedEvidenceContext = evidenceContext
+    if (capturedEvidenceContext) {
+      console.log(`📚 [CAPTURE] Captured evidence context with ${capturedEvidenceContext.context.citations.length} citations for onFinish callback`)
+    } else {
+      console.log(`📚 [CAPTURE] No evidence context to capture`)
     }
     
     const result = streamText({
@@ -366,13 +400,14 @@ export async function POST(req: Request) {
         Promise.resolve().then(async () => {
           try {
             // Only process completion if we have a real userId and chatId
-            // Skip for any user (guest or authenticated) if chatId is temporary
-            // Also skip if chatId is literally "temp" (not a valid UUID)
-            if (userId === "temp" || 
-                chatId === "temp" || 
-                chatId.startsWith("temp-chat-")) {
-              console.log("Skipping completion processing for temp userId or invalid chatId")
-              return
+            // CRITICAL: Still extract citations even for temp chats, but don't save to DB
+            // This ensures citations are available in the UI even during streaming
+            const isTempChat = userId === "temp" || 
+                              chatId === "temp" || 
+                              chatId.startsWith("temp-chat-")
+            
+            if (isTempChat) {
+              console.log("📚 [CITATION] Temp chat detected - extracting citations but skipping DB save")
             }
 
             const supabase = await validateAndTrackUsage({
@@ -403,25 +438,67 @@ export async function POST(req: Request) {
                 }
               }
 
-              // Save assistant message with retry logic
-              // Include evidence citations if available
+              // CRITICAL: Extract citations from response (even for temp chats)
+              // This ensures citations are available in the UI
               const assistantMessage = response.messages[response.messages.length - 1]
-              const citationsToSave = evidenceContext?.context?.citations || []
               
-              try {
-                await storeAssistantMessage({
-                  supabase,
-                  chatId,
-                  messages:
-                    response.messages as unknown as import("@/app/types/api.types").Message[],
-                  message_group_id,
-                  model: effectiveModel,
-                  evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
-                })
-              } catch (error) {
-                console.error("Failed to save assistant message:", error)
-                // Try one more time after a short delay
-                await new Promise(resolve => setTimeout(resolve, 1000))
+              // Extract text content from message (handles both string and array formats)
+              let responseText = ''
+              if (assistantMessage?.content) {
+                if (typeof assistantMessage.content === 'string') {
+                  responseText = assistantMessage.content
+                } else if (Array.isArray(assistantMessage.content)) {
+                  // Extract text from content parts
+                  const textParts = assistantMessage.content
+                    .filter((part: any) => part?.type === 'text' && part?.text)
+                    .map((part: any) => part.text)
+                  responseText = textParts.join('\n\n')
+                }
+              }
+              
+              // Extract referenced citations from the response
+              // CRITICAL: Use capturedEvidenceContext to ensure we have the right context
+              let citationsToSave: any[] = []
+              const contextToUse = capturedEvidenceContext || evidenceContext
+              
+              if (contextToUse?.context?.citations) {
+                console.log(`📚 [CITATION EXTRACTION] Using evidence context with ${contextToUse.context.citations.length} citations`)
+                if (responseText) {
+                  const extractionResult = extractReferencedCitations(
+                    responseText,
+                    contextToUse.context.citations
+                  )
+                  
+                  citationsToSave = extractionResult.referencedCitations
+                  
+                  // Log extraction results for debugging
+                  if (extractionResult.hasCitations) {
+                    console.log(`📚 [CITATION EXTRACTION] Found ${citationsToSave.length} referenced citations (indices: [${extractionResult.citationIndices.join(', ')}])`)
+                    if (extractionResult.verificationStats.missingCitations.length > 0) {
+                      console.warn(`📚 [CITATION EXTRACTION] ${extractionResult.verificationStats.missingCitations.length} retrieved citations were not referenced`)
+                    }
+                  } else if (contextToUse.context.citations.length > 0) {
+                    console.warn(`📚 [CITATION EXTRACTION] ⚠️ No citation markers found in response despite ${contextToUse.context.citations.length} citations being provided`)
+                    console.warn(`📚 [CITATION EXTRACTION] Response preview: ${responseText.substring(0, 300)}...`)
+                    // Fallback: if no citations found but we have evidence, include all retrieved citations
+                    // This helps debug why citations aren't being generated
+                    citationsToSave = contextToUse.context.citations
+                    console.warn(`📚 [CITATION EXTRACTION] Fallback: Including all ${citationsToSave.length} retrieved citations for debugging`)
+                  }
+                } else {
+                  console.warn(`📚 [CITATION EXTRACTION] ⚠️ Could not extract response text for citation parsing`)
+                  // Fallback: include all citations if we can't parse the response
+                  if (contextToUse.context.citations.length > 0) {
+                    citationsToSave = contextToUse.context.citations
+                    console.warn(`📚 [CITATION EXTRACTION] Fallback: Including all ${citationsToSave.length} retrieved citations`)
+                  }
+                }
+              } else {
+                console.log(`📚 [CITATION EXTRACTION] No evidence context available (capturedEvidenceContext: ${!!capturedEvidenceContext}, evidenceContext: ${!!evidenceContext})`)
+              }
+              
+              // Only save to database if not a temp chat
+              if (!isTempChat && supabase) {
                 try {
                   await storeAssistantMessage({
                     supabase,
@@ -432,9 +509,29 @@ export async function POST(req: Request) {
                     model: effectiveModel,
                     evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
                   })
-                } catch (retryError) {
-                  console.error("Retry also failed to save assistant message:", retryError)
+                  if (citationsToSave.length > 0) {
+                    console.log(`📚 [CITATION SAVE] ✅ Saved ${citationsToSave.length} citations to database`)
+                  }
+                } catch (error) {
+                  console.error("Failed to save assistant message:", error)
+                  // Try one more time after a short delay
+                  await new Promise(resolve => setTimeout(resolve, 1000))
+                  try {
+                    await storeAssistantMessage({
+                      supabase,
+                      chatId,
+                      messages:
+                        response.messages as unknown as import("@/app/types/api.types").Message[],
+                      message_group_id,
+                      model: effectiveModel,
+                      evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
+                    })
+                  } catch (retryError) {
+                    console.error("Retry also failed to save assistant message:", retryError)
+                  }
                 }
+              } else if (isTempChat && citationsToSave.length > 0) {
+                console.log(`📚 [CITATION] Temp chat - ${citationsToSave.length} citations extracted but not saved to DB`)
               }
 
               // Increment message count after successful save
@@ -460,14 +557,14 @@ export async function POST(req: Request) {
     console.log(`✅ Streaming started in ${streamingStartTime.toFixed(0)}ms`)
 
     // ENHANCE SYSTEM PROMPT IN BACKGROUND (non-blocking)
-    if (userRole === "doctor" || userRole === "medical_student") {
+    if (effectiveUserRole === "doctor" || effectiveUserRole === "medical_student") {
       // Don't await - let this run in background
       Promise.resolve().then(async () => {
         try {
-          console.log("Enhancing system prompt in background for role:", userRole)
+          console.log("Enhancing system prompt in background for role:", effectiveUserRole)
           
           const healthcarePrompt = getHealthcareSystemPromptServer(
-            userRole,
+            effectiveUserRole,
             medicalSpecialty,
             clinicalDecisionSupport,
             medicalLiteratureAccess,
@@ -479,7 +576,7 @@ export async function POST(req: Request) {
             
             // Analyze medical query complexity
             const medicalContext: MedicalContext = {
-              userRole: userRole as "doctor" | "medical_student",
+              userRole: effectiveUserRole as "doctor" | "medical_student",
               medicalSpecialty,
               specialties: medicalSpecialty ? [medicalSpecialty] : [],
               requiredCapabilities: [],
@@ -526,17 +623,23 @@ export async function POST(req: Request) {
       'Access-Control-Expose-Headers': 'X-Evidence-Citations',
     }
     
-    // Add evidence citations to headers for frontend rendering
-    if (evidenceContext?.context?.citations && evidenceContext.context.citations.length > 0) {
-      try {
-        // Encode citations as base64 to handle special characters
-        const citationsJson = JSON.stringify(evidenceContext.context.citations)
-        responseHeaders['X-Evidence-Citations'] = Buffer.from(citationsJson).toString('base64')
-        console.log(`📚 EVIDENCE MODE: Sending ${evidenceContext.context.citations.length} citations to client`)
-      } catch (e) {
-        console.error('Failed to encode evidence citations:', e)
-      }
-    }
+          // Add evidence citations to headers for frontend rendering
+          // Send all retrieved citations initially - frontend will filter to referenced ones after parsing response
+          // CRITICAL: Use capturedEvidenceContext to ensure we have the right context
+          const contextForHeaders = capturedEvidenceContext || evidenceContext
+          if (contextForHeaders?.context?.citations && contextForHeaders.context.citations.length > 0) {
+            try {
+              console.log(`📚 [HEADERS] Adding ${contextForHeaders.context.citations.length} retrieved citations to response headers`)
+              // Encode citations as base64 to handle special characters
+              const citationsJson = JSON.stringify(contextForHeaders.context.citations)
+              responseHeaders['X-Evidence-Citations'] = Buffer.from(citationsJson).toString('base64')
+              console.log(`📚 EVIDENCE MODE: Sending ${contextForHeaders.context.citations.length} citations to client`)
+            } catch (e) {
+              console.error('Failed to encode evidence citations:', e)
+            }
+          } else {
+            console.log(`📚 [HEADERS] No citations to add to headers (contextForHeaders: ${!!contextForHeaders})`)
+          }
     
     return result.toDataStreamResponse({
       sendReasoning: true,

@@ -22,5 +22,6 @@ export {
   parseCitationMarkers,
   generateEvidenceSummary,
   formatResponseWithCitations,
+  extractReferencedCitations,
 } from './synthesis';
 

@@ -70,22 +70,14 @@ export function useChatCore({
   
   // Evidence citations from server - indexed by message ID or last response
   // Use ref to persist across hook reinitializations (e.g., URL changes)
-  // CRITICAL: Track citations per message to ensure follow-up messages also save their citations
   const evidenceCitationsRef = useRef<any[]>([])
-  const evidenceCitationsByMessageRef = useRef<Map<string, any[]>>(new Map()) // Track citations per message ID
   const [evidenceCitations, setEvidenceCitationsState] = useState<any[]>([])
   
   // Wrapper to update both state, ref, and sessionStorage
-  const setEvidenceCitations = useCallback((citations: any[], messageId?: string) => {
-    console.log('📚 [EVIDENCE] Setting evidence citations:', citations.length, messageId ? `for message ${messageId}` : '')
+  const setEvidenceCitations = useCallback((citations: any[]) => {
+    console.log('📚 [EVIDENCE] Setting evidence citations:', citations.length)
     evidenceCitationsRef.current = citations
     setEvidenceCitationsState(citations)
-    
-    // CRITICAL: Store citations per message ID for follow-up messages
-    if (messageId && citations.length > 0) {
-      evidenceCitationsByMessageRef.current.set(messageId, citations)
-      console.log('📚 [EVIDENCE] Stored citations for message:', messageId, citations.length)
-    }
     
     // Store in sessionStorage for persistence across restores
     if (typeof window !== 'undefined' && citations.length > 0) {
@@ -441,38 +433,14 @@ export function useChatCore({
     },
     // Optimize for streaming performance
     onFinish: async (message) => {
-      // CRITICAL: Associate citations with this message ID for follow-up messages
-      // The citations were set in onResponse, now we associate them with the message ID
-      if (message.id && evidenceCitationsRef.current.length > 0) {
-        evidenceCitationsByMessageRef.current.set(message.id, evidenceCitationsRef.current)
-        console.log('📚 [onFinish] Associated', evidenceCitationsRef.current.length, 'citations with message ID:', message.id)
-      }
-      
       // CRITICAL: Save all messages when streaming completes
       // Use the real chatId (not temp) if available
       const realChatId = chatId && !chatId.startsWith('temp-chat-') ? chatId : currentChatIdForSavingRef.current
       if (realChatId && !realChatId.startsWith('temp-chat-') && messagesRef.current.length > 0) {
         try {
           const { setMessages: saveMessagesToDb } = await import("@/lib/chat-store/messages/api")
-          
-          // CRITICAL: Get evidence citations for THIS specific message (follow-up messages)
-          // Try to get citations by message ID first, then fall back to ref
-          let citationsToSave: any[] | undefined = undefined
-          
-          // Priority 1: Get citations by message ID (for follow-up messages)
-          if (message.id) {
-            const messageCitations = evidenceCitationsByMessageRef.current.get(message.id)
-            if (messageCitations && messageCitations.length > 0) {
-              citationsToSave = messageCitations
-              console.log('📚 [onFinish] Found citations for message ID:', message.id, citationsToSave.length)
-            }
-          }
-          
-          // Priority 2: Get from ref (current citations)
-          if (!citationsToSave && evidenceCitationsRef.current.length > 0) {
-            citationsToSave = evidenceCitationsRef.current
-            console.log('📚 [onFinish] Using citations from ref:', citationsToSave.length)
-          }
+          // CRITICAL: Get evidence citations from ref, or try sessionStorage as fallback
+          let citationsToSave = evidenceCitationsRef.current.length > 0 ? evidenceCitationsRef.current : undefined
           
           // Fallback 1: Check sessionStorage if ref is empty
           if (!citationsToSave && typeof window !== 'undefined') {
@@ -546,34 +514,15 @@ export function useChatCore({
           const citationsJson = atob(evidenceHeader)
           const citations = JSON.parse(citationsJson)
           console.log(`📚 [EVIDENCE] Successfully parsed ${citations.length} citations from server`)
-          
-          // CRITICAL: Store citations - they will be associated with message ID in onFinish
-          // For follow-up messages, we need to track citations per message
-          // The message ID will be available in onFinish callback
           setEvidenceCitations(citations)
         } else {
           console.log('📚 [EVIDENCE] No evidence citations header found in response')
-          // CRITICAL: Clear citations for this response if no header (follow-up message without citations)
-          // This ensures we don't save old citations with new messages
-          setEvidenceCitations([])
         }
       } catch (e) {
         console.error('📚 [EVIDENCE] Failed to parse evidence citations from header:', e)
       }
     },
   })
-  
-  // CRITICAL: Clear citations when a new message starts (status changes to "submitted")
-  // This ensures follow-up messages don't inherit citations from previous messages
-  useEffect(() => {
-    if (status === 'submitted') {
-      // Clear citations when a new message is submitted
-      // They will be set again in onResponse if the new message has citations
-      console.log('📚 [EVIDENCE] Clearing citations for new message submission')
-      evidenceCitationsRef.current = []
-      setEvidenceCitationsState([])
-    }
-  }, [status])
   
   // CRITICAL: Save messages incrementally during streaming
   // This ensures messages are saved even if navigation happens before onFinish
@@ -598,67 +547,50 @@ export function useChatCore({
         return
       }
       
-          // Save new messages incrementally
+      // Save new messages incrementally
       Promise.resolve().then(async () => {
         try {
           const { saveMessageIncremental } = await import("@/lib/chat-store/messages/api")
+          // CRITICAL: Get evidence citations from ref, or try sessionStorage as fallback
+          let citationsToSave = evidenceCitationsRef.current.length > 0 ? evidenceCitationsRef.current : undefined
           
-          for (const message of assistantMessagesToSave) {
-            // CRITICAL: Get evidence citations for THIS specific message (follow-up messages)
-            // Try to get citations by message ID first, then fall back to ref
-            let citationsToSave: any[] | undefined = undefined
-            
-            // Priority 1: Get citations by message ID (for follow-up messages)
-            if (message.id) {
-              const messageCitations = evidenceCitationsByMessageRef.current.get(message.id)
-              if (messageCitations && messageCitations.length > 0) {
-                citationsToSave = messageCitations
-                console.log('📚 [STREAMING] Found citations for message ID:', message.id, citationsToSave.length)
-              }
-            }
-            
-            // Priority 2: Get from ref (current citations)
-            if (!citationsToSave && evidenceCitationsRef.current.length > 0) {
-              citationsToSave = evidenceCitationsRef.current
-              console.log('📚 [STREAMING] Using citations from ref:', citationsToSave.length)
-            }
-            
-            // Fallback 1: Check sessionStorage if ref is empty
-            if (!citationsToSave && typeof window !== 'undefined') {
-              try {
-                const latest = sessionStorage.getItem('evidenceCitations:latest')
-                if (latest) {
-                  const latestData = JSON.parse(latest)
-                  if (latestData.citations && Array.isArray(latestData.citations) && latestData.citations.length > 0) {
-                    const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 60000) // 1 minute
-                    const matchesChatId = !realChatId || latestData.chatId === realChatId || !latestData.chatId
-                    if (isRecent && matchesChatId) {
-                      citationsToSave = latestData.citations
-                      console.log('📚 [STREAMING] Restored citations from sessionStorage for save:', citationsToSave.length)
-                    }
+          // Fallback 1: Check sessionStorage if ref is empty
+          if (!citationsToSave && typeof window !== 'undefined') {
+            try {
+              const latest = sessionStorage.getItem('evidenceCitations:latest')
+              if (latest) {
+                const latestData = JSON.parse(latest)
+                if (latestData.citations && Array.isArray(latestData.citations) && latestData.citations.length > 0) {
+                  const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 60000) // 1 minute
+                  const matchesChatId = !realChatId || latestData.chatId === realChatId || !latestData.chatId
+                  if (isRecent && matchesChatId) {
+                    citationsToSave = latestData.citations
+                    console.log('📚 [STREAMING] Restored citations from sessionStorage for save:', citationsToSave.length)
                   }
                 }
-              } catch (e) {
-                console.error('📚 [STREAMING] Failed to parse sessionStorage citations:', e)
               }
+            } catch (e) {
+              console.error('📚 [STREAMING] Failed to parse sessionStorage citations:', e)
             }
-            
-            // Fallback 2: Extract from the message being saved if available
-            if (!citationsToSave && message?.parts && Array.isArray(message.parts)) {
-              const metadataPart = message.parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
+          }
+          
+          // Fallback 2: Extract from the message being saved if available
+          if (!citationsToSave && assistantMessagesToSave.length > 0) {
+            const messageToCheck = assistantMessagesToSave[assistantMessagesToSave.length - 1]
+            if (messageToCheck?.parts && Array.isArray(messageToCheck.parts)) {
+              const metadataPart = messageToCheck.parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
               if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
                 citationsToSave = (metadataPart as any).metadata.evidenceCitations
                 console.log('📚 [STREAMING] Extracted citations from message parts for save:', citationsToSave.length)
               }
             }
-            
+          }
+          
+          for (const message of assistantMessagesToSave) {
             await saveMessageIncremental(realChatId, message, citationsToSave)
-            if (citationsToSave && citationsToSave.length > 0) {
-              console.log('[🐛 STREAMING] Saved message', message.id, 'with', citationsToSave.length, 'citations')
-            }
           }
           lastSavedMessageCountRef.current = messages.length
-          console.log('[🐛 STREAMING] Saved', assistantMessagesToSave.length, 'new assistant messages incrementally to chatId:', realChatId)
+          console.log('[🐛 STREAMING] Saved', assistantMessagesToSave.length, 'new assistant messages incrementally to chatId:', realChatId, citationsToSave ? `with ${citationsToSave.length} citations` : '')
         } catch (error) {
           console.error('[🐛 STREAMING] Failed to save messages incrementally:', error)
         }
@@ -1207,7 +1139,42 @@ export function useChatCore({
   const submit = useCallback(async () => {
     if (!input.trim() && files.length === 0) return
    
-   
+    // CRITICAL: Check authentication FIRST before doing anything
+    const isAuthenticated = !!user?.id
+    
+    if (!isAuthenticated) {
+      // Store pending message for sending after authentication
+      // Note: Files can't be serialized, so we store file metadata
+      const fileMetadata = files.map(file => ({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      }))
+      
+      const pendingMessage = {
+        content: input.trim(),
+        files: fileMetadata, // Store metadata only
+        hasFiles: files.length > 0,
+        selectedModel,
+        enableSearch,
+        enableEvidence,
+        timestamp: Date.now(),
+      }
+      
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('pendingMessage', JSON.stringify(pendingMessage))
+        // Store files in a separate way if needed (IndexedDB or temporary storage)
+        // For now, we'll just note that files need to be re-uploaded
+        if (files.length > 0) {
+          console.log('Files were attached but cannot be preserved. User will need to re-upload after login.')
+        }
+      }
+      
+      // Show auth dialog
+      setHasDialogAuth(true)
+      return
+    }
+
     // Set submitting state immediately for optimistic UI
     setIsSubmitting(true)
 
@@ -1220,337 +1187,146 @@ export function useChatCore({
     setFiles([])
     clearDraft()
 
+    // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
+    const isOnChatRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/c/')
+    const chatIdFromUrl = isOnChatRoute ? window.location.pathname.split('/c/')[1] : null
+    const existingChatIdFromRef = currentChatIdForSavingRef.current
+    
+    // Quick synchronous chatId resolution (priority: URL > prop > ref > temp)
+    let optimisticChatId = chatIdFromUrl || chatId || existingChatIdFromRef || "temp"
+    
+    // Create optimistic attachments immediately (no upload yet)
+    let optimisticAttachments: Attachment[] | undefined = undefined
+    if (currentFiles.length > 0) {
+      optimisticAttachments = createOptimisticAttachments(currentFiles)
+    }
+
+    // CRITICAL: Append message IMMEDIATELY with optimistic values - message appears instantly
+    const optimisticOptions = {
+      body: {
+        chatId: optimisticChatId,
+        userId: user?.id || "temp", // Use cached userId if available
+        model: selectedModel,
+        isAuthenticated: !!user?.id,
+        systemPrompt,
+        enableSearch,
+        enableEvidence,
+        // CRITICAL: Ensure userRole is passed correctly for evidence mode
+        userRole: userPreferences.preferences.userRole || "general",
+        medicalSpecialty: userPreferences.preferences.medicalSpecialty,
+        clinicalDecisionSupport: userPreferences.preferences.clinicalDecisionSupport,
+        medicalLiteratureAccess: userPreferences.preferences.medicalLiteratureAccess,
+        medicalComplianceMode: userPreferences.preferences.medicalComplianceMode,
+      },
+    }
+
+    append({
+      role: "user",
+      content: currentInput,
+      experimental_attachments: optimisticAttachments,
+    }, optimisticOptions)
+
+    // Mark that we've sent the first message to prevent redirect
+    hasSentFirstMessageRef.current = true
+    if (typeof window !== 'undefined' && optimisticChatId) {
+      sessionStorage.setItem(`hasSentMessage:${optimisticChatId}`, 'true')
+    }
+
+    // NOW do async work in parallel (non-blocking - message already visible)
     try {
-      const uid = await getOrCreateGuestUserId(user)
+      // Run critical async operations in parallel
+      const [uid, allowed] = await Promise.all([
+        getOrCreateGuestUserId(user),
+        // Pre-check limits with cached userId if available (non-blocking)
+        user?.id ? checkLimitsAndNotify(user.id) : Promise.resolve(true)
+      ])
+
       if (!uid) {
         setIsSubmitting(false)
         setHasDialogAuth(true)
         return
       }
 
-      const allowed = await checkLimitsAndNotify(uid)
       if (!allowed) {
         setIsSubmitting(false)
         return
       }
 
-      // For authenticated users, ensure we have a chat ID before streaming
-      let currentChatId = chatId
-      let chatIdFromEnsure = null
-      
-      // CRITICAL: Check if we're on a chat route (/c/chatid) - if so, use that chatId
-      const isOnChatRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/c/')
-      const chatIdFromUrl = isOnChatRoute ? window.location.pathname.split('/c/')[1] : null
+      // Determine real chatId (use cached values to avoid DB call when possible)
       const isOnHomePage = typeof window !== 'undefined' && window.location.pathname === "/"
-      
-      // CRITICAL: Check if we already have a chatId from a previous message in this session
-      // This prevents creating a new chat on every message when URL hasn't updated yet
-      // Also check sessionStorage for the chatId from the last message sent
-      const existingChatIdFromRef = currentChatIdForSavingRef.current
       const hasExistingMessages = messages.length > 0
       
-      // CRITICAL: Also check sessionStorage for chatId from previous messages
-      // This is a backup in case the ref gets cleared
-      // BUT: Only use it if it matches the current chatId from props/URL to avoid using old chats
-      let chatIdFromSessionStorage: string | null = null
-      if (typeof window !== 'undefined') {
-        // First, check if current chatId has a hasSentMessage flag (most reliable)
-        if (chatId && !chatId.startsWith('temp-chat-')) {
-          const hasSentMessage = sessionStorage.getItem(`hasSentMessage:${chatId}`)
-          if (hasSentMessage === 'true') {
-            chatIdFromSessionStorage = chatId // Use current chatId if it has sent messages
-          }
-        }
-        
-        // If no match, check for any hasSentMessage keys (fallback)
-        if (!chatIdFromSessionStorage) {
-          const keys = Object.keys(sessionStorage)
-          const sentMessageKeys = keys.filter(k => k.startsWith('hasSentMessage:') && !k.includes('temp-chat-'))
-          if (sentMessageKeys.length > 0) {
-            // Get the most recent one (they should all be the same, but just in case)
-            const mostRecentKey = sentMessageKeys[sentMessageKeys.length - 1]
-            const candidateChatId = mostRecentKey.replace('hasSentMessage:', '')
-            // CRITICAL: Only use if it matches current chatId or URL to avoid using old chats
-            if (candidateChatId === chatId || candidateChatId === chatIdFromUrl) {
-              chatIdFromSessionStorage = candidateChatId
-            }
-          }
-        }
-      }
+      let currentChatId = optimisticChatId
       
-      // Use sessionStorage chatId as fallback if ref is empty AND it matches current context
-      // CRITICAL: Only use effectiveExistingChatId if it matches current chatId/URL to prevent navigation to old chats
-      const effectiveExistingChatId = existingChatIdFromRef || 
-        (chatIdFromSessionStorage && (chatIdFromSessionStorage === chatId || chatIdFromSessionStorage === chatIdFromUrl) 
-          ? chatIdFromSessionStorage 
-          : null)
-      
-      console.log('[🐛 SUBMIT DEBUG] Chat ID decision:', {
-        chatIdFromProp: chatId,
-        chatIdFromUrl,
-        existingChatIdFromRef,
-        chatIdFromSessionStorage,
-        effectiveExistingChatId,
-        pathname: typeof window !== 'undefined' ? window.location.pathname : 'N/A',
-        isOnChatRoute,
-        isOnHomePage,
-        isAuthenticated,
-        messagesCount: messages.length,
-        hasExistingMessages,
-        isTempId: chatId?.startsWith('temp')
-      })
-      
-      // CRITICAL: Priority order for chatId (check in this exact order):
-      // 1. chatId from URL (if on /c/chatid route) - highest priority
-      // 2. chatId from prop (from useChatSession) - second priority  
-      // 3. chatId from ref (from previous message in this session) - third priority
-      // 4. Only create new chat if we have NO chatId anywhere and NO messages (truly new conversation)
-      // CRITICAL: Never use effectiveExistingChatId if we have a valid chatId from props/URL to avoid old chats
-      
-      if (chatIdFromUrl && chatIdFromUrl !== chatId) {
-        // We're on a chat route - use that chatId
-        console.log('[🐛 SUBMIT] Using chatId from URL:', chatIdFromUrl)
-        currentChatId = chatIdFromUrl
-        if (chatIdFromUrl !== chatId) {
-          bumpChat(chatIdFromUrl)
-        }
-      } else if (chatId && !chatId.startsWith('temp')) {
-        // We have a valid chatId from prop - use it, NEVER create new chat or use old chats
-        console.log('[🐛 SUBMIT] ✅ Using existing valid chatId from prop (preventing new chat):', chatId)
-        currentChatId = chatId
-        // CRITICAL: Update ref to match current chatId to prevent using old chats
-        if (currentChatIdForSavingRef.current !== chatId) {
-          currentChatIdForSavingRef.current = chatId
-        }
-      } else if (effectiveExistingChatId && !effectiveExistingChatId.startsWith('temp-chat-') && 
-                 (!chatId || chatId.startsWith('temp'))) {
-        // CRITICAL: Only use effectiveExistingChatId if we don't have a valid chatId from props
-        // This prevents using old chats when we have a current valid chatId
-        // CRITICAL: We have a chatId from a previous message (ref or sessionStorage) - use it
-        // This prevents creating a new chat on every message when URL hasn't updated yet
-        console.log('[🐛 SUBMIT] ✅ Using existing chatId from previous message (preventing new chat):', effectiveExistingChatId)
-        currentChatId = effectiveExistingChatId
-        // Update the ref if it was empty but we found it in sessionStorage
-        if (!existingChatIdFromRef) {
-          currentChatIdForSavingRef.current = effectiveExistingChatId
-        }
-        // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
-        // URL will be updated after message is fully sent and saved
-        // We'll update it in the onFinish callback instead
-      } else if (hasExistingMessages) {
-        // CRITICAL: We have messages - we're in an existing conversation
-        // Don't create a new chat, use the effective chatId if available
-        console.log('[🐛 SUBMIT] ✅ Have existing messages - using chatId to prevent new chat')
-        if (effectiveExistingChatId && !effectiveExistingChatId.startsWith('temp-chat-')) {
-          currentChatId = effectiveExistingChatId
-          // Update the ref if it was empty
-          if (!existingChatIdFromRef) {
-            currentChatIdForSavingRef.current = effectiveExistingChatId
-          }
-          // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
-          // URL will be updated after message is fully sent and saved in onFinish callback
-        } else {
-          console.error('[🐛 SUBMIT] ⚠️ Have messages but no valid chatId found! This should not happen.')
-          setIsSubmitting(false)
-          return
-        }
-      } else if (isAuthenticated && isOnHomePage && messages.length === 0 && !effectiveExistingChatId) {
-        // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
-        // URL will be updated after message is fully sent and saved in onFinish callback
-        // CRITICAL: Only create new chat if:
-        // - We're on home page
-        // - We have no messages
-        // - We have NO existing chatId in ref (truly new conversation)
-        console.log('[🐛 SUBMIT] On home page with no messages and no existing chatId - creating new chat')
+      // Only call ensureChatExists if we truly don't have a valid chatId
+      if ((!currentChatId || currentChatId === "temp" || currentChatId.startsWith('temp-chat-')) && 
+          isAuthenticated && isOnHomePage && !hasExistingMessages) {
         try {
-          chatIdFromEnsure = await ensureChatExists(uid, currentInput)
-          
+          const chatIdFromEnsure = await ensureChatExists(uid, currentInput)
           if (chatIdFromEnsure && !chatIdFromEnsure.toString().startsWith('temp')) {
             currentChatId = chatIdFromEnsure.toString()
-            console.log('[🐛 SUBMIT] Got real chatId from ensureChatExists:', currentChatId)
-            // Update chatId if it changed
             if (currentChatId !== chatId) {
               bumpChat(currentChatId)
             }
-            // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
-            // URL will be updated after message is fully sent and saved in onFinish callback
-          } else if (chatIdFromEnsure) {
-            console.warn('[🐛 SUBMIT] ⚠️ Got temp chatId for authenticated user (unexpected):', chatIdFromEnsure)
-            currentChatId = chatIdFromEnsure.toString()
-          } else {
-            console.error('[🐛 SUBMIT] Chat creation failed - cannot proceed without chatId')
-            setIsSubmitting(false)
-            return
           }
         } catch (error) {
           console.error('[🐛 SUBMIT] Chat creation failed:', error)
-          setIsSubmitting(false)
-          return
+          // Continue with optimistic chatId
         }
-      } else if (isAuthenticated && !isOnHomePage && (!chatId || chatId.startsWith('temp'))) {
-        // We're not on home page but don't have a valid chatId
-        // Try to use effective chatId, otherwise fail
-        if (effectiveExistingChatId && !effectiveExistingChatId.startsWith('temp-chat-')) {
-          console.log('[🐛 SUBMIT] Using chatId from ref/sessionStorage (not on home page):', effectiveExistingChatId)
-          currentChatId = effectiveExistingChatId
-          // Update the ref if it was empty
-          if (!existingChatIdFromRef) {
-            currentChatIdForSavingRef.current = effectiveExistingChatId
-          }
-          // CRITICAL: Don't update URL immediately - it causes useChat to reset and clear messages
-          // URL will be updated after message is fully sent and saved in onFinish callback
-        } else {
-          console.warn('[🐛 SUBMIT] ⚠️ NOT on home page but no valid chatId! Cannot proceed.')
-          setIsSubmitting(false)
-          return
-        }
-      } else {
-        // Fallback: if we somehow get here and have no chatId, we can't proceed
-        console.error('[🐛 SUBMIT] ⚠️ No valid chatId found and cannot create new chat. State:', {
-          chatId,
-          chatIdFromUrl,
-          existingChatIdFromRef,
-          chatIdFromSessionStorage,
-          effectiveExistingChatId,
-          hasExistingMessages,
-          isOnHomePage,
-          messagesLength: messages.length
-        })
-        setIsSubmitting(false)
-        return
       }
-      
-      console.log('[🐛 SUBMIT] Final currentChatId:', currentChatId)
-      
-      // CRITICAL: Store the chatId for saving messages (use real chatId if available)
-      // This ref is used to prevent creating new chats on subsequent messages
+
+      // Update chatId ref for next message
       if (currentChatId && !currentChatId.startsWith('temp-chat-')) {
         currentChatIdForSavingRef.current = currentChatId
-        console.log('[🐛 SUBMIT] Stored chatId in ref for future messages:', currentChatId)
-      } else if (currentChatId && currentChatId.startsWith('temp-chat-')) {
-        lastUsedTempChatIdRef.current = currentChatId
-        // Wait for real chatId to be available
-        currentChatIdForSavingRef.current = null
       }
 
-      // Start streaming with the message
-      const options = {
-        body: {
-          chatId: currentChatId || "temp", // Use real chatId if available, temp for guests
-          userId: uid,
-          model: selectedModel,
-          isAuthenticated: !!user?.id,
-          systemPrompt,
-          enableSearch,
-          enableEvidence,
-          userRole: userPreferences.preferences.userRole,
-          medicalSpecialty: userPreferences.preferences.medicalSpecialty,
-          clinicalDecisionSupport:
-            userPreferences.preferences.clinicalDecisionSupport,
-          medicalLiteratureAccess:
-            userPreferences.preferences.medicalLiteratureAccess,
-          medicalComplianceMode:
-            userPreferences.preferences.medicalComplianceMode,
-        },
-      }
-     
+      // Handle file uploads in background (non-blocking)
+      if (currentFiles.length > 0 && currentChatId && currentChatId !== "temp") {
+        Promise.resolve().then(async () => {
+          try {
+            const uploadingToastId = toast({
+              title: `Uploading ${currentFiles.length} file${currentFiles.length > 1 ? 's' : ''}...`,
+              description: "Please wait while your files are being uploaded",
+              status: "info",
+            })
 
-      // Handle file uploads first if there are files
-      let processedAttachments: Attachment[] | null = null
-      if (currentFiles.length > 0) {
-        console.log("[DEBUG] Starting file upload process with", currentFiles.length, "files:", currentFiles.map(f => f.name))
-
-        // Show upload progress notification
-        const uploadingToastId = toast({
-          title: `Uploading ${currentFiles.length} file${currentFiles.length > 1 ? 's' : ''}...`,
-          description: "Please wait while your files are being uploaded",
-          status: "info",
-        })
-
-        try {
-          // Use the already-determined currentChatId from above, don't call ensureChatExists again
-          console.log("[DEBUG] Using currentChatId for file upload:", currentChatId)
-
-          if (currentChatId) {
-            // Upload files in background
-            processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id, currentFiles)
-            console.log("[DEBUG] File uploads completed:", processedAttachments?.length || 0, "files")
-            console.log("[DEBUG] Processed attachments:", processedAttachments)
-
-            // Dismiss upload progress and show success
+            const processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id, currentFiles)
+            
             sonnerToast.dismiss(uploadingToastId)
+            if (processedAttachments && processedAttachments.length > 0) {
+              toast({
+                title: "Files uploaded successfully",
+                description: `${processedAttachments.length} file${processedAttachments.length > 1 ? 's' : ''} ready`,
+                status: "success",
+              })
+              // Note: Real attachments will be used in the API call via streaming
+            }
+          } catch (error) {
+            console.error("File upload failed:", error)
             toast({
-              title: "Files uploaded successfully",
-              description: `${processedAttachments?.length || 0} file${(processedAttachments?.length || 0) > 1 ? 's' : ''} ready`,
-              status: "success",
+              title: "File upload failed",
+              description: "Your message was sent, but files couldn't be uploaded.",
+              status: "warning",
             })
           }
-        } catch (error) {
-          console.error("File upload failed:", error)
-          // Dismiss upload progress
-          sonnerToast.dismiss(uploadingToastId)
-          toast({
-            title: "File upload failed",
-            description: "Your message was sent, but files couldn't be uploaded.",
-            status: "warning",
-          })
-        }
+        })
       }
 
-      // Append message with processed attachments (or none if upload failed)
-      console.log("[DEBUG] About to append message with attachments:", processedAttachments)
-      console.log("[DEBUG] Attachment count:", processedAttachments?.length || 0)
-
-      // Mark that we've sent the first message to prevent redirect
-      hasSentFirstMessageRef.current = true
-      if (typeof window !== 'undefined') {
-        // Set for BOTH the current chat ID (temp or real) AND the chatId from props
-        // This ensures it works regardless of when navigation happens
-        if (currentChatId) {
-          sessionStorage.setItem(`hasSentMessage:${currentChatId}`, 'true')
-          // CRITICAL: Cache the user message immediately to temp chat ID for migration
-          if (currentChatId.startsWith('temp-chat-')) {
-            try {
-              const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
-              // Save the user message to temp chat ID so it can be migrated later
-              const userMessage = {
-                role: "user" as const,
-                content: currentInput,
-                id: `msg-${Date.now()}`,
-                experimental_attachments: processedAttachments,
-                createdAt: new Date()
-              }
-              await writeToIndexedDB("messages", { id: currentChatId, messages: [userMessage] })
-              console.log('[useChatCore] Cached user message to temp chat ID:', currentChatId)
-            } catch (error) {
-              console.error('[useChatCore] Failed to cache user message to temp chat ID:', error)
-            }
-          }
-        }
-        if (chatId && chatId !== currentChatId) {
-          sessionStorage.setItem(`hasSentMessage:${chatId}`, 'true')
-        }
-      }
-
-      append({
-        role: "user",
-        content: currentInput,
-        experimental_attachments: processedAttachments || undefined,
-      }, options)
     } catch (error) {
       console.error("Error in submit:", error)
       toast({
         title: "An error occurred while sending your message.",
         status: "error",
       })
-    } finally {
       setIsSubmitting(false)
     }
+    // Note: Don't set isSubmitting to false here - let onFinish handle it
   }, [
     user,
     input,
     files,
     chatId,
+    messages,
     checkLimitsAndNotify,
     ensureChatExists,
     handleFileUploads,
@@ -1565,6 +1341,8 @@ export function useChatCore({
     setInput,
     setFiles,
     userPreferences,
+    createOptimisticAttachments,
+    isAuthenticated,
     setHasRateLimitPaywall,
     setRateLimitWaitTime,
     setRateLimitType,
@@ -1575,85 +1353,77 @@ export function useChatCore({
     async (suggestion: string) => {
       setIsSubmitting(true)
 
+      // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
+      const optimisticChatId = chatId || currentChatIdForSavingRef.current || "temp"
+
+      // CRITICAL: Append message IMMEDIATELY with optimistic values - message appears instantly
+      const optimisticOptions = {
+        body: {
+          chatId: optimisticChatId,
+          userId: user?.id || "temp", // Use cached userId if available
+          model: selectedModel,
+          isAuthenticated: !!user?.id,
+          systemPrompt: getSystemPromptByRole(userPreferences.preferences.userRole),
+        },
+      }
+
+      append({
+        role: "user",
+        content: suggestion,
+      }, optimisticOptions)
+
+      // Mark that we've sent the first message to prevent redirect
+      hasSentFirstMessageRef.current = true
+      if (typeof window !== 'undefined' && optimisticChatId) {
+        sessionStorage.setItem(`hasSentMessage:${optimisticChatId}`, 'true')
+      }
+
+      // NOW do async work in parallel (non-blocking - message already visible)
       try {
-        const uid = await getOrCreateGuestUserId(user)
+        // Run critical async operations in parallel
+        const [uid, allowed] = await Promise.all([
+          getOrCreateGuestUserId(user),
+          // Pre-check limits with cached userId if available (non-blocking)
+          user?.id ? checkLimitsAndNotify(user.id) : Promise.resolve(true)
+        ])
+
         if (!uid) {
           setIsSubmitting(false)
           return
         }
 
-        const allowed = await checkLimitsAndNotify(uid)
         if (!allowed) {
           setIsSubmitting(false)
           return
         }
 
-        // For authenticated users, ensure we have a chat ID before streaming
-        // CRITICAL: Use existing chatId if we have one - don't create new chat for suggestions
-        let currentChatId = chatId
+        // Determine real chatId (use cached values to avoid DB call when possible)
         const isOnHomePage = typeof window !== 'undefined' && window.location.pathname === "/"
-        
-        // Only create new chat if we're on home page AND don't have a valid chatId
-        if (isAuthenticated && isOnHomePage && (!chatId || chatId.startsWith('temp'))) {
-          // For authenticated users, wait for real chat creation (no temp chats)
+        let currentChatId = optimisticChatId
+
+        // Only call ensureChatExists if we truly don't have a valid chatId
+        if (isAuthenticated && isOnHomePage && (!currentChatId || currentChatId.startsWith('temp'))) {
           try {
             const quickChatId = await ensureChatExists(uid, suggestion)
-            
             if (quickChatId && !quickChatId.toString().startsWith('temp')) {
               currentChatId = quickChatId.toString()
-              // Update chatId if it changed
               if (currentChatId !== chatId) {
                 bumpChat(currentChatId)
               }
-            } else if (quickChatId) {
-              // This shouldn't happen for authenticated users, but handle it
-              console.warn('[🐛 SUGGESTION] ⚠️ Got temp chatId for authenticated user (unexpected):', quickChatId)
-              currentChatId = quickChatId.toString()
-            } else {
-              // Chat creation failed - don't create temp chat for authenticated users
-              console.error('[🐛 SUGGESTION] Chat creation failed - cannot proceed without chatId')
-              return
             }
           } catch (error) {
             console.error('[🐛 SUGGESTION] Chat creation failed:', error)
-            return
+            // Continue with optimistic chatId
           }
         } else if (chatId && !chatId.startsWith('temp')) {
-          // We already have a valid chatId - use it, never create a new chat
-          console.log('[🐛 SUGGESTION] Using existing valid chatId (no new chat):', currentChatId)
           currentChatId = chatId
-        } else if (!isOnHomePage && (!chatId || chatId.startsWith('temp'))) {
-          // We're not on home page but don't have a valid chatId
-          // This shouldn't normally happen, but handle it gracefully
-          console.warn('[🐛 SUGGESTION] ⚠️ NOT on home page but no valid chatId! Cannot proceed.')
-          return
         }
 
-        // Start streaming immediately for instant feedback
-        const options = {
-          body: {
-            chatId: currentChatId || "temp", // Use real chatId if available, temp for guests
-            userId: uid,
-            model: selectedModel,
-            isAuthenticated,
-            systemPrompt: getSystemPromptByRole(userPreferences.preferences.userRole),
-          },
+        // Update chatId ref for next message
+        if (currentChatId && !currentChatId.startsWith('temp-chat-')) {
+          currentChatIdForSavingRef.current = currentChatId
         }
 
-        // Mark that we've sent the first message to prevent redirect
-        hasSentFirstMessageRef.current = true
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem(`hasSentMessage:${currentChatId || chatId}`, 'true')
-        }
-
-        // Append message immediately
-        append(
-          {
-            role: "user",
-            content: suggestion,
-          },
-          options
-        )
       } catch {
         toast({ title: "Failed to send suggestion", status: "error" })
         setIsSubmitting(false)
@@ -1668,6 +1438,7 @@ export function useChatCore({
       ensureChatExists,
       isAuthenticated,
       bumpChat,
+      userPreferences,
     ]
   )
 

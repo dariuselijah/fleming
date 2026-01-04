@@ -11,10 +11,11 @@ import { getSystemPromptByRole } from "@/lib/config"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
+import { toast } from "@/components/ui/toast"
 import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
 import { redirect } from "next/navigation"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
@@ -54,6 +55,17 @@ export function Chat() {
   const { user } = useUser()
   const { preferences } = useUserPreferences()
   const { draftValue, clearDraft } = useChatDraft(chatId)
+  
+  // Track previous user state to detect login
+  const prevUserRef = useRef(user)
+  const isInitialMountRef = useRef(true)
+  const pendingMessageRef = useRef<{
+    content: string
+    files: File[]
+    selectedModel: string
+    enableSearch: boolean
+    enableEvidence: boolean
+  } | null>(null)
 
   // File upload functionality
   const {
@@ -141,6 +153,94 @@ export function Chat() {
     setRateLimitWaitTime,
     setRateLimitType,
   })
+
+  // Helper function to send pending message - defined after useChatCore to access submit
+  const sendPendingMessage = useCallback(() => {
+    if (typeof window === 'undefined') return
+    
+    const pendingMessageStr = sessionStorage.getItem('pendingMessage')
+    if (!pendingMessageStr) return
+    
+    try {
+      const pendingMessage = JSON.parse(pendingMessageStr)
+      
+      // Store in ref for immediate access
+      pendingMessageRef.current = {
+        content: pendingMessage.content || '',
+        files: [], // Files can't be serialized, user will need to re-upload if needed
+        selectedModel: pendingMessage.selectedModel || selectedModel,
+        enableSearch: pendingMessage.enableSearch ?? enableSearch,
+        enableEvidence: pendingMessage.enableEvidence ?? enableEvidence,
+      }
+      
+      // Set input from pending message
+      handleInputChange(pendingMessage.content || '')
+      
+      // Restore search and evidence settings if they were set
+      if (pendingMessage.enableSearch !== undefined) {
+        setEnableSearch(pendingMessage.enableSearch)
+      }
+      if (pendingMessage.enableEvidence !== undefined) {
+        setEnableEvidence(pendingMessage.enableEvidence)
+      }
+      
+      // Show notification if files were attached but can't be restored
+      if (pendingMessage.hasFiles) {
+        toast({
+          title: "Message sent",
+          description: "Note: Files need to be re-uploaded after login.",
+          status: "info",
+        })
+      }
+      
+      // Clear pending message from storage
+      sessionStorage.removeItem('pendingMessage')
+      
+      // Close auth dialog if open
+      setHasDialogAuth(false)
+      
+      // Wait for state to update, then send
+      // Use requestAnimationFrame to ensure React has processed state updates
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          submit()
+        }, 50)
+      })
+    } catch (error) {
+      console.error('Error parsing pending message:', error)
+      sessionStorage.removeItem('pendingMessage')
+      pendingMessageRef.current = null
+    }
+  }, [submit, handleInputChange, setEnableSearch, setEnableEvidence, setHasDialogAuth, selectedModel, enableSearch, enableEvidence])
+  
+  // Check for pending message on mount (in case user returned from OAuth)
+  useEffect(() => {
+    if (isInitialMountRef.current && user?.id) {
+      // User is authenticated on mount, check for pending message
+      sendPendingMessage()
+      isInitialMountRef.current = false
+      prevUserRef.current = user
+      return
+    }
+    
+    // Skip on initial mount if no user
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false
+      prevUserRef.current = user
+      return
+    }
+    
+    const prevUser = prevUserRef.current
+    const currentUser = user
+    
+    // User just logged in (was null, now has id)
+    if (!prevUser?.id && currentUser?.id) {
+      sendPendingMessage()
+    }
+    
+    // Update ref
+    prevUserRef.current = currentUser
+  }, [user, sendPendingMessage])
 
   // Memoize the conversation props to prevent unnecessary rerenders
   const conversationProps = useMemo(

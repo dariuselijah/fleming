@@ -219,3 +219,4 @@ COMMENT ON TABLE response_citations IS 'Links chat messages to specific document
 COMMENT ON TABLE citation_verifications IS 'Verification log for citation accuracy and traceability';
 COMMENT ON TABLE citation_source_metadata IS 'Additional metadata for citation sources';
 
+

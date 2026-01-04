@@ -1,8 +1,18 @@
-import { MessageContent } from "@/components/prompt-kit/message"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { AlertCircle, Loader2, RefreshCw } from "lucide-react"
-import { useLayoutEffect, useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState, useEffect, useMemo } from "react"
+import {
+  Message as MessageContainer,
+  MessageContent,
+} from "@/components/prompt-kit/message"
+import {
+  ChatContainerRoot,
+  ChatContainerContent,
+} from "@/components/prompt-kit/chat-container"
+import { CitationMarkdown } from "@/app/components/chat/citation-markdown"
+import { EvidenceReferencesSection } from "@/app/components/chat/evidence-references-section"
+import type { EvidenceCitation } from "@/lib/evidence/types"
 
 type ChatPreviewPanelProps = {
   chatId: string | null
@@ -18,89 +28,83 @@ type ChatMessage = {
   content: string
   role: "user" | "assistant"
   created_at: string
+  evidenceCitations?: EvidenceCitation[]
 }
 
 type MessageBubbleProps = {
   content: string
   role: "user" | "assistant"
-  timestamp: string
+  id: string
+  evidenceCitations?: EvidenceCitation[]
+  isLast?: boolean
 }
 
-function MessageBubble({ content, role }: MessageBubbleProps) {
-  const isUser = role === "user"
+function MessageBubble({ content, role, evidenceCitations }: MessageBubbleProps) {
+  // CRITICAL: Validate evidenceCitations before using
+  const hasValidCitations = useMemo(() => {
+    if (!evidenceCitations || !Array.isArray(evidenceCitations)) return false
+    // Check if citations have required fields (index and title)
+    return evidenceCitations.length > 0 && 
+           evidenceCitations.every(c => 
+             c && 
+             typeof c.index === 'number' && 
+             c.title && 
+             typeof c.title === 'string'
+           )
+  }, [evidenceCitations])
 
-  if (isUser) {
+  if (role === "user") {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[70%]">
-          <MessageContent
-            className="bg-accent relative rounded-3xl px-5 py-2.5"
-            markdown={true}
-            components={{
-              code: ({ children }) => <>{children}</>,
-              pre: ({ children }) => <>{children}</>,
-              h1: ({ children }) => <p>{children}</p>,
-              h2: ({ children }) => <p>{children}</p>,
-              h3: ({ children }) => <p>{children}</p>,
-              h4: ({ children }) => <p>{children}</p>,
-              h5: ({ children }) => <p>{children}</p>,
-              h6: ({ children }) => <p>{children}</p>,
-              p: ({ children }) => <p>{children}</p>,
-              li: ({ children }) => <p>- {children}</p>,
-              ul: ({ children }) => <>{children}</>,
-              ol: ({ children }) => <>{children}</>,
-            }}
-          >
-            {content}
-          </MessageContent>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[400px]">
+      <MessageContainer className="group flex w-full max-w-3xl flex-col items-end gap-0.5 px-6 pb-2">
         <MessageContent
-          className="text-foreground bg-transparent p-0 text-sm"
+          className="bg-accent relative max-w-[70%] rounded-3xl px-5 py-2.5"
           markdown={true}
           components={{
-            h1: ({ children }) => (
-              <div className="mb-1 text-base font-semibold">{children}</div>
-            ),
-            h2: ({ children }) => (
-              <div className="mb-1 text-sm font-medium">{children}</div>
-            ),
-            h3: ({ children }) => (
-              <div className="mb-1 text-sm font-medium">{children}</div>
-            ),
-            h4: ({ children }) => (
-              <div className="text-sm font-medium">{children}</div>
-            ),
-            h5: ({ children }) => (
-              <div className="text-sm font-medium">{children}</div>
-            ),
-            h6: ({ children }) => (
-              <div className="text-sm font-medium">{children}</div>
-            ),
-            p: ({ children }) => <div className="mb-1">{children}</div>,
-            li: ({ children }) => <div>• {children}</div>,
-            ul: ({ children }) => <div className="space-y-0.5">{children}</div>,
-            ol: ({ children }) => <div className="space-y-0.5">{children}</div>,
-            code: ({ children }) => (
-              <code className="bg-muted rounded px-1 text-xs">{children}</code>
-            ),
-            pre: ({ children }) => (
-              <div className="bg-muted overflow-x-auto rounded p-2 text-xs">
-                {children}
-              </div>
-            ),
+            code: ({ children }) => <>{children}</>,
+            pre: ({ children }) => <>{children}</>,
+            h1: ({ children }) => <p>{children}</p>,
+            h2: ({ children }) => <p>{children}</p>,
+            h3: ({ children }) => <p>{children}</p>,
+            h4: ({ children }) => <p>{children}</p>,
+            h5: ({ children }) => <p>{children}</p>,
+            h6: ({ children }) => <p>{children}</p>,
+            p: ({ children }) => <p>{children}</p>,
+            li: ({ children }) => <p>- {children}</p>,
+            ul: ({ children }) => <>{children}</>,
+            ol: ({ children }) => <>{children}</>,
           }}
         >
           {content}
         </MessageContent>
+      </MessageContainer>
+    )
+  }
+
+  // Assistant message
+  return (
+    <MessageContainer className="group flex w-full max-w-3xl flex-1 items-start gap-4 px-6 pb-2">
+      <div className="flex min-w-full flex-col gap-2">
+        {hasValidCitations ? (
+          <CitationMarkdown
+            citations={new Map()}
+            evidenceCitations={evidenceCitations}
+            className="prose dark:prose-invert relative min-w-full bg-transparent p-0 prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-base prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
+          >
+            {content}
+          </CitationMarkdown>
+        ) : (
+          <MessageContent
+            className="prose dark:prose-invert relative min-w-full bg-transparent p-0 prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-base prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
+            markdown={true}
+          >
+            {content}
+          </MessageContent>
+        )}
+        {hasValidCitations && (
+          <EvidenceReferencesSection citations={evidenceCitations} />
+        )}
       </div>
-    </div>
+    </MessageContainer>
   )
 }
 
@@ -184,17 +188,49 @@ export function ChatPreviewPanel({
 }: ChatPreviewPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const [lastChatId, setLastChatId] = useState<string | null>(null)
+  const lastChatIdRef = useRef<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
   const maxRetries = 3
 
-  const shouldFetch = chatId && chatId !== lastChatId
+  // Deduplicate messages by ID and sort by created_at to prevent duplicates and ensure order
+  const uniqueMessages = useMemo(() => {
+    const seen = new Set<string>()
+    const deduplicated = messages.filter((msg) => {
+      if (seen.has(msg.id)) {
+        return false
+      }
+      seen.add(msg.id)
+      return true
+    })
+    // Sort by created_at to ensure chronological order
+    return deduplicated.sort((a, b) => {
+      const timeA = new Date(a.created_at).getTime()
+      const timeB = new Date(b.created_at).getTime()
+      return timeA - timeB
+    })
+  }, [messages])
 
-  if (shouldFetch && onFetchPreview) {
-    setLastChatId(chatId)
-    setRetryCount(0)
-    onFetchPreview(chatId)
-  }
+  // Track the last chatId we scrolled for and the scroll height to prevent re-scrolling
+  const lastScrolledChatIdRef = useRef<string | null>(null)
+  const lastScrollHeightRef = useRef<number>(0)
+
+  // Fetch messages when chatId changes
+  useEffect(() => {
+    if (chatId && chatId !== lastChatIdRef.current) {
+      lastChatIdRef.current = chatId
+      lastScrolledChatIdRef.current = null // Reset scroll flag for new chat
+      lastScrollHeightRef.current = 0 // Reset scroll height
+      setRetryCount(0)
+      if (onFetchPreview) {
+        onFetchPreview(chatId)
+      }
+    } else if (!chatId) {
+      // Clear when chatId is null
+      lastChatIdRef.current = null
+      lastScrolledChatIdRef.current = null
+      lastScrollHeightRef.current = 0
+    }
+  }, [chatId, onFetchPreview])
 
   const handleRetry = () => {
     if (chatId && onFetchPreview && retryCount < maxRetries) {
@@ -203,17 +239,45 @@ export function ChatPreviewPanel({
     }
   }
 
-  // Immediately scroll to bottom when chatId changes or messages load
+  // Scroll to bottom only once per chatId when messages first load
   useLayoutEffect(() => {
-    if (chatId && messages.length > 0 && scrollAreaRef.current) {
+    // Only scroll if:
+    // 1. We have a chatId
+    // 2. We have messages
+    // 3. We haven't scrolled for this chatId yet
+    // 4. The chatId matches the current lastChatIdRef (to avoid scrolling during transitions)
+    if (
+      chatId &&
+      uniqueMessages.length > 0 &&
+      chatId !== lastScrolledChatIdRef.current &&
+      chatId === lastChatIdRef.current &&
+      scrollAreaRef.current
+    ) {
       const scrollContainer = scrollAreaRef.current.querySelector(
         "[data-radix-scroll-area-viewport]"
       )
       if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight
+        // Mark that we've scrolled for this chatId
+        lastScrolledChatIdRef.current = chatId
+        // Use a small delay to ensure DOM is fully updated
+        const timeoutId = setTimeout(() => {
+          if (
+            scrollContainer &&
+            chatId === lastScrolledChatIdRef.current &&
+            chatId === lastChatIdRef.current
+          ) {
+            const newScrollHeight = scrollContainer.scrollHeight
+            // Only scroll if the content height has actually changed
+            if (newScrollHeight !== lastScrollHeightRef.current) {
+              lastScrollHeightRef.current = newScrollHeight
+              scrollContainer.scrollTop = newScrollHeight
+            }
+          }
+        }, 50)
+        return () => clearTimeout(timeoutId)
       }
     }
-  }, [chatId, messages.length])
+  }, [chatId, uniqueMessages.length])
 
   return (
     <div
@@ -234,24 +298,28 @@ export function ChatPreviewPanel({
         {chatId && !isLoading && !error && messages.length === 0 && (
           <EmptyState />
         )}
-        {chatId && !isLoading && !error && messages.length > 0 && (
+        {chatId && !isLoading && !error && uniqueMessages.length > 0 && (
           <ScrollArea ref={scrollAreaRef} className="h-full">
-            <div className="space-y-4 p-6">
-              <div className="flex justify-center">
-                <div className="text-muted-foreground bg-muted/50 rounded-full px-2 py-1 text-xs">
-                  Last {messages.length} messages
+            <div className="relative flex h-full w-full flex-col items-center">
+              <div className="w-full">
+                <div className="flex justify-center py-2 w-full">
+                  <div className="text-muted-foreground bg-muted/50 rounded-full px-2 py-1 text-xs">
+                    Last {uniqueMessages.length} messages
+                  </div>
                 </div>
+                {uniqueMessages.map((message, index) => (
+                  <MessageBubble
+                    key={message.id}
+                    id={message.id}
+                    content={message.content}
+                    role={message.role}
+                    evidenceCitations={message.evidenceCitations}
+                    isLast={index === uniqueMessages.length - 1}
+                  />
+                ))}
+                <div ref={bottomRef} />
               </div>
-              {messages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  content={message.content}
-                  role={message.role}
-                  timestamp={message.created_at}
-                />
-              ))}
             </div>
-            <div ref={bottomRef} />
           </ScrollArea>
         )}
       </div>

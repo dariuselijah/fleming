@@ -237,3 +237,75 @@ export function formatResponseWithCitations(
   };
 }
 
+/**
+ * Extract and verify citations from LLM response
+ * This is the CRITICAL function that ensures only referenced citations are saved
+ * 
+ * @param responseText - The LLM-generated response text
+ * @param allRetrievedCitations - All citations that were retrieved and provided to the LLM
+ * @returns Only the citations that are actually referenced in the response
+ */
+export function extractReferencedCitations(
+  responseText: string,
+  allRetrievedCitations: EvidenceCitation[]
+): {
+  referencedCitations: EvidenceCitation[];
+  citationIndices: number[];
+  hasCitations: boolean;
+  verificationStats: {
+    totalRetrieved: number;
+    totalReferenced: number;
+    missingCitations: number[];
+  };
+} {
+  if (!responseText || allRetrievedCitations.length === 0) {
+    return {
+      referencedCitations: [],
+      citationIndices: [],
+      hasCitations: false,
+      verificationStats: {
+        totalRetrieved: allRetrievedCitations.length,
+        totalReferenced: 0,
+        missingCitations: [],
+      },
+    };
+  }
+
+  // Parse citation markers from response
+  const citationMap = parseCitationMarkers(responseText, allRetrievedCitations);
+  const referencedIndices = Array.from(citationMap.keys()).sort((a, b) => a - b);
+  
+  // Get only the citations that were actually referenced
+  const referencedCitations = referencedIndices
+    .map(index => citationMap.get(index))
+    .filter((c): c is EvidenceCitation => c !== undefined);
+
+  // Find citations that were retrieved but not referenced (potential issues)
+  const allIndices = new Set(allRetrievedCitations.map(c => c.index));
+  const referencedSet = new Set(referencedIndices);
+  const missingCitations = Array.from(allIndices).filter(i => !referencedSet.has(i));
+
+  const hasCitations = referencedCitations.length > 0;
+
+  // Log for debugging
+  if (hasCitations) {
+    console.log(`📚 [CITATION EXTRACTION] Found ${referencedCitations.length} referenced citations out of ${allRetrievedCitations.length} retrieved`);
+    if (missingCitations.length > 0) {
+      console.log(`📚 [CITATION EXTRACTION] Warning: ${missingCitations.length} retrieved citations were not referenced: [${missingCitations.join(', ')}]`);
+    }
+  } else if (allRetrievedCitations.length > 0) {
+    console.warn(`📚 [CITATION EXTRACTION] No citation markers found in response despite ${allRetrievedCitations.length} citations being provided`);
+  }
+
+  return {
+    referencedCitations,
+    citationIndices: referencedIndices,
+    hasCitations,
+    verificationStats: {
+      totalRetrieved: allRetrievedCitations.length,
+      totalReferenced: referencedCitations.length,
+      missingCitations,
+    },
+  };
+}
+

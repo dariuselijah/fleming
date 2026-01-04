@@ -219,9 +219,15 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     if (!chatId) return
 
     try {
+      // CRITICAL: Update state immediately for instant UI update
       setMessages((prev) => {
         const updated = [...prev, message]
-        writeToIndexedDB("messages", { id: chatId, messages: updated })
+        // Write to IndexedDB asynchronously after state update (non-blocking)
+        Promise.resolve().then(() => {
+          writeToIndexedDB("messages", { id: chatId, messages: updated }).catch((error) => {
+            console.error("[cacheAndAddMessage] Failed to write to IndexedDB:", error)
+          })
+        })
         return updated
       })
     } catch {

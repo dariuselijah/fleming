@@ -119,3 +119,4 @@ export function getUniqueCitationIndices(markers: CitationMarker[]): number[] {
   return Array.from(indices).sort((a, b) => a - b)
 }
 
+

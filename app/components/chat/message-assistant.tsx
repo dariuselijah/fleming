@@ -4,7 +4,7 @@ import {
   MessageActions,
   MessageContent,
 } from "@/components/prompt-kit/message"
-import { Loader } from "@/components/prompt-kit/loader"
+import { ProcessingLoader } from "@/components/prompt-kit/processing-loader"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
@@ -21,7 +21,7 @@ import { extractCitationsFromSources, extractCitationsFromWebSearch, extractJour
 import type { CitationData } from "./citation-popup"
 import type { EvidenceCitation } from "@/lib/evidence/types"
 import { parseCitationMarkers, getUniqueCitationIndices } from "@/lib/citations/parser"
-import { useMemo, useCallback, useEffect, useState, useRef, memo } from "react"
+import { useMemo, useCallback, useEffect, useState, useRef } from "react"
 
 type MessageAssistantProps = {
   children: string
@@ -36,9 +36,7 @@ type MessageAssistantProps = {
   evidenceCitations?: EvidenceCitation[]
 }
 
-// Memoize component to prevent re-renders when props haven't changed
-// Only re-render when content actually changes (for last message during streaming)
-export const MessageAssistant = memo(function MessageAssistant({
+export function MessageAssistant({
   children,
   isLast,
   hasScrollAnchor,
@@ -98,31 +96,7 @@ export const MessageAssistant = memo(function MessageAssistant({
   const lastSourcesKeyRef = useRef<string>('')
   const hasLoadedRef = useRef(false)
   
-  // Optimize: Use refs to track previous values and avoid expensive operations during streaming
-  const prevChildrenRef = useRef(children)
-  const prevSourcesKeyRef = useRef<string>('')
-  const isStreamingRef = useRef(status === "streaming" && isLast)
-  
   useEffect(() => {
-    // Skip expensive operations if we're streaming and content hasn't changed significantly
-    // Only check every N characters during streaming to reduce computation
-    const isStreaming = status === "streaming" && isLast
-    isStreamingRef.current = isStreaming
-    
-    // During streaming, only run expensive checks every 50 characters or so
-    if (isStreaming) {
-      const contentChanged = prevChildrenRef.current !== children
-      const significantChange = contentChanged && 
-        Math.abs((children?.length || 0) - (prevChildrenRef.current?.length || 0)) > 50
-      
-      if (!significantChange) {
-        // Content hasn't changed significantly, skip expensive operations
-        return
-      }
-    }
-    
-    prevChildrenRef.current = children
-    
     // CRITICAL: Check if text contains evidence-style markers [1], [2] etc.
     // If so, this is an evidence-backed response and we should NOT extract from web sources
     // even if evidenceCitations state is temporarily empty (e.g., during restore)
@@ -170,14 +144,6 @@ export const MessageAssistant = memo(function MessageAssistant({
     
     // Create a key from sources to detect changes
     const sourcesKey = sources.map(s => s.url).sort().join('|')
-    
-    // Only process if sources actually changed (not just children update during streaming)
-    if (sourcesKey === prevSourcesKeyRef.current && isStreaming) {
-      // Sources haven't changed and we're streaming - skip expensive extraction
-      return
-    }
-    
-    prevSourcesKeyRef.current = sourcesKey
     
     // Extract citations whenever we have sources, even during streaming
     if (sources.length > 0) {
@@ -302,9 +268,7 @@ export const MessageAssistant = memo(function MessageAssistant({
       }
     }
     // Include evidenceCitations to ensure we re-check when they arrive
-    // Optimize: Only run expensive operations when not streaming or when streaming completes
-    // Use a ref to track if we're currently streaming to avoid expensive work
-  }, [sources, evidenceCitations, children, status, isLast])
+  }, [sources, children, evidenceCitations])
   
   // Use evidence citations if available, otherwise fall back to web search citations
   const activeCitations = hasEvidenceCitations ? evidenceCitationMap : citations
@@ -383,7 +347,7 @@ export const MessageAssistant = memo(function MessageAssistant({
         {contentNullOrEmpty ? (
         isLastStreaming ? <div
             className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
-              <Loader>Thinking...</Loader>
+              <ProcessingLoader />
             </div> : null
         ) : shouldShowCitations ? (
           <CitationMarkdown
@@ -457,35 +421,4 @@ export const MessageAssistant = memo(function MessageAssistant({
       </div>
     </Message>
   )
-}, (prevProps, nextProps) => {
-  // Custom comparison for React.memo
-  // Only re-render if these props change
-  if (prevProps.isLast !== nextProps.isLast) return false
-  if (prevProps.status !== nextProps.status) return false
-  if (prevProps.hasScrollAnchor !== nextProps.hasScrollAnchor) return false
-  if (prevProps.className !== nextProps.className) return false
-  if (prevProps.copied !== nextProps.copied) return false
-  
-  // For the last message, always update during streaming (content changes)
-  // For other messages, only update if content changed
-  if (nextProps.isLast) {
-    // Last message - always update during streaming
-    if (prevProps.children !== nextProps.children) return false
-  } else {
-    // Non-last messages - only update if content changed
-    if (prevProps.children !== nextProps.children) return false
-  }
-  
-  // Check parts array changes (but don't deep compare - too expensive)
-  if (prevProps.parts !== nextProps.parts) {
-    if (prevProps.parts?.length !== nextProps.parts?.length) return false
-  }
-  
-  // Check evidenceCitations changes
-  if (prevProps.evidenceCitations !== nextProps.evidenceCitations) {
-    if (prevProps.evidenceCitations?.length !== nextProps.evidenceCitations?.length) return false
-  }
-  
-  // Props are equal, skip re-render
-  return true
-})
+}

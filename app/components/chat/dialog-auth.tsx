@@ -61,10 +61,10 @@ export function DialogAuth({ open, setOpen }: DialogAuthProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-xl">
-            Authentication Required
+            Sign in to send your message
           </DialogTitle>
           <DialogDescription className="pt-2 text-base">
-            Please sign in to continue using Fleming. Anonymous access is not allowed.
+            Please sign in to send your message. Your message will be sent automatically after you sign in.
           </DialogDescription>
         </DialogHeader>
         {error && (

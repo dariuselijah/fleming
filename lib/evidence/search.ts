@@ -126,6 +126,7 @@ ${c.snippet}
 
 /**
  * Build system prompt for evidence-based responses
+ * ENHANCED: More explicit citation requirements to ensure LLM generates citations
  */
 function buildEvidenceSystemPrompt(citations: EvidenceCitation[]): string {
   if (citations.length === 0) {
@@ -133,33 +134,52 @@ function buildEvidenceSystemPrompt(citations: EvidenceCitation[]): string {
   }
 
   return `
-## EVIDENCE-BASED RESPONSE GUIDELINES
+## ⚠️ CRITICAL: EVIDENCE-BASED RESPONSE REQUIREMENTS ⚠️
 
-You have access to ${citations.length} peer-reviewed medical evidence sources. You MUST:
+You have access to ${citations.length} peer-reviewed medical evidence sources. You MUST follow these rules:
 
-1. **CITE EVERY CLAIM**: Use inline citations [1], [2], etc. for every factual medical statement
-2. **PRIORITIZE HIGH EVIDENCE**: Weight meta-analyses (Level 1) and RCTs (Level 2) more heavily
-3. **ACKNOWLEDGE LIMITATIONS**: If evidence is from lower-quality studies, mention this
-4. **BE PRECISE**: Quote study findings accurately, including sample sizes when available
-5. **SYNTHESIZE**: Combine findings from multiple sources when they agree
-6. **FLAG CONFLICTS**: Note when sources disagree and explain why
+### MANDATORY CITATION RULES:
+1. **EVERY factual medical claim MUST be followed by a citation in square brackets**
+   - Format: [1], [2], [3] for single citations
+   - Format: [1,2,3] for multiple citations supporting the same claim
+   - Format: [1-3] for ranges (use sparingly)
+   
+2. **DO NOT make claims without citations** - If you cannot cite it, say "This information is not available in the provided sources"
 
-### Citation Format:
-- Single citation: "ACE inhibitors reduce mortality [1]"
-- Multiple citations: "Blood pressure control improves outcomes [1,2,3]"
-- Direct quote: "The study found 'a 23% reduction in cardiovascular events' [1]"
+3. **CITE IMMEDIATELY after each claim**, not at the end of paragraphs
+   - ✅ CORRECT: "ACE inhibitors reduce mortality [1]. They are first-line therapy [2]."
+   - ❌ WRONG: "ACE inhibitors reduce mortality. They are first-line therapy. [1,2]"
+
+4. **PRIORITIZE HIGH EVIDENCE**: Weight meta-analyses (Level 1) and RCTs (Level 2) more heavily than lower-quality studies
+
+5. **BE PRECISE**: Quote study findings accurately, including sample sizes when available
+
+6. **SYNTHESIZE**: Combine findings from multiple sources when they agree: "Multiple studies show X [1,2,3]"
+
+7. **FLAG CONFLICTS**: Note when sources disagree: "Some studies show X [1], while others show Y [2]"
+
+### Citation Examples:
+- Single: "Hypertension affects 30% of adults [1]"
+- Multiple: "Blood pressure control improves outcomes [1,2,3]"
+- With context: "A meta-analysis of 50,000 patients found a 23% reduction in cardiovascular events [1]"
 
 ### Evidence Quality Indicators:
-- Level 1 (Meta-Analysis/SR): Strongest evidence - prioritize these
-- Level 2 (RCT): Strong evidence - reliable for treatment recommendations
-- Level 3 (Cohort): Moderate evidence - good for associations
-- Level 4 (Case): Weak evidence - mention with caution
-- Level 5 (Opinion): Expert opinion - use for context only
+- **Level 1** (Meta-Analysis/Systematic Review): Strongest evidence - prioritize these
+- **Level 2** (Randomized Controlled Trial): Strong evidence - reliable for treatment recommendations
+- **Level 3** (Cohort/Case-Control): Moderate evidence - good for associations
+- **Level 4** (Case Series/Report): Weak evidence - mention with caution
+- **Level 5** (Expert Opinion/Review): Expert opinion - use for context only
 
-### AVAILABLE EVIDENCE:
-${citations.map(c => `[${c.index}] ${c.title} (${c.journal}, ${c.year || 'n.d.'}) - Level ${c.evidenceLevel}`).join('\n')}
+### AVAILABLE EVIDENCE (YOU MUST USE THESE):
+${citations.map(c => `[${c.index}] ${c.title} (${c.journal}, ${c.year || 'n.d.'}) - Level ${c.evidenceLevel}${c.studyType ? ` (${c.studyType})` : ''}`).join('\n')}
 
-Respond with a well-structured answer that synthesizes this evidence.`;
+### REMINDER: 
+- Every medical fact needs a citation [X]
+- Multiple facts need multiple citations [X,Y,Z]
+- If you cannot cite it, say so explicitly
+- DO NOT invent citations or use citations that don't exist
+
+Now respond with a well-structured, evidence-based answer that properly cites every claim.`;
 }
 
 /**
