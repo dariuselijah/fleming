@@ -55,7 +55,7 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
   const [isPopupOpen, setIsPopupOpen] = useState(false)
   const [activeCitationIndex, setActiveCitationIndex] = useState(0)
   const [isHovering, setIsHovering] = useState(false)
-  const anchorRef = useRef<HTMLSpanElement>(null)
+  const anchorRef = useRef<HTMLAnchorElement | HTMLSpanElement>(null)
   
   if (citations.length === 0) return null
   
