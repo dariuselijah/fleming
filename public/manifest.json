@@ -1,7 +1,7 @@
 {
   "name": "AskFleming - AI Medical Assistant",
   "short_name": "AskFleming",
-  "description": "AI-powered medical assistant and multi-model chat application",
+  "description": "Evidence-based medical AI assistant providing peer-reviewed citations from PubMed, systematic reviews, and clinical trials. Every medical answer includes verified research sources with evidence levels and study types. Trusted by healthcare professionals for clinical decision support.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
@@ -13,7 +13,9 @@
       "type": "image/x-icon"
     }
   ],
-  "categories": ["health", "medical", "productivity", "utilities"],
+  "categories": ["health", "medical", "productivity", "utilities", "education"],
   "lang": "en",
-  "scope": "/"
+  "scope": "/",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false
 } 

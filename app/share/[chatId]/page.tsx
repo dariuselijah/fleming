@@ -29,22 +29,35 @@ export async function generateMetadata({
     .eq("id", chatId)
     .single()
 
-  const title = chat?.title || "Chat"
-  const description = "A chat in Fleming"
+  const title = chat?.title || "AskFleming Chat"
+  const description = `A conversation with AskFleming, an evidence-based medical AI assistant providing peer-reviewed citations from PubMed, systematic reviews, and clinical trials. Every medical answer includes verified research sources with evidence levels.`
 
   return {
-    title,
+    title: `${title} - AskFleming`,
     description,
     openGraph: {
-      title,
+      title: `${title} - AskFleming`,
       description,
       type: "article",
       url: `${APP_DOMAIN}/share/${chatId}`,
+      images: [
+        {
+          url: `${APP_DOMAIN}/cover_fleming.jpg`,
+          width: 1200,
+          height: 630,
+          alt: "AskFleming - AI Medical Assistant",
+        },
+      ],
     },
     twitter: {
       card: "summary_large_image",
-      title,
+      title: `${title} - AskFleming`,
       description,
+      images: [`${APP_DOMAIN}/cover_fleming.jpg`],
+    },
+    robots: {
+      index: true,
+      follow: true,
     },
   }
 }

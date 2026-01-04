@@ -26,24 +26,35 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "AskFleming - AI-Powered Medical Assistant & Multi-Model Chat",
-  description: "AskFleming is an advanced AI chat application powered by Grok-4, GPT-4o, and other leading models. Get instant medical insights, health advice, and AI assistance. Perfect for medical students, healthcare professionals, and anyone seeking reliable health information.",
+  title: "AskFleming - Evidence-Based Medical AI with Peer-Reviewed Citations",
+  description: "AskFleming provides evidence-based medical answers backed by peer-reviewed research. Every response includes citations from PubMed, systematic reviews, and clinical trials. Get instant access to medical literature with evidence levels, study types, and verified citations. Trusted by healthcare professionals and medical students for clinical decision support.",
   keywords: [
     "AskFleming",
     "Fleming",
-    "AI medical assistant",
-    "health AI",
-    "medical AI chat",
-    "Grok-4",
-    "GPT-4o",
-    "healthcare AI",
-    "medical advice",
-    "AI health assistant",
-    "medical chatbot",
-    "health information",
-    "AI doctor",
-    "medical consultation",
-    "healthcare chatbot"
+    "evidence-based medicine",
+    "medical citations",
+    "peer-reviewed medical AI",
+    "PubMed citations",
+    "clinical evidence",
+    "medical literature search",
+    "evidence-based clinical guidance",
+    "medical research citations",
+    "systematic review citations",
+    "RCT citations",
+    "clinical trial evidence",
+    "medical citation system",
+    "evidence synthesis",
+    "medical literature access",
+    "clinical decision support",
+    "evidence grading",
+    "Oxford CEBM evidence levels",
+    "medical research assistant",
+    "healthcare evidence",
+    "clinical evidence database",
+    "medical citation verification",
+    "evidence-based healthcare",
+    "medical research platform",
+    "clinical research citations"
   ],
   authors: [{ name: "Perkily", url: "https://perkily.io" }],
   creator: "Perkily",
@@ -62,15 +73,24 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: "https://askfleming.perkily.io",
     siteName: "AskFleming",
-    title: "AskFleming - AI-Powered Medical Assistant & Multi-Model Chat",
-    description: "Get instant medical insights, health advice, and AI assistance with AskFleming. Powered by Grok-4, GPT-4o, and other leading AI models.",
+    title: "AskFleming - Evidence-Based Medical AI with Peer-Reviewed Citations",
+    description: "Get evidence-based medical answers with verified citations from PubMed, systematic reviews, and clinical trials. Every response includes peer-reviewed research with evidence levels and study types. Trusted by healthcare professionals for clinical decision support.",
+    images: [
+      {
+        url: "https://askfleming.perkily.io/cover_fleming.jpg",
+        width: 1200,
+        height: 630,
+        alt: "AskFleming - Evidence-Based Medical AI",
+      },
+    ],
   },
   twitter: {
-    card: "summary",
-    title: "AskFleming - AI-Powered Medical Assistant",
-    description: "Get instant medical insights, health advice, and AI assistance with AskFleming. Powered by Grok-4, GPT-4o, and other leading AI models.",
-    creator: "@perkily",
-    site: "@perkily",
+    card: "summary_large_image",
+    title: "AskFleming - Evidence-Based Medical AI with Citations",
+    description: "Evidence-based medical answers with peer-reviewed citations from PubMed, systematic reviews, and clinical trials. Every response includes verified research sources.",
+    creator: "@HelloPerkily",
+    site: "@HelloPerkily",
+    images: ["https://askfleming.perkily.io/cover_fleming.jpg"],
   },
   robots: {
     index: true,
@@ -87,6 +107,8 @@ export const metadata: Metadata = {
     google: "your-google-verification-code", // Replace with actual verification code
   },
   manifest: "/manifest.json",
+  category: "Healthcare",
+  classification: "Medical AI Assistant",
   other: {
     "theme-color": "#000000",
     "apple-mobile-web-app-capable": "yes",
@@ -124,7 +146,7 @@ export default async function RootLayout({
             "@context": "https://schema.org",
             "@type": "WebApplication",
             "name": "AskFleming",
-            "description": "AI-powered medical assistant and multi-model chat application",
+            "description": "Evidence-based medical AI assistant providing peer-reviewed citations from PubMed, systematic reviews, and clinical trials. Every medical answer includes verified research sources with evidence levels and study types.",
             "url": "https://askfleming.perkily.io",
             "applicationCategory": "HealthApplication",
             "operatingSystem": "Web Browser",
@@ -144,15 +166,25 @@ export default async function RootLayout({
               "url": "https://perkily.io"
             },
             "featureList": [
-              "AI Medical Assistant",
-              "Multi-Model AI Chat",
-              "Grok-4 Integration",
-              "GPT-4o Support",
-              "Medical Advice",
-              "Health Information",
-              "File Upload Support",
-              "Real-time Chat"
-            ]
+              "Evidence-Based Medical Answers",
+              "Peer-Reviewed Citations",
+              "PubMed Integration",
+              "Systematic Review Citations",
+              "Clinical Trial Evidence",
+              "Evidence Level Grading (Oxford CEBM)",
+              "Citation Verification",
+              "Medical Literature Search",
+              "Evidence Synthesis",
+              "Hybrid Search (Semantic + Full-Text)",
+              "Study Type Classification",
+              "Real-time Citation Rendering",
+              "Clinical Decision Support",
+              "Medical Research Access"
+            ],
+            "audience": {
+              "@type": "Audience",
+              "audienceType": ["Healthcare Professionals", "Medical Students", "Clinical Researchers", "Evidence-Based Practitioners"]
+            }
           })
         }}
       />

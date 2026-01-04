@@ -150,8 +150,13 @@ export async function POST(req: Request) {
           console.log(`📚 [EVIDENCE] DB fetch result: prefs=${JSON.stringify(prefs)}, error=${fetchError?.message || 'none'}`)
           
           if (prefs?.user_role) {
-            effectiveUserRole = prefs.user_role
-            console.log(`📚 [EVIDENCE] ✅ Fetched userRole from DB: ${effectiveUserRole}`)
+            const validRoles = ["doctor", "general", "medical_student"] as const
+            if (validRoles.includes(prefs.user_role as typeof validRoles[number])) {
+              effectiveUserRole = prefs.user_role as typeof effectiveUserRole
+              console.log(`📚 [EVIDENCE] ✅ Fetched userRole from DB: ${effectiveUserRole}`)
+            } else {
+              console.log(`📚 [EVIDENCE] ⚠️ Invalid user_role value from DB: ${prefs.user_role}`)
+            }
           } else {
             console.log(`📚 [EVIDENCE] ⚠️ No user_role found in preferences for userId: ${userId}`)
           }
