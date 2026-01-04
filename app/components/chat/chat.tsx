@@ -20,6 +20,7 @@ import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
 import { PerformanceMonitor } from "./performance-monitor"
+import { OnboardingDialog } from "../onboarding/onboarding-dialog"
 
 const FeedbackWidget = dynamic(
   () => import("./feedback-widget").then((mod) => mod.FeedbackWidget),
@@ -91,7 +92,19 @@ export function Chat() {
   const [hasRateLimitPaywall, setHasRateLimitPaywall] = useState(false)
   const [rateLimitWaitTime, setRateLimitWaitTime] = useState<number | null>(null)
   const [rateLimitType, setRateLimitType] = useState<"hourly" | "daily">("hourly")
+  const [showOnboardingDialog, setShowOnboardingDialog] = useState(false)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
+  
+  // Check if onboarding dialog should be shown
+  useEffect(() => {
+    if (isAuthenticated && preferences && !preferences.onboardingCompleted) {
+      // Small delay to ensure UI is ready
+      const timer = setTimeout(() => {
+        setShowOnboardingDialog(true)
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [isAuthenticated, preferences])
   const systemPrompt = useMemo(
     () => getSystemPromptByRole(preferences?.userRole || "general", user?.system_prompt || undefined),
     [user?.system_prompt, preferences?.userRole]
@@ -449,6 +462,11 @@ export function Chat() {
         setOpen={setHasRateLimitPaywall}
         waitTimeSeconds={rateLimitWaitTime}
         limitType={rateLimitType}
+      />
+
+      <OnboardingDialog 
+        open={showOnboardingDialog} 
+        onComplete={() => setShowOnboardingDialog(false)}
       />
 
       <FeedbackWidget />

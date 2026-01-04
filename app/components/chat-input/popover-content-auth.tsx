@@ -9,7 +9,15 @@ import { isSupabaseEnabled } from "@/lib/supabase/config"
 import Image from "next/image"
 import { useState } from "react"
 
-export function PopoverContentAuth() {
+type PopoverContentAuthProps = {
+  title?: string
+  description?: string
+}
+
+export function PopoverContentAuth({ 
+  title = "Login to try more features for free",
+  description = "Add files, use more models, BYOK, and more."
+}: PopoverContentAuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -64,10 +72,10 @@ export function PopoverContentAuth() {
       )}
       <div className="p-3">
         <p className="text-primary mb-1 text-base font-medium">
-          Login to try more features for free
+          {title}
         </p>
         <p className="text-muted-foreground mb-5 text-base">
-          Add files, use more models, BYOK, and more.
+          {description}
         </p>
         <Button
           variant="secondary"

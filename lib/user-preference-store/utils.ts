@@ -43,6 +43,9 @@ export type UserPreferences = {
   allergies?: string[]
   familyHistory?: string
   lifestyleFactors?: string
+  
+  // Onboarding
+  onboardingCompleted?: boolean
 }
 
 export const defaultPreferences: UserPreferences = {
@@ -68,6 +71,9 @@ export const defaultPreferences: UserPreferences = {
   allergies: [],
   familyHistory: "",
   lifestyleFactors: "",
+  
+  // Onboarding
+  onboardingCompleted: false,
 }
 
 // Helper functions to convert between API format (snake_case) and frontend format (camelCase)
@@ -96,6 +102,9 @@ export function convertFromApiFormat(apiData: any): UserPreferences {
     allergies: apiData.allergies || [],
     familyHistory: apiData.family_history || "",
     lifestyleFactors: apiData.lifestyle_factors || "",
+    
+    // Onboarding
+    onboardingCompleted: apiData.onboarding_completed ?? false,
   }
   console.log("Converted to frontend format:", result)
   return result
@@ -142,6 +151,8 @@ export function convertToApiFormat(preferences: Partial<UserPreferences>) {
     apiData.family_history = preferences.familyHistory
   if (preferences.lifestyleFactors !== undefined)
     apiData.lifestyle_factors = preferences.lifestyleFactors
+  if (preferences.onboardingCompleted !== undefined)
+    apiData.onboarding_completed = preferences.onboardingCompleted
   
   console.log("Converted API data:", apiData)
   return apiData

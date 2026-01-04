@@ -33,7 +33,10 @@ export function ButtonSearch({
             Search
           </Button>
         </PopoverTrigger>
-        <PopoverContentAuth />
+        <PopoverContentAuth 
+          title="Sign in to enable web search"
+          description="Access the latest medical journals, research articles, clinical studies, and evidence-based information from across the web."
+        />
       </Popover>
     )
   }

@@ -1170,8 +1170,8 @@ export function useChatCore({
         }
       }
       
-      // Show auth dialog
-      setHasDialogAuth(true)
+      // Redirect to login page immediately
+      router.push('/auth')
       return
     }
 
@@ -1351,6 +1351,30 @@ export function useChatCore({
   // Handle suggestion - optimized for immediate response
   const handleSuggestion = useCallback(
     async (suggestion: string) => {
+      // CRITICAL: Check authentication FIRST before doing anything
+      const isAuthenticated = !!user?.id
+      
+      if (!isAuthenticated) {
+        // Store pending message for sending after authentication
+        const pendingMessage = {
+          content: suggestion,
+          files: [],
+          hasFiles: false,
+          selectedModel,
+          enableSearch,
+          enableEvidence,
+          timestamp: Date.now(),
+        }
+        
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('pendingMessage', JSON.stringify(pendingMessage))
+        }
+        
+        // Redirect to login page immediately
+        router.push('/auth')
+        return
+      }
+
       setIsSubmitting(true)
 
       // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
@@ -1439,6 +1463,9 @@ export function useChatCore({
       isAuthenticated,
       bumpChat,
       userPreferences,
+      router,
+      enableSearch,
+      enableEvidence,
     ]
   )
 
