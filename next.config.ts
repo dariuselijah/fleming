@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
     optimizeCss: true,
   },
   serverExternalPackages: ["shiki", "vscode-oniguruma"],
+  // Remove all console logs in production builds
+  compiler: {
+    removeConsole: process.env.NODE_ENV === "production",
+  },
   // Optimize streaming response headers
   async headers() {
     return [

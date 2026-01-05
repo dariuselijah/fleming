@@ -311,13 +311,19 @@ export class DocumentIngestionPipeline {
 
   /**
    * Generate embeddings for chunks
+   * Optimized: Uses parallel batch processing with OpenAI's batch API
    */
   private async generateEmbeddingsForChunks(
     chunks: Array<{ chunk_text: string }>,
     apiKey?: string
   ): Promise<Array<{ embedding: number[]; [key: string]: any }>> {
     const texts = chunks.map((c) => c.chunk_text)
-    const embeddings = await generateEmbeddings(texts, apiKey)
+    
+    // Use optimized batch processing: 200 chunks per batch, 3 parallel batches
+    const embeddings = await generateEmbeddings(texts, apiKey, {
+      batchSize: 200, // Increased from 100 for better throughput
+      parallelBatches: 3, // Process 3 batches concurrently (3 * 200 = 600 chunks at a time)
+    })
 
     return chunks.map((chunk, index) => ({
       ...chunk,

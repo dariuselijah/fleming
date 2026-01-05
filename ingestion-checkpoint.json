@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "startTime": "2025-12-30T06:34:11.887Z",
-  "lastUpdate": "2026-01-03T22:43:12.863Z",
+  "lastUpdate": "2026-01-05T00:00:28.809Z",
   "topics": [
     {
       "topic": "hypertension treatment",
@@ -176,12 +176,12 @@
     },
     {
       "topic": "stroke treatment",
-      "status": "processing",
-      "articlesProcessed": 2169,
-      "chunksCreated": 4941,
-      "errors": 14,
-      "startedAt": "2026-01-03T22:43:12.863Z",
-      "completedAt": "2025-12-30T06:54:34.717Z"
+      "status": "completed",
+      "articlesProcessed": 1291,
+      "chunksCreated": 2929,
+      "errors": 0,
+      "startedAt": "2026-01-04T19:45:50.500Z",
+      "completedAt": "2026-01-04T20:04:31.935Z"
     },
     {
       "topic": "type 2 diabetes",
@@ -329,12 +329,12 @@
     },
     {
       "topic": "osteoporosis",
-      "status": "failed",
-      "articlesProcessed": 4018,
-      "chunksCreated": 9032,
-      "errors": 34,
-      "startedAt": "2026-01-01T23:35:07.844Z",
-      "completedAt": "2026-01-02T00:05:18.324Z"
+      "status": "processing",
+      "articlesProcessed": 8793,
+      "chunksCreated": 19972,
+      "errors": 33,
+      "startedAt": "2026-01-05T00:00:28.809Z",
+      "completedAt": "2026-01-04T21:15:25.531Z"
     },
     {
       "topic": "osteoporosis treatment",
@@ -428,12 +428,12 @@
     },
     {
       "topic": "pneumonia antibiotic",
-      "status": "completed",
+      "status": "processing",
       "articlesProcessed": 18,
       "chunksCreated": 0,
       "errors": 0,
-      "startedAt": "2026-01-01T23:35:07.843Z",
-      "completedAt": "2026-01-01T23:35:10.973Z"
+      "startedAt": "2026-01-05T00:00:28.809Z",
+      "completedAt": "2026-01-04T19:45:54.011Z"
     },
     {
       "topic": "pulmonary embolism",
@@ -1553,7 +1553,7 @@
       "articlesProcessed": 0,
       "chunksCreated": 0,
       "errors": 0,
-      "startedAt": "2026-01-03T22:43:12.863Z"
+      "startedAt": "2026-01-05T00:00:28.809Z"
     },
     {
       "topic": "MS treatment",
@@ -1561,7 +1561,7 @@
       "articlesProcessed": 0,
       "chunksCreated": 0,
       "errors": 0,
-      "startedAt": "2026-01-03T22:43:12.863Z"
+      "startedAt": "2026-01-04T21:15:28.544Z"
     },
     {
       "topic": "stroke",
@@ -1569,7 +1569,7 @@
       "articlesProcessed": 0,
       "chunksCreated": 0,
       "errors": 0,
-      "startedAt": "2026-01-03T22:43:12.863Z"
+      "startedAt": "2026-01-04T21:15:28.544Z"
     },
     {
       "topic": "stroke treatment",
@@ -2205,9 +2205,9 @@
   ],
   "stats": {
     "totalTopics": 265,
-    "completedTopics": 177,
-    "totalArticles": 862194,
-    "totalChunks": 1897842,
-    "totalErrors": 10309
+    "completedTopics": 180,
+    "totalArticles": 872296,
+    "totalChunks": 1920743,
+    "totalErrors": 10342
   }
 }

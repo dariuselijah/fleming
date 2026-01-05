@@ -139,7 +139,14 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
       updates.clinicalDecisionSupport = selectedDemographic === "doctor"
     }
 
-    await updatePreferences(updates)
+    try {
+      await updatePreferences(updates)
+    } catch (error) {
+      // Error is already handled by the mutation (falls back to localStorage)
+      // Continue with completion even if API fails
+      console.error("Error updating preferences during onboarding completion:", error)
+    }
+    
     navigateToStep("complete")
     
     setTimeout(() => {
@@ -417,7 +424,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                               className={cn(
                                 "px-4 py-2.5 rounded-full text-sm font-medium transition-all border-2 flex items-center gap-2 relative",
                                 isSelected
-                                  ? "border-[#0091FF] bg-[#E5F3FE] text-[#0091FF] shadow-md shadow-[#0091FF]/10"
+                                  ? "border-[#0091FF] bg-[#0091FF]/10 dark:bg-[#0091FF]/20 text-[#0091FF] shadow-md shadow-[#0091FF]/10 dark:shadow-[#0091FF]/20"
                                   : "border-border bg-background hover:bg-accent hover:border-accent-foreground/20"
                               )}
                               whileHover={{ scale: 1.05, y: -1 }}
@@ -459,8 +466,8 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                               className={cn(
                                 "w-full justify-between h-14 text-base font-normal transition-all",
                                 !selectedSpecialty && "text-muted-foreground",
-                                specialtyPopoverOpen && "border-[#0091FF] ring-2 ring-[#0091FF]/20",
-                                selectedSpecialty && !COMMON_SPECIALTIES.some(s => s.value === selectedSpecialty) && "border-[#0091FF] bg-[#E5F3FE]/30"
+                                specialtyPopoverOpen && "border-[#0091FF] ring-2 ring-[#0091FF]/20 dark:ring-[#0091FF]/30",
+                                selectedSpecialty && !COMMON_SPECIALTIES.some(s => s.value === selectedSpecialty) && "border-[#0091FF] bg-[#0091FF]/10 dark:bg-[#0091FF]/20"
                               )}
                             >
                               <span className="truncate text-left flex-1">
@@ -515,7 +522,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                                         "cursor-pointer py-3.5 px-4 text-base rounded-lg transition-all relative",
                                         "hover:bg-accent hover:text-accent-foreground",
                                         "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
-                                        isSelected && "bg-[#E5F3FE] text-[#0091FF] font-medium hover:bg-[#E5F3FE]"
+                                        isSelected && "bg-[#0091FF]/10 dark:bg-[#0091FF]/20 text-[#0091FF] font-medium hover:bg-[#0091FF]/10 dark:hover:bg-[#0091FF]/20"
                                       )}
                                     >
                                       <div className="flex items-center w-full gap-3">
@@ -685,7 +692,7 @@ function DemographicOption({ icon: Icon, title, description, selected, onClick }
       className={cn(
         "w-full p-5 rounded-2xl border-2 text-left transition-all relative overflow-hidden",
         selected 
-          ? "border-[#0091FF] bg-[#E5F3FE]/50 text-[#0091FF] shadow-lg shadow-[#0091FF]/10" 
+          ? "border-[#0091FF] bg-[#0091FF]/10 dark:bg-[#0091FF]/20 text-[#0091FF] shadow-lg shadow-[#0091FF]/10 dark:shadow-[#0091FF]/20" 
           : "border-border bg-background hover:bg-accent hover:border-accent-foreground/20"
       )}
       whileHover={{ scale: 1.02, y: -2 }}
@@ -694,7 +701,7 @@ function DemographicOption({ icon: Icon, title, description, selected, onClick }
     >
       {selected && (
         <motion.div
-          className="absolute inset-0 bg-gradient-to-br from-[#0091FF]/5 to-transparent"
+          className="absolute inset-0 bg-gradient-to-br from-[#0091FF]/5 dark:from-[#0091FF]/10 to-transparent"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
@@ -703,7 +710,7 @@ function DemographicOption({ icon: Icon, title, description, selected, onClick }
       <div className="flex items-start gap-4 relative z-10">
         <div className={cn(
           "p-3 rounded-xl transition-all",
-          selected ? "bg-[#0091FF]/10" : "bg-muted"
+          selected ? "bg-[#0091FF]/10 dark:bg-[#0091FF]/20" : "bg-muted"
         )}>
           <Icon className={cn("size-6", selected ? "text-[#0091FF]" : "")} weight={selected ? "fill" : "regular"} />
         </div>
@@ -711,7 +718,7 @@ function DemographicOption({ icon: Icon, title, description, selected, onClick }
           <div className="font-semibold text-lg mb-1">{title}</div>
           <div className={cn(
             "text-sm leading-relaxed",
-            selected ? "text-[#0091FF]/80" : "text-muted-foreground"
+            selected ? "text-[#0091FF] dark:text-[#0091FF]" : "text-muted-foreground"
           )}>
             {description}
           </div>
@@ -745,7 +752,7 @@ function OptionButton({ title, description, selected, onClick }: OptionButtonPro
       className={cn(
         "w-full p-4 rounded-xl border-2 text-left transition-all relative overflow-hidden",
         selected 
-          ? "border-[#0091FF] bg-[#E5F3FE]/50 text-[#0091FF] shadow-md shadow-[#0091FF]/5" 
+          ? "border-[#0091FF] bg-[#0091FF]/10 dark:bg-[#0091FF]/20 text-[#0091FF] shadow-md shadow-[#0091FF]/5 dark:shadow-[#0091FF]/10" 
           : "border-border bg-background hover:bg-accent hover:border-accent-foreground/20"
       )}
       whileHover={{ scale: 1.01, y: -1 }}
@@ -754,7 +761,7 @@ function OptionButton({ title, description, selected, onClick }: OptionButtonPro
     >
       {selected && (
         <motion.div
-          className="absolute inset-0 bg-gradient-to-r from-[#0091FF]/5 to-transparent"
+          className="absolute inset-0 bg-gradient-to-r from-[#0091FF]/5 dark:from-[#0091FF]/10 to-transparent"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.2 }}
@@ -766,7 +773,7 @@ function OptionButton({ title, description, selected, onClick }: OptionButtonPro
           {description && (
             <div className={cn(
               "text-sm mt-1 leading-relaxed",
-              selected ? "text-[#0091FF]/80" : "text-muted-foreground"
+              selected ? "text-[#0091FF] dark:text-[#0091FF]" : "text-muted-foreground"
             )}>
               {description}
             </div>
