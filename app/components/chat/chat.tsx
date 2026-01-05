@@ -94,10 +94,35 @@ export function Chat() {
   const [rateLimitType, setRateLimitType] = useState<"hourly" | "daily">("hourly")
   const [showOnboardingDialog, setShowOnboardingDialog] = useState(false)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
+  const onboardingShownRef = useRef(false)
+  const lastUserIdRef = useRef<string | undefined>(user?.id)
   
-  // Check if onboarding dialog should be shown
+  // Reset onboarding shown ref when user changes
   useEffect(() => {
+    if (lastUserIdRef.current !== user?.id) {
+      onboardingShownRef.current = false
+      lastUserIdRef.current = user?.id
+    }
+  }, [user?.id])
+  
+  // Check if onboarding dialog should be shown (only once per user)
+  useEffect(() => {
+    // If already completed, don't show
+    if (preferences?.onboardingCompleted) {
+      setShowOnboardingDialog(false)
+      onboardingShownRef.current = true // Mark as shown to prevent future attempts
+      return
+    }
+    
+    // If already shown in this session for this user, don't show again
+    if (onboardingShownRef.current) {
+      return
+    }
+    
+    // Show only if authenticated, preferences are loaded, and not completed
     if (isAuthenticated && preferences && !preferences.onboardingCompleted) {
+      // Mark as shown to prevent showing again
+      onboardingShownRef.current = true
       // Small delay to ensure UI is ready
       const timer = setTimeout(() => {
         setShowOnboardingDialog(true)
@@ -466,7 +491,11 @@ export function Chat() {
 
       <OnboardingDialog 
         open={showOnboardingDialog} 
-        onComplete={() => setShowOnboardingDialog(false)}
+        onComplete={() => {
+          setShowOnboardingDialog(false)
+          // Mark as shown to prevent showing again
+          onboardingShownRef.current = true
+        }}
       />
 
       <FeedbackWidget />

@@ -139,16 +139,17 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
       updates.clinicalDecisionSupport = selectedDemographic === "doctor"
     }
 
-    try {
-      await updatePreferences(updates)
-    } catch (error) {
-      // Error is already handled by the mutation (falls back to localStorage)
-      // Continue with completion even if API fails
-      console.error("Error updating preferences during onboarding completion:", error)
-    }
-    
+    // Always proceed to completion step immediately (don't wait for API)
     navigateToStep("complete")
     
+    // Save preferences in background (non-blocking)
+    // The mutation already handles errors and falls back to localStorage
+    updatePreferences(updates).catch((error) => {
+      // Error is already handled by the mutation (falls back to localStorage)
+      console.error("Error updating preferences during onboarding completion:", error)
+    })
+    
+    // Always close dialog after showing completion animation
     setTimeout(() => {
       onComplete()
     }, 1000)
