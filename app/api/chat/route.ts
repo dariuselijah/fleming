@@ -38,6 +38,82 @@ const getCachedSystemPrompt = (role: "doctor" | "general" | "medical_student" | 
   return systemPromptCache.get(cacheKey)!
 }
 
+/**
+ * Remove citation instructions from system prompt when evidence mode is off
+ * This ensures normal conversations without citations when evidence mode is disabled
+ */
+function removeCitationInstructions(prompt: string): string {
+  // Remove citation-related sections more reliably
+  let cleaned = prompt
+  
+  // Remove "Mandatory Citations" section and related content
+  cleaned = cleaned.replace(/\*\*Mandatory Citations?\*\*:.*?(?=\n\n|\*\*|$)/gis, '')
+  cleaned = cleaned.replace(/\*\*Citation Format\*\*:.*?(?=\n\n|\*\*|$)/gis, '')
+  
+  // Remove citation examples and instructions (including web search citations)
+  cleaned = cleaned.replace(/Every factual claim.*?\[CITATION:.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/must be followed by.*?\[CITATION:.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/MUST be followed by.*?\[CITATION:.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/Use.*?\[CITATION:.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/Use web search results to find and cite sources.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/with citations for every factual claim.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/properly cited.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/well-cited.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/with citations.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/cite sources.*?(?=\n|$)/gi, '')
+  
+  // Remove citation format examples
+  cleaned = cleaned.replace(/\[CITATION:\d+\]/gi, '')
+  cleaned = cleaned.replace(/\[CITATION:\d+,\d+\]/gi, '')
+  cleaned = cleaned.replace(/\[CITATION:\d+-\d+\]/gi, '')
+  
+  // Remove "Response Structure" sections that mention citations
+  cleaned = cleaned.replace(/\*\*Response Structure\*\*:.*?with citations.*?(?=\n\n|\*\*|$)/gis, '')
+  cleaned = cleaned.replace(/with immediate citations.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/all cited.*?(?=\n|$)/gi, '')
+  
+  // Remove "Your Mission" lines that mention citations
+  cleaned = cleaned.replace(/Every response must be.*?cited.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/properly cited.*?(?=\n|$)/gi, '')
+  cleaned = cleaned.replace(/evidence-based.*?cited.*?(?=\n|$)/gi, '')
+  
+  // Remove entire sections about citations
+  cleaned = cleaned.replace(/\*\*Citations?\*\*:.*?(?=\n\n|\*\*|$)/gis, '')
+  cleaned = cleaned.replace(/Citations?:.*?(?=\n\n|\*\*|$)/gis, '')
+  
+  // Clean up extra whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n')
+  cleaned = cleaned.replace(/^\s+|\s+$/g, '')
+  
+  return cleaned
+}
+
+/**
+ * Strip citation markers from response text when evidence mode is off
+ * This prevents citation markers from appearing in the UI when evidence mode is disabled
+ */
+function stripCitationMarkers(text: string): string {
+  if (!text) return text
+  
+  // Remove [CITATION:X] markers
+  let cleaned = text
+    .replace(/\[CITATION:\d+(?:,\d+)*\]/gi, '')
+    .replace(/\[CITATION:\d+-\d+\]/gi, '')
+    // Also remove simple numbered citations [1], [2] if they appear
+    .replace(/\[\d+\]/g, '')
+    .replace(/\[\d+,\d+\]/g, '')
+    .replace(/\[\d+-\d+\]/g, '')
+  
+  // Remove "Citations:" section at the end if present
+  cleaned = cleaned.replace(/\n\*\*Citations?\*\*:.*$/gis, '')
+  cleaned = cleaned.replace(/\nCitations?:.*$/gis, '')
+  
+  // Clean up extra whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n')
+  
+  return cleaned.trim()
+}
+
 // Function to quickly assess query complexity for smart orchestration
 function assessQueryComplexity(query: string): "simple" | "complex" {
   const queryLower = query.toLowerCase()
@@ -239,6 +315,15 @@ export async function POST(req: Request) {
     )
     
     console.log(`📚 [EVIDENCE] Mode check: userRole=${effectiveUserRole} (from request: ${userRole}), enableEvidenceFromClient=${enableEvidenceFromClient}, isHealthcareMode=${isHealthcareMode}, medicalLiteratureAccess=${medicalLiteratureAccess}, finalEnableEvidence=${finalEnableEvidence}`)
+    
+    // CRITICAL: If evidence mode is OFF, remove citation instructions from system prompt
+    // This ensures normal conversations without citations when evidence mode is disabled
+    if (!finalEnableEvidence) {
+      console.log("📚 [EVIDENCE] Evidence mode is OFF - removing citation instructions from system prompt")
+      effectiveSystemPrompt = removeCitationInstructions(effectiveSystemPrompt)
+      // Add explicit instruction to NOT include citations
+      effectiveSystemPrompt += `\n\n**IMPORTANT: Do NOT include citations, citation markers, or reference numbers in your response. Respond naturally without any [CITATION:X] or [X] markers. Do not include a "Citations" section at the end.`
+    }
     
     // If evidence mode is enabled, synthesize evidence from medical_evidence table
     let evidenceContext: Awaited<ReturnType<typeof synthesizeEvidence>> | null = null
@@ -463,11 +548,15 @@ export async function POST(req: Request) {
               }
               
               // Extract referenced citations from the response
+              // CRITICAL: Only extract citations if evidence mode is enabled
               // CRITICAL: Use capturedEvidenceContext to ensure we have the right context
               let citationsToSave: any[] = []
-              const contextToUse = capturedEvidenceContext || evidenceContext
               
-              if (contextToUse?.context?.citations) {
+              // Only extract citations if evidence mode was enabled
+              if (finalEnableEvidence) {
+                const contextToUse = capturedEvidenceContext || evidenceContext
+                
+                if (contextToUse?.context?.citations) {
                 console.log(`📚 [CITATION EXTRACTION] Using evidence context with ${contextToUse.context.citations.length} citations`)
                 if (responseText) {
                   const extractionResult = extractReferencedCitations(
@@ -499,8 +588,11 @@ export async function POST(req: Request) {
                     console.warn(`📚 [CITATION EXTRACTION] Fallback: Including all ${citationsToSave.length} retrieved citations`)
                   }
                 }
+                } else {
+                  console.log(`📚 [CITATION EXTRACTION] No evidence context available (capturedEvidenceContext: ${!!capturedEvidenceContext}, evidenceContext: ${!!evidenceContext})`)
+                }
               } else {
-                console.log(`📚 [CITATION EXTRACTION] No evidence context available (capturedEvidenceContext: ${!!capturedEvidenceContext}, evidenceContext: ${!!evidenceContext})`)
+                console.log(`📚 [CITATION EXTRACTION] Evidence mode is OFF - skipping citation extraction`)
               }
               
               // Only save to database if not a temp chat
@@ -630,21 +722,26 @@ export async function POST(req: Request) {
     }
     
           // Add evidence citations to headers for frontend rendering
+          // CRITICAL: Only send citations if evidence mode is enabled
           // Send all retrieved citations initially - frontend will filter to referenced ones after parsing response
           // CRITICAL: Use capturedEvidenceContext to ensure we have the right context
-          const contextForHeaders = capturedEvidenceContext || evidenceContext
-          if (contextForHeaders?.context?.citations && contextForHeaders.context.citations.length > 0) {
-            try {
-              console.log(`📚 [HEADERS] Adding ${contextForHeaders.context.citations.length} retrieved citations to response headers`)
-              // Encode citations as base64 to handle special characters
-              const citationsJson = JSON.stringify(contextForHeaders.context.citations)
-              responseHeaders['X-Evidence-Citations'] = Buffer.from(citationsJson).toString('base64')
-              console.log(`📚 EVIDENCE MODE: Sending ${contextForHeaders.context.citations.length} citations to client`)
-            } catch (e) {
-              console.error('Failed to encode evidence citations:', e)
+          if (finalEnableEvidence) {
+            const contextForHeaders = capturedEvidenceContext || evidenceContext
+            if (contextForHeaders?.context?.citations && contextForHeaders.context.citations.length > 0) {
+              try {
+                console.log(`📚 [HEADERS] Adding ${contextForHeaders.context.citations.length} retrieved citations to response headers`)
+                // Encode citations as base64 to handle special characters
+                const citationsJson = JSON.stringify(contextForHeaders.context.citations)
+                responseHeaders['X-Evidence-Citations'] = Buffer.from(citationsJson).toString('base64')
+                console.log(`📚 EVIDENCE MODE: Sending ${contextForHeaders.context.citations.length} citations to client`)
+              } catch (e) {
+                console.error('Failed to encode evidence citations:', e)
+              }
+            } else {
+              console.log(`📚 [HEADERS] No citations to add to headers (contextForHeaders: ${!!contextForHeaders})`)
             }
           } else {
-            console.log(`📚 [HEADERS] No citations to add to headers (contextForHeaders: ${!!contextForHeaders})`)
+            console.log(`📚 [HEADERS] Evidence mode is OFF - not sending citations in headers`)
           }
     
     return result.toDataStreamResponse({

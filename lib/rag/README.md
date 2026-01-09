@@ -177,3 +177,6 @@ const hallucinationCheck = await verifier.detectHallucinations(
 - Citation verification uses text similarity (can be enhanced with embeddings)
 
 
+
+
+

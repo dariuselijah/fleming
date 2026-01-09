@@ -36,14 +36,22 @@ export function CitationMarkdown({
     return map
   }, [evidenceCitations])
   
+  // CRITICAL: If we have no evidence citations, don't render citation markers
+  // This prevents broken citations from appearing when evidence mode is off
+  const shouldRenderCitations = evidenceCitations && evidenceCitations.length > 0
+  
   // Parse citation markers from text - handle both [CITATION:1] and [1] formats
   const markers = useMemo(() => {
+    // If we don't have evidence citations, don't parse markers (they'll be shown as plain text)
+    if (!shouldRenderCitations) {
+      return []
+    }
+    
     // First try the standard parser for [CITATION:X] format
     let result = parseCitationMarkers(children)
     
-    // ALWAYS also look for simple [1] pattern - this is what evidence mode uses
-    // We do this regardless of whether we have evidence citations, because they might
-    // arrive asynchronously or be restored from ref
+    // Also look for simple [1] pattern - this is what evidence mode uses
+    // Only do this if we have evidence citations to match them to
     if (result.length === 0) {
       // Parse simple [1], [2,3], [1-3] patterns manually
       const simplePattern = /\[(\d+(?:[\s,]+\d+)*(?:-\d+)?)\]/g
@@ -79,7 +87,7 @@ export function CitationMarkdown({
     }
     
     return result
-  }, [children])
+  }, [children, shouldRenderCitations])
   
   // Replace citation markers with unique placeholders BEFORE markdown processing
   // Use a format that react-markdown won't escape or treat specially

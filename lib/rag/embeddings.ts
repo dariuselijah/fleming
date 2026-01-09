@@ -111,7 +111,10 @@ async function generateEmbeddingsBatch(
 
         if (isRateLimit && retries > 1) {
           // Extract retry delay from error message
-          const delay = extractRetryDelay(errorData?.error?.message || errorText)
+          const baseDelay = extractRetryDelay(errorData?.error?.message || errorText)
+          // Add jitter to prevent thundering herd (random 0-500ms)
+          const jitter = Math.random() * 500
+          const delay = baseDelay + jitter
           retries--
           console.log(`[Embeddings] Rate limit hit, retrying in ${(delay / 1000).toFixed(1)}s... (${retries} retries left)`)
           await new Promise(resolve => setTimeout(resolve, delay))
@@ -148,18 +151,25 @@ async function generateEmbeddingsBatch(
   throw new Error('Failed to generate embeddings after retries')
 }
 
+// Global rate limit state to coordinate across batches
+let rateLimitState = {
+  lastRateLimitTime: 0,
+  consecutiveRateLimits: 0,
+  currentParallelism: 3, // Start with default, reduce if rate limited
+}
+
 /**
  * Generate embeddings for multiple texts in batch
  * Optimized: Uses OpenAI's batch API (sends multiple texts in one request)
- * Includes rate limit handling with retry logic
+ * Includes rate limit handling with retry logic and adaptive parallelism
  */
 export async function generateEmbeddings(
   texts: string[],
   apiKey?: string,
   options?: EmbeddingOptions
 ): Promise<number[][]> {
-  const batchSize = options?.batchSize || 200 // Increased from 100 for better throughput
-  const parallelBatches = options?.parallelBatches || 3 // Process multiple batches concurrently
+  const batchSize = options?.batchSize || 200
+  let parallelBatches = options?.parallelBatches || rateLimitState.currentParallelism
   const results: number[][] = []
   const model = options?.model || EMBEDDING_MODEL
   const dimension = options?.dimension || EMBEDDING_DIMENSION
@@ -169,37 +179,93 @@ export async function generateEmbeddings(
     throw new Error('OpenAI API key is required for embedding generation')
   }
 
-  // Process in parallel batches for better throughput
+  // Process in batches with adaptive parallelism
   for (let i = 0; i < texts.length; i += batchSize * parallelBatches) {
     const batchGroup: string[][] = []
     
     // Create batch group (up to parallelBatches batches)
-    for (let j = 0; j < parallelBatches && i + j * batchSize < texts.length; j++) {
+    // Reduce parallelism if we've been rate limited recently
+    const currentParallel = Math.max(1, parallelBatches)
+    for (let j = 0; j < currentParallel && i + j * batchSize < texts.length; j++) {
       const batch = texts.slice(i + j * batchSize, i + (j + 1) * batchSize)
       if (batch.length > 0) {
         batchGroup.push(batch)
       }
     }
 
-    // Process batches in parallel (each with its own retry logic)
-    const batchPromises = batchGroup.map((batch) => 
-      generateEmbeddingsBatch(batch, model, dimension, key)
-    )
+    // Process batches with staggered delays to avoid thundering herd
+    // Each batch waits a bit longer before starting
+    const batchPromises = batchGroup.map((batch, index) => {
+      // Stagger requests by 200ms per batch to avoid simultaneous rate limits
+      const staggerDelay = index * 200
+      return new Promise<number[][]>((resolve, reject) => {
+        setTimeout(async () => {
+          try {
+            const result = await generateEmbeddingsBatch(batch, model, dimension, key)
+            resolve(result)
+          } catch (error) {
+            reject(error)
+          }
+        }, staggerDelay)
+      })
+    })
 
     try {
-      const batchResults = await Promise.all(batchPromises)
-      results.push(...batchResults.flat())
+      const batchResults = await Promise.allSettled(batchPromises)
+      
+      // Process results and track rate limits
+      let hasRateLimit = false
+      for (const result of batchResults) {
+        if (result.status === 'fulfilled') {
+          results.push(...result.value)
+          // Reset rate limit counter on success
+          if (rateLimitState.consecutiveRateLimits > 0) {
+            rateLimitState.consecutiveRateLimits = Math.max(0, rateLimitState.consecutiveRateLimits - 1)
+          }
+        } else {
+          const error = result.reason
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          
+          // Check if it's a rate limit error
+          if (errorMessage.includes('rate limit') || errorMessage.includes('rate_limit')) {
+            hasRateLimit = true
+            rateLimitState.lastRateLimitTime = Date.now()
+            rateLimitState.consecutiveRateLimits++
+            
+            // Reduce parallelism if we're hitting rate limits
+            if (rateLimitState.consecutiveRateLimits >= 2) {
+              parallelBatches = Math.max(1, Math.floor(parallelBatches * 0.5))
+              rateLimitState.currentParallelism = parallelBatches
+              console.log(`[Embeddings] Reducing parallelism to ${parallelBatches} due to rate limits`)
+            }
+          }
+          
+          console.error(`[Embeddings] Batch failed: ${errorMessage}`)
+        }
+      }
+      
+      // If we had rate limits, wait longer before next batch group
+      if (hasRateLimit) {
+        const waitTime = Math.min(5000, 1000 * rateLimitState.consecutiveRateLimits)
+        console.log(`[Embeddings] Waiting ${waitTime}ms before next batch group due to rate limits`)
+        await new Promise(resolve => setTimeout(resolve, waitTime))
+      } else if (i + batchSize * parallelBatches < texts.length) {
+        // Normal delay between batch groups
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      
+      // Gradually increase parallelism if we haven't hit rate limits recently
+      if (!hasRateLimit && Date.now() - rateLimitState.lastRateLimitTime > 60000) {
+        if (parallelBatches < (options?.parallelBatches || 3)) {
+          parallelBatches = Math.min(options?.parallelBatches || 3, parallelBatches + 1)
+          rateLimitState.currentParallelism = parallelBatches
+          console.log(`[Embeddings] Increasing parallelism to ${parallelBatches}`)
+        }
+        rateLimitState.consecutiveRateLimits = 0
+      }
     } catch (error) {
-      // If parallel execution fails, log and continue with remaining batches
+      // Fallback error handling
       console.error(`[Embeddings] Batch group failed: ${error instanceof Error ? error.message : String(error)}`)
-      // Don't throw - let individual batches handle retries
-      // This allows partial success
-    }
-
-    // Add small delay between batch groups to avoid overwhelming the API
-    // Only delay if there are more batches to process
-    if (i + batchSize * parallelBatches < texts.length) {
-      await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
 

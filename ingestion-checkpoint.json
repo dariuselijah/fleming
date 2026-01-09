@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "startTime": "2025-12-30T06:34:11.887Z",
-  "lastUpdate": "2026-01-05T00:00:28.809Z",
+  "lastUpdate": "2026-01-05T22:27:59.659Z",
   "topics": [
     {
       "topic": "hypertension treatment",
@@ -333,7 +333,7 @@
       "articlesProcessed": 8793,
       "chunksCreated": 19972,
       "errors": 33,
-      "startedAt": "2026-01-05T00:00:28.809Z",
+      "startedAt": "2026-01-05T22:27:59.658Z",
       "completedAt": "2026-01-04T21:15:25.531Z"
     },
     {
@@ -432,7 +432,7 @@
       "articlesProcessed": 18,
       "chunksCreated": 0,
       "errors": 0,
-      "startedAt": "2026-01-05T00:00:28.809Z",
+      "startedAt": "2026-01-05T22:27:59.658Z",
       "completedAt": "2026-01-04T19:45:54.011Z"
     },
     {
@@ -1553,7 +1553,7 @@
       "articlesProcessed": 0,
       "chunksCreated": 0,
       "errors": 0,
-      "startedAt": "2026-01-05T00:00:28.809Z"
+      "startedAt": "2026-01-05T22:27:59.658Z"
     },
     {
       "topic": "MS treatment",
