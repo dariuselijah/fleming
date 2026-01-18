@@ -306,13 +306,9 @@ export async function POST(req: Request) {
     const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
     const finalEnableSearch = enableSearchFromClient || (isHealthcareMode && isFleming4 && hasWebSearchSupport)
     
-    // EVIDENCE MODE: Auto-enable for healthcare professionals or if explicitly requested
-    // CRITICAL: Enable by default for healthcare professionals (doctors/medical students)
-    // Only disable if explicitly set to false
-    const finalEnableEvidence = enableEvidenceFromClient !== false && (
-      enableEvidenceFromClient === true || 
-      isHealthcareMode
-    )
+    // EVIDENCE MODE: Only enable if explicitly requested
+    // Disabled by default for all users including healthcare professionals
+    const finalEnableEvidence = enableEvidenceFromClient === true
     
     console.log(`📚 [EVIDENCE] Mode check: userRole=${effectiveUserRole} (from request: ${userRole}), enableEvidenceFromClient=${enableEvidenceFromClient}, isHealthcareMode=${isHealthcareMode}, medicalLiteratureAccess=${medicalLiteratureAccess}, finalEnableEvidence=${finalEnableEvidence}`)
     

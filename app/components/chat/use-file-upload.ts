@@ -162,22 +162,8 @@ export const useFileUpload = () => {
         return null
       }
 
-      // Check file type
-      const allowedTypes = [
-        "image/jpeg", "image/png", "image/gif", "application/pdf",
-        "text/plain", "text/markdown", "application/json", "text/csv",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      ]
-      
-      if (!allowedTypes.includes(file.type)) {
-        toast({
-          title: "File type not supported",
-          description: `${file.name} is not a supported file type`,
-          status: "error"
-        })
-        return null
-      }
+      // Allow all file types - no type restrictions
+      // Only file size validation is performed
 
       // File is valid
       return {

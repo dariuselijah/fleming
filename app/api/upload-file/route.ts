@@ -129,19 +129,6 @@ export async function POST(request: NextRequest) {
 async function validateFile(file: File): Promise<{ isValid: boolean; error?: string }> {
   const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
-  const ALLOWED_FILE_TYPES = [
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "application/pdf",
-    "text/plain",
-    "text/markdown",
-    "application/json",
-    "text/csv",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ]
-
   if (file.size > MAX_FILE_SIZE) {
     return {
       isValid: false,
@@ -149,12 +136,7 @@ async function validateFile(file: File): Promise<{ isValid: boolean; error?: str
     }
   }
 
-  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-    return {
-      isValid: false,
-      error: "File type not supported",
-    }
-  }
-
+  // Allow all file types - only check file size
+  // File type validation removed to allow all types of files
   return { isValid: true }
 } 

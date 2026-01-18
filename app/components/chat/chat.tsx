@@ -75,6 +75,7 @@ export function Chat() {
     handleFileUploads,
     createOptimisticAttachments,
     cleanupOptimisticAttachments,
+    convertBlobUrlsToDataUrls,
     handleFileUpload,
     handleFileRemove,
   } = useFileUpload()
@@ -183,6 +184,7 @@ export function Chat() {
     cleanupOptimisticAttachments,
     ensureChatExists,
     handleFileUploads,
+    convertBlobUrlsToDataUrls,
     selectedModel,
     clearDraft,
     bumpChat,

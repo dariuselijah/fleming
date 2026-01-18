@@ -12,6 +12,8 @@
     "ingest:recommended": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --high-evidence",
     "ingest:dry-run": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --dry-run",
     "ingest:scale": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed-scale.ts",
+    "ingest:bulk": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed-bulk.ts",
+    "monitor": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/monitor-ingestion.ts",
     "check-env": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-env.ts"
   },
   "dependencies": {

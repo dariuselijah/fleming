@@ -32,6 +32,10 @@ type UseChatCoreProps = {
     isAuthenticated?: boolean,
     filesToUpload?: File[]
   ) => Promise<Attachment[] | null>
+  convertBlobUrlsToDataUrls: (
+    attachments: Attachment[],
+    files: File[]
+  ) => Promise<Attachment[]>
   selectedModel: string
   clearDraft: () => void
   bumpChat: (chatId: string) => void
@@ -54,6 +58,7 @@ export function useChatCore({
   cleanupOptimisticAttachments,
   ensureChatExists,
   handleFileUploads,
+  convertBlobUrlsToDataUrls,
   selectedModel,
   clearDraft,
   bumpChat,
@@ -66,7 +71,7 @@ export function useChatCore({
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
-  const [enableEvidence, setEnableEvidence] = useState(true) // Always enabled by default
+  const [enableEvidence, setEnableEvidence] = useState(false) // Disabled by default
   
   // Evidence citations from server - indexed by message ID or last response
   // Use ref to persist across hook reinitializations (e.g., URL changes)
@@ -1198,7 +1203,10 @@ export function useChatCore({
     // Create optimistic attachments immediately (no upload yet)
     let optimisticAttachments: Attachment[] | undefined = undefined
     if (currentFiles.length > 0) {
-      optimisticAttachments = createOptimisticAttachments(currentFiles)
+      const tempAttachments = createOptimisticAttachments(currentFiles)
+      // CRITICAL: Convert blob URLs to data URLs before sending to server
+      // Blob URLs only work in browser context and cannot be accessed server-side
+      optimisticAttachments = await convertBlobUrlsToDataUrls(tempAttachments, currentFiles)
     }
 
     // CRITICAL: Append message IMMEDIATELY with optimistic values - message appears instantly
@@ -1327,6 +1335,7 @@ export function useChatCore({
     files,
     chatId,
     messages,
+    convertBlobUrlsToDataUrls,
     checkLimitsAndNotify,
     ensureChatExists,
     handleFileUploads,

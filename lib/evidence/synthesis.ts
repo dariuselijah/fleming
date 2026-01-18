@@ -308,4 +308,3 @@ export function extractReferencedCitations(
     },
   };
 }
-

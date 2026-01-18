@@ -175,11 +175,13 @@ export async function ingestPubMedTopic(
     // Step 4: Generate embeddings in batches (optimized for scale)
     if (allChunks.length > 0) {
       // Use larger batch size for embeddings (OpenAI supports up to 2048 inputs per request)
-      const embeddingBatchSize = 200; // Increased from 50 for better throughput
+      // Dynamically adjust based on chunk count for better throughput
+      const embeddingBatchSize = Math.min(200, Math.max(100, Math.floor(allChunks.length / 10)));
       const chunksWithEmbeddings: Array<MedicalEvidenceChunk & { embedding: number[] }> = [];
       
-      // Process embeddings in parallel batches (up to 5 concurrent)
-      const parallelBatches = 3;
+      // Process embeddings in parallel batches (scale with available chunks)
+      // More chunks = more parallel batches (up to 5)
+      const parallelBatches = Math.min(5, Math.max(2, Math.floor(allChunks.length / 1000) + 2));
       for (let i = 0; i < allChunks.length; i += embeddingBatchSize * parallelBatches) {
         const batchGroup = [];
         for (let j = 0; j < parallelBatches && i + j * embeddingBatchSize < allChunks.length; j++) {

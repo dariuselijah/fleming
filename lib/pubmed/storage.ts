@@ -397,10 +397,15 @@ export async function storeMedicalEvidence(
     options?.onProgress?.(stored, records.length);
     
     // Adaptive delay between batches - longer if server is overwhelmed
+    // Dynamically adjust based on batch size and error rate
     if (i + batchSize < records.length) {
-      const baseDelay = 2500; // 2.5s base delay for 5 workers to reduce concurrent load
+      // Base delay scales inversely with batch size (smaller batches = shorter delay)
+      const baseDelay = Math.max(1000, 3000 - (batchSize * 10));
+      // Error delay increases with consecutive errors
       const errorDelay = Math.min(consecutiveErrors * 2000, 20000); // Max 20s delay
-      await new Promise(resolve => setTimeout(resolve, baseDelay + errorDelay));
+      // Add small jitter to prevent thundering herd
+      const jitter = Math.random() * 500;
+      await new Promise(resolve => setTimeout(resolve, baseDelay + errorDelay + jitter));
     }
   }
   

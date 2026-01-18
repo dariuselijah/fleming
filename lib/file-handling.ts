@@ -39,18 +39,8 @@ export async function validateFile(
     }
   }
 
-  const buffer = await file.arrayBuffer()
-  const type = await fileType.fileTypeFromBuffer(
-    Buffer.from(buffer.slice(0, 4100))
-  )
-
-  if (!type || !ALLOWED_FILE_TYPES.includes(type.mime)) {
-    return {
-      isValid: false,
-      error: "File type not supported or doesn't match its extension",
-    }
-  }
-
+  // Allow all file types - only check file size
+  // File type validation removed to allow all types of files
   return { isValid: true }
 }
 

@@ -520,9 +520,11 @@ async function processTopicsInBatches(
     const pct = Math.round((completed / total) * 100);
     console.log(`\n📈 Progress: ${completed}/${total} (${pct}%) | Articles: ${checkpoint!.stats.totalArticles.toLocaleString()} | Chunks: ${checkpoint!.stats.totalChunks.toLocaleString()}`);
     
-    // Delay between worker batches to prevent database overload (3s for 5 workers)
+    // Adaptive delay between worker batches based on worker count
+    // More workers = shorter delay per worker (but more total load)
+    const baseDelay = Math.max(1000, 5000 / workers); // Scale delay inversely with workers
     if (i + workers < pendingTopics.length) {
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => setTimeout(resolve, baseDelay));
     }
   }
   
@@ -637,8 +639,8 @@ Examples:
     ] : undefined,
     ncbiApiKey: values['ncbi-key'] || process.env.NCBI_API_KEY,
     openaiApiKey: process.env.OPENAI_API_KEY,
-    batchSize: 100, // Reduced for better storage reliability
-    delayBetweenBatches: 2500, // 2.5s delay for 5 workers to prevent overload
+    batchSize: Math.min(200, Math.max(50, 100 * workers / 5)), // Scale batch size with workers
+    delayBetweenBatches: Math.max(1000, 2500 / (workers / 5)), // Adaptive delay based on workers
   };
   
   const startTime = Date.now();
