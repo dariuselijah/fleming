@@ -285,9 +285,7 @@ export function extractReferencedCitations(
   const referencedSet = new Set(referencedIndices);
   const missingCitations = Array.from(allIndices).filter(i => !referencedSet.has(i));
 
-  const hasCitations = referencedCitations.length > 0;
-
-  // Log for debugging
+  const hasCitations = referencedCitations.length > 0;  // Log for debugging
   if (hasCitations) {
     console.log(`📚 [CITATION EXTRACTION] Found ${referencedCitations.length} referenced citations out of ${allRetrievedCitations.length} retrieved`);
     if (missingCitations.length > 0) {
@@ -295,9 +293,7 @@ export function extractReferencedCitations(
     }
   } else if (allRetrievedCitations.length > 0) {
     console.warn(`📚 [CITATION EXTRACTION] No citation markers found in response despite ${allRetrievedCitations.length} citations being provided`);
-  }
-
-  return {
+  }  return {
     referencedCitations,
     citationIndices: referencedIndices,
     hasCitations,
