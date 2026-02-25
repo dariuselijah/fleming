@@ -71,7 +71,7 @@ export function useChatCore({
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
-  const [enableEvidence, setEnableEvidence] = useState(false) // Disabled by default
+  const [enableEvidence, setEnableEvidence] = useState(true) // Enabled by default
   
   // Evidence citations from server - indexed by message ID or last response
   // Use ref to persist across hook reinitializations (e.g., URL changes)

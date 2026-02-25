@@ -1,0 +1,408 @@
+{
+  "summary": {
+    "totalCases": 35,
+    "avgResults": 8,
+    "avgTopEvidenceLevel": 1.2571428571428571,
+    "avgLatestYear": 2024.8857142857144
+  },
+  "results": [
+    {
+      "id": "retr-cardiology-hfref",
+      "query": "guideline directed medical therapy heart failure reduced ejection fraction",
+      "tags": [
+        "cardiology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 8,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-cardiology-afib",
+      "query": "atrial fibrillation anticoagulation CHA2DS2-VASc evidence",
+      "tags": [
+        "cardiology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 8,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-cardiology-htn",
+      "query": "first line antihypertensive treatment comparative outcomes",
+      "tags": [
+        "cardiology",
+        "primary-care"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 7,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-cardiology-lipid",
+      "query": "high intensity statin secondary prevention cardiovascular disease",
+      "tags": [
+        "cardiology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 7,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-endo-t2dm",
+      "query": "type 2 diabetes SGLT2 GLP-1 cardiovascular kidney outcomes",
+      "tags": [
+        "endocrine"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-endo-obesity",
+      "query": "obesity pharmacotherapy efficacy long term randomized trial",
+      "tags": [
+        "endocrine"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 7,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-endo-thyroid",
+      "query": "subclinical hypothyroidism treatment outcomes adults",
+      "tags": [
+        "endocrine"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 5,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-resp-asthma",
+      "query": "asthma stepwise management inhaled corticosteroid formoterol evidence",
+      "tags": [
+        "respiratory"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 4,
+      "topEvidenceLevel": 2,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-resp-copd",
+      "query": "copd exacerbation steroid antibiotic trial outcomes",
+      "tags": [
+        "respiratory"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 2,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-resp-ild",
+      "query": "idiopathic pulmonary fibrosis antifibrotic treatment outcomes",
+      "tags": [
+        "respiratory"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-id-sepsis",
+      "query": "sepsis bundle antibiotics timing mortality",
+      "tags": [
+        "infectious-disease",
+        "critical-care"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 5,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-id-uti",
+      "query": "uncomplicated cystitis first line antibiotics resistance",
+      "tags": [
+        "infectious-disease"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 5,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-id-cap",
+      "query": "community acquired pneumonia empiric therapy outpatient adults",
+      "tags": [
+        "infectious-disease",
+        "respiratory"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 4,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-id-cdiff",
+      "query": "clostridioides difficile first line therapy recurrence prevention",
+      "tags": [
+        "infectious-disease",
+        "gastroenterology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 2,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-neuro-stroke",
+      "query": "acute ischemic stroke thrombolysis time window contraindications",
+      "tags": [
+        "neurology",
+        "emergency"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-neuro-epilepsy",
+      "query": "new onset focal epilepsy first line antiseizure medications",
+      "tags": [
+        "neurology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 7,
+      "topEvidenceLevel": 2,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-neuro-dementia",
+      "query": "alzheimer disease disease modifying therapy evidence",
+      "tags": [
+        "neurology",
+        "geriatrics"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 8,
+      "topEvidenceLevel": 5,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-psych-mdd",
+      "query": "major depressive disorder first line ssri efficacy meta analysis",
+      "tags": [
+        "psychiatry"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 4,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-psych-ptsd",
+      "query": "ptsd trauma focused psychotherapy ssri comparative effectiveness",
+      "tags": [
+        "psychiatry"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 4,
+      "topEvidenceLevel": 2,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-psych-bipolar",
+      "query": "bipolar disorder maintenance treatment lithium lamotrigine evidence",
+      "tags": [
+        "psychiatry"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 7,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-gi-uc",
+      "query": "ulcerative colitis induction biologic therapy outcomes",
+      "tags": [
+        "gastroenterology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-gi-crohns",
+      "query": "crohn disease biologic escalation strategy",
+      "tags": [
+        "gastroenterology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-gi-nafld",
+      "query": "metabolic dysfunction associated steatotic liver disease intervention trial",
+      "tags": [
+        "gastroenterology",
+        "endocrine"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 7,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-neph-ckd",
+      "query": "chronic kidney disease progression prevention interventions",
+      "tags": [
+        "nephrology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 8,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-neph-aki",
+      "query": "acute kidney injury fluid strategy outcomes",
+      "tags": [
+        "nephrology",
+        "critical-care"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 4,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-onc-breast",
+      "query": "breast cancer screening interval mortality benefit harms",
+      "tags": [
+        "oncology",
+        "preventive"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2024
+    },
+    {
+      "id": "retr-onc-prostate",
+      "query": "psa screening shared decision making evidence",
+      "tags": [
+        "oncology",
+        "urology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 5,
+      "topEvidenceLevel": 1,
+      "latestYear": 2024
+    },
+    {
+      "id": "retr-peds-asthma",
+      "query": "pediatric asthma controller therapy safety growth",
+      "tags": [
+        "pediatrics",
+        "respiratory"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 4,
+      "topEvidenceLevel": 1,
+      "latestYear": 2023
+    },
+    {
+      "id": "retr-womens-preeclampsia",
+      "query": "aspirin prophylaxis preeclampsia prevention high risk pregnancy",
+      "tags": [
+        "womens-health",
+        "obstetrics"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 5,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-geri-falls",
+      "query": "falls prevention older adults multifactorial intervention evidence",
+      "tags": [
+        "geriatrics"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 2,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-pharm-warfarin",
+      "query": "warfarin antibiotic drug interactions INR management",
+      "tags": [
+        "pharmacology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-pharm-ckd-dosing",
+      "query": "renal dose adjustment medications advanced ckd",
+      "tags": [
+        "pharmacology",
+        "nephrology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 8,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-ortho-oa",
+      "query": "osteoarthritis pain management nsaid vs acetaminophen trial",
+      "tags": [
+        "musculoskeletal"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-rheum-ra",
+      "query": "rheumatoid arthritis early dmard initiation outcomes",
+      "tags": [
+        "musculoskeletal"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 6,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-derm-psoriasis",
+      "query": "psoriasis biologics efficacy safety comparison",
+      "tags": [
+        "dermatology"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 5,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    }
+  ]
+}

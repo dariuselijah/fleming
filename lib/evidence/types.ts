@@ -53,6 +53,8 @@ export interface EvidenceSynthesisResult {
   processingTimeMs: number;
 }
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 export interface EvidenceSearchOptions {
   query: string;
   maxResults?: number;
@@ -64,6 +66,12 @@ export interface EvidenceSearchOptions {
   keywordWeight?: number;
   recencyWeight?: number;
   evidenceBoost?: number;
+  candidateMultiplier?: number;
+  enableRerank?: boolean;
+  minMedicalConfidence?: number;
+  forceEvidence?: boolean;
+  queryExpansion?: boolean;
+  supabaseClient?: SupabaseClient;
 }
 
 export interface EvidenceContext {

@@ -12,6 +12,7 @@ export {
   resultsToCitations,
   buildEvidenceContext,
   isMedicalQuery,
+  scoreMedicalQuery,
   extractMedicalTerms,
 } from './search';
 
@@ -25,3 +26,13 @@ export {
   extractReferencedCitations,
 } from './synthesis';
 
+// Provenance normalization
+export {
+  buildProvenance,
+  computeProvenanceConfidence,
+  provenanceToEvidenceCitation,
+} from './provenance';
+export type {
+  SourceProvenance,
+  ProvenanceSourceType,
+} from './provenance';

@@ -3,14 +3,215 @@
  * Hybrid search (semantic + keyword) using the medical_evidence table
  */
 
-import { createClient } from '@/lib/supabase/server';
-import { generateEmbedding } from '@/lib/rag/embeddings';
+import { generateEmbedding } from '../rag/embeddings';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { 
   MedicalEvidenceResult, 
   EvidenceCitation, 
   EvidenceSearchOptions,
   EvidenceContext 
 } from './types';
+
+export type MedicalQuerySignal = {
+  score: number;
+  isMedical: boolean;
+  signals: string[];
+};
+
+type SupabaseClientType = SupabaseClient;
+
+async function getServerClient(): Promise<SupabaseClientType | null> {
+  try {
+    const { createClient } = await import('../supabase/server');
+    return (await createClient()) as SupabaseClientType | null;
+  } catch (error) {
+    console.error('[Evidence Search] Failed to load server Supabase client:', error);
+    return null;
+  }
+}
+
+const DEFAULT_MEDICAL_CONFIDENCE = 0.35;
+const MAX_FALLBACK_TOKENS = 6;
+const DEFAULT_CANDIDATE_MULTIPLIER = 4;
+
+const MEDICAL_SIGNAL_PATTERNS: Array<{
+  regex: RegExp;
+  weight: number;
+  label: string;
+}> = [
+  { regex: /\b(disease|disorder|syndrome|infection|cancer|tumor|diabetes|hypertension|asthma|copd|heart failure|stroke)\b/i, weight: 0.35, label: 'condition' },
+  { regex: /\b(treatment|therapy|medication|drug|surgery|procedure|intervention|dose|dosing)\b/i, weight: 0.25, label: 'treatment' },
+  { regex: /\b(diagnosis|symptom|sign|prognosis|risk|screening|prevention|guideline|protocol)\b/i, weight: 0.2, label: 'clinical' },
+  { regex: /\b(evidence|study|trial|research|meta-analysis|review|efficacy|safety|outcome)\b/i, weight: 0.2, label: 'evidence' },
+  { regex: /\b(blood pressure|heart rate|glucose|cholesterol|kidney|liver|lung|brain)\b/i, weight: 0.15, label: 'physiology' },
+  { regex: /\b(cardiology|oncology|neurology|psychiatry|pediatric|geriatric|emergency)\b/i, weight: 0.15, label: 'specialty' },
+  { regex: /\b(antibiotic|anticoagulant|statin|insulin|metformin|ssri|snri|beta blocker|ace inhibitor|arb|sglt2|glp-1)\b/i, weight: 0.25, label: 'medication' },
+];
+
+const SHORT_MEDICAL_TOKENS = new Set([
+  'bp',
+  'hr',
+  'rr',
+  'a1c',
+  'ldl',
+  'hdl',
+  'bmi',
+  'egfr',
+  'ckd',
+  'copd',
+  'uti',
+  'mi',
+  'acs',
+  'af',
+  'rct',
+  'ptsd',
+]);
+
+function normalizeQueryText(query: string): string {
+  return query
+    .replace(/[^\w\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeQuery(query: string): string[] {
+  const normalized = normalizeQueryText(query).toLowerCase();
+  const tokens = normalized
+    .split(' ')
+    .map(token => token.trim())
+    .filter(token => token.length >= 3);
+
+  const shortTokens = normalized
+    .split(' ')
+    .map(token => token.trim())
+    .filter(token => SHORT_MEDICAL_TOKENS.has(token));
+
+  return Array.from(new Set([...tokens, ...shortTokens]));
+}
+
+function sanitizeLikeToken(token: string): string {
+  return token.replace(/[%_]/g, '\\$&');
+}
+
+function getCandidateCount(maxResults: number, candidateMultiplier?: number): number {
+  const multiplier = candidateMultiplier ?? DEFAULT_CANDIDATE_MULTIPLIER;
+  const requested = Math.max(maxResults, Math.round(maxResults * multiplier));
+  return Math.min(Math.max(requested, maxResults), 200);
+}
+
+function expandMedicalQuery(query: string): string {
+  const terms = extractMedicalTerms(query);
+  if (terms.length === 0) return query;
+
+  const lower = query.toLowerCase();
+  const extraTerms = terms.filter(term => !lower.includes(term.toLowerCase()));
+  if (extraTerms.length === 0) return query;
+
+  return `${query} ${extraTerms.join(' ')}`.trim();
+}
+
+function computeKeywordOverlapScore(query: string, haystack: string): number {
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0) return 0;
+
+  const normalizedHaystack = haystack.toLowerCase();
+  let hits = 0;
+  tokens.forEach(token => {
+    if (normalizedHaystack.includes(token)) hits += 1;
+  });
+
+  return hits / tokens.length;
+}
+
+function rerankResults(query: string, results: MedicalEvidenceResult[]): MedicalEvidenceResult[] {
+  if (results.length <= 1) return results;
+
+  const scored = results.map(result => {
+    const text = `${result.title} ${result.content}`;
+    const overlapScore = computeKeywordOverlapScore(query, text);
+    const baseScore = typeof result.score === 'number' ? result.score : 0;
+    const combinedScore = baseScore + overlapScore * 0.35;
+
+    return {
+      ...result,
+      score: combinedScore,
+    };
+  });
+
+  return scored.sort((a, b) => b.score - a.score);
+}
+
+async function fallbackKeywordSearch(
+  supabase: SupabaseClientType,
+  options: EvidenceSearchOptions,
+  candidateCount: number
+): Promise<MedicalEvidenceResult[]> {
+  const tokens = tokenizeQuery(options.query)
+    .slice(0, MAX_FALLBACK_TOKENS)
+    .map(token => sanitizeLikeToken(token));
+
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  const orFilters = tokens
+    .flatMap(token => [`title.ilike.%${token}%`, `content.ilike.%${token}%`])
+    .join(',');
+
+  let queryBuilder = (supabase as any)
+    .from('medical_evidence')
+    .select(
+      [
+        'id',
+        'content',
+        'content_with_context',
+        'title',
+        'journal_name',
+        'publication_year',
+        'doi',
+        'authors',
+        'evidence_level',
+        'study_type',
+        'sample_size',
+        'mesh_terms',
+        'major_mesh_terms',
+        'chemicals',
+        'section_type',
+        'pmid',
+      ].join(', ')
+    )
+    .or(orFilters)
+    .limit(candidateCount);
+
+  if (typeof options.minEvidenceLevel === 'number') {
+    queryBuilder = queryBuilder.lte('evidence_level', options.minEvidenceLevel);
+  }
+
+  if (options.studyTypes && options.studyTypes.length > 0) {
+    queryBuilder = queryBuilder.in('study_type', options.studyTypes);
+  }
+
+  if (options.minYear) {
+    queryBuilder = queryBuilder.gte('publication_year', options.minYear);
+  }
+
+  queryBuilder = queryBuilder
+    .order('evidence_level', { ascending: true })
+    .order('publication_year', { ascending: false });
+
+  const { data, error } = await queryBuilder;
+
+  if (error) {
+    console.warn('[Evidence Search] Fallback keyword search failed:', error.message);
+    return [];
+  }
+
+  const rows = (data || []) as unknown as MedicalEvidenceResult[];
+  return rows.map(row => ({
+    ...row,
+    score: 0,
+  }));
+}
 
 /**
  * Search medical evidence using hybrid search (semantic + full-text)
@@ -30,23 +231,30 @@ export async function searchMedicalEvidence(
     keywordWeight = 1.0,
     recencyWeight = 0.1,
     evidenceBoost = 0.2,
+    candidateMultiplier,
+    enableRerank = true,
+    queryExpansion = true,
+    supabaseClient: providedSupabaseClient,
   } = options;
 
-  const supabase = await createClient();
+  const supabase = providedSupabaseClient ?? (await getServerClient());
   
   if (!supabase) {
     throw new Error('Failed to create Supabase client');
   }
+  const supabaseClient = supabase as SupabaseClientType;
+
+  const expandedQuery = queryExpansion ? expandMedicalQuery(query) : query;
+  const candidateCount = getCandidateCount(maxResults, candidateMultiplier);
 
   // Generate embedding for the query
-  const queryEmbedding = await generateEmbedding(query);
+  const queryEmbedding = await generateEmbedding(expandedQuery);
 
   // Call the hybrid search RPC function
-  // @ts-expect-error - hybrid_medical_search is a custom RPC function not in generated types
-  const { data, error } = await supabase.rpc('hybrid_medical_search', {
-    query_text: query,
+  const { data, error } = await supabaseClient.rpc('hybrid_medical_search', {
+    query_text: expandedQuery,
     query_embedding: queryEmbedding,
-    match_count: maxResults,
+    match_count: candidateCount,
     full_text_weight: keywordWeight,
     semantic_weight: semanticWeight,
     recency_weight: recencyWeight,
@@ -58,11 +266,15 @@ export async function searchMedicalEvidence(
   });
 
   if (error) {
-    console.error('[Evidence Search] Hybrid search failed:', error);
-    throw new Error(`Evidence search failed: ${error.message}`);
+    console.warn('[Evidence Search] Hybrid search failed, using fallback:', error.message);
+    const fallbackResults = await fallbackKeywordSearch(supabaseClient, options, candidateCount);
+    const rerankedFallback = enableRerank ? rerankResults(query, fallbackResults) : fallbackResults;
+    return rerankedFallback.slice(0, maxResults);
   }
 
-  return (data || []) as MedicalEvidenceResult[];
+  const results = (data || []) as MedicalEvidenceResult[];
+  const reranked = enableRerank ? rerankResults(query, results) : results;
+  return reranked.slice(0, maxResults);
 }
 
 /**
@@ -199,23 +411,47 @@ function getEvidenceLevelLabel(level: number): string {
 /**
  * Check if a query is likely medical/clinical
  */
-export function isMedicalQuery(query: string): boolean {
-  const medicalPatterns = [
-    // Conditions
-    /\b(disease|disorder|syndrome|infection|cancer|tumor|diabetes|hypertension|asthma|copd|heart failure|stroke)\b/i,
-    // Treatments
-    /\b(treatment|therapy|medication|drug|surgery|procedure|intervention|dose|dosing)\b/i,
-    // Clinical
-    /\b(diagnosis|symptom|sign|prognosis|risk|screening|prevention|guideline|protocol)\b/i,
-    // Evidence
-    /\b(evidence|study|trial|research|meta-analysis|review|efficacy|safety|outcome)\b/i,
-    // Body/Anatomy
-    /\b(blood pressure|heart rate|glucose|cholesterol|kidney|liver|lung|brain)\b/i,
-    // Medical specialties
-    /\b(cardiology|oncology|neurology|psychiatry|pediatric|geriatric|emergency)\b/i,
-  ];
+export function scoreMedicalQuery(
+  query: string,
+  minConfidence: number = DEFAULT_MEDICAL_CONFIDENCE
+): MedicalQuerySignal {
+  const normalized = query.toLowerCase();
+  let score = 0;
+  const signals: string[] = [];
 
-  return medicalPatterns.some(pattern => pattern.test(query));
+  MEDICAL_SIGNAL_PATTERNS.forEach(pattern => {
+    if (pattern.regex.test(query)) {
+      score += pattern.weight;
+      signals.push(pattern.label);
+    }
+  });
+
+  if (/\b\d+(?:\.\d+)?\s?(mg|mcg|g|ml|units|iu|mmhg|meq\/l|mmol\/l)\b/i.test(normalized)) {
+    score += 0.25;
+    signals.push('dosage');
+  }
+
+  if (/\b(a1c|hba1c|ldl|hdl|bmi|egfr|creatinine|ast|alt|bun|tsh|wbc)\b/i.test(normalized)) {
+    score += 0.2;
+    signals.push('lab');
+  }
+
+  const tokens = tokenizeQuery(normalized);
+  if (tokens.length >= 5) {
+    score += 0.1;
+    signals.push('multi-term');
+  }
+
+  const boundedScore = Math.min(score, 1);
+  return {
+    score: boundedScore,
+    isMedical: boundedScore >= minConfidence,
+    signals,
+  };
+}
+
+export function isMedicalQuery(query: string): boolean {
+  return scoreMedicalQuery(query).isMedical;
 }
 
 /**

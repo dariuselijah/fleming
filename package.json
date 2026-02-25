@@ -14,7 +14,13 @@
     "ingest:scale": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed-scale.ts",
     "ingest:bulk": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed-bulk.ts",
     "monitor": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/monitor-ingestion.ts",
-    "check-env": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-env.ts"
+    "check-env": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-env.ts",
+    "eval:evidence": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/eval-evidence.ts",
+    "benchmark:chat": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/benchmark-chat.ts",
+    "benchmark:check": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-benchmark-thresholds.ts",
+    "benchmark:report": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/generate-benchmark-report.ts",
+    "benchmark:release-check": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-release-benchmarks.ts",
+    "benchmark:release": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.10",

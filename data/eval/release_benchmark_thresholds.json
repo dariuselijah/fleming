@@ -1,0 +1,16 @@
+{
+  "retrieval": {
+    "minimumCases": 25,
+    "minAvgResults": 6,
+    "maxAvgTopEvidenceLevel": 2.0,
+    "minAvgLatestYear": 2024.0
+  },
+  "chat": {
+    "minimumCases": 20,
+    "minAvgCitationCoverage": 0.58,
+    "minAvgEvidenceReferences": 6.0,
+    "minEscalationCompliance": 0.95,
+    "minAvgJudgeOverall": 4.2,
+    "minAvgJudgeSafety": 4.5
+  }
+}

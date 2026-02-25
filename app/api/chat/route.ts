@@ -1,10 +1,23 @@
-import { SYSTEM_PROMPT_DEFAULT, MEDICAL_STUDENT_SYSTEM_PROMPT, getSystemPromptByRole, FLEMING_4_SYSTEM_PROMPT } from "@/lib/config"
+import { getSystemPromptByRole } from "@/lib/config"
 import { getAllModels, getModelInfo } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { SupportedModel } from "@/lib/openproviders/types"
 import type { ProviderWithoutOllama } from "@/lib/user-keys"
+import { searchPubMed, fetchPubMedArticle } from "@/lib/pubmed"
+import {
+  searchGuidelines,
+  searchClinicalTrials,
+  lookupDrugSafety,
+  detectEvidenceConflicts,
+} from "@/lib/evidence/live-tools"
+import {
+  buildProvenance,
+  provenanceToEvidenceCitation,
+  type SourceProvenance,
+} from "@/lib/evidence/provenance"
 import { Attachment } from "@ai-sdk/ui-utils"
-import { Message as MessageAISDK, streamText, ToolSet } from "ai"
+import { Message as MessageAISDK, streamText, ToolSet, tool } from "ai"
+import { z } from "zod"
 import {
   incrementMessageCount,
   logUserMessage,
@@ -162,6 +175,73 @@ function assessQueryComplexity(query: string): "simple" | "complex" {
   return "complex"
 }
 
+function needsFreshEvidence(query: string): boolean {
+  const q = query.toLowerCase()
+  return (
+    /\b(latest|recent|new|updated|current)\b/.test(q) ||
+    /\b(guideline|consensus|position statement)\b/.test(q) ||
+    /\btrial|rct|meta-analysis|systematic review\b/.test(q) ||
+    /\b202[4-9]\b/.test(q)
+  )
+}
+
+function extractToolProvenance(toolInvocationParts: any[]): SourceProvenance[] {
+  const flattened = toolInvocationParts.flatMap((part: any) => {
+    const result = part?.toolInvocation?.result
+    if (!result) return []
+    if (Array.isArray(result?.provenance)) return result.provenance
+    if (result?.article && typeof result.article === "object") {
+      const article = result.article
+      return [
+        buildProvenance({
+          id: `pubmed_${article.pmid || "lookup"}`,
+          sourceType: "pubmed",
+          sourceName: "PubMed",
+          title: article.title || "PubMed article",
+          url: article.url || null,
+          publishedAt: article.year ? String(article.year) : null,
+          region: null,
+          journal: article.journal || "PubMed",
+          doi: article.doi || null,
+          pmid: article.pmid || null,
+          evidenceLevel: 2,
+          studyType: "Literature record",
+          snippet: article.abstract || "",
+        }),
+      ]
+    }
+    if (Array.isArray(result?.articles)) {
+      return result.articles.map((article: any, idx: number) =>
+        buildProvenance({
+          id: `pubmed_${article.pmid || idx + 1}`,
+          sourceType: "pubmed",
+          sourceName: "PubMed",
+          title: article.title || "PubMed article",
+          url: article.url || null,
+          publishedAt: article.year ? String(article.year) : null,
+          region: null,
+          journal: article.journal || "PubMed",
+          doi: article.doi || null,
+          pmid: article.pmid || null,
+          evidenceLevel: 2,
+          studyType: "Literature record",
+          snippet: "",
+        })
+      )
+    }
+    return []
+  })
+
+  const deduped = new Map<string, SourceProvenance>()
+  flattened.forEach((item: SourceProvenance) => {
+    const key = item.pmid || item.doi || item.url || `${item.sourceName}:${item.title}`
+    if (!deduped.has(key)) {
+      deduped.set(key, item)
+    }
+  })
+  return Array.from(deduped.values())
+}
+
 type ChatRequest = {
   messages: MessageAISDK[]
   chatId: string
@@ -277,22 +357,14 @@ export async function POST(req: Request) {
     }
 
     // START STREAMING IMMEDIATELY - minimal blocking operations
-    // Apply enhanced system prompts for Fleming models
-    // CRITICAL: For Fleming models, always use Fleming-specific prompts (ignore systemPrompt parameter)
-    // This ensures Fleming models behave as AI doctors without disclaimers
+    // Use role-based web system prompts for all models
     let effectiveModel = model
     let effectiveSystemPrompt: string
-    if (effectiveModel === "fleming-4") {
-      effectiveSystemPrompt = FLEMING_4_SYSTEM_PROMPT
-      console.log(`[Fleming 4] Using Fleming 4 system prompt (AI doctor mode)`)
-    } else {
-      // For non-Fleming models, use the standard prompt logic
-      effectiveSystemPrompt = getCachedSystemPrompt(
-        effectiveUserRole || "general", 
-        medicalSpecialty, 
-        systemPrompt
-      )
-    }
+    effectiveSystemPrompt = getCachedSystemPrompt(
+      effectiveUserRole || "general",
+      medicalSpecialty,
+      systemPrompt
+    )
     
     // INSTANT MODEL LOADING - no async operations, no delays
     console.log(`🔍 Looking for model: "${effectiveModel}"${effectiveModel !== model ? ` (switched from ${model})` : ''}`)
@@ -321,22 +393,27 @@ export async function POST(req: Request) {
       effectiveSystemPrompt += `\n\n**IMPORTANT: Do NOT include citations, citation markers, or reference numbers in your response. Respond naturally without any [CITATION:X] or [X] markers. Do not include a "Citations" section at the end.`
     }
     
+    // Get last user message once and reuse in evidence + tool gating
+    const lastUserMessage = messages.filter(m => m.role === "user").pop()
+    const queryText = typeof lastUserMessage?.content === "string"
+      ? lastUserMessage.content
+      : ""
+
     // If evidence mode is enabled, synthesize evidence from medical_evidence table
     let evidenceContext: Awaited<ReturnType<typeof synthesizeEvidence>> | null = null
     if (finalEnableEvidence) {
       try {
-        // Get the last user message for evidence search
-        const lastUserMessage = messages.filter(m => m.role === 'user').pop()
-        const queryText = typeof lastUserMessage?.content === 'string' 
-          ? lastUserMessage.content 
-          : ''
-        
         if (queryText.length > 0) {
           console.log("📚 EVIDENCE MODE: Searching medical evidence for:", queryText.substring(0, 100))
           evidenceContext = await synthesizeEvidence({
             query: queryText,
             maxResults: 8,
             minEvidenceLevel: 5, // Include all evidence levels
+            candidateMultiplier: 5,
+            enableRerank: true,
+            queryExpansion: true,
+            minMedicalConfidence: 0.25,
+            forceEvidence: queryText.trim().length >= 8,
           })
           
           if (evidenceContext.shouldUseEvidence) {
@@ -423,11 +500,153 @@ export async function POST(req: Request) {
       console.log(`📚 [CAPTURE] No evidence context to capture`)
     }
     
+    // Optional live PubMed tools for freshness and sparse-corpus gaps
+    const supportsTools = Boolean(modelConfig?.tools)
+    const shouldEnablePubMedTools =
+      finalEnableEvidence &&
+      supportsTools &&
+      queryText.length > 0 &&
+      (
+        needsFreshEvidence(queryText) ||
+        (capturedEvidenceContext?.context?.citations?.length ?? 0) < 4
+      )
+    const shouldEnableEvidenceTools = finalEnableEvidence && supportsTools && queryText.length > 0
+
+    const runtimeTools: ToolSet = shouldEnableEvidenceTools
+      ? {
+          pubmedSearch: tool({
+            description: "Search PubMed for recent or guideline-related medical literature.",
+            parameters: z.object({
+              query: z.string().min(3).describe("Clinical query for PubMed"),
+              maxResults: z.number().int().min(1).max(10).default(5),
+            }),
+            execute: async ({ query, maxResults }) => {
+              const result = await searchPubMed(query, maxResults)
+              const provenance: SourceProvenance[] = result.articles.map((a, idx) =>
+                buildProvenance({
+                  id: `pubmed_${a.pmid || idx + 1}`,
+                  sourceType: "pubmed",
+                  sourceName: "PubMed",
+                  title: a.title,
+                  url: a.url || null,
+                  publishedAt: a.year ? String(a.year) : null,
+                  region: null,
+                  journal: a.journal || "PubMed",
+                  doi: a.doi || null,
+                  pmid: a.pmid || null,
+                  evidenceLevel: 2,
+                  studyType: "Literature record",
+                  snippet: "",
+                })
+              )
+              return {
+                totalResults: result.totalResults,
+                articles: result.articles.map(a => ({
+                  pmid: a.pmid,
+                  title: a.title,
+                  journal: a.journal,
+                  year: a.year,
+                  doi: a.doi,
+                  url: a.url,
+                })),
+                provenance,
+              }
+            },
+          }),
+          pubmedLookup: tool({
+            description: "Get details for a PubMed article by PMID.",
+            parameters: z.object({
+              pmid: z.string().min(4).describe("PubMed ID"),
+            }),
+            execute: async ({ pmid }) => {
+              const article = await fetchPubMedArticle(pmid)
+              if (!article) return { found: false }
+              const provenance = [
+                buildProvenance({
+                  id: `pubmed_${article.pmid || "lookup"}`,
+                  sourceType: "pubmed",
+                  sourceName: "PubMed",
+                  title: article.title,
+                  url: article.url || null,
+                  publishedAt: article.year ? String(article.year) : null,
+                  region: null,
+                  journal: article.journal || "PubMed",
+                  doi: article.doi || null,
+                  pmid: article.pmid || null,
+                  evidenceLevel: 2,
+                  studyType: "Literature record",
+                  snippet: article.abstract || "",
+                }),
+              ]
+              return {
+                found: true,
+                article: {
+                  pmid: article.pmid,
+                  title: article.title,
+                  abstract: article.abstract,
+                  journal: article.journal,
+                  year: article.year,
+                  doi: article.doi,
+                  url: article.url,
+                },
+                provenance,
+              }
+            },
+          }),
+          guidelineSearch: tool({
+            description: "Search guideline-like sources (NICE if configured, plus Europe PMC guideline records).",
+            parameters: z.object({
+              query: z.string().min(3).describe("Clinical guideline query"),
+              maxResults: z.number().int().min(1).max(10).default(6),
+            }),
+            execute: async ({ query, maxResults }) => {
+              const result = await searchGuidelines(query, maxResults)
+              return result
+            },
+          }),
+          clinicalTrialsSearch: tool({
+            description: "Search ClinicalTrials.gov v2 for recent or ongoing trials relevant to a clinical question.",
+            parameters: z.object({
+              query: z.string().min(3).describe("Clinical trial search query"),
+              maxResults: z.number().int().min(1).max(10).default(5),
+            }),
+            execute: async ({ query, maxResults }) => {
+              return searchClinicalTrials(query, maxResults)
+            },
+          }),
+          drugSafetyLookup: tool({
+            description: "Lookup drug contraindications, interactions, and renal considerations.",
+            parameters: z.object({
+              drugName: z.string().min(2).describe("Generic or brand drug name"),
+            }),
+            execute: async ({ drugName }) => {
+              const result = await lookupDrugSafety(drugName)
+              return result
+            },
+          }),
+          evidenceConflictCheck: tool({
+            description: "Detect potential contradictions across provided evidence statements.",
+            parameters: z.object({
+              statements: z.array(z.string().min(10)).min(2).max(20),
+            }),
+            execute: async ({ statements }) => {
+              return detectEvidenceConflicts(statements)
+            },
+          }),
+        }
+      : ({} as ToolSet)
+
+    if (shouldEnableEvidenceTools) {
+      effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:\n- Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.\n- Use guidelineSearch for formal recommendations and regional guidance.\n- Use clinicalTrialsSearch for ongoing/new evidence.\n- Use drugSafetyLookup for contraindications/interactions/renal dosing checks.\n- Use evidenceConflictCheck when sources disagree.`
+    } else if (shouldEnablePubMedTools) {
+      effectiveSystemPrompt += `\n\nYou may use PubMed tools when the question requests latest evidence, guideline updates, or when provided evidence is sparse. Prefer retrieved PubMed records for recency-sensitive claims and cite them explicitly.`
+    }
+
     const result = streamText({
       model: modelWithSearch,
       system: effectiveSystemPrompt,
       messages: anonymizedMessages, // Use anonymized messages for LLM
-      tools: {} as ToolSet,
+      tools: runtimeTools,
       maxSteps: 10,
       onError: (err: unknown) => {
         console.error("Streaming error occurred:", err)
@@ -586,6 +805,16 @@ export async function POST(req: Request) {
                 }
                 } else {
                   console.log(`📚 [CITATION EXTRACTION] No evidence context available (capturedEvidenceContext: ${!!capturedEvidenceContext}, evidenceContext: ${!!evidenceContext})`)
+                }
+
+                // Add normalized provenance from tool results to feed citation UX
+                const toolProvenance = extractToolProvenance(toolInvocationParts)
+                if (toolProvenance.length > 0) {
+                  const provenanceCitations = toolProvenance.map((item, idx) =>
+                    provenanceToEvidenceCitation(item, citationsToSave.length + idx + 1)
+                  )
+                  citationsToSave = [...citationsToSave, ...provenanceCitations]
+                  console.log(`📚 [PROVENANCE] Added ${provenanceCitations.length} normalized tool citations`)
                 }
               } else {
                 console.log(`📚 [CITATION EXTRACTION] Evidence mode is OFF - skipping citation extraction`)

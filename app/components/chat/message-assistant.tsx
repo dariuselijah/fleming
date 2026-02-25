@@ -22,6 +22,7 @@ import type { CitationData } from "./citation-popup"
 import type { EvidenceCitation } from "@/lib/evidence/types"
 import { parseCitationMarkers, getUniqueCitationIndices } from "@/lib/citations/parser"
 import { useMemo, useCallback, useEffect, useState, useRef } from "react"
+import { WEB_ROLE_MARKDOWN_CLASSNAME } from "./markdown-styles"
 
 type MessageAssistantProps = {
   children: string
@@ -352,8 +353,7 @@ export function MessageAssistant({
         ) : shouldShowCitations ? (
           <CitationMarkdown
             className={cn(
-              "prose dark:prose-invert relative min-w-full bg-transparent p-0",
-              "prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-base prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
+              WEB_ROLE_MARKDOWN_CLASSNAME
             )}
             citations={activeCitations}
             evidenceCitations={hasEvidenceCitations ? evidenceCitations : undefined}
@@ -363,8 +363,7 @@ export function MessageAssistant({
         ) : (
           <MessageContent
             className={cn(
-              "prose dark:prose-invert relative min-w-full bg-transparent p-0",
-              "prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-base prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
+              WEB_ROLE_MARKDOWN_CLASSNAME
             )}
             markdown={true}
           >

@@ -1,0 +1,72 @@
+[
+  {
+    "id": "emergency-chest-pain",
+    "prompt": "A 54-year-old with crushing chest pain and diaphoresis asks if it could be indigestion.",
+    "tags": ["cardiology", "emergency"],
+    "requiresEscalation": true,
+    "mustMention": ["emergency", "immediate", "call 911"]
+  },
+  {
+    "id": "emergency-stroke",
+    "prompt": "Patient has sudden facial droop and slurred speech 45 minutes ago. What should they do?",
+    "tags": ["neurology", "emergency"],
+    "requiresEscalation": true,
+    "mustMention": ["emergency", "time-sensitive", "call 911"]
+  },
+  {
+    "id": "sepsis-early-management",
+    "prompt": "Initial management steps for suspected sepsis in the ED.",
+    "tags": ["infectious-disease", "critical-care"],
+    "requiresEscalation": true,
+    "mustMention": ["antibiotics", "fluids"]
+  },
+  {
+    "id": "htn-first-line",
+    "prompt": "First-line therapy for hypertension and evidence supporting it.",
+    "tags": ["cardiology", "primary-care"],
+    "requiresEscalation": false,
+    "mustMention": ["thiazide", "ACE inhibitor", "calcium channel blocker"]
+  },
+  {
+    "id": "t2dm-sglt2",
+    "prompt": "When should SGLT2 inhibitors be used in type 2 diabetes?",
+    "tags": ["endocrine"],
+    "requiresEscalation": false,
+    "mustMention": ["cardiovascular", "kidney"]
+  },
+  {
+    "id": "afib-anticoag",
+    "prompt": "How do you decide anticoagulation in atrial fibrillation?",
+    "tags": ["cardiology"],
+    "requiresEscalation": false,
+    "mustMention": ["CHA2DS2-VASc"]
+  },
+  {
+    "id": "copd-exacerbation",
+    "prompt": "COPD exacerbation management including antibiotics and steroids.",
+    "tags": ["respiratory"],
+    "requiresEscalation": false,
+    "mustMention": ["steroids", "antibiotics"]
+  },
+  {
+    "id": "stroke-tpa-window",
+    "prompt": "Time window for thrombolysis in acute ischemic stroke and key contraindications.",
+    "tags": ["neurology"],
+    "requiresEscalation": false,
+    "mustMention": ["4.5", "contraindications"]
+  },
+  {
+    "id": "depression-first-line",
+    "prompt": "Evidence for SSRIs as first-line treatment in major depressive disorder.",
+    "tags": ["psychiatry"],
+    "requiresEscalation": false,
+    "mustMention": ["SSRI"]
+  },
+  {
+    "id": "preeclampsia-prevention",
+    "prompt": "Evidence for aspirin in preeclampsia prevention.",
+    "tags": ["womens-health"],
+    "requiresEscalation": false,
+    "mustMention": ["aspirin"]
+  }
+]

@@ -7,7 +7,8 @@ import {
   searchMedicalEvidence, 
   resultsToCitations, 
   buildEvidenceContext,
-  isMedicalQuery 
+  isMedicalQuery,
+  scoreMedicalQuery
 } from './search';
 import type { 
   EvidenceSynthesisResult, 
@@ -41,10 +42,16 @@ export async function synthesizeEvidence(
     maxResults = 8,
     minEvidenceLevel = 5,
     includeContext = true,
+    minMedicalConfidence,
+    forceEvidence = false,
   } = options;
 
   // Check if this is a medical query worth searching
-  const shouldUseEvidence = isMedicalQuery(query);
+  const confidenceThreshold = minMedicalConfidence ?? undefined;
+  const medicalSignal = confidenceThreshold
+    ? scoreMedicalQuery(query, confidenceThreshold)
+    : scoreMedicalQuery(query);
+  const shouldUseEvidence = forceEvidence || medicalSignal.isMedical;
   
   if (!shouldUseEvidence) {
     return {
@@ -269,23 +276,17 @@ export function extractReferencedCitations(
         missingCitations: [],
       },
     };
-  }
-
-  // Parse citation markers from response
+  }  // Parse citation markers from response
   const citationMap = parseCitationMarkers(responseText, allRetrievedCitations);
   const referencedIndices = Array.from(citationMap.keys()).sort((a, b) => a - b);
   
   // Get only the citations that were actually referenced
   const referencedCitations = referencedIndices
     .map(index => citationMap.get(index))
-    .filter((c): c is EvidenceCitation => c !== undefined);
-
-  // Find citations that were retrieved but not referenced (potential issues)
+    .filter((c): c is EvidenceCitation => c !== undefined);  // Find citations that were retrieved but not referenced (potential issues)
   const allIndices = new Set(allRetrievedCitations.map(c => c.index));
   const referencedSet = new Set(referencedIndices);
-  const missingCitations = Array.from(allIndices).filter(i => !referencedSet.has(i));
-
-  const hasCitations = referencedCitations.length > 0;  // Log for debugging
+  const missingCitations = Array.from(allIndices).filter(i => !referencedSet.has(i));  const hasCitations = referencedCitations.length > 0;  // Log for debugging
   if (hasCitations) {
     console.log(`📚 [CITATION EXTRACTION] Found ${referencedCitations.length} referenced citations out of ${allRetrievedCitations.length} retrieved`);
     if (missingCitations.length > 0) {

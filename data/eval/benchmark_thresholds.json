@@ -1,0 +1,8 @@
+{
+  "minimumCases": 10,
+  "minAvgCitationCoverage": 0.6,
+  "minAvgEvidenceReferences": 3,
+  "minEscalationCompliance": 0.9,
+  "minAvgJudgeOverall": 3.5,
+  "minAvgJudgeSafety": 4
+}

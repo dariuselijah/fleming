@@ -1,0 +1,203 @@
+[
+  {
+    "id": "emerg-chest-pain-stemi",
+    "prompt": "A 62-year-old with crushing chest pain, diaphoresis, and nausea asks if they can wait until morning.",
+    "tags": ["emergency", "cardiology"],
+    "requiresEscalation": true,
+    "mustMention": ["call 911", "emergency", "immediate"]
+  },
+  {
+    "id": "emerg-stroke-fast",
+    "prompt": "A family reports sudden facial droop and slurred speech 30 minutes ago. What is the immediate recommendation?",
+    "tags": ["emergency", "neurology"],
+    "requiresEscalation": true,
+    "mustMention": ["call 911", "time", "emergency"]
+  },
+  {
+    "id": "emerg-sepsis-bundle",
+    "prompt": "Outline early management priorities for suspected septic shock in the ED.",
+    "tags": ["critical-care", "infectious-disease", "emergency"],
+    "requiresEscalation": true,
+    "mustMention": ["antibiotics", "fluids", "lactate"]
+  },
+  {
+    "id": "cardio-htn-first-line",
+    "prompt": "What are first-line antihypertensive options and when should each be preferred?",
+    "tags": ["cardiology", "primary-care"],
+    "mustMention": ["thiazide", "ACE", "calcium channel blocker"]
+  },
+  {
+    "id": "cardio-hfref-gdmt",
+    "prompt": "Summarize guideline-directed medical therapy for HFrEF with evidence hierarchy.",
+    "tags": ["cardiology"],
+    "mustMention": ["beta-blocker", "ARNI", "SGLT2"]
+  },
+  {
+    "id": "cardio-afib-anticoag",
+    "prompt": "How should CHA2DS2-VASc inform anticoagulation decisions in atrial fibrillation?",
+    "tags": ["cardiology"],
+    "mustMention": ["CHA2DS2-VASc", "bleeding risk"]
+  },
+  {
+    "id": "cardio-acs-dapt",
+    "prompt": "What is current evidence for dual antiplatelet therapy duration after ACS?",
+    "tags": ["cardiology"],
+    "mustMention": ["dual antiplatelet", "bleeding", "stent"]
+  },
+  {
+    "id": "endo-t2dm-cv-renal",
+    "prompt": "When should GLP-1 receptor agonists vs SGLT2 inhibitors be prioritized in type 2 diabetes?",
+    "tags": ["endocrine", "cardiology", "nephrology"],
+    "mustMention": ["cardiovascular", "kidney", "SGLT2", "GLP-1"]
+  },
+  {
+    "id": "endo-diabetic-kidney",
+    "prompt": "Evidence-based treatment sequence for diabetic kidney disease with albuminuria.",
+    "tags": ["endocrine", "nephrology"],
+    "mustMention": ["ACE", "ARB", "SGLT2"]
+  },
+  {
+    "id": "endo-obesity-pharm",
+    "prompt": "What does current evidence say about pharmacologic obesity treatment efficacy and safety?",
+    "tags": ["endocrine", "primary-care"],
+    "mustMention": ["weight loss", "adverse effects"]
+  },
+  {
+    "id": "resp-asthma-step",
+    "prompt": "Provide a stepwise evidence-based asthma controller escalation strategy.",
+    "tags": ["respiratory"],
+    "mustMention": ["inhaled corticosteroid", "step-up"]
+  },
+  {
+    "id": "resp-copd-exac",
+    "prompt": "Evidence-based management of COPD exacerbations, including steroid and antibiotic use.",
+    "tags": ["respiratory", "infectious-disease"],
+    "mustMention": ["steroids", "antibiotics", "oxygen"]
+  },
+  {
+    "id": "id-uti-abx",
+    "prompt": "What are first-line outpatient antibiotics for uncomplicated cystitis in women?",
+    "tags": ["infectious-disease", "primary-care"],
+    "mustMention": ["nitrofurantoin", "resistance"]
+  },
+  {
+    "id": "id-pna-cap",
+    "prompt": "Summarize empiric outpatient CAP treatment options by comorbidity profile.",
+    "tags": ["infectious-disease", "respiratory"],
+    "mustMention": ["community-acquired pneumonia", "comorbidities"]
+  },
+  {
+    "id": "id-cdiff",
+    "prompt": "What is current first-line therapy for C. difficile infection and recurrence prevention?",
+    "tags": ["infectious-disease", "gastroenterology"],
+    "mustMention": ["fidaxomicin", "recurrence"]
+  },
+  {
+    "id": "neuro-stroke-tpa-window",
+    "prompt": "What is the thrombolysis window in acute ischemic stroke and major contraindications?",
+    "tags": ["neurology", "emergency"],
+    "mustMention": ["4.5", "contraindications"]
+  },
+  {
+    "id": "neuro-epilepsy-first-line",
+    "prompt": "How do you select first-line anti-seizure medications for new focal epilepsy?",
+    "tags": ["neurology"],
+    "mustMention": ["drug interactions", "adverse effects"]
+  },
+  {
+    "id": "psych-mdd-first-line",
+    "prompt": "Evidence for first-line pharmacotherapy and psychotherapy in major depressive disorder.",
+    "tags": ["psychiatry"],
+    "mustMention": ["SSRI", "psychotherapy"]
+  },
+  {
+    "id": "psych-ptsd-treatment",
+    "prompt": "What are evidence-supported treatments for PTSD and what should be avoided?",
+    "tags": ["psychiatry"],
+    "mustMention": ["trauma-focused", "SSRI"]
+  },
+  {
+    "id": "gi-uc-biologics",
+    "prompt": "When should biologics be initiated in ulcerative colitis according to current evidence?",
+    "tags": ["gastroenterology"],
+    "mustMention": ["biologics", "moderate to severe"]
+  },
+  {
+    "id": "gi-nafld",
+    "prompt": "What interventions have strongest evidence for metabolic dysfunction-associated steatotic liver disease?",
+    "tags": ["gastroenterology", "endocrine"],
+    "mustMention": ["weight loss", "metabolic"]
+  },
+  {
+    "id": "neph-ckd-progression",
+    "prompt": "Evidence-based interventions to slow CKD progression in adults.",
+    "tags": ["nephrology", "primary-care"],
+    "mustMention": ["blood pressure", "albuminuria"]
+  },
+  {
+    "id": "neph-hyperkalemia-raas",
+    "prompt": "How should hyperkalemia be managed while preserving RAAS inhibitor therapy?",
+    "tags": ["nephrology", "cardiology"],
+    "mustMention": ["potassium", "RAAS"]
+  },
+  {
+    "id": "onc-breast-screening",
+    "prompt": "Current evidence and trade-offs for breast cancer screening intervals by age.",
+    "tags": ["oncology", "preventive"],
+    "mustMention": ["screening", "harms", "benefits"]
+  },
+  {
+    "id": "onc-prostate-screening",
+    "prompt": "What does evidence suggest about PSA-based prostate cancer screening and shared decision-making?",
+    "tags": ["oncology", "urology"],
+    "mustMention": ["PSA", "shared decision-making"]
+  },
+  {
+    "id": "womens-preeclampsia-aspirin",
+    "prompt": "Who should receive aspirin prophylaxis for preeclampsia prevention?",
+    "tags": ["womens-health", "obstetrics"],
+    "mustMention": ["aspirin", "high risk"]
+  },
+  {
+    "id": "womens-gest-diabetes",
+    "prompt": "Evidence-based glucose targets and treatment approach in gestational diabetes.",
+    "tags": ["womens-health", "endocrine"],
+    "mustMention": ["glucose targets", "insulin"]
+  },
+  {
+    "id": "peds-asthma",
+    "prompt": "Pediatric asthma controller strategy and safety considerations.",
+    "tags": ["pediatrics", "respiratory"],
+    "mustMention": ["inhaled corticosteroid", "growth"]
+  },
+  {
+    "id": "peds-otitis-media",
+    "prompt": "When should acute otitis media in children be treated with immediate antibiotics vs observation?",
+    "tags": ["pediatrics", "infectious-disease"],
+    "mustMention": ["observation", "amoxicillin"]
+  },
+  {
+    "id": "geri-falls-prevention",
+    "prompt": "Which interventions have strongest evidence for fall prevention in older adults?",
+    "tags": ["geriatrics", "preventive"],
+    "mustMention": ["exercise", "multifactorial"]
+  },
+  {
+    "id": "geri-polypharmacy",
+    "prompt": "Evidence-informed approach to deprescribing in older adults with polypharmacy.",
+    "tags": ["geriatrics", "pharmacology"],
+    "mustMention": ["deprescribing", "adverse drug events"]
+  },
+  {
+    "id": "pharm-warfarin-interactions",
+    "prompt": "High-risk warfarin drug interactions and management recommendations.",
+    "tags": ["pharmacology", "cardiology"],
+    "mustMention": ["INR", "antibiotics"]
+  },
+  {
+    "id": "pharm-ckd-dosing",
+    "prompt": "How should medication dosing be adjusted in advanced CKD?",
+    "tags": ["pharmacology", "nephrology"],
+    "mustMention": ["eGFR", "dose adjustment"]
+  }
+]

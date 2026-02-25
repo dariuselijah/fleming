@@ -41,6 +41,11 @@ export async function POST(req: Request) {
       minEvidenceLevel,
       studyTypes,
       minYear,
+      candidateMultiplier: 5,
+      enableRerank: true,
+      queryExpansion: true,
+      minMedicalConfidence: 0.25,
+      forceEvidence: true,
     };
 
     const result = await synthesizeEvidence(options);

@@ -12,6 +12,7 @@ import {
 } from "@/components/prompt-kit/chat-container"
 import { CitationMarkdown } from "@/app/components/chat/citation-markdown"
 import { EvidenceReferencesSection } from "@/app/components/chat/evidence-references-section"
+import { WEB_ROLE_MARKDOWN_CLASSNAME } from "@/app/components/chat/markdown-styles"
 import type { EvidenceCitation } from "@/lib/evidence/types"
 
 type ChatPreviewPanelProps = {
@@ -88,13 +89,13 @@ function MessageBubble({ content, role, evidenceCitations }: MessageBubbleProps)
           <CitationMarkdown
             citations={new Map()}
             evidenceCitations={evidenceCitations}
-            className="prose dark:prose-invert relative min-w-full bg-transparent p-0 prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-base prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
+            className={WEB_ROLE_MARKDOWN_CLASSNAME}
           >
             {content}
           </CitationMarkdown>
         ) : (
           <MessageContent
-            className="prose dark:prose-invert relative min-w-full bg-transparent p-0 prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-base prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
+            className={WEB_ROLE_MARKDOWN_CLASSNAME}
             markdown={true}
           >
             {content}
