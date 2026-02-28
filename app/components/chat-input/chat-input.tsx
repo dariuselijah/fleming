@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react"
+import {
+  CLINICIAN_MODE_PLACEHOLDERS,
+  DEFAULT_CLINICIAN_WORKFLOW_MODE,
+  type ClinicianWorkflowMode,
+} from "@/lib/clinician-mode"
 import { getModelInfo } from "@/lib/models"
 import { useModel } from "@/lib/model-store/provider"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
@@ -16,6 +21,8 @@ import { Button } from "@/components/ui/button"
 import { PromptSystem } from "../suggestions/prompt-system"
 import { ButtonFileUpload } from "./button-file-upload"
 import { ButtonSearch } from "./button-search"
+import { ClinicianWorkflowPanel } from "./clinician-workflow-panel"
+import { ClinicianModeSelector } from "./clinician-mode-selector"
 import { FileList } from "./file-list"
 import { LearningModeSelector } from "./learning-mode-selector"
 
@@ -43,6 +50,8 @@ type ChatInputProps = {
   enableEvidence?: boolean
   learningMode: MedicalStudentLearningMode
   onLearningModeChange: (mode: MedicalStudentLearningMode) => void
+  clinicianMode?: ClinicianWorkflowMode
+  onClinicianModeChange?: (mode: ClinicianWorkflowMode) => void
 }
 
 export function ChatInput({
@@ -50,6 +59,7 @@ export function ChatInput({
   onValueChange,
   onSend,
   isSubmitting,
+  hasMessages = false,
   files,
   onFileUpload,
   onFileRemove,
@@ -66,6 +76,8 @@ export function ChatInput({
   enableEvidence = false,
   learningMode,
   onLearningModeChange,
+  clinicianMode = DEFAULT_CLINICIAN_WORKFLOW_MODE,
+  onClinicianModeChange,
 }: ChatInputProps) {
   const { models } = useModel()
   const { preferences } = useUserPreferences()
@@ -189,6 +201,23 @@ export function ChatInput({
   }
 
   const isMedicalStudent = preferences.userRole === "medical_student"
+  const isDoctor = preferences.userRole === "doctor"
+  const showClinicianWorkflowPanel =
+    isDoctor && !hasMessages && clinicianMode !== "open_search"
+  const shouldShowInlineSuggestions =
+    isDoctor &&
+    !hasMessages &&
+    (clinicianMode === "open_search" || clinicianMode === "clinical_summary")
+
+  const handleClinicianPanelSubmit = useCallback(
+    (prompt: string) => {
+      if (status === "streaming") {
+        stop()
+      }
+      onSuggestion(prompt)
+    },
+    [onSuggestion, status, stop]
+  )
 
   return (
     <div className="relative flex w-full flex-col gap-4">
@@ -198,62 +227,85 @@ export function ChatInput({
           onChange={onLearningModeChange}
         />
       )}
+      {isDoctor && onClinicianModeChange && (
+        <ClinicianModeSelector
+          value={clinicianMode}
+          onChange={onClinicianModeChange}
+        />
+      )}
+      {showClinicianWorkflowPanel && (
+        <ClinicianWorkflowPanel
+          mode={clinicianMode}
+          onSubmitPrompt={handleClinicianPanelSubmit}
+          isSubmitting={isSubmitting || status === "streaming"}
+        />
+      )}
       {hasSuggestions && (
         <PromptSystem
           onValueChange={onValueChange}
           onSuggestion={onSuggestion}
           value={value}
           learningMode={learningMode}
+          clinicianMode={clinicianMode}
+          position={shouldShowInlineSuggestions ? "inline" : "floating"}
         />
       )}
-      <div className="relative order-2 px-2 pb-3 sm:pb-4 md:order-1">
-        <PromptInput
-          className="bg-popover relative z-10 p-0 pt-1 shadow-xs backdrop-blur-xl"
-          maxHeight={200}
-          value={value}
-          onValueChange={onValueChange}
-        >
-          <FileList files={files} onFileRemove={onFileRemove} />
-          <PromptInputTextarea
-            placeholder={isMedicalStudent ? placeholderByMode[learningMode] : "Ask Fleming anything..."}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base placeholder:text-muted-foreground placeholder:opacity-80"
-          />
-          <PromptInputActions className="mt-5 w-full justify-between px-3 pb-3">
-            <div className="flex gap-2">
-              <ButtonFileUpload
-                onFileUpload={onFileUpload}
-                isUserAuthenticated={isUserAuthenticated}
-                model={effectiveModelId}
-              />
-              {hasSearchSupport ? (
-                <ButtonSearch
-                  isSelected={enableSearch}
-                  onToggle={setEnableSearch}
-                  isAuthenticated={isUserAuthenticated}
+      {!showClinicianWorkflowPanel && (
+        <div className="relative order-2 px-2 pb-3 sm:pb-4 md:order-1">
+          <PromptInput
+            className="bg-popover relative z-10 p-0 pt-1 shadow-xs backdrop-blur-xl"
+            maxHeight={200}
+            value={value}
+            onValueChange={onValueChange}
+          >
+            <FileList files={files} onFileRemove={onFileRemove} />
+            <PromptInputTextarea
+              placeholder={
+                isMedicalStudent
+                  ? placeholderByMode[learningMode]
+                  : isDoctor
+                    ? CLINICIAN_MODE_PLACEHOLDERS[clinicianMode]
+                    : "Ask Fleming anything..."
+              }
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base placeholder:text-muted-foreground placeholder:opacity-80"
+            />
+            <PromptInputActions className="mt-5 w-full justify-between px-3 pb-3">
+              <div className="flex gap-2">
+                <ButtonFileUpload
+                  onFileUpload={onFileUpload}
+                  isUserAuthenticated={isUserAuthenticated}
+                  model={effectiveModelId}
                 />
-              ) : null}
-            </div>
-            <PromptInputAction tooltip={status === "streaming" ? "Stop" : "Send"}>
-              <Button
-                size="sm"
-                className="size-9 rounded-full transition-all duration-300 ease-out"
-                disabled={isButtonDisabled}
-                type="button"
-                onClick={handleSend}
-                aria-label={status === "streaming" ? "Stop" : "Send message"}
-              >
-                {status === "streaming" ? (
-                  <StopIcon className="size-4" />
-                ) : (
-                  <ArrowUpIcon className="size-4" />
-                )}
-              </Button>
-            </PromptInputAction>
-          </PromptInputActions>
-        </PromptInput>
-      </div>
+                {hasSearchSupport ? (
+                  <ButtonSearch
+                    isSelected={enableSearch}
+                    onToggle={setEnableSearch}
+                    isAuthenticated={isUserAuthenticated}
+                  />
+                ) : null}
+              </div>
+              <PromptInputAction tooltip={status === "streaming" ? "Stop" : "Send"}>
+                <Button
+                  size="sm"
+                  className="size-9 rounded-full transition-all duration-300 ease-out"
+                  disabled={isButtonDisabled}
+                  type="button"
+                  onClick={handleSend}
+                  aria-label={status === "streaming" ? "Stop" : "Send message"}
+                >
+                  {status === "streaming" ? (
+                    <StopIcon className="size-4" />
+                  ) : (
+                    <ArrowUpIcon className="size-4" />
+                  )}
+                </Button>
+              </PromptInputAction>
+            </PromptInputActions>
+          </PromptInput>
+        </div>
+      )}
     </div>
   )
 }

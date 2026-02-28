@@ -1,9 +1,9 @@
 {
   "summary": {
-    "totalCases": 35,
+    "totalCases": 39,
     "avgResults": 8,
-    "avgTopEvidenceLevel": 1.2571428571428571,
-    "avgLatestYear": 2024.8857142857144
+    "avgTopEvidenceLevel": 1.1282051282051282,
+    "avgLatestYear": 2024.8461538461538
   },
   "results": [
     {
@@ -13,7 +13,7 @@
         "cardiology"
       ],
       "resultCount": 8,
-      "uniquePmids": 8,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -24,7 +24,7 @@
         "cardiology"
       ],
       "resultCount": 8,
-      "uniquePmids": 8,
+      "uniquePmids": 7,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -49,7 +49,7 @@
       "resultCount": 8,
       "uniquePmids": 7,
       "topEvidenceLevel": 1,
-      "latestYear": 2025
+      "latestYear": 2023
     },
     {
       "id": "retr-endo-t2dm",
@@ -69,7 +69,7 @@
         "endocrine"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -102,7 +102,7 @@
         "respiratory"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 7,
       "topEvidenceLevel": 2,
       "latestYear": 2025
     },
@@ -160,7 +160,7 @@
         "gastroenterology"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 5,
       "topEvidenceLevel": 2,
       "latestYear": 2025
     },
@@ -196,7 +196,7 @@
       ],
       "resultCount": 8,
       "uniquePmids": 8,
-      "topEvidenceLevel": 5,
+      "topEvidenceLevel": 1,
       "latestYear": 2025
     },
     {
@@ -206,7 +206,7 @@
         "psychiatry"
       ],
       "resultCount": 8,
-      "uniquePmids": 4,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -218,7 +218,7 @@
       ],
       "resultCount": 8,
       "uniquePmids": 4,
-      "topEvidenceLevel": 2,
+      "topEvidenceLevel": 1,
       "latestYear": 2025
     },
     {
@@ -228,9 +228,9 @@
         "psychiatry"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
-      "latestYear": 2025
+      "latestYear": 2024
     },
     {
       "id": "retr-gi-uc",
@@ -239,7 +239,7 @@
         "gastroenterology"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -250,7 +250,7 @@
         "gastroenterology"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 7,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -285,7 +285,7 @@
         "critical-care"
       ],
       "resultCount": 8,
-      "uniquePmids": 4,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -299,7 +299,7 @@
       "resultCount": 8,
       "uniquePmids": 6,
       "topEvidenceLevel": 1,
-      "latestYear": 2024
+      "latestYear": 2025
     },
     {
       "id": "retr-onc-prostate",
@@ -309,7 +309,7 @@
         "urology"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 4,
       "topEvidenceLevel": 1,
       "latestYear": 2024
     },
@@ -333,7 +333,7 @@
         "obstetrics"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -355,7 +355,7 @@
         "pharmacology"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 3,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -372,13 +372,63 @@
       "latestYear": 2025
     },
     {
+      "id": "retr-clinical-abdominal-pain",
+      "query": "adult abdominal pain diagnostic workup red flags guideline",
+      "tags": [
+        "internal-medicine",
+        "emergency",
+        "guideline-priority"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 7,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-clinical-htn-pathophysiology",
+      "query": "hypertension pathophysiology and first line treatment guideline adults",
+      "tags": [
+        "cardiology",
+        "guideline-priority"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 4,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-clinical-acetaminophen-safety",
+      "query": "acetaminophen maximum daily dose multi ingredient products safety guidance",
+      "tags": [
+        "pharmacology",
+        "guideline-priority"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 3,
+      "topEvidenceLevel": 1,
+      "latestYear": 2025
+    },
+    {
+      "id": "retr-clinical-sepsis-bundle",
+      "query": "sepsis first hour bundle guideline antibiotics fluids lactate",
+      "tags": [
+        "critical-care",
+        "infectious-disease",
+        "guideline-priority"
+      ],
+      "resultCount": 8,
+      "uniquePmids": 7,
+      "topEvidenceLevel": 2,
+      "latestYear": 2025
+    },
+    {
       "id": "retr-ortho-oa",
       "query": "osteoarthritis pain management nsaid vs acetaminophen trial",
       "tags": [
         "musculoskeletal"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 7,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },

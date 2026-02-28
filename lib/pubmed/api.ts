@@ -31,7 +31,7 @@ export async function searchPubMed(
 ): Promise<PubMedSearchResult> {
   try {
     // Step 1: Search for article IDs
-    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json`
+    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json&sort=relevance`
     
     const searchResponse = await fetch(searchUrl)
     const searchData = await searchResponse.json()

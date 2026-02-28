@@ -3,16 +3,18 @@
 import { PromptSuggestion } from "@/components/prompt-kit/prompt-suggestion"
 import { TRANSITION_SUGGESTIONS } from "@/lib/motion"
 import { getSuggestionsByRole } from "@/lib/config"
+import type { ClinicianWorkflowMode } from "@/lib/clinician-mode"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import type { MedicalStudentLearningMode } from "@/lib/medical-student-learning"
 import { AnimatePresence, motion } from "motion/react"
-import React, { memo, useCallback, useMemo, useState, useEffect } from "react"
+import React, { memo, useCallback, useMemo, useState } from "react"
 
 type SuggestionsProps = {
   onValueChange: (value: string) => void
   onSuggestion: (suggestion: string) => void
   value?: string
   learningMode: MedicalStudentLearningMode
+  clinicianMode: ClinicianWorkflowMode
 }
 
 const MotionPromptSuggestion = motion.create(PromptSuggestion)
@@ -22,6 +24,7 @@ export const Suggestions = memo(function Suggestions({
   onSuggestion,
   value,
   learningMode,
+  clinicianMode,
 }: SuggestionsProps) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const { preferences } = useUserPreferences()
@@ -35,9 +38,15 @@ export const Suggestions = memo(function Suggestions({
     return getSuggestionsByRole(
       preferences.userRole,
       preferences.medicalSpecialty,
-      learningMode
+      learningMode,
+      clinicianMode
     )
-  }, [preferences.userRole, preferences.medicalSpecialty, learningMode])
+  }, [
+    preferences.userRole,
+    preferences.medicalSpecialty,
+    learningMode,
+    clinicianMode,
+  ])
 
   const activeCategoryData = SUGGESTIONS_CONFIG.find(
     (group) => group.label === activeCategory

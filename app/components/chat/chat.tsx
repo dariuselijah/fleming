@@ -12,6 +12,10 @@ import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
 import { normalizeMedicalStudentLearningMode } from "@/lib/medical-student-learning"
+import {
+  normalizeClinicianWorkflowMode,
+  type ClinicianWorkflowMode,
+} from "@/lib/clinician-mode"
 import { toast } from "@/components/ui/toast"
 import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
@@ -68,6 +72,7 @@ export function Chat() {
     enableSearch: boolean
     enableEvidence: boolean
     learningMode: "ask" | "simulate" | "guideline"
+    clinicianMode: ClinicianWorkflowMode
   } | null>(null)
 
   // File upload functionality
@@ -170,6 +175,8 @@ export function Chat() {
     setEnableEvidence,
     learningMode,
     setLearningMode,
+    clinicianMode,
+    setClinicianMode,
     evidenceCitations,
     submit,
     handleSuggestion,
@@ -218,6 +225,9 @@ export function Chat() {
         learningMode: normalizeMedicalStudentLearningMode(
           pendingMessage.learningMode
         ),
+        clinicianMode: normalizeClinicianWorkflowMode(
+          pendingMessage.clinicianMode
+        ),
       }
       
       // Set input from pending message
@@ -233,6 +243,11 @@ export function Chat() {
       if (pendingMessage.learningMode !== undefined) {
         setLearningMode(
           normalizeMedicalStudentLearningMode(pendingMessage.learningMode)
+        )
+      }
+      if (pendingMessage.clinicianMode !== undefined) {
+        setClinicianMode(
+          normalizeClinicianWorkflowMode(pendingMessage.clinicianMode)
         )
       }
       
@@ -263,7 +278,18 @@ export function Chat() {
       sessionStorage.removeItem('pendingMessage')
       pendingMessageRef.current = null
     }
-  }, [submit, handleInputChange, setEnableSearch, setEnableEvidence, setLearningMode, setHasDialogAuth, selectedModel, enableSearch, enableEvidence])
+  }, [
+    submit,
+    handleInputChange,
+    setEnableSearch,
+    setEnableEvidence,
+    setLearningMode,
+    setClinicianMode,
+    setHasDialogAuth,
+    selectedModel,
+    enableSearch,
+    enableEvidence,
+  ])
   
   // Check for pending message on mount (in case user returned from OAuth)
   useEffect(() => {
@@ -311,7 +337,14 @@ export function Chat() {
   const chatInputProps = useMemo(
     () => {
       // Show suggestions when there are no messages, regardless of chatId
-      const hasSuggestions = preferences.promptSuggestions && messages.length === 0
+      const shouldShowDoctorSuggestions =
+        preferences.userRole === "doctor" &&
+        (clinicianMode === "open_search" ||
+          clinicianMode === "clinical_summary")
+      const hasSuggestions =
+        preferences.promptSuggestions &&
+        messages.length === 0 &&
+        (preferences.userRole !== "doctor" || shouldShowDoctorSuggestions)
       
       return {
         value: input,
@@ -323,6 +356,7 @@ export function Chat() {
         onFileUpload: handleFileUpload,
         onFileRemove: handleFileRemove,
         hasSuggestions,
+        hasMessages: messages.length > 0,
         onSelectModel: handleModelChange,
         selectedModel,
         isUserAuthenticated: isAuthenticated,
@@ -334,6 +368,8 @@ export function Chat() {
         enableEvidence,
         learningMode,
         onLearningModeChange: setLearningMode,
+        clinicianMode,
+        onClinicianModeChange: setClinicianMode,
       }
     },
     [
@@ -346,6 +382,7 @@ export function Chat() {
       handleFileUpload,
       handleFileRemove,
       preferences.promptSuggestions,
+      preferences.userRole,
       chatId,
       messages.length,
       handleModelChange,
@@ -359,6 +396,8 @@ export function Chat() {
       enableEvidence,
       learningMode,
       setLearningMode,
+      clinicianMode,
+      setClinicianMode,
     ]
   )
 

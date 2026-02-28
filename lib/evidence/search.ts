@@ -32,7 +32,23 @@ async function getServerClient(): Promise<SupabaseClientType | null> {
 
 const DEFAULT_MEDICAL_CONFIDENCE = 0.35;
 const MAX_FALLBACK_TOKENS = 6;
-const DEFAULT_CANDIDATE_MULTIPLIER = 4;
+const DEFAULT_CANDIDATE_MULTIPLIER = 6;
+const US_GUIDELINE_ORG_PATTERN =
+  /\b(aha|acc|acp|ada|acog|aafp|cdc|nih|idsa|nccn|uspstf|sccm|ats)\b/i;
+const HIGH_AUTHORITY_STUDY_TYPE_PATTERN =
+  /\b(guideline|recommendation|consensus|position statement|meta-analysis|systematic|randomized|rct)\b/i;
+const MEDICAL_QUERY_SYNONYM_EXPANSIONS: Record<string, string[]> = {
+  htn: ["hypertension", "high blood pressure"],
+  cap: ["community acquired pneumonia", "community-acquired pneumonia"],
+  copd: ["chronic obstructive pulmonary disease"],
+  ckd: ["chronic kidney disease"],
+  hfref: ["heart failure reduced ejection fraction", "heart failure with reduced ejection fraction"],
+  afib: ["atrial fibrillation"],
+  acs: ["acute coronary syndrome"],
+  uti: ["urinary tract infection"],
+  sepsis: ["septic shock", "sepsis bundle"],
+  "abdominal pain": ["acute abdomen", "abdominal pain workup", "red flags"],
+};
 
 const MEDICAL_SIGNAL_PATTERNS: Array<{
   regex: RegExp;
@@ -101,13 +117,19 @@ function getCandidateCount(maxResults: number, candidateMultiplier?: number): nu
 
 function expandMedicalQuery(query: string): string {
   const terms = extractMedicalTerms(query);
-  if (terms.length === 0) return query;
+  const normalized = query.toLowerCase();
+  const synonymTerms = Object.entries(MEDICAL_QUERY_SYNONYM_EXPANSIONS).flatMap(
+    ([needle, synonyms]) => (normalized.includes(needle) ? synonyms : [])
+  );
+  if (terms.length === 0 && synonymTerms.length === 0) return query;
 
   const lower = query.toLowerCase();
-  const extraTerms = terms.filter(term => !lower.includes(term.toLowerCase()));
+  const extraTerms = [...terms, ...synonymTerms].filter(
+    term => !lower.includes(term.toLowerCase())
+  );
   if (extraTerms.length === 0) return query;
 
-  return `${query} ${extraTerms.join(' ')}`.trim();
+  return `${query} ${extraTerms.slice(0, 10).join(" ")}`.trim();
 }
 
 function computeKeywordOverlapScore(query: string, haystack: string): number {
@@ -123,6 +145,73 @@ function computeKeywordOverlapScore(query: string, haystack: string): number {
   return hits / tokens.length;
 }
 
+function computeUsFirstEvidenceBoost(result: MedicalEvidenceResult): number {
+  const studyType = (result.study_type || "").toLowerCase();
+  const journal = (result.journal_name || "").toLowerCase();
+  const title = (result.title || "").toLowerCase();
+  const meshTerms = [...(result.mesh_terms || []), ...(result.major_mesh_terms || [])].map(
+    (term) => term.toLowerCase()
+  );
+
+  let boost = 0;
+
+  if (studyType.includes("guideline")) boost += 0.45;
+  if (studyType.includes("meta-analysis") || studyType.includes("systematic")) boost += 0.2;
+  if (studyType.includes("randomized") || studyType.includes("rct")) boost += 0.15;
+  if (studyType.includes("case report")) boost -= 0.1;
+
+  if (
+    meshTerms.some(
+      (term) => term.includes("region:us") || term.includes("country:us") || term === "us"
+    )
+  ) {
+    boost += 0.4;
+  }
+
+  if (
+    meshTerms.some((term) =>
+      /(organization:|source:).*(aha|acc|acp|ada|acog|aafp|cdc|nih|idsa|nccn|uspstf|sccm|ats)/i.test(
+        term
+      )
+    )
+  ) {
+    boost += 0.25;
+  }
+
+  if (
+    US_GUIDELINE_ORG_PATTERN.test(result.journal_name || "") ||
+    US_GUIDELINE_ORG_PATTERN.test(result.title || "")
+  ) {
+    boost += 0.2;
+  }
+
+  if (journal.includes("guideline") || title.includes("guideline")) boost += 0.15;
+
+  return boost;
+}
+
+function computeCitationWorthinessBoost(result: MedicalEvidenceResult): number {
+  const evidenceLevel = typeof result.evidence_level === "number" ? result.evidence_level : 5;
+  const evidenceBoost = Math.max(0, 6 - evidenceLevel) * 0.1;
+  const studyType = (result.study_type || "").toLowerCase();
+  const studyTypeBoost = HIGH_AUTHORITY_STUDY_TYPE_PATTERN.test(studyType) ? 0.2 : 0;
+  const sourceAuthorityBoost = US_GUIDELINE_ORG_PATTERN.test(
+    `${result.title || ""} ${result.journal_name || ""}`
+  )
+    ? 0.12
+    : 0;
+  const contentLengthBoost = Math.min(0.12, (result.content?.length || 0) / 3000);
+  const metadataCompletenessBoost = result.pmid || result.doi ? 0.05 : 0;
+
+  return (
+    evidenceBoost +
+    studyTypeBoost +
+    sourceAuthorityBoost +
+    contentLengthBoost +
+    metadataCompletenessBoost
+  );
+}
+
 function rerankResults(query: string, results: MedicalEvidenceResult[]): MedicalEvidenceResult[] {
   if (results.length <= 1) return results;
 
@@ -130,7 +219,10 @@ function rerankResults(query: string, results: MedicalEvidenceResult[]): Medical
     const text = `${result.title} ${result.content}`;
     const overlapScore = computeKeywordOverlapScore(query, text);
     const baseScore = typeof result.score === 'number' ? result.score : 0;
-    const combinedScore = baseScore + overlapScore * 0.35;
+    const usFirstBoost = computeUsFirstEvidenceBoost(result);
+    const citationWorthinessBoost = computeCitationWorthinessBoost(result);
+    const combinedScore =
+      baseScore + overlapScore * 0.35 + usFirstBoost + citationWorthinessBoost;
 
     return {
       ...result,
@@ -222,7 +314,7 @@ export async function searchMedicalEvidence(
 ): Promise<MedicalEvidenceResult[]> {
   const {
     query,
-    maxResults = 10,
+    maxResults = 12,
     minEvidenceLevel = 5, // Include all by default
     studyTypes,
     meshTerms,

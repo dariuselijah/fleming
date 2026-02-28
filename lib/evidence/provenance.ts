@@ -25,6 +25,12 @@ export interface SourceProvenance {
   confidenceReason: string;
 }
 
+export type ProvenanceQualityGateResult = {
+  passed: boolean;
+  score: number;
+  reasons: string[];
+}
+
 type ConfidenceInputs = {
   sourceType: ProvenanceSourceType;
   sourceName?: string;
@@ -132,6 +138,81 @@ export function buildProvenance(input: Omit<SourceProvenance, "confidence" | "co
 function toYear(value: string | null): number | null {
   const year = getYear(value);
   return year ?? null;
+}
+
+function extractQueryTerms(query: string): string[] {
+  return query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map(term => term.trim())
+    .filter(term => term.length >= 3)
+    .filter(term => !["with", "from", "that", "this", "what", "when", "where", "guideline"].includes(term));
+}
+
+function computeQueryOverlapScore(provenance: SourceProvenance, queryText: string): number {
+  const terms = extractQueryTerms(queryText);
+  if (terms.length === 0) return 1;
+  const haystack = `${provenance.title} ${provenance.journal || ""} ${provenance.snippet || ""}`.toLowerCase();
+  const matches = terms.filter(term => haystack.includes(term)).length;
+  return matches / terms.length;
+}
+
+export function evaluateProvenanceQuality(
+  provenance: SourceProvenance,
+  queryText: string
+): ProvenanceQualityGateResult {
+  const reasons: string[] = [];
+  let score = 0;
+
+  const overlap = computeQueryOverlapScore(provenance, queryText);
+  const overlapThreshold = provenance.sourceType === "guideline" ? 0.15 : 0.2;
+  if (overlap >= overlapThreshold) {
+    score += 0.35;
+  } else {
+    reasons.push("low_query_overlap");
+  }
+
+  const hasIdentifier = Boolean(provenance.pmid || provenance.doi || provenance.url);
+  if (hasIdentifier) {
+    score += 0.2;
+  } else {
+    reasons.push("missing_identifier");
+  }
+
+  if (provenance.title && provenance.title.length >= 12) {
+    score += 0.15;
+  } else {
+    reasons.push("missing_title");
+  }
+
+  if (provenance.publishedAt) score += 0.1;
+  if (provenance.journal || provenance.sourceName) score += 0.1;
+  if (provenance.confidence >= 0.55) score += 0.1;
+
+  const studyType = provenance.studyType?.toLowerCase() || "";
+  const evidenceLevel = provenance.evidenceLevel ?? 5;
+  if (
+    /(guideline|meta-analysis|systematic|randomized|rct)/i.test(studyType) &&
+    evidenceLevel > 3
+  ) {
+    reasons.push("unsupported_evidence_strength");
+  }
+
+  const minScoreThreshold =
+    provenance.sourceType === "guideline" || provenance.sourceType === "pubmed"
+      ? 0.48
+      : 0.55;
+  const hasBlockingReason = reasons.includes("unsupported_evidence_strength");
+  const passed = score >= minScoreThreshold && !hasBlockingReason;
+  return { passed, score: Number(score.toFixed(2)), reasons };
+}
+
+export function filterProvenanceByQuality(
+  entries: SourceProvenance[],
+  queryText: string
+): SourceProvenance[] {
+  return entries.filter((entry) => evaluateProvenanceQuality(entry, queryText).passed);
 }
 
 export function provenanceToEvidenceCitation(provenance: SourceProvenance, index: number): EvidenceCitation {

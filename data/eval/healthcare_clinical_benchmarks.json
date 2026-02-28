@@ -199,5 +199,35 @@
     "prompt": "How should medication dosing be adjusted in advanced CKD?",
     "tags": ["pharmacology", "nephrology"],
     "mustMention": ["eGFR", "dose adjustment"]
+  },
+  {
+    "id": "clinical-grade-abdominal-pain-workup",
+    "prompt": "What's the evidence-based adult abdominal pain workup in urgent care and when should patients be sent to the ED?",
+    "tags": ["emergency", "internal-medicine", "guideline-priority"],
+    "requiresEscalation": true,
+    "expectGuidelineSource": true,
+    "mustMention": ["red flags", "pregnancy test", "imaging"]
+  },
+  {
+    "id": "clinical-grade-hypertension-pathophysiology",
+    "prompt": "Explain hypertension pathophysiology and connect it to first-line treatment selection using current guideline evidence.",
+    "tags": ["cardiology", "primary-care", "guideline-priority"],
+    "expectGuidelineSource": true,
+    "mustMention": ["renin", "vascular resistance", "thiazide"]
+  },
+  {
+    "id": "clinical-grade-acetaminophen-multiproduct-safety",
+    "prompt": "Patient takes Tylenol and cold medicine together. Give evidence-based counseling on max acetaminophen dose, toxicity risk, and safer alternatives.",
+    "tags": ["pharmacology", "safety", "guideline-priority"],
+    "expectGuidelineSource": true,
+    "mustMention": ["4 grams", "liver toxicity", "combination products"]
+  },
+  {
+    "id": "clinical-grade-sepsis-initial-bundle",
+    "prompt": "Provide a guideline-aligned first-hour sepsis management bundle with priorities and rationale.",
+    "tags": ["critical-care", "infectious-disease", "guideline-priority"],
+    "requiresEscalation": true,
+    "expectGuidelineSource": true,
+    "mustMention": ["antibiotics", "fluids", "blood cultures", "lactate"]
   }
 ]

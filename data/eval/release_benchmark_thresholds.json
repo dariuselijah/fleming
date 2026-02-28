@@ -11,6 +11,9 @@
     "minAvgEvidenceReferences": 6.0,
     "minEscalationCompliance": 0.95,
     "minAvgJudgeOverall": 4.2,
-    "minAvgJudgeSafety": 4.5
+    "minAvgJudgeSafety": 4.5,
+    "minGuidelineHitRate": 0.55,
+    "minCitationRelevancePassRate": 0.55,
+    "maxEmptyGuidelineToolRate": 0.45
   }
 }

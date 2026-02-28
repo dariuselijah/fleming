@@ -9,6 +9,11 @@ import {
   normalizeMedicalStudentLearningMode,
   type MedicalStudentLearningMode,
 } from "@/lib/medical-student-learning"
+import {
+  DEFAULT_CLINICIAN_WORKFLOW_MODE,
+  normalizeClinicianWorkflowMode,
+  type ClinicianWorkflowMode,
+} from "@/lib/clinician-mode"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { UserProfile } from "@/lib/user/types"
 import type { Message } from "@ai-sdk/react"
@@ -73,6 +78,7 @@ export function useChatCore({
   setRateLimitType,
 }: UseChatCoreProps) {
   const LEARNING_MODE_STORAGE_KEY = "medical-student-learning-mode"
+  const CLINICIAN_MODE_STORAGE_KEY = "clinician-workflow-mode"
   const router = useRouter()
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -82,6 +88,8 @@ export function useChatCore({
     useState<MedicalStudentLearningMode>(
       DEFAULT_MEDICAL_STUDENT_LEARNING_MODE
     )
+  const [clinicianMode, setClinicianModeState] =
+    useState<ClinicianWorkflowMode>(DEFAULT_CLINICIAN_WORKFLOW_MODE)
   
   // Evidence citations from server - indexed by message ID or last response
   // Use ref to persist across hook reinitializations (e.g., URL changes)
@@ -106,6 +114,11 @@ export function useChatCore({
       }
     }
   }, [chatId])
+
+  const clearEvidenceCitations = useCallback(() => {
+    evidenceCitationsRef.current = []
+    setEvidenceCitationsState([])
+  }, [])
   
   // Track which chatId we've already restored citations for to prevent duplicate restores
   const restoredChatIdRef = useRef<string | null>(null)
@@ -155,6 +168,15 @@ export function useChatCore({
     if (chatId && restoredChatIdRef.current === chatId) {
       return
     }
+
+    // Moving to a different chat should never carry citations forward.
+    if (
+      chatId &&
+      restoredChatIdRef.current &&
+      restoredChatIdRef.current !== chatId
+    ) {
+      clearEvidenceCitations()
+    }
     
     isRestoringRef.current = true
     
@@ -202,7 +224,8 @@ export function useChatCore({
               const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 30000)
               const matchesChatId = !chatId || latestData.chatId === chatId
               
-              if (isRecent || matchesChatId) {
+              // Never restore latest citations into a different concrete chat.
+              if ((!chatId && isRecent) || matchesChatId) {
                 // Only update if different from current ref
                 const currentIds = evidenceCitationsRef.current.map((c: any) => c.index).sort().join(',')
                 const newIds = latestData.citations.map((c: any) => c.index).sort().join(',')
@@ -225,13 +248,15 @@ export function useChatCore({
       
       // Mark as restored even if we didn't find anything (prevents infinite loops)
       if (chatId) {
+        // Explicitly clear stale citations when this chat has no stored evidence.
+        clearEvidenceCitations()
         restoredChatIdRef.current = chatId
       }
     } finally {
       // Always reset the restoring flag
       isRestoringRef.current = false
     }
-  }, [chatId]) // Only depend on chatId, NOT evidenceCitations
+  }, [chatId, clearEvidenceCitations]) // Only depend on chatId, NOT evidenceCitations
 
   // Get user preferences at the top level
   const { useUserPreferences } = require("@/lib/user-preference-store/provider")
@@ -245,22 +270,49 @@ export function useChatCore({
   }, [])
 
   useEffect(() => {
+    if (typeof window === "undefined") return
+    const storedMode = window.localStorage.getItem(CLINICIAN_MODE_STORAGE_KEY)
+    if (!storedMode) return
+    setClinicianModeState(normalizeClinicianWorkflowMode(storedMode))
+  }, [])
+
+  useEffect(() => {
     if (userPreferences.preferences.userRole !== "medical_student") {
       if (learningMode !== DEFAULT_MEDICAL_STUDENT_LEARNING_MODE) {
         setLearningModeState(DEFAULT_MEDICAL_STUDENT_LEARNING_MODE)
+      }
+    } else {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(LEARNING_MODE_STORAGE_KEY, learningMode)
+      }
+
+    // Guideline mode should always be evidence-backed.
+    if (learningMode === "guideline" && !enableEvidence) {
+        setEnableEvidence(true)
+      }
+    }
+
+    if (userPreferences.preferences.userRole !== "doctor") {
+      if (clinicianMode !== DEFAULT_CLINICIAN_WORKFLOW_MODE) {
+        setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
       }
       return
     }
 
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(LEARNING_MODE_STORAGE_KEY, learningMode)
+      window.localStorage.setItem(CLINICIAN_MODE_STORAGE_KEY, clinicianMode)
     }
 
-    // Guideline mode should always be evidence-backed.
-    if (learningMode === "guideline" && !enableEvidence) {
-      setEnableEvidence(true)
-    }
-  }, [userPreferences.preferences.userRole, learningMode, enableEvidence])
+  // Clinician mode should always be evidence-backed (same expectation as med student).
+  if (!enableEvidence) {
+    setEnableEvidence(true)
+  }
+  }, [
+    userPreferences.preferences.userRole,
+    learningMode,
+    enableEvidence,
+    clinicianMode,
+  ])
 
   const setLearningMode = useCallback(
     (mode: MedicalStudentLearningMode) => {
@@ -272,6 +324,11 @@ export function useChatCore({
     },
     [enableEvidence]
   )
+
+  const setClinicianMode = useCallback((mode: ClinicianWorkflowMode) => {
+    const normalized = normalizeClinicianWorkflowMode(mode)
+    setClinicianModeState(normalized)
+  }, [])
 
   // Auto-enable web search for healthcare professionals using Fleming 4
   useEffect(() => {
@@ -1210,6 +1267,7 @@ export function useChatCore({
         enableSearch,
         enableEvidence,
         learningMode,
+        clinicianMode,
         timestamp: Date.now(),
       }
       
@@ -1229,6 +1287,7 @@ export function useChatCore({
 
     // Set submitting state immediately for optimistic UI
     setIsSubmitting(true)
+    clearEvidenceCitations()
 
     // Store input and files for async processing
     const currentInput = input
@@ -1267,6 +1326,7 @@ export function useChatCore({
         enableSearch,
         enableEvidence,
         learningMode,
+        clinicianMode,
         // CRITICAL: Ensure userRole is passed correctly for evidence mode
         userRole: userPreferences.preferences.userRole || "general",
         medicalSpecialty: userPreferences.preferences.medicalSpecialty,
@@ -1393,6 +1453,8 @@ export function useChatCore({
     enableSearch,
     enableEvidence,
     learningMode,
+    clinicianMode,
+    clearEvidenceCitations,
     bumpChat,
     clearDraft,
     setHasDialogAuth,
@@ -1422,6 +1484,7 @@ export function useChatCore({
           enableSearch,
           enableEvidence,
           learningMode,
+          clinicianMode,
           timestamp: Date.now(),
         }
         
@@ -1435,6 +1498,7 @@ export function useChatCore({
       }
 
       setIsSubmitting(true)
+      clearEvidenceCitations()
 
       // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
       const optimisticChatId = chatId || currentChatIdForSavingRef.current || "temp"
@@ -1450,6 +1514,7 @@ export function useChatCore({
           enableSearch,
           enableEvidence,
           learningMode,
+          clinicianMode,
         },
       }
 
@@ -1529,6 +1594,8 @@ export function useChatCore({
       enableSearch,
       enableEvidence,
       learningMode,
+      clinicianMode,
+      clearEvidenceCitations,
     ]
   )
 
@@ -1539,6 +1606,8 @@ export function useChatCore({
       return
     }
 
+    clearEvidenceCitations()
+
     const options = {
       body: {
         chatId,
@@ -1547,11 +1616,22 @@ export function useChatCore({
         isAuthenticated,
         systemPrompt: systemPrompt || getSystemPromptByRole(userPreferences.preferences.userRole),
         learningMode,
+        clinicianMode,
       },
     }
 
     reload(options)
-  }, [user, chatId, selectedModel, isAuthenticated, systemPrompt, learningMode, reload])
+  }, [
+    user,
+    chatId,
+    selectedModel,
+    isAuthenticated,
+    systemPrompt,
+    learningMode,
+    clinicianMode,
+    clearEvidenceCitations,
+    reload,
+  ])
 
   // Handle input change - optimized for streaming
   const { setDraftValue } = useChatDraft(chatId)
@@ -1585,9 +1665,11 @@ export function useChatCore({
     enableSearch,
     enableEvidence,
     learningMode,
+    clinicianMode,
     setEnableEvidence,
     setEnableSearch,
     setLearningMode,
+    setClinicianMode,
     
     // Evidence citations from medical evidence database
     evidenceCitations,

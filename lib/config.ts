@@ -16,6 +16,10 @@ import {
   DEFAULT_MEDICAL_STUDENT_LEARNING_MODE,
   type MedicalStudentLearningMode,
 } from "@/lib/medical-student-learning"
+import {
+  DEFAULT_CLINICIAN_WORKFLOW_MODE,
+  type ClinicianWorkflowMode,
+} from "@/lib/clinician-mode"
 
 export const NON_AUTH_DAILY_MESSAGE_LIMIT = 5
 export const AUTH_DAILY_MESSAGE_LIMIT = 1000
@@ -472,6 +476,156 @@ export const MEDICAL_STUDENT_MODE_SUGGESTIONS: Record<
   ],
 }
 
+export const CLINICIAN_MODE_SUGGESTIONS: Record<
+  ClinicianWorkflowMode,
+  typeof HEALTHCARE_PROFESSIONAL_SUGGESTIONS
+> = {
+  open_search: [
+    {
+      label: "Open Search",
+      highlight: "Search",
+      prompt: "Open Search",
+      items: [
+        "Synthesize likely causes of fever in this immunocompromised patient and suggest immediate next data points.",
+        "Build a focused differential for acute dyspnea with this history and triage priorities.",
+        "Summarize high-yield red flags and next diagnostics for chest pain with equivocal ECG findings.",
+      ],
+      icon: StethoscopeIcon,
+    },
+    {
+      label: "Evidence Pull",
+      highlight: "Evidence",
+      prompt: "Evidence Pull",
+      items: [
+        "Give me a point-of-care evidence summary for this treatment decision with caveats.",
+        "What recent guideline updates should change management in this case?",
+        "Compare two management approaches and tell me where evidence is strongest.",
+      ],
+      icon: MicroscopeIcon,
+    },
+  ],
+  clinical_summary: [
+    {
+      label: "Clinical Summary",
+      highlight: "Summary",
+      prompt: "Clinical Summary",
+      items: [
+        "Create a one-liner, active problem list, and immediate plan from this case.",
+        "Turn this messy note into a concise sign-out summary with critical watch items.",
+        "Generate a SOAP-style summary with assessment confidence and gaps.",
+      ],
+      icon: StethoscopeIcon,
+    },
+    {
+      label: "Handoff Ready",
+      highlight: "Handoff",
+      prompt: "Handoff",
+      items: [
+        "Prepare a handoff summary with what to monitor overnight and escalation triggers.",
+        "Extract key trends from these labs/vitals and integrate them into plan bullets.",
+        "Draft a progress-note style summary focused on decisions made today.",
+      ],
+      icon: UserIcon,
+    },
+  ],
+  drug_interactions: [
+    {
+      label: "Interaction Check",
+      highlight: "Interaction",
+      prompt: "Interaction Check",
+      items: [
+        "Screen this med list for major interaction risks and rank by severity.",
+        "Check interaction risk between apixaban, amiodarone, clarithromycin, and diltiazem.",
+        "Identify QT-prolongation concerns in this regimen and monitoring strategy.",
+      ],
+      icon: PillIcon,
+    },
+    {
+      label: "Medication Safety",
+      highlight: "Safety",
+      prompt: "Medication Safety",
+      items: [
+        "Point out renal/hepatic dosing concerns and safer alternatives in this regimen.",
+        "Review this polypharmacy profile for falls, bleeding, and sedation risk.",
+        "Flag contraindications for this patient profile and provide fallback options.",
+      ],
+      icon: HeartIcon,
+    },
+  ],
+  stewardship: [
+    {
+      label: "Stewardship Strategy",
+      highlight: "Stewardship",
+      prompt: "Stewardship",
+      items: [
+        "Recommend empiric antibiotic options for this presentation with stewardship rationale.",
+        "Suggest de-escalation options now that culture and sensitivity data are available.",
+        "Propose duration and stop criteria for this infection scenario.",
+      ],
+      icon: MicroscopeIcon,
+    },
+    {
+      label: "Resistance Risk",
+      highlight: "Resistance",
+      prompt: "Resistance",
+      items: [
+        "Assess resistance risk factors and how they should change antibiotic choice.",
+        "Build a practical narrowing plan for this broad-spectrum regimen.",
+        "Highlight when to involve ID consult based on this case complexity.",
+      ],
+      icon: Lightbulb,
+    },
+  ],
+  icd10_codes: [
+    {
+      label: "ICD10 Mapping",
+      highlight: "Coding",
+      prompt: "ICD10 Mapping",
+      items: [
+        "Map likely ICD10 options for this assessment and identify the best primary code.",
+        "Suggest ICD10 codes for diabetes with CKD and hypertension with sequencing notes.",
+        "List coding candidates for this encounter and required specificity details.",
+      ],
+      icon: Code,
+    },
+    {
+      label: "Documentation Gaps",
+      highlight: "Documentation",
+      prompt: "Documentation",
+      items: [
+        "What documentation elements are missing to support a more specific ICD10 code?",
+        "Identify ambiguity in this note that could weaken coding accuracy.",
+        "Create a checklist to improve coding specificity for this case.",
+      ],
+      icon: Notepad,
+    },
+  ],
+  med_review: [
+    {
+      label: "Medication Review",
+      highlight: "Review",
+      prompt: "Medication Review",
+      items: [
+        "Review this medication list for duplications, interactions, and deprescribing opportunities.",
+        "Prioritize medication changes to reduce adverse-event risk in this older adult.",
+        "Create a practical med optimization plan balancing efficacy, safety, and adherence.",
+      ],
+      icon: PillIcon,
+    },
+    {
+      label: "Follow-up Plan",
+      highlight: "Follow-up",
+      prompt: "Follow-up",
+      items: [
+        "Provide a monitoring plan after these medication changes with timing and labs.",
+        "Suggest patient counseling points for this updated regimen.",
+        "Identify highest-risk meds that need closer follow-up in the next 1-2 weeks.",
+      ],
+      icon: UserIcon,
+    },
+  ],
+}
+
 // Specialty-specific suggestions based on medical specialty
 export const SPECIALTY_SUGGESTIONS = {
   cardiology: [
@@ -639,7 +793,8 @@ export const SUGGESTIONS = GENERAL_USER_SUGGESTIONS
 export function getSuggestionsByRole(
   userRole?: "general" | "doctor" | "medical_student",
   medicalSpecialty?: string,
-  learningMode: MedicalStudentLearningMode = DEFAULT_MEDICAL_STUDENT_LEARNING_MODE
+  learningMode: MedicalStudentLearningMode = DEFAULT_MEDICAL_STUDENT_LEARNING_MODE,
+  clinicianMode: ClinicianWorkflowMode = DEFAULT_CLINICIAN_WORKFLOW_MODE
 ) {
   if (userRole === "medical_student") {
     return (
@@ -648,12 +803,25 @@ export function getSuggestionsByRole(
     )
   }
   if (userRole === "doctor") {
-    // If we have specialty-specific suggestions, use them
-    if (medicalSpecialty && medicalSpecialty !== "general" && SPECIALTY_SUGGESTIONS[medicalSpecialty as keyof typeof SPECIALTY_SUGGESTIONS]) {
-      return SPECIALTY_SUGGESTIONS[medicalSpecialty as keyof typeof SPECIALTY_SUGGESTIONS]
+    const modeSuggestions =
+      CLINICIAN_MODE_SUGGESTIONS[clinicianMode] ||
+      HEALTHCARE_PROFESSIONAL_SUGGESTIONS
+
+    // Keep specialty-aware behavior by appending specialty-specific prompts.
+    if (
+      medicalSpecialty &&
+      medicalSpecialty !== "general" &&
+      SPECIALTY_SUGGESTIONS[medicalSpecialty as keyof typeof SPECIALTY_SUGGESTIONS]
+    ) {
+      return [
+        ...modeSuggestions,
+        ...SPECIALTY_SUGGESTIONS[
+          medicalSpecialty as keyof typeof SPECIALTY_SUGGESTIONS
+        ],
+      ]
     }
-    // Otherwise use general healthcare professional suggestions
-    return HEALTHCARE_PROFESSIONAL_SUGGESTIONS
+
+    return modeSuggestions
   }
   return GENERAL_USER_SUGGESTIONS
 }

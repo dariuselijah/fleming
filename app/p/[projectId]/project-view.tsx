@@ -10,6 +10,8 @@ import { toast } from "@/components/ui/toast"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import { useMessages } from "@/lib/chat-store/messages/provider"
 import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
+import type { ClinicianWorkflowMode } from "@/lib/clinician-mode"
+import type { EvidenceCitation } from "@/lib/evidence/types"
 import { Attachment } from "@/lib/file-handling"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { MedicalStudentLearningMode } from "@/lib/medical-student-learning"
@@ -37,8 +39,11 @@ type ProjectViewProps = {
 export function ProjectView({ projectId }: ProjectViewProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
+  const [evidenceCitations, setEvidenceCitations] = useState<EvidenceCitation[]>([])
   const [learningMode, setLearningMode] =
     useState<MedicalStudentLearningMode>("ask")
+  const [clinicianMode, setClinicianMode] =
+    useState<ClinicianWorkflowMode>("open_search")
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const { user } = useUser()
   const { preferences } = useUserPreferences()
@@ -74,6 +79,8 @@ export function ProjectView({ projectId }: ProjectViewProps) {
   const chats = allChats.filter((chat) => chat.project_id === projectId)
 
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
+  const shouldForceEvidence =
+    preferences?.userRole === "doctor" || preferences?.userRole === "medical_student"
 
   // Handle errors directly in onError callback
   const handleError = useCallback((error: Error) => {
@@ -105,6 +112,19 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     initialMessages: [],
     onFinish: cacheAndAddMessage,
     onError: handleError,
+    onResponse: (response) => {
+      try {
+        const evidenceHeader = response.headers.get("X-Evidence-Citations")
+        if (!evidenceHeader) return
+        const citationsJson = atob(evidenceHeader)
+        const citations = JSON.parse(citationsJson)
+        if (Array.isArray(citations)) {
+          setEvidenceCitations(citations)
+        }
+      } catch (error) {
+        console.error("[ProjectView] Failed to parse evidence citations header:", error)
+      }
+    },
   })
 
   const { selectedModel, handleModelChange } = useModel({
@@ -196,6 +216,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
 
   const submit = useCallback(async () => {
     setIsSubmitting(true)
+    setEvidenceCitations([])
 
     if (!user?.id) {
       setIsSubmitting(false)
@@ -259,7 +280,9 @@ export function ProjectView({ projectId }: ProjectViewProps) {
           isAuthenticated: true,
           systemPrompt: getSystemPromptByRole(preferences?.userRole),
           enableSearch,
+          enableEvidence: shouldForceEvidence,
           learningMode,
+          clinicianMode,
         },
         experimental_attachments: attachments || undefined,
       }
@@ -297,13 +320,16 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     messages.length,
     bumpChat,
     enableSearch,
+    shouldForceEvidence,
     learningMode,
+    clinicianMode,
   ])
 
   const handleReload = useCallback(async () => {
     if (!user?.id) {
       return
     }
+    setEvidenceCitations([])
 
     const options = {
       body: {
@@ -312,12 +338,22 @@ export function ProjectView({ projectId }: ProjectViewProps) {
         model: selectedModel,
         isAuthenticated: true,
         systemPrompt: getSystemPromptByRole(preferences?.userRole),
+        enableEvidence: shouldForceEvidence,
         learningMode,
+        clinicianMode,
       },
     }
 
     reload(options)
-  }, [user, selectedModel, learningMode, reload, preferences?.userRole])
+  }, [
+    user,
+    selectedModel,
+    shouldForceEvidence,
+    learningMode,
+    clinicianMode,
+    reload,
+    preferences?.userRole,
+  ])
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
@@ -335,8 +371,9 @@ export function ProjectView({ projectId }: ProjectViewProps) {
       onDelete: handleDelete,
       onEdit: handleEdit,
       onReload: handleReload,
+      evidenceCitations,
     }),
-    [messages, status, handleDelete, handleEdit, handleReload]
+    [messages, status, handleDelete, handleEdit, handleReload, evidenceCitations]
   )
 
   // Memoize the chat input props
@@ -351,6 +388,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
       onFileUpload: handleFileUpload,
       onFileRemove: handleFileRemove,
       hasSuggestions: false,
+      hasMessages: messages.length > 0,
       onSelectModel: handleModelChange,
       selectedModel,
       isUserAuthenticated: isAuthenticated,
@@ -360,6 +398,8 @@ export function ProjectView({ projectId }: ProjectViewProps) {
       enableSearch,
       learningMode,
       onLearningModeChange: setLearningMode,
+      clinicianMode,
+      onClinicianModeChange: setClinicianMode,
     }),
     [
       input,
@@ -378,6 +418,8 @@ export function ProjectView({ projectId }: ProjectViewProps) {
       enableSearch,
       learningMode,
       setLearningMode,
+      clinicianMode,
+      setClinicianMode,
     ]
   )
 

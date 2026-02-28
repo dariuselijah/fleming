@@ -90,7 +90,13 @@ function getLocalStoragePreferences(): UserPreferences {
   const stored = localStorage.getItem(PREFERENCES_STORAGE_KEY)
   if (stored) {
     try {
-      return JSON.parse(stored)
+      const parsed = JSON.parse(stored)
+      if (parsed && typeof parsed === "object") {
+        return {
+          ...defaultPreferences,
+          ...parsed,
+        }
+      }
     } catch {
       // fallback to legacy layout storage if JSON parsing fails
     }

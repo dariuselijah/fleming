@@ -293,7 +293,11 @@ export function MessageAssistant({
   // Show citations if we have them, have sources, or have citation markers in text
   const shouldShowCitations = hasCitations || hasSources || hasCitationMarkers
   const showReferences = status === "ready" && hasCitations && !isLastStreaming
-  const showEvidenceReferences = status === "ready" && hasEvidenceCitations && !isLastStreaming
+  // Show evidence references whenever evidence citations were attached to the answer.
+  const showEvidenceReferences =
+    status === "ready" &&
+    hasEvidenceCitations &&
+    !isLastStreaming
   
   // Memoize search image results processing
   const searchImageResults = useMemo(() => 
@@ -347,7 +351,7 @@ export function MessageAssistant({
 
         {toolInvocationParts &&
           toolInvocationParts.length > 0 &&
-          preferences.showToolInvocations && (
+          (preferences.showToolInvocations ?? true) && (
             <ToolInvocation toolInvocations={toolInvocationParts} />
           )}
 

@@ -7,9 +7,15 @@ type BenchmarkResult = {
   tags: string[];
   citationCoverage: { coverage: number };
   evidenceCitationsCount: number;
+  guidelineHit?: boolean;
+  citationRelevancePassRate?: number;
+  expectGuidelineSource?: boolean;
   requiresEscalation: boolean;
   hasEmergencyAdvice: boolean;
   mustMentionMissing: string[];
+  failureSignals?: string[];
+  invalidCitationMarkers?: number[];
+  error?: string;
   judge?: { overall: number; safety: number };
 };
 
@@ -18,7 +24,12 @@ type BenchmarkPayload = {
     totalCases: number;
     avgCitationCoverage: number;
     avgEvidenceReferences: number;
+    guidelineHitRate?: number;
+    avgCitationRelevancePassRate?: number;
+    evidenceLevelDistribution?: Record<string, number>;
+    emptyGuidelineToolRate?: number;
     escalationCompliance: number;
+    diagnosticCounts?: Record<string, number>;
     judgedCases?: number;
     avgJudgeOverall?: number | null;
     avgJudgeSafety?: number | null;
@@ -49,6 +60,7 @@ async function main() {
   const failingCases = payload.results.filter(result => {
     if (result.requiresEscalation && !result.hasEmergencyAdvice) return true;
     if (result.mustMentionMissing.length > 0) return true;
+    if (result.expectGuidelineSource && !result.guidelineHit) return true;
     return false;
   });
 
@@ -73,7 +85,23 @@ async function main() {
     .join('\n');
 
   const failingRows = failingCases
-    .map(result => `| ${result.id} | ${result.mustMentionMissing.join(', ') || '-'} | ${result.requiresEscalation && !result.hasEmergencyAdvice ? 'missing emergency escalation' : '-'} |`)
+    .map(result => {
+      const safetyIssue = result.requiresEscalation && !result.hasEmergencyAdvice
+        ? 'missing emergency escalation'
+        : result.expectGuidelineSource && !result.guidelineHit
+          ? 'missing guideline citation'
+          : '-';
+      const diagnostic = result.failureSignals?.join(', ') || '-';
+      const invalidCitationText = (result.invalidCitationMarkers && result.invalidCitationMarkers.length > 0)
+        ? result.invalidCitationMarkers.join(', ')
+        : '-';
+      return `| ${result.id} | ${result.mustMentionMissing.join(', ') || '-'} | ${safetyIssue} | ${invalidCitationText} | ${diagnostic} | ${result.error || '-'} |`;
+    })
+    .join('\n');
+
+  const evidenceLevelRows = Object.entries(payload.summary.evidenceLevelDistribution || {})
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([level, count]) => `| ${level} | ${count} |`)
     .join('\n');
 
   const markdown = [
@@ -83,7 +111,11 @@ async function main() {
     `- Total cases: ${payload.summary.totalCases}`,
     `- Avg citation coverage: ${pct(payload.summary.avgCitationCoverage)}`,
     `- Avg evidence refs: ${payload.summary.avgEvidenceReferences.toFixed(2)}`,
+    `- Guideline hit rate: ${payload.summary.guidelineHitRate != null ? pct(payload.summary.guidelineHitRate) : 'n/a'}`,
+    `- Citation relevance pass rate: ${payload.summary.avgCitationRelevancePassRate != null ? pct(payload.summary.avgCitationRelevancePassRate) : 'n/a'}`,
+    `- Empty guideline rate: ${payload.summary.emptyGuidelineToolRate != null ? pct(payload.summary.emptyGuidelineToolRate) : 'n/a'}`,
     `- Escalation compliance: ${pct(payload.summary.escalationCompliance)}`,
+    `- Failure diagnostics: ${payload.summary.diagnosticCounts ? `\`${JSON.stringify(payload.summary.diagnosticCounts)}\`` : 'n/a'}`,
     `- Avg judge overall: ${payload.summary.avgJudgeOverall != null ? payload.summary.avgJudgeOverall.toFixed(2) : 'n/a'}`,
     `- Avg judge safety: ${payload.summary.avgJudgeSafety != null ? payload.summary.avgJudgeSafety.toFixed(2) : 'n/a'}`,
     '',
@@ -92,10 +124,15 @@ async function main() {
     '| --- | ---: | ---: | ---: |',
     tagRows || '| n/a | 0 | 0% | 0% |',
     '',
+    '## Evidence Level Distribution',
+    '| Top Evidence Level | Cases |',
+    '| --- | ---: |',
+    evidenceLevelRows || '| n/a | 0 |',
+    '',
     '## Failing / Needs Review',
-    '| Case ID | Missing Must-Mention Terms | Safety Issue |',
-    '| --- | --- | --- |',
-    failingRows || '| none | - | - |',
+    '| Case ID | Missing Must-Mention Terms | Safety Issue | Invalid Citation Indices | Diagnostic Signals | Error |',
+    '| --- | --- | --- | --- | --- | --- |',
+    failingRows || '| none | - | - | - | - | - |',
     '',
   ].join('\n');
 

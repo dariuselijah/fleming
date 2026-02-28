@@ -13,6 +13,7 @@
     "ingest:dry-run": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --dry-run",
     "ingest:scale": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed-scale.ts",
     "ingest:bulk": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed-bulk.ts",
+    "ingest:guidelines": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-guidelines.ts",
     "monitor": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/monitor-ingestion.ts",
     "check-env": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-env.ts",
     "eval:evidence": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/eval-evidence.ts",

@@ -1,12 +1,6 @@
 import { buildProvenance, type SourceProvenance } from "./provenance";
-
-type GuidelineResult = {
-  source: string;
-  title: string;
-  url?: string;
-  date?: string;
-  summary?: string;
-};
+import { searchGuidelineAdapters } from "./guidelines/registry";
+import type { GuidelineResult } from "./guidelines/types";
 
 type ClinicalTrialResult = {
   nctId: string;
@@ -27,10 +21,13 @@ type DrugSafetyResult = {
   renalConsiderations: string[];
 };
 
-const DEFAULT_NICE_BASE_URL = 'https://api.nice.org.uk/services/content/search';
-const DEFAULT_EUROPE_PMC_URL = 'https://www.ebi.ac.uk/europepmc/webservices/rest/search';
 const DEFAULT_TRIALS_API_URL = 'https://clinicaltrials.gov/api/v2/studies';
 const DEFAULT_OPENFDA_LABEL_URL = 'https://api.fda.gov/drug/label.json';
+const DRUG_ALIAS_MAP: Record<string, string> = {
+  paracetamol: "acetaminophen",
+  panado: "acetaminophen",
+  tylenol: "acetaminophen",
+}
 
 function normalizeWhitespace(text?: string): string | undefined {
   if (!text) return undefined;
@@ -42,81 +39,53 @@ function toArray(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string').map(v => v.trim()).filter(Boolean);
 }
 
+function normalizeDrugLookupCandidates(drugName: string): string[] {
+  const lower = drugName.toLowerCase().trim()
+  const aliasResolved = DRUG_ALIAS_MAP[lower] || lower
+  const withoutBracketed = aliasResolved
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\([^\)]*\)/g, " ")
+  const withoutDoseAndForm = withoutBracketed
+    .replace(/\b\d+(\.\d+)?\s*(mg|mcg|g|ml|iu|units?)\b/gi, " ")
+    .replace(
+      /\b(tablet|capsule|powder|oral|solution|suspension|injection|intravenous|topical)\b/gi,
+      " "
+    )
+  const cleaned = normalizeWhitespace(withoutDoseAndForm) || ""
+  const primaryToken = cleaned.split(" ").filter(Boolean)[0] || ""
+  const aliasOfPrimary = DRUG_ALIAS_MAP[primaryToken] || ""
+  return Array.from(
+    new Set(
+      [cleaned, primaryToken, aliasResolved, aliasOfPrimary, lower].filter(Boolean)
+    )
+  )
+}
+
 export async function searchEuropePmcGuidelines(
   query: string,
   maxResults: number = 5
 ): Promise<GuidelineResult[]> {
-  const guidelineQuery = `${query} AND (guideline OR consensus OR recommendation)`;
-  const params = new URLSearchParams({
-    query: guidelineQuery,
-    pageSize: String(Math.min(Math.max(maxResults, 1), 20)),
-    format: 'json',
-    resultType: 'core',
-    sort: 'P_PDATE_D',
-  });
-
-  const response = await fetch(`${DEFAULT_EUROPE_PMC_URL}?${params.toString()}`);
-  if (!response.ok) return [];
-
-  const data = await response.json();
-  const list = (data?.resultList?.result || []) as Array<Record<string, unknown>>;
-
-  return list.map(item => ({
-    source: 'Europe PMC',
-    title: String(item.title || 'Untitled'),
-    url: item.fullTextUrlList && Array.isArray((item.fullTextUrlList as any)?.fullTextUrl)
-      ? String((item.fullTextUrlList as any).fullTextUrl[0]?.url || '')
-      : String(item?.doi ? `https://doi.org/${item.doi}` : ''),
-    date: String(item.firstPublicationDate || item.pubYear || ''),
-    summary: normalizeWhitespace(String(item.abstractText || '').slice(0, 400)),
-  })).filter(item => item.title);
+  const { results } = await searchGuidelineAdapters(query, maxResults, "GLOBAL")
+  return results.filter((item) => item.source === "Europe PMC")
 }
 
 export async function searchNiceGuidelines(
   query: string,
   maxResults: number = 5
 ): Promise<GuidelineResult[]> {
-  const apiKey = process.env.NICE_API_KEY;
-  if (!apiKey) return [];
-
-  const params = new URLSearchParams({
-    searchTerm: query,
-    page: '1',
-    pageSize: String(Math.min(Math.max(maxResults, 1), 20)),
-  });
-
-  const response = await fetch(`${DEFAULT_NICE_BASE_URL}?${params.toString()}`, {
-    headers: {
-      'API-Key': apiKey,
-      Accept: 'application/vnd.nice.syndication.services+json',
-    },
-  });
-
-  if (!response.ok) return [];
-
-  const data = await response.json();
-  const items = (data?.results || data?.items || []) as Array<Record<string, unknown>>;
-
-  return items.map(item => ({
-    source: 'NICE',
-    title: String(item.title || item.name || 'Untitled'),
-    url: String(item.url || item.webUrl || ''),
-    date: String(item.lastModifiedDate || item.publishedDate || ''),
-    summary: normalizeWhitespace(String(item.summary || item.description || '').slice(0, 400)),
-  })).filter(item => item.title);
+  const { results } = await searchGuidelineAdapters(query, maxResults, "UK")
+  return results.filter((item) => item.source === "NICE")
 }
 
 export async function searchGuidelines(
   query: string,
   maxResults: number = 6
 ): Promise<{ results: GuidelineResult[]; sourcesUsed: string[]; provenance: SourceProvenance[] }> {
-  const [nice, europePmc] = await Promise.all([
-    searchNiceGuidelines(query, Math.ceil(maxResults / 2)),
-    searchEuropePmcGuidelines(query, maxResults),
-  ]);
-
-  const merged = [...nice, ...europePmc].slice(0, maxResults);
-  const sourcesUsed = Array.from(new Set(merged.map(item => item.source)));
+  const { results: merged, sourcesUsed } = await searchGuidelineAdapters(
+    query,
+    maxResults,
+    "US"
+  )
   const provenance = merged.map((item, idx) =>
     buildProvenance({
       id: `guideline_${idx + 1}`,
@@ -125,12 +94,12 @@ export async function searchGuidelines(
       title: item.title,
       url: item.url || null,
       publishedAt: item.date || null,
-      region: item.source === "NICE" ? "UK" : null,
+      region: item.region || (item.source === "NICE" ? "UK" : null),
       journal: item.source === "Europe PMC" ? "Europe PMC" : item.source,
       doi: null,
       pmid: null,
-      evidenceLevel: 5,
-      studyType: "Guideline",
+      evidenceLevel: item.evidenceLevel || 3,
+      studyType: item.studyType || "Guideline",
       snippet: item.summary || "",
     })
   );
@@ -200,11 +169,22 @@ export async function searchClinicalTrials(
 export async function lookupDrugSafety(
   drugName: string
 ): Promise<DrugSafetyResult & { provenance: SourceProvenance[] }> {
-  const encodedDrug = encodeURIComponent(drugName.trim());
-  const url = `${DEFAULT_OPENFDA_LABEL_URL}?search=openfda.generic_name:${encodedDrug}&limit=1`;
+  const candidates = normalizeDrugLookupCandidates(drugName);
 
-  const response = await fetch(url);
-  if (!response.ok) {
+  let response: Response | null = null;
+  let matchedCandidate = drugName;
+  for (const candidate of candidates) {
+    const encodedDrug = encodeURIComponent(candidate);
+    const url = `${DEFAULT_OPENFDA_LABEL_URL}?search=openfda.generic_name:${encodedDrug}&limit=1`;
+    const attempt = await fetch(url);
+    if (attempt.ok) {
+      response = attempt;
+      matchedCandidate = candidate;
+      break;
+    }
+  }
+
+  if (!response) {
     return {
       source: 'OpenFDA',
       drug: drugName,
@@ -246,7 +226,7 @@ export async function lookupDrugSafety(
 
   const result = {
     source: 'OpenFDA',
-    drug: drugName,
+    drug: matchedCandidate || drugName,
     contraindications: contraindications.slice(0, 6).map(c => normalizeWhitespace(c) || c),
     warnings: warnings.slice(0, 6).map(c => normalizeWhitespace(c) || c),
     interactions: interactions.slice(0, 6).map(c => normalizeWhitespace(c) || c),

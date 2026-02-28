@@ -263,6 +263,7 @@ export function extractReferencedCitations(
     totalRetrieved: number;
     totalReferenced: number;
     missingCitations: number[];
+    fallbackAdded: number;
   };
 } {
   if (!responseText || allRetrievedCitations.length === 0) {
@@ -274,34 +275,67 @@ export function extractReferencedCitations(
         totalRetrieved: allRetrievedCitations.length,
         totalReferenced: 0,
         missingCitations: [],
+        fallbackAdded: 0,
       },
     };
-  }  // Parse citation markers from response
+  }
+
+  // Parse citation markers from response
   const citationMap = parseCitationMarkers(responseText, allRetrievedCitations);
   const referencedIndices = Array.from(citationMap.keys()).sort((a, b) => a - b);
   
   // Get only the citations that were actually referenced
   const referencedCitations = referencedIndices
     .map(index => citationMap.get(index))
-    .filter((c): c is EvidenceCitation => c !== undefined);  // Find citations that were retrieved but not referenced (potential issues)
+    .filter((c): c is EvidenceCitation => c !== undefined);
+
+  const minimumCitationFloor = Math.min(3, allRetrievedCitations.length);
+  let fallbackAdded = 0;
+  if (referencedCitations.length < minimumCitationFloor) {
+    const referencedSet = new Set(referencedCitations.map(c => c.index));
+    const fallbackCandidates = allRetrievedCitations.filter(c => !referencedSet.has(c.index));
+    const needed = minimumCitationFloor - referencedCitations.length;
+    const fallbackToAdd = fallbackCandidates.slice(0, needed);
+    if (fallbackToAdd.length > 0) {
+      fallbackAdded = fallbackToAdd.length;
+      referencedCitations.push(...fallbackToAdd);
+    }
+  }
+
+  const finalIndices = referencedCitations
+    .map(citation => citation.index)
+    .sort((a, b) => a - b);
+
+  // Find citations that were retrieved but not included (potential issues)
   const allIndices = new Set(allRetrievedCitations.map(c => c.index));
-  const referencedSet = new Set(referencedIndices);
-  const missingCitations = Array.from(allIndices).filter(i => !referencedSet.has(i));  const hasCitations = referencedCitations.length > 0;  // Log for debugging
+  const referencedSet = new Set(finalIndices);
+  const missingCitations = Array.from(allIndices).filter(i => !referencedSet.has(i));
+  const hasCitations = referencedCitations.length > 0;
+
+  // Log for debugging
   if (hasCitations) {
     console.log(`📚 [CITATION EXTRACTION] Found ${referencedCitations.length} referenced citations out of ${allRetrievedCitations.length} retrieved`);
+    if (fallbackAdded > 0) {
+      console.warn(
+        `📚 [CITATION EXTRACTION] Added ${fallbackAdded} fallback citations to maintain minimum evidence references`
+      );
+    }
     if (missingCitations.length > 0) {
       console.log(`📚 [CITATION EXTRACTION] Warning: ${missingCitations.length} retrieved citations were not referenced: [${missingCitations.join(', ')}]`);
     }
   } else if (allRetrievedCitations.length > 0) {
     console.warn(`📚 [CITATION EXTRACTION] No citation markers found in response despite ${allRetrievedCitations.length} citations being provided`);
-  }  return {
+  }
+
+  return {
     referencedCitations,
-    citationIndices: referencedIndices,
+    citationIndices: finalIndices,
     hasCitations,
     verificationStats: {
       totalRetrieved: allRetrievedCitations.length,
       totalReferenced: referencedCitations.length,
       missingCitations,
+      fallbackAdded,
     },
   };
 }

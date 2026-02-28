@@ -13,10 +13,26 @@ type ChatSummary = {
   totalCases: number;
   avgCitationCoverage: number;
   avgEvidenceReferences: number;
+  guidelineHitRate?: number;
+  avgCitationRelevancePassRate?: number;
+  emptyGuidelineToolRate?: number;
   escalationCompliance: number;
   avgJudgeOverall?: number | null;
   avgJudgeSafety?: number | null;
 };
+
+function assertFiniteNumber(
+  value: unknown,
+  label: string,
+  failures: string[]
+): value is number {
+  const numeric = typeof value === 'number' ? value : Number.NaN;
+  const valid = Number.isFinite(numeric);
+  if (!valid) {
+    failures.push(`${label} is missing or non-numeric`);
+  }
+  return valid;
+}
 
 type Thresholds = {
   retrieval: {
@@ -32,6 +48,9 @@ type Thresholds = {
     minEscalationCompliance: number;
     minAvgJudgeOverall: number;
     minAvgJudgeSafety: number;
+    minGuidelineHitRate?: number;
+    minCitationRelevancePassRate?: number;
+    maxEmptyGuidelineToolRate?: number;
   };
 };
 
@@ -65,6 +84,34 @@ async function main() {
   const thresholds = readJson<Thresholds>(thresholdsPath);
 
   const failures: string[] = [];
+
+  // Summary payload validation before threshold checks.
+  assertFiniteNumber(retrieval.totalCases, 'retrieval.totalCases', failures);
+  assertFiniteNumber(retrieval.avgResults, 'retrieval.avgResults', failures);
+  assertFiniteNumber(retrieval.avgTopEvidenceLevel, 'retrieval.avgTopEvidenceLevel', failures);
+  assertFiniteNumber(retrieval.avgLatestYear, 'retrieval.avgLatestYear', failures);
+  assertFiniteNumber(chat.totalCases, 'chat.totalCases', failures);
+  assertFiniteNumber(chat.avgCitationCoverage, 'chat.avgCitationCoverage', failures);
+  assertFiniteNumber(chat.avgEvidenceReferences, 'chat.avgEvidenceReferences', failures);
+  assertFiniteNumber(chat.escalationCompliance, 'chat.escalationCompliance', failures);
+  if (chat.avgJudgeOverall != null) {
+    assertFiniteNumber(chat.avgJudgeOverall, 'chat.avgJudgeOverall', failures);
+  }
+  if (chat.avgJudgeSafety != null) {
+    assertFiniteNumber(chat.avgJudgeSafety, 'chat.avgJudgeSafety', failures);
+  }
+  if (typeof thresholds.chat.minGuidelineHitRate === 'number' && chat.guidelineHitRate != null) {
+    assertFiniteNumber(chat.guidelineHitRate, 'chat.guidelineHitRate', failures);
+  }
+  if (
+    typeof thresholds.chat.minCitationRelevancePassRate === 'number' &&
+    chat.avgCitationRelevancePassRate != null
+  ) {
+    assertFiniteNumber(chat.avgCitationRelevancePassRate, 'chat.avgCitationRelevancePassRate', failures);
+  }
+  if (typeof thresholds.chat.maxEmptyGuidelineToolRate === 'number' && chat.emptyGuidelineToolRate != null) {
+    assertFiniteNumber(chat.emptyGuidelineToolRate, 'chat.emptyGuidelineToolRate', failures);
+  }
 
   failIf(
     retrieval.totalCases < thresholds.retrieval.minimumCases,
@@ -117,6 +164,27 @@ async function main() {
     `chat.avgJudgeSafety failed: ${(chat.avgJudgeSafety ?? 0).toFixed(3)} < ${thresholds.chat.minAvgJudgeSafety.toFixed(3)}`,
     failures
   );
+  if (typeof thresholds.chat.minGuidelineHitRate === 'number') {
+    failIf(
+      (chat.guidelineHitRate ?? 0) < thresholds.chat.minGuidelineHitRate,
+      `chat.guidelineHitRate failed: ${(chat.guidelineHitRate ?? 0).toFixed(3)} < ${thresholds.chat.minGuidelineHitRate.toFixed(3)}`,
+      failures
+    );
+  }
+  if (typeof thresholds.chat.minCitationRelevancePassRate === 'number') {
+    failIf(
+      (chat.avgCitationRelevancePassRate ?? 0) < thresholds.chat.minCitationRelevancePassRate,
+      `chat.avgCitationRelevancePassRate failed: ${(chat.avgCitationRelevancePassRate ?? 0).toFixed(3)} < ${thresholds.chat.minCitationRelevancePassRate.toFixed(3)}`,
+      failures
+    );
+  }
+  if (typeof thresholds.chat.maxEmptyGuidelineToolRate === 'number') {
+    failIf(
+      (chat.emptyGuidelineToolRate ?? 1) > thresholds.chat.maxEmptyGuidelineToolRate,
+      `chat.emptyGuidelineToolRate failed: ${(chat.emptyGuidelineToolRate ?? 1).toFixed(3)} > ${thresholds.chat.maxEmptyGuidelineToolRate.toFixed(3)}`,
+      failures
+    );
+  }
 
   if (failures.length > 0) {
     console.error('❌ Release benchmark checks failed:');

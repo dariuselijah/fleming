@@ -12,6 +12,7 @@ import {
 } from "@/lib/evidence/live-tools"
 import {
   buildProvenance,
+  evaluateProvenanceQuality,
   provenanceToEvidenceCitation,
   type SourceProvenance,
 } from "@/lib/evidence/provenance"
@@ -40,6 +41,11 @@ import {
   normalizeMedicalStudentLearningMode,
   type MedicalStudentLearningMode,
 } from "@/lib/medical-student-learning"
+import {
+  getClinicianModeSystemInstructions,
+  normalizeClinicianWorkflowMode,
+  type ClinicianWorkflowMode,
+} from "@/lib/clinician-mode"
 
 export const maxDuration = 60
 
@@ -190,7 +196,89 @@ function needsFreshEvidence(query: string): boolean {
   )
 }
 
-function extractToolProvenance(toolInvocationParts: any[]): SourceProvenance[] {
+const MEDICAL_QUERY_STOP_WORDS = new Set([
+  "the",
+  "and",
+  "or",
+  "for",
+  "with",
+  "from",
+  "into",
+  "about",
+  "what",
+  "when",
+  "where",
+  "which",
+  "that",
+  "this",
+  "these",
+  "those",
+  "workup",
+  "evaluation",
+  "guidelines",
+  "review",
+  "adult",
+  "adults",
+  "patient",
+  "patients",
+])
+const US_PRIORITY_SOURCE_PATTERN =
+  /\b(aha|acc|acp|ada|acog|aafp|cdc|nih|idsa|nccn|uspstf|sccm|ats)\b/i
+
+function extractClinicalQueryTerms(query: string): string[] {
+  return query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(
+      (term) =>
+        term.length >= 3 &&
+        !MEDICAL_QUERY_STOP_WORDS.has(term) &&
+        !/^\d+$/.test(term)
+    )
+}
+
+function buildFocusedPubMedQuery(query: string): string {
+  const terms = extractClinicalQueryTerms(query).slice(0, 6)
+  if (terms.length === 0) return query
+  return terms.map((term) => `${term}[Title/Abstract]`).join(" AND ")
+}
+
+function isTextRelevantToClinicalQuery(text: string, query: string): boolean {
+  const terms = extractClinicalQueryTerms(query)
+  if (terms.length === 0) return true
+
+  const haystack = text.toLowerCase()
+  const matchCount = terms.filter((term) => haystack.includes(term)).length
+  const minMatches = Math.min(2, Math.max(1, Math.ceil(terms.length * 0.34)))
+  return matchCount >= minMatches
+}
+
+function getProvenanceUsPriorityScore(item: SourceProvenance): number {
+  const title = item.title || ""
+  const journal = item.journal || ""
+  const source = item.sourceName || ""
+  const studyType = item.studyType || ""
+  const region = (item.region || "").toUpperCase()
+
+  let score = 0
+  if (item.sourceType === "guideline") score += 4
+  if (/guideline|recommendation|consensus|statement/i.test(studyType)) score += 3
+  if (region === "US") score += 4
+  if (US_PRIORITY_SOURCE_PATTERN.test(`${source} ${journal} ${title}`)) score += 2
+  if (/meta-analysis|systematic/i.test(studyType)) score += 2
+  if (/randomized|rct/i.test(studyType)) score += 1
+  if (typeof item.evidenceLevel === "number") {
+    score += Math.max(0, 6 - item.evidenceLevel) * 0.5
+  }
+  return score
+}
+
+function extractToolProvenance(
+  toolInvocationParts: any[],
+  queryText: string
+): SourceProvenance[] {
   const flattened = toolInvocationParts.flatMap((part: any) => {
     const result = part?.toolInvocation?.result
     if (!result) return []
@@ -244,7 +332,25 @@ function extractToolProvenance(toolInvocationParts: any[]): SourceProvenance[] {
       deduped.set(key, item)
     }
   })
+
   return Array.from(deduped.values())
+    .filter((item) => {
+      const relevanceText = `${item.title || ""} ${item.journal || ""} ${item.snippet || ""}`
+      if (!isTextRelevantToClinicalQuery(relevanceText, queryText)) {
+        return false
+      }
+      const gate = evaluateProvenanceQuality(item, queryText)
+      if (!gate.passed) {
+        console.warn(
+          `[PROVENANCE GATE] Dropped citation "${item.title}" (score=${gate.score}, reasons=${gate.reasons.join(",")})`
+        )
+      }
+      return gate.passed
+    })
+    .sort(
+      (a, b) =>
+        getProvenanceUsPriorityScore(b) - getProvenanceUsPriorityScore(a)
+    )
 }
 
 type ChatRequest = {
@@ -263,6 +369,7 @@ type ChatRequest = {
   medicalLiteratureAccess?: boolean
   medicalComplianceMode?: boolean
   learningMode?: MedicalStudentLearningMode
+  clinicianMode?: ClinicianWorkflowMode
 }
 
 export async function POST(req: Request) {
@@ -283,6 +390,7 @@ export async function POST(req: Request) {
       medicalLiteratureAccess,
       medicalComplianceMode,
       learningMode,
+      clinicianMode,
     } = (await req.json()) as ChatRequest
 
     if (!messages || !chatId || !userId) {
@@ -320,8 +428,8 @@ export async function POST(req: Request) {
     const queryText = typeof lastUserMessage?.content === "string"
       ? lastUserMessage.content
       : ""
-    const finalEnableEvidence = enableEvidenceFromClient === true
     const effectiveLearningMode = normalizeMedicalStudentLearningMode(learningMode)
+    const effectiveClinicianMode = normalizeClinicianWorkflowMode(clinicianMode)
 
     // Run all blocking work in parallel so streaming can start as soon as possible
     const effectiveModel = model
@@ -333,7 +441,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const [effectiveUserRole, apiKey, evidenceContextResult] = await Promise.all([
+    const [effectiveUserRole, apiKey] = await Promise.all([
       // 1) Resolve user role (from request or DB)
       (async (): Promise<"doctor" | "general" | "medical_student" | undefined> => {
         if (userRole) return userRole
@@ -363,13 +471,21 @@ export async function POST(req: Request) {
         const provider = getProviderForModel(effectiveModel)
         return (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
       })(),
-      // 3) Evidence synthesis when enabled (runs in parallel with above)
+    ])
+
+    const clinicianRoleFromResolvedRole =
+      effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
+    const finalEnableEvidence =
+      enableEvidenceFromClient === true || clinicianRoleFromResolvedRole
+    const minEvidenceLevelForQuery = clinicianRoleFromResolvedRole ? 3 : 5
+
+    const evidenceContextResult =
       finalEnableEvidence && queryText.length > 0
-        ? synthesizeEvidence({
+        ? await synthesizeEvidence({
             query: queryText,
-            maxResults: 8,
-            minEvidenceLevel: 5,
-            candidateMultiplier: 5,
+            maxResults: 12,
+            minEvidenceLevel: minEvidenceLevelForQuery,
+            candidateMultiplier: 6,
             enableRerank: true,
             queryExpansion: true,
             minMedicalConfidence: 0.25,
@@ -378,8 +494,7 @@ export async function POST(req: Request) {
             console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", err)
             return null
           })
-        : Promise.resolve(null),
-    ])
+        : null
 
     let effectiveSystemPrompt = getCachedSystemPrompt(
       effectiveUserRole || "general",
@@ -390,6 +505,12 @@ export async function POST(req: Request) {
     if (effectiveUserRole === "medical_student") {
       effectiveSystemPrompt += `\n\n${getLearningModeSystemInstructions(
         effectiveLearningMode
+      )}`
+    }
+
+    if (effectiveUserRole === "doctor") {
+      effectiveSystemPrompt += `\n\n${getClinicianModeSystemInstructions(
+        effectiveClinicianMode
       )}`
     }
 
@@ -486,8 +607,22 @@ export async function POST(req: Request) {
               maxResults: z.number().int().min(1).max(10).default(5),
             }),
             execute: async ({ query, maxResults }) => {
-              const result = await searchPubMed(query, maxResults)
-              const provenance: SourceProvenance[] = result.articles.map((a, idx) =>
+              // Normalize tool queries to reduce broad, irrelevant retrieval.
+              const focusedQuery = buildFocusedPubMedQuery(query)
+              const result = await searchPubMed(
+                focusedQuery,
+                Math.min(maxResults * 3, 30)
+              )
+              const relevantArticles = result.articles
+                .filter((article) =>
+                  isTextRelevantToClinicalQuery(
+                    `${article.title || ""} ${article.abstract || ""}`,
+                    query
+                  )
+                )
+                .slice(0, maxResults)
+
+              const provenance: SourceProvenance[] = relevantArticles.map((a, idx) =>
                 buildProvenance({
                   id: `pubmed_${a.pmid || idx + 1}`,
                   sourceType: "pubmed",
@@ -501,12 +636,13 @@ export async function POST(req: Request) {
                   pmid: a.pmid || null,
                   evidenceLevel: 2,
                   studyType: "Literature record",
-                  snippet: "",
+                  snippet: (a.abstract || "").slice(0, 320),
                 })
               )
               return {
-                totalResults: result.totalResults,
-                articles: result.articles.map(a => ({
+                totalResults: relevantArticles.length,
+                searchedQuery: focusedQuery,
+                articles: relevantArticles.map(a => ({
                   pmid: a.pmid,
                   title: a.title,
                   journal: a.journal,
@@ -602,7 +738,7 @@ export async function POST(req: Request) {
       : ({} as ToolSet)
 
     if (shouldEnableEvidenceTools) {
-      effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:\n- Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.\n- Use guidelineSearch for formal recommendations and regional guidance.\n- Use clinicalTrialsSearch for ongoing/new evidence.\n- Use drugSafetyLookup for contraindications/interactions/renal dosing checks.\n- Use evidenceConflictCheck when sources disagree.`
+      effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:\n- Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.\n- Use guidelineSearch for formal recommendations and regional guidance.\n- Use clinicalTrialsSearch for ongoing/new evidence.\n- Use drugSafetyLookup for contraindications/interactions/renal dosing checks.\n- Use evidenceConflictCheck when sources disagree.\n- IMPORTANT: Keep tool queries tightly aligned to the user question (specific condition/drug terms, not broad generic terms).\n- IMPORTANT: If a tool returns irrelevant records, explicitly discard them and retry with a narrower query before citing evidence.`
     } else if (shouldEnablePubMedTools) {
       effectiveSystemPrompt += `\n\nYou may use PubMed tools when the question requests latest evidence, guideline updates, or when provided evidence is sparse. Prefer retrieved PubMed records for recency-sensitive claims and cite them explicitly.`
     }
@@ -773,7 +909,10 @@ export async function POST(req: Request) {
                 }
 
                 // Add normalized provenance from tool results to feed citation UX
-                const toolProvenance = extractToolProvenance(toolInvocationParts)
+                const toolProvenance = extractToolProvenance(
+                  toolInvocationParts,
+                  queryText
+                )
                 if (toolProvenance.length > 0) {
                   const provenanceCitations = toolProvenance.map((item, idx) =>
                     provenanceToEvidenceCitation(item, citationsToSave.length + idx + 1)

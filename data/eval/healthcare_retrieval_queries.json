@@ -31,6 +31,10 @@
   { "id": "retr-geri-falls", "query": "falls prevention older adults multifactorial intervention evidence", "tags": ["geriatrics"] },
   { "id": "retr-pharm-warfarin", "query": "warfarin antibiotic drug interactions INR management", "tags": ["pharmacology"] },
   { "id": "retr-pharm-ckd-dosing", "query": "renal dose adjustment medications advanced ckd", "tags": ["pharmacology", "nephrology"] },
+  { "id": "retr-clinical-abdominal-pain", "query": "adult abdominal pain diagnostic workup red flags guideline", "tags": ["internal-medicine", "emergency", "guideline-priority"] },
+  { "id": "retr-clinical-htn-pathophysiology", "query": "hypertension pathophysiology and first line treatment guideline adults", "tags": ["cardiology", "guideline-priority"] },
+  { "id": "retr-clinical-acetaminophen-safety", "query": "acetaminophen maximum daily dose multi ingredient products safety guidance", "tags": ["pharmacology", "guideline-priority"] },
+  { "id": "retr-clinical-sepsis-bundle", "query": "sepsis first hour bundle guideline antibiotics fluids lactate", "tags": ["critical-care", "infectious-disease", "guideline-priority"] },
   { "id": "retr-ortho-oa", "query": "osteoarthritis pain management nsaid vs acetaminophen trial", "tags": ["musculoskeletal"] },
   { "id": "retr-rheum-ra", "query": "rheumatoid arthritis early dmard initiation outcomes", "tags": ["musculoskeletal"] },
   { "id": "retr-derm-psoriasis", "query": "psoriasis biologics efficacy safety comparison", "tags": ["dermatology"] }
