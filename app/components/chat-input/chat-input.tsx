@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react"
 import { getModelInfo } from "@/lib/models"
 import { useModel } from "@/lib/model-store/provider"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import type { MedicalStudentLearningMode } from "@/lib/medical-student-learning"
 import {
   PromptInput,
   PromptInputAction,
@@ -15,6 +17,7 @@ import { PromptSystem } from "../suggestions/prompt-system"
 import { ButtonFileUpload } from "./button-file-upload"
 import { ButtonSearch } from "./button-search"
 import { FileList } from "./file-list"
+import { LearningModeSelector } from "./learning-mode-selector"
 
 // Fleming 3.5 has been removed - only Fleming 4 is available
 
@@ -38,6 +41,8 @@ type ChatInputProps = {
   enableSearch: boolean
   setEnableEvidence?: (enabled: boolean) => void
   enableEvidence?: boolean
+  learningMode: MedicalStudentLearningMode
+  onLearningModeChange: (mode: MedicalStudentLearningMode) => void
 }
 
 export function ChatInput({
@@ -59,8 +64,11 @@ export function ChatInput({
   enableSearch,
   setEnableEvidence,
   enableEvidence = false,
+  learningMode,
+  onLearningModeChange,
 }: ChatInputProps) {
   const { models } = useModel()
+  const { preferences } = useUserPreferences()
   const [isButtonDisabled, setIsButtonDisabled] = useState(true);
   
   // Use selectedModel directly - no model selector needed since only Fleming 4 is available
@@ -174,13 +182,28 @@ export function ChatInput({
     setIsButtonDisabled(Boolean(shouldDisable));
   }, [value, isSubmitting, status]);
 
+  const placeholderByMode: Record<MedicalStudentLearningMode, string> = {
+    ask: "Ask Fleming anything...",
+    simulate: "Start a clinical simulation (e.g., chest pain in ED)...",
+    guideline: "Ask for a guideline snapshot (e.g., HF GDMT updates)...",
+  }
+
+  const isMedicalStudent = preferences.userRole === "medical_student"
+
   return (
     <div className="relative flex w-full flex-col gap-4">
+      {isMedicalStudent && (
+        <LearningModeSelector
+          value={learningMode}
+          onChange={onLearningModeChange}
+        />
+      )}
       {hasSuggestions && (
         <PromptSystem
           onValueChange={onValueChange}
           onSuggestion={onSuggestion}
           value={value}
+          learningMode={learningMode}
         />
       )}
       <div className="relative order-2 px-2 pb-3 sm:pb-4 md:order-1">
@@ -192,7 +215,7 @@ export function ChatInput({
         >
           <FileList files={files} onFileRemove={onFileRemove} />
           <PromptInputTextarea
-            placeholder="Ask Fleming anything..."
+            placeholder={isMedicalStudent ? placeholderByMode[learningMode] : "Ask Fleming anything..."}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base placeholder:text-muted-foreground placeholder:opacity-80"

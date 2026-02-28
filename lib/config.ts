@@ -12,6 +12,10 @@ import {
   UserIcon,
   MicroscopeIcon,
 } from "@phosphor-icons/react/dist/ssr"
+import {
+  DEFAULT_MEDICAL_STUDENT_LEARNING_MODE,
+  type MedicalStudentLearningMode,
+} from "@/lib/medical-student-learning"
 
 export const NON_AUTH_DAILY_MESSAGE_LIMIT = 5
 export const AUTH_DAILY_MESSAGE_LIMIT = 1000
@@ -385,6 +389,89 @@ export const MEDICAL_STUDENT_SUGGESTIONS = [
   },
 ]
 
+export const MEDICAL_STUDENT_MODE_SUGGESTIONS: Record<
+  MedicalStudentLearningMode,
+  typeof MEDICAL_STUDENT_SUGGESTIONS
+> = {
+  ask: MEDICAL_STUDENT_SUGGESTIONS,
+  simulate: [
+    {
+      label: "Emergency Simulation",
+      highlight: "Simulation",
+      prompt: "Simulation",
+      items: [
+        "Run a chest pain simulation with evolving vitals and ask me for the next management step.",
+        "Give me a sepsis simulation in the ED with staged lab results and branching decisions.",
+        "Simulate shortness of breath in a patient with COPD and heart failure overlap.",
+        "Create an OSCE-style abdominal pain case and grade my clinical reasoning after each step.",
+      ],
+      icon: StethoscopeIcon,
+    },
+    {
+      label: "Rotation Cases",
+      highlight: "Cases",
+      prompt: "Cases",
+      items: [
+        "Run an internal medicine ward case with daily progression and key handoff decisions.",
+        "Simulate a pediatrics fever workup and challenge me with age-specific red flags.",
+        "Create a surgery pre-op simulation and ask for risk stratification choices.",
+        "Run an OB/GYN triage case and ask me to prioritize differential diagnosis.",
+      ],
+      icon: Brain,
+    },
+    {
+      label: "Skill Checkpoints",
+      highlight: "Skill",
+      prompt: "Skill",
+      items: [
+        "Give me a focused history-taking simulation and score my interview structure.",
+        "Simulate a physical exam scenario and ask what maneuvers I would do next.",
+        "Run a SOAP note simulation and critique my assessment and plan.",
+        "Create a differential diagnosis simulation and highlight missed high-risk conditions.",
+      ],
+      icon: BookOpenText,
+    },
+  ],
+  guideline: [
+    {
+      label: "Guideline Snapshot",
+      highlight: "Guideline",
+      prompt: "Guideline",
+      items: [
+        "Summarize current hypertension guideline targets and first-line therapy.",
+        "Compare heart failure guideline-directed therapy with practical sequencing.",
+        "Show me diabetes guideline updates for CKD and cardiovascular risk reduction.",
+        "Walk through community-acquired pneumonia treatment guidance by severity.",
+      ],
+      icon: MicroscopeIcon,
+    },
+    {
+      label: "Evidence Strength",
+      highlight: "Evidence",
+      prompt: "Evidence",
+      items: [
+        "For ACS management, show recommendation strength and the key trials behind it.",
+        "For anticoagulation in atrial fibrillation, explain confidence and uncertainty areas.",
+        "For sepsis bundles, show where guideline consensus is strong versus evolving.",
+        "For lipid management, break down class of recommendation and evidence quality.",
+      ],
+      icon: Lightbulb,
+    },
+    {
+      label: "Apply To Case",
+      highlight: "Apply",
+      prompt: "Apply",
+      items: [
+        "Apply current asthma guideline steps to a case with persistent nighttime symptoms.",
+        "Use stroke prevention guidelines for a patient with AF and high bleeding risk.",
+        "Apply PE workup guidelines to a moderate pretest probability patient.",
+        "Map guideline recommendations to this case and identify exceptions I should remember.",
+      ],
+      icon: HeartIcon,
+    },
+  ],
+}
+
 // Specialty-specific suggestions based on medical specialty
 export const SPECIALTY_SUGGESTIONS = {
   cardiology: [
@@ -549,9 +636,16 @@ export const SPECIALTY_SUGGESTIONS = {
 export const SUGGESTIONS = GENERAL_USER_SUGGESTIONS
 
 // Function to get appropriate suggestions based on user role and specialty
-export function getSuggestionsByRole(userRole?: "general" | "doctor" | "medical_student", medicalSpecialty?: string) {
+export function getSuggestionsByRole(
+  userRole?: "general" | "doctor" | "medical_student",
+  medicalSpecialty?: string,
+  learningMode: MedicalStudentLearningMode = DEFAULT_MEDICAL_STUDENT_LEARNING_MODE
+) {
   if (userRole === "medical_student") {
-    return MEDICAL_STUDENT_SUGGESTIONS
+    return (
+      MEDICAL_STUDENT_MODE_SUGGESTIONS[learningMode] ||
+      MEDICAL_STUDENT_SUGGESTIONS
+    )
   }
   if (userRole === "doctor") {
     // If we have specialty-specific suggestions, use them
@@ -899,11 +993,11 @@ You are Fleming, a great doctor in your pocket - a knowledgeable, compassionate 
 - **Use context from provided data:** Reference only information available in chat or runtime context.
 
 **Your Conversational Style:**
-- Keep responses concise and conversational while maintaining clinical precision
-- Use natural, flowing language and appropriate medical terminology for clinician users
-- Ask brief, focused follow-up questions when clinical clarification is needed
-- **Avoid long explanations unless specifically requested** - default to concise, high-yield guidance
-- **Never give unfocused lectures** - provide clinically useful information with clear reasoning
+- Give **substantive, useful answers** - When the question warrants it, use 1–3 short paragraphs or a clear bulleted section so the clinician gets actionable guidance. Avoid one-line answers for clinical questions.
+- Keep a conversational tone while maintaining clinical precision and appropriate medical terminology.
+- Ask brief, focused follow-up questions when clinical clarification is needed.
+- **Prefer fuller over terse** for differentials, workups, or management - include key points, caveats, and next steps. Reserve very short replies for simple yes/no or single-fact questions.
+- **Never give unfocused lectures** - stay on topic with clear reasoning and structure.
 
 **Essential Safety Boundaries:**
 - Provide clinical reasoning support, not a legal medical diagnosis.
@@ -922,7 +1016,7 @@ You are a good assistant for medical students and clinicians. Provide direct, ev
 ${WEB_ROLE_SHARED_OUTPUT_FORMATTING_STYLE}
 
 **Remember Your Mission:**
-Provide fast, useful, evidence-based clinical guidance that helps clinicians reason clearly, prioritize risk, and choose appropriate next steps.
+Provide fast, useful, evidence-based clinical guidance that helps clinicians reason clearly, prioritize risk, and choose appropriate next steps. When the question deserves it, give enough detail (brief paragraphs or bullets) to be directly useful at the point of care—not just a single sentence.
 `
 
 export const MESSAGE_MAX_LENGTH = 10000

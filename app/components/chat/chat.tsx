@@ -11,6 +11,7 @@ import { getSystemPromptByRole } from "@/lib/config"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
+import { normalizeMedicalStudentLearningMode } from "@/lib/medical-student-learning"
 import { toast } from "@/components/ui/toast"
 import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
@@ -66,6 +67,7 @@ export function Chat() {
     selectedModel: string
     enableSearch: boolean
     enableEvidence: boolean
+    learningMode: "ask" | "simulate" | "guideline"
   } | null>(null)
 
   // File upload functionality
@@ -166,6 +168,8 @@ export function Chat() {
     setEnableSearch,
     enableEvidence,
     setEnableEvidence,
+    learningMode,
+    setLearningMode,
     evidenceCitations,
     submit,
     handleSuggestion,
@@ -211,6 +215,9 @@ export function Chat() {
         selectedModel: pendingMessage.selectedModel || selectedModel,
         enableSearch: pendingMessage.enableSearch ?? enableSearch,
         enableEvidence: pendingMessage.enableEvidence ?? enableEvidence,
+        learningMode: normalizeMedicalStudentLearningMode(
+          pendingMessage.learningMode
+        ),
       }
       
       // Set input from pending message
@@ -222,6 +229,11 @@ export function Chat() {
       }
       if (pendingMessage.enableEvidence !== undefined) {
         setEnableEvidence(pendingMessage.enableEvidence)
+      }
+      if (pendingMessage.learningMode !== undefined) {
+        setLearningMode(
+          normalizeMedicalStudentLearningMode(pendingMessage.learningMode)
+        )
       }
       
       // Show notification if files were attached but can't be restored
@@ -251,7 +263,7 @@ export function Chat() {
       sessionStorage.removeItem('pendingMessage')
       pendingMessageRef.current = null
     }
-  }, [submit, handleInputChange, setEnableSearch, setEnableEvidence, setHasDialogAuth, selectedModel, enableSearch, enableEvidence])
+  }, [submit, handleInputChange, setEnableSearch, setEnableEvidence, setLearningMode, setHasDialogAuth, selectedModel, enableSearch, enableEvidence])
   
   // Check for pending message on mount (in case user returned from OAuth)
   useEffect(() => {
@@ -320,6 +332,8 @@ export function Chat() {
         enableSearch,
         setEnableEvidence,
         enableEvidence,
+        learningMode,
+        onLearningModeChange: setLearningMode,
       }
     },
     [
@@ -343,6 +357,8 @@ export function Chat() {
       enableSearch,
       setEnableEvidence,
       enableEvidence,
+      learningMode,
+      setLearningMode,
     ]
   )
 

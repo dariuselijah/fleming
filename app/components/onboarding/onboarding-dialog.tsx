@@ -141,6 +141,19 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
 
     // Always proceed to completion step immediately (don't wait for API)
     navigateToStep("complete")
+
+    // Seed default learning mode for medical students.
+    if (typeof window !== "undefined" && selectedDemographic === "medical_student") {
+      const modeByUse: Record<string, "ask" | "simulate" | "guideline"> = {
+        studying: "ask",
+        clinical: "simulate",
+        research: "guideline",
+      }
+      const seededMode = selectedStudentUse
+        ? modeByUse[selectedStudentUse] || "ask"
+        : "ask"
+      window.localStorage.setItem("medical-student-learning-mode", seededMode)
+    }
     
     // Save preferences in background (non-blocking)
     // The mutation already handles errors and falls back to localStorage
@@ -153,7 +166,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     setTimeout(() => {
       onComplete()
     }, 1000)
-  }, [selectedDemographic, selectedSpecialty, updatePreferences, onComplete, navigateToStep])
+  }, [selectedDemographic, selectedSpecialty, selectedStudentUse, updatePreferences, onComplete, navigateToStep])
 
   const handleNext = useCallback(() => {
     if (currentStep === "personal-health-communication" && selectedCommunication) {

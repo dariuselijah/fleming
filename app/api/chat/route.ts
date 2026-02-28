@@ -35,6 +35,11 @@ import {
 import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
 import { anonymizeMessages } from "@/lib/anonymize"
 import { synthesizeEvidence, buildEvidenceSystemPrompt, extractReferencedCitations } from "@/lib/evidence"
+import {
+  getLearningModeSystemInstructions,
+  normalizeMedicalStudentLearningMode,
+  type MedicalStudentLearningMode,
+} from "@/lib/medical-student-learning"
 
 export const maxDuration = 60
 
@@ -257,6 +262,7 @@ type ChatRequest = {
   clinicalDecisionSupport?: boolean
   medicalLiteratureAccess?: boolean
   medicalComplianceMode?: boolean
+  learningMode?: MedicalStudentLearningMode
 }
 
 export async function POST(req: Request) {
@@ -276,6 +282,7 @@ export async function POST(req: Request) {
       clinicalDecisionSupport,
       medicalLiteratureAccess,
       medicalComplianceMode,
+      learningMode,
     } = (await req.json()) as ChatRequest
 
     if (!messages || !chatId || !userId) {
@@ -285,61 +292,15 @@ export async function POST(req: Request) {
       )
     }
 
-    // CRITICAL: Fetch userRole from database if not provided (needed for evidence mode)
-    // This must happen BEFORE evidence mode check
-    let effectiveUserRole = userRole
-    console.log(`📚 [EVIDENCE] Initial userRole check: userRole=${userRole}, isAuthenticated=${isAuthenticated}, userId=${userId}`)
-    
-    if (!effectiveUserRole && isAuthenticated && userId !== "temp") {
-      console.log(`📚 [EVIDENCE] Attempting to fetch userRole from DB for userId: ${userId}`)
-      try {
-        const { createClient } = await import("@/lib/supabase/server")
-        const supabase = await createClient()
-        
-        if (supabase) {
-          const { data: prefs, error: fetchError } = await supabase
-            .from("user_preferences")
-            .select("user_role")
-            .eq("user_id", userId)
-            .single()
-          
-          console.log(`📚 [EVIDENCE] DB fetch result: prefs=${JSON.stringify(prefs)}, error=${fetchError?.message || 'none'}`)
-          
-          if (prefs?.user_role) {
-            const validRoles = ["doctor", "general", "medical_student"] as const
-            type ValidRole = typeof validRoles[number]
-            if (validRoles.includes(prefs.user_role as ValidRole)) {
-              effectiveUserRole = prefs.user_role as ValidRole
-              console.log(`📚 [EVIDENCE] ✅ Fetched userRole from DB: ${effectiveUserRole}`)
-            } else {
-              console.log(`📚 [EVIDENCE] ⚠️ Invalid user_role value from DB: ${prefs.user_role}`)
-            }
-          } else {
-            console.log(`📚 [EVIDENCE] ⚠️ No user_role found in preferences for userId: ${userId}`)
-          }
-        } else {
-          console.warn("📚 [EVIDENCE] ⚠️ Supabase client not available")
-        }
-      } catch (e) {
-        // Non-critical - continue with undefined userRole
-        console.warn("📚 [EVIDENCE] ❌ Failed to fetch userRole from DB:", e)
-      }
-    } else {
-      console.log(`📚 [EVIDENCE] Skipping DB fetch: effectiveUserRole=${effectiveUserRole}, isAuthenticated=${isAuthenticated}, userId=${userId}`)
-    }
-
-    // CRITICAL: Check rate limits BEFORE streaming starts
-    // Skip for temp users/chats
+    // CRITICAL: Check rate limits FIRST - fail fast before any other work
     if (userId !== "temp" && chatId !== "temp" && !chatId.startsWith("temp-chat-")) {
       try {
-        const supabase = await validateAndTrackUsage({
+        await validateAndTrackUsage({
           userId,
           model,
           isAuthenticated,
         })
-        // If validation fails, it will throw an error with waitTimeSeconds
       } catch (error: any) {
-        // If it's a rate limit error with wait time, return it with proper status
         if (error.code === "DAILY_LIMIT_REACHED" || error.limitType === "hourly") {
           return new Response(
             JSON.stringify({
@@ -351,99 +312,103 @@ export async function POST(req: Request) {
             { status: 429 }
           )
         }
-        // Re-throw other errors
         throw error
       }
     }
 
-    // START STREAMING IMMEDIATELY - minimal blocking operations
-    // Use role-based web system prompts for all models
-    let effectiveModel = model
-    let effectiveSystemPrompt: string
-    effectiveSystemPrompt = getCachedSystemPrompt(
-      effectiveUserRole || "general",
-      medicalSpecialty,
-      systemPrompt
-    )
-    
-    // INSTANT MODEL LOADING - no async operations, no delays
-    console.log(`🔍 Looking for model: "${effectiveModel}"${effectiveModel !== model ? ` (switched from ${model})` : ''}`)
-    const modelConfig = getModelInfo(effectiveModel)
-    console.log(`📋 Model config found:`, modelConfig ? `${modelConfig.id} (${modelConfig.name})` : 'null')
-    
-    // Auto-enable web search for healthcare professionals using Fleming 4
-    // Use effectiveUserRole (from request or DB fallback)
-    const isHealthcareMode = effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
-    const isFleming4 = effectiveModel === "fleming-4"
-    const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
-    const finalEnableSearch = enableSearchFromClient || (isHealthcareMode && isFleming4 && hasWebSearchSupport)
-    
-    // EVIDENCE MODE: Only enable if explicitly requested
-    // Disabled by default for all users including healthcare professionals
-    const finalEnableEvidence = enableEvidenceFromClient === true
-    
-    console.log(`📚 [EVIDENCE] Mode check: userRole=${effectiveUserRole} (from request: ${userRole}), enableEvidenceFromClient=${enableEvidenceFromClient}, isHealthcareMode=${isHealthcareMode}, medicalLiteratureAccess=${medicalLiteratureAccess}, finalEnableEvidence=${finalEnableEvidence}`)
-    
-    // CRITICAL: If evidence mode is OFF, remove citation instructions from system prompt
-    // This ensures normal conversations without citations when evidence mode is disabled
-    if (!finalEnableEvidence) {
-      console.log("📚 [EVIDENCE] Evidence mode is OFF - removing citation instructions from system prompt")
-      effectiveSystemPrompt = removeCitationInstructions(effectiveSystemPrompt)
-      // Add explicit instruction to NOT include citations
-      effectiveSystemPrompt += `\n\n**IMPORTANT: Do NOT include citations, citation markers, or reference numbers in your response. Respond naturally without any [CITATION:X] or [X] markers. Do not include a "Citations" section at the end.`
-    }
-    
-    // Get last user message once and reuse in evidence + tool gating
     const lastUserMessage = messages.filter(m => m.role === "user").pop()
     const queryText = typeof lastUserMessage?.content === "string"
       ? lastUserMessage.content
       : ""
+    const finalEnableEvidence = enableEvidenceFromClient === true
+    const effectiveLearningMode = normalizeMedicalStudentLearningMode(learningMode)
 
-    // If evidence mode is enabled, synthesize evidence from medical_evidence table
-    let evidenceContext: Awaited<ReturnType<typeof synthesizeEvidence>> | null = null
-    if (finalEnableEvidence) {
-      try {
-        if (queryText.length > 0) {
-          console.log("📚 EVIDENCE MODE: Searching medical evidence for:", queryText.substring(0, 100))
-          evidenceContext = await synthesizeEvidence({
+    // Run all blocking work in parallel so streaming can start as soon as possible
+    const effectiveModel = model
+    const modelConfig = getModelInfo(effectiveModel)
+    if (!modelConfig || !modelConfig.apiSdk) {
+      return new Response(
+        JSON.stringify({ error: `Model ${model} not found` }),
+        { status: 400 }
+      )
+    }
+
+    const [effectiveUserRole, apiKey, evidenceContextResult] = await Promise.all([
+      // 1) Resolve user role (from request or DB)
+      (async (): Promise<"doctor" | "general" | "medical_student" | undefined> => {
+        if (userRole) return userRole
+        if (!isAuthenticated || userId === "temp") return undefined
+        try {
+          const { createClient } = await import("@/lib/supabase/server")
+          const supabase = await createClient()
+          if (!supabase) return undefined
+          const { data: prefs } = await supabase
+            .from("user_preferences")
+            .select("user_role")
+            .eq("user_id", userId)
+            .single()
+          const validRoles = ["doctor", "general", "medical_student"] as const
+          if (prefs?.user_role && validRoles.includes(prefs.user_role as (typeof validRoles)[number])) {
+            return prefs.user_role as (typeof validRoles)[number]
+          }
+        } catch {
+          // non-critical
+        }
+        return undefined
+      })(),
+      // 2) API key (needed before stream)
+      (async (): Promise<string | undefined> => {
+        if (!isAuthenticated || !userId || userId === "temp") return undefined
+        const { getEffectiveApiKey } = await import("@/lib/user-keys")
+        const provider = getProviderForModel(effectiveModel)
+        return (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
+      })(),
+      // 3) Evidence synthesis when enabled (runs in parallel with above)
+      finalEnableEvidence && queryText.length > 0
+        ? synthesizeEvidence({
             query: queryText,
             maxResults: 8,
-            minEvidenceLevel: 5, // Include all evidence levels
+            minEvidenceLevel: 5,
             candidateMultiplier: 5,
             enableRerank: true,
             queryExpansion: true,
             minMedicalConfidence: 0.25,
             forceEvidence: queryText.trim().length >= 8,
+          }).catch((err) => {
+            console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", err)
+            return null
           })
-          
-          if (evidenceContext.shouldUseEvidence) {
-            console.log(`📚 EVIDENCE MODE: Found ${evidenceContext.context.citations.length} sources in ${evidenceContext.searchTimeMs.toFixed(0)}ms`)
-            // Enhance system prompt with evidence
-            effectiveSystemPrompt = buildEvidenceSystemPrompt(effectiveSystemPrompt, evidenceContext.context)
-          } else {
-            console.log("📚 EVIDENCE MODE: Query not medical or no evidence found")
-          }
-        }
-      } catch (error) {
-        console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", error)
-        // Continue without evidence - don't block the chat
-      }
+        : Promise.resolve(null),
+    ])
+
+    let effectiveSystemPrompt = getCachedSystemPrompt(
+      effectiveUserRole || "general",
+      medicalSpecialty,
+      systemPrompt
+    )
+
+    if (effectiveUserRole === "medical_student") {
+      effectiveSystemPrompt += `\n\n${getLearningModeSystemInstructions(
+        effectiveLearningMode
+      )}`
     }
 
-    if (!modelConfig || !modelConfig.apiSdk) {
-      console.error(`❌ Model "${model}" not found or missing apiSdk`)
-      throw new Error(`Model ${model} not found`)
+    const evidenceContext = evidenceContextResult
+    if (evidenceContext?.shouldUseEvidence && evidenceContext.context.citations.length > 0) {
+      effectiveSystemPrompt = buildEvidenceSystemPrompt(effectiveSystemPrompt, evidenceContext.context)
     }
 
-    // Get API key if needed (this is fast) - only for real users
-    let apiKey: string | undefined
-    if (isAuthenticated && userId && userId !== "temp") {
-      const { getEffectiveApiKey } = await import("@/lib/user-keys")
-      const provider = getProviderForModel(effectiveModel)
-      apiKey = (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
+    const isHealthcareMode = effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
+    const isFleming4 = effectiveModel === "fleming-4"
+    const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
+    const finalEnableSearch = enableSearchFromClient || (isHealthcareMode && isFleming4 && hasWebSearchSupport)
+
+    if (!finalEnableEvidence) {
+      effectiveSystemPrompt = removeCitationInstructions(effectiveSystemPrompt)
+      effectiveSystemPrompt += `\n\n**IMPORTANT: Do NOT include citations, citation markers, or reference numbers in your response. Respond naturally without any [CITATION:X] or [X] markers. Do not include a "Citations" section at the end.`
     }
 
-    // Filter out invalid attachments but keep data URLs and blob URLs for vision models
+    // Filter attachments (sync)
     // Vision models can process both data URLs (base64) and blob URLs directly
     const filteredMessages = messages.map(message => {
       if (message.experimental_attachments) {

@@ -23,6 +23,8 @@ import type { EvidenceCitation } from "@/lib/evidence/types"
 import { parseCitationMarkers, getUniqueCitationIndices } from "@/lib/citations/parser"
 import { useMemo, useCallback, useEffect, useState, useRef } from "react"
 import { WEB_ROLE_MARKDOWN_CLASSNAME } from "./markdown-styles"
+import { parseLearningCard } from "@/lib/medical-student-learning"
+import { LearningCard } from "./learning-card"
 
 type MessageAssistantProps = {
   children: string
@@ -50,6 +52,11 @@ export function MessageAssistant({
   evidenceCitations = [],
 }: MessageAssistantProps) {
   const { preferences } = useUserPreferences()
+  const { card: learningCard, cleanContent } = useMemo(
+    () => parseLearningCard(children || ""),
+    [children]
+  )
+  const contentToRender = cleanContent || ""
   
   // Memoize derived data to prevent unnecessary recalculations during streaming
   const sources = useMemo(() => getSources(parts), [parts])
@@ -60,7 +67,7 @@ export function MessageAssistant({
     parts?.find((part) => part.type === "reasoning"), [parts]
   )
   
-  const contentNullOrEmpty = children === null || children === ""
+  const contentNullOrEmpty = contentToRender === null || contentToRender === ""
   const isLastStreaming = status === "streaming" && isLast
   
   // Track if we're using evidence citations (from medical_evidence database)
@@ -101,8 +108,10 @@ export function MessageAssistant({
     // CRITICAL: Check if text contains evidence-style markers [1], [2] etc.
     // If so, this is an evidence-backed response and we should NOT extract from web sources
     // even if evidenceCitations state is temporarily empty (e.g., during restore)
-    const hasEvidenceMarkers = children && /\[\d+\]/.test(children)
-    const hasCITATIONMarkers = children && /\[CITATION:\d+/.test(children)
+    const hasEvidenceMarkers =
+      contentToRender && /\[\d+\]/.test(contentToRender)
+    const hasCITATIONMarkers =
+      contentToRender && /\[CITATION:\d+/.test(contentToRender)
     
     // Skip source extraction if we have evidence citations OR evidence-style markers
     // Evidence markers indicate this response came from evidence mode, so we should wait
@@ -177,7 +186,7 @@ export function MessageAssistant({
         : extractCitationsFromSources
       
       // Use current content or empty string if still streaming
-      const contentToUse = children || ""
+      const contentToUse = contentToRender || ""
       
       extractionFn(sources, contentToUse)
         .then((extractedCitations) => {
@@ -198,13 +207,13 @@ export function MessageAssistant({
         return // Don't overwrite existing citations
       }
       
-      const markers = parseCitationMarkers(children || "")
+      const markers = parseCitationMarkers(contentToRender || "")
       const uniqueIndices = getUniqueCitationIndices(markers)
       const placeholderCitations = new Map<number, CitationData>()
       
       // Try to extract URLs from the text - be more aggressive
       const urlPattern = /https?:\/\/[^\s\)\]\[]+/g
-      const allUrls = (children || "").match(urlPattern) || []
+      const allUrls = (contentToRender || "").match(urlPattern) || []
       
       // Also try to extract PubMed/JAMA/NEJM URLs specifically (more patterns)
       const pubmedUrlPattern = /(?:https?:\/\/)?(?:www\.)?(?:pubmed\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov\/pubmed)\/(\d+)/gi
@@ -213,11 +222,11 @@ export function MessageAssistant({
       
       // Also look for domain patterns without full URLs
       const domainPattern = /(?:pubmed|jama|nejm|nature|science|thelancet|bmj|cell|aafp|uptodate)\.(?:org|com|net)[^\s\)\]\[]*/gi
-      const domainUrls = (children || "").match(domainPattern) || []
+      const domainUrls = (contentToRender || "").match(domainPattern) || []
       
-      const pubmedUrls = (children || "").match(pubmedUrlPattern) || []
-      const jamaUrls = (children || "").match(jamaUrlPattern) || []
-      const nejmUrls = (children || "").match(nejmUrlPattern) || []
+      const pubmedUrls = (contentToRender || "").match(pubmedUrlPattern) || []
+      const jamaUrls = (contentToRender || "").match(jamaUrlPattern) || []
+      const nejmUrls = (contentToRender || "").match(nejmUrlPattern) || []
       
       const medicalUrls = [...pubmedUrls, ...jamaUrls, ...nejmUrls, ...domainUrls, ...allUrls]
       const uniqueUrls = Array.from(new Set(medicalUrls))
@@ -231,8 +240,8 @@ export function MessageAssistant({
           const marker = markers.find(m => m.indices.includes(idx))
           if (marker) {
             const start = Math.max(0, marker.startIndex - 200)
-            const end = Math.min(children.length, marker.endIndex + 200)
-            const citationContext = children?.substring(start, end) || ""
+            const end = Math.min(contentToRender.length, marker.endIndex + 200)
+            const citationContext = contentToRender?.substring(start, end) || ""
             const pmidMatch = citationContext.match(/PMID[:\s]+(\d+)/i) || 
                             citationContext.match(/(\d{8})/)?.[1] ||
                             citationContext.match(/pubmed[^\d]*(\d{8,})/i)?.[1]
@@ -269,7 +278,7 @@ export function MessageAssistant({
       }
     }
     // Include evidenceCitations to ensure we re-check when they arrive
-  }, [sources, children, evidenceCitations])
+  }, [sources, contentToRender, evidenceCitations])
   
   // Use evidence citations if available, otherwise fall back to web search citations
   const activeCitations = hasEvidenceCitations ? evidenceCitationMap : citations
@@ -278,7 +287,9 @@ export function MessageAssistant({
   const hasCitations = activeCitations.size > 0
   const hasSources = sources.length > 0
   // Check if text contains citation markers - now also check for [1], [2] pattern used by evidence mode
-  const hasCitationMarkers = children && (/\[CITATION:\d+/.test(children) || /\[\d+\]/.test(children))
+  const hasCitationMarkers =
+    contentToRender &&
+    (/\[CITATION:\d+/.test(contentToRender) || /\[\d+\]/.test(contentToRender))
   // Show citations if we have them, have sources, or have citation markers in text
   const shouldShowCitations = hasCitations || hasSources || hasCitationMarkers
   const showReferences = status === "ready" && hasCitations && !isLastStreaming
@@ -343,7 +354,8 @@ export function MessageAssistant({
         {searchImageResults.length > 0 && (
           <SearchImages results={searchImageResults} />
         )}
-        
+
+        {learningCard && <LearningCard card={learningCard} />}
 
         {contentNullOrEmpty ? (
         isLastStreaming ? <div
@@ -358,7 +370,7 @@ export function MessageAssistant({
             citations={activeCitations}
             evidenceCitations={hasEvidenceCitations ? evidenceCitations : undefined}
           >
-            {children}
+            {contentToRender}
           </CitationMarkdown>
         ) : (
           <MessageContent
@@ -367,7 +379,7 @@ export function MessageAssistant({
             )}
             markdown={true}
           >
-            {children}
+            {contentToRender}
           </MessageContent>
         )}
 

@@ -12,6 +12,7 @@ import { useMessages } from "@/lib/chat-store/messages/provider"
 import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
 import { API_ROUTE_CHAT } from "@/lib/routes"
+import type { MedicalStudentLearningMode } from "@/lib/medical-student-learning"
 import { useUser } from "@/lib/user-store/provider"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
@@ -36,6 +37,8 @@ type ProjectViewProps = {
 export function ProjectView({ projectId }: ProjectViewProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
+  const [learningMode, setLearningMode] =
+    useState<MedicalStudentLearningMode>("ask")
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const { user } = useUser()
   const { preferences } = useUserPreferences()
@@ -256,6 +259,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
           isAuthenticated: true,
           systemPrompt: getSystemPromptByRole(preferences?.userRole),
           enableSearch,
+          learningMode,
         },
         experimental_attachments: attachments || undefined,
       }
@@ -293,6 +297,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     messages.length,
     bumpChat,
     enableSearch,
+    learningMode,
   ])
 
   const handleReload = useCallback(async () => {
@@ -307,11 +312,12 @@ export function ProjectView({ projectId }: ProjectViewProps) {
         model: selectedModel,
         isAuthenticated: true,
         systemPrompt: getSystemPromptByRole(preferences?.userRole),
+        learningMode,
       },
     }
 
     reload(options)
-  }, [user, selectedModel, reload])
+  }, [user, selectedModel, learningMode, reload, preferences?.userRole])
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
@@ -352,6 +358,8 @@ export function ProjectView({ projectId }: ProjectViewProps) {
       status,
       setEnableSearch,
       enableSearch,
+      learningMode,
+      onLearningModeChange: setLearningMode,
     }),
     [
       input,
@@ -368,6 +376,8 @@ export function ProjectView({ projectId }: ProjectViewProps) {
       status,
       setEnableSearch,
       enableSearch,
+      learningMode,
+      setLearningMode,
     ]
   )
 

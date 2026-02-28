@@ -2,6 +2,7 @@ import { Message as MessageType } from "@ai-sdk/react"
 import React, { useState, useCallback, useMemo } from "react"
 import { MessageAssistant } from "./message-assistant"
 import { MessageUser } from "./message-user"
+import { parseLearningCard } from "@/lib/medical-student-learning"
 
 type MessageProps = {
   variant: MessageType["role"]
@@ -35,13 +36,17 @@ export function Message({
   evidenceCitations = [],
 }: MessageProps) {
   const [copied, setCopied] = useState(false)
+  const clipboardText = useMemo(() => {
+    if (variant !== "assistant") return children
+    return parseLearningCard(children).cleanContent
+  }, [variant, children])
 
   // Memoize handlers to prevent unnecessary re-renders during streaming
   const copyToClipboard = useCallback(() => {
-    navigator.clipboard.writeText(children)
+    navigator.clipboard.writeText(clipboardText)
     setCopied(true)
     setTimeout(() => setCopied(false), 500)
-  }, [children])
+  }, [clipboardText])
 
   const memoizedOnDelete = useCallback(() => onDelete(id), [onDelete, id])
   const memoizedOnEdit = useCallback((newText: string) => onEdit(id, newText), [onEdit, id])

@@ -4,6 +4,11 @@ import { toast as sonnerToast } from "sonner"
 import { getOrCreateGuestUserId } from "@/lib/api"
 import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
+import {
+  DEFAULT_MEDICAL_STUDENT_LEARNING_MODE,
+  normalizeMedicalStudentLearningMode,
+  type MedicalStudentLearningMode,
+} from "@/lib/medical-student-learning"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { UserProfile } from "@/lib/user/types"
 import type { Message } from "@ai-sdk/react"
@@ -67,11 +72,16 @@ export function useChatCore({
   setRateLimitWaitTime,
   setRateLimitType,
 }: UseChatCoreProps) {
+  const LEARNING_MODE_STORAGE_KEY = "medical-student-learning-mode"
   const router = useRouter()
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [enableSearch, setEnableSearch] = useState(false)
   const [enableEvidence, setEnableEvidence] = useState(true) // Enabled by default
+  const [learningMode, setLearningModeState] =
+    useState<MedicalStudentLearningMode>(
+      DEFAULT_MEDICAL_STUDENT_LEARNING_MODE
+    )
   
   // Evidence citations from server - indexed by message ID or last response
   // Use ref to persist across hook reinitializations (e.g., URL changes)
@@ -226,6 +236,42 @@ export function useChatCore({
   // Get user preferences at the top level
   const { useUserPreferences } = require("@/lib/user-preference-store/provider")
   const userPreferences = useUserPreferences()
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const storedMode = window.localStorage.getItem(LEARNING_MODE_STORAGE_KEY)
+    if (!storedMode) return
+    setLearningModeState(normalizeMedicalStudentLearningMode(storedMode))
+  }, [])
+
+  useEffect(() => {
+    if (userPreferences.preferences.userRole !== "medical_student") {
+      if (learningMode !== DEFAULT_MEDICAL_STUDENT_LEARNING_MODE) {
+        setLearningModeState(DEFAULT_MEDICAL_STUDENT_LEARNING_MODE)
+      }
+      return
+    }
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LEARNING_MODE_STORAGE_KEY, learningMode)
+    }
+
+    // Guideline mode should always be evidence-backed.
+    if (learningMode === "guideline" && !enableEvidence) {
+      setEnableEvidence(true)
+    }
+  }, [userPreferences.preferences.userRole, learningMode, enableEvidence])
+
+  const setLearningMode = useCallback(
+    (mode: MedicalStudentLearningMode) => {
+      const normalized = normalizeMedicalStudentLearningMode(mode)
+      setLearningModeState(normalized)
+      if (normalized === "guideline" && !enableEvidence) {
+        setEnableEvidence(true)
+      }
+    },
+    [enableEvidence]
+  )
 
   // Auto-enable web search for healthcare professionals using Fleming 4
   useEffect(() => {
@@ -1163,6 +1209,7 @@ export function useChatCore({
         selectedModel,
         enableSearch,
         enableEvidence,
+        learningMode,
         timestamp: Date.now(),
       }
       
@@ -1219,6 +1266,7 @@ export function useChatCore({
         systemPrompt,
         enableSearch,
         enableEvidence,
+        learningMode,
         // CRITICAL: Ensure userRole is passed correctly for evidence mode
         userRole: userPreferences.preferences.userRole || "general",
         medicalSpecialty: userPreferences.preferences.medicalSpecialty,
@@ -1344,6 +1392,7 @@ export function useChatCore({
     systemPrompt,
     enableSearch,
     enableEvidence,
+    learningMode,
     bumpChat,
     clearDraft,
     setHasDialogAuth,
@@ -1372,6 +1421,7 @@ export function useChatCore({
           selectedModel,
           enableSearch,
           enableEvidence,
+          learningMode,
           timestamp: Date.now(),
         }
         
@@ -1397,6 +1447,9 @@ export function useChatCore({
           model: selectedModel,
           isAuthenticated: !!user?.id,
           systemPrompt: getSystemPromptByRole(userPreferences.preferences.userRole),
+          enableSearch,
+          enableEvidence,
+          learningMode,
         },
       }
 
@@ -1475,6 +1528,7 @@ export function useChatCore({
       router,
       enableSearch,
       enableEvidence,
+      learningMode,
     ]
   )
 
@@ -1492,11 +1546,12 @@ export function useChatCore({
         model: selectedModel,
         isAuthenticated,
         systemPrompt: systemPrompt || getSystemPromptByRole(userPreferences.preferences.userRole),
+        learningMode,
       },
     }
 
     reload(options)
-  }, [user, chatId, selectedModel, isAuthenticated, systemPrompt, reload])
+  }, [user, chatId, selectedModel, isAuthenticated, systemPrompt, learningMode, reload])
 
   // Handle input change - optimized for streaming
   const { setDraftValue } = useChatDraft(chatId)
@@ -1529,8 +1584,10 @@ export function useChatCore({
     setIsSubmitting,
     enableSearch,
     enableEvidence,
+    learningMode,
     setEnableEvidence,
     setEnableSearch,
+    setLearningMode,
     
     // Evidence citations from medical evidence database
     evidenceCitations,

@@ -3,17 +3,20 @@
 import { AnimatePresence } from "motion/react"
 import React, { memo } from "react"
 import { Suggestions } from "../chat-input/suggestions"
+import type { MedicalStudentLearningMode } from "@/lib/medical-student-learning"
 
 type PromptSystemProps = {
   onValueChange: (value: string) => void
   onSuggestion: (suggestion: string) => void
   value: string
+  learningMode: MedicalStudentLearningMode
 }
 
 export const PromptSystem = memo(function PromptSystem({
   onValueChange,
   onSuggestion,
   value,
+  learningMode,
 }: PromptSystemProps) {
   return (
     <>
@@ -23,6 +26,7 @@ export const PromptSystem = memo(function PromptSystem({
             onValueChange={onValueChange}
             onSuggestion={onSuggestion}
             value={value}
+            learningMode={learningMode}
           />
         </AnimatePresence>
       </div>
