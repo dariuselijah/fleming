@@ -1,0 +1,212 @@
+{
+  "version": "1.0",
+  "startTime": "2026-03-01T05:07:14.796Z",
+  "lastUpdate": "2026-03-01T05:09:27.493Z",
+  "topics": [
+    {
+      "topic": "acute coronary syndrome antiplatelet strategy",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 6,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:14.797Z",
+      "completedAt": "2026-03-01T05:07:19.613Z"
+    },
+    {
+      "topic": "acute heart failure emergency management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:14.797Z",
+      "completedAt": "2026-03-01T05:07:15.879Z"
+    },
+    {
+      "topic": "acute hypoxemic respiratory failure management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:22.115Z",
+      "completedAt": "2026-03-01T05:07:23.225Z"
+    },
+    {
+      "topic": "acute meningitis empiric therapy",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:22.115Z",
+      "completedAt": "2026-03-01T05:07:23.247Z"
+    },
+    {
+      "topic": "acute pancreatitis early management",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:25.749Z",
+      "completedAt": "2026-03-01T05:07:27.173Z"
+    },
+    {
+      "topic": "adult abdominal pain workup emergency",
+      "status": "completed",
+      "articlesProcessed": 4,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:25.749Z",
+      "completedAt": "2026-03-01T05:07:27.177Z"
+    },
+    {
+      "topic": "bradycardia acute management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:29.679Z",
+      "completedAt": "2026-03-01T05:07:30.766Z"
+    },
+    {
+      "topic": "cardiogenic shock management",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:29.679Z",
+      "completedAt": "2026-03-01T05:07:31.042Z"
+    },
+    {
+      "topic": "cardiovascular risk primary prevention",
+      "status": "completed",
+      "articlesProcessed": 6,
+      "chunksCreated": 21,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:33.543Z",
+      "completedAt": "2026-03-01T05:07:43.860Z"
+    },
+    {
+      "topic": "cellulitis severe management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:33.543Z",
+      "completedAt": "2026-03-01T05:07:34.738Z"
+    },
+    {
+      "topic": "cervical cancer screening",
+      "status": "completed",
+      "articlesProcessed": 55,
+      "chunksCreated": 168,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:46.361Z",
+      "completedAt": "2026-03-01T05:08:41.876Z"
+    },
+    {
+      "topic": "crushing chest pain emergency management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:07:46.361Z",
+      "completedAt": "2026-03-01T05:07:48.406Z"
+    },
+    {
+      "topic": "deep vein thrombosis acute treatment",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 8,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:08:44.378Z",
+      "completedAt": "2026-03-01T05:08:48.943Z"
+    },
+    {
+      "topic": "delirium prevention hospitalized older adults",
+      "status": "completed",
+      "articlesProcessed": 9,
+      "chunksCreated": 27,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:08:44.378Z",
+      "completedAt": "2026-03-01T05:08:57.218Z"
+    },
+    {
+      "topic": "healthcare associated pneumonia empiric therapy",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 3,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:08:59.721Z",
+      "completedAt": "2026-03-01T05:09:03.430Z"
+    },
+    {
+      "topic": "heart failure therapy",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 6,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:08:59.721Z",
+      "completedAt": "2026-03-01T05:09:04.216Z"
+    },
+    {
+      "topic": "hypertensive emergency treatment",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:09:06.718Z",
+      "completedAt": "2026-03-01T05:09:07.828Z"
+    },
+    {
+      "topic": "intracerebral hemorrhage blood pressure management",
+      "status": "completed",
+      "articlesProcessed": 6,
+      "chunksCreated": 14,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:09:06.718Z",
+      "completedAt": "2026-03-01T05:09:14.023Z"
+    },
+    {
+      "topic": "lower gastrointestinal bleeding management",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 3,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:09:16.525Z",
+      "completedAt": "2026-03-01T05:09:19.637Z"
+    },
+    {
+      "topic": "sepsis treatment bundle",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:09:16.525Z",
+      "completedAt": "2026-03-01T05:09:17.934Z"
+    },
+    {
+      "topic": "transient ischemic attack high risk workup",
+      "status": "completed",
+      "articlesProcessed": 4,
+      "chunksCreated": 13,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:09:22.139Z",
+      "completedAt": "2026-03-01T05:09:27.493Z"
+    },
+    {
+      "topic": "upper gastrointestinal bleeding emergency management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T05:09:22.140Z",
+      "completedAt": "2026-03-01T05:09:23.264Z"
+    }
+  ],
+  "stats": {
+    "totalTopics": 22,
+    "completedTopics": 22,
+    "totalArticles": 96,
+    "totalChunks": 269,
+    "totalErrors": 0
+  }
+}

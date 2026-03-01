@@ -54,6 +54,8 @@ export function getClinicianModeSystemInstructions(
 ): string {
   const commonGuardrail =
     "If critical clinical data is missing, ask targeted follow-up questions before concluding."
+  const escalationGuardrail =
+    'If emergency red flags are present, explicitly escalate with direct language such as "call 911 now" or "go to the emergency department immediately."'
 
   switch (mode) {
     case "open_search":
@@ -65,6 +67,7 @@ Operate as a broad clinical copilot:
 - Prioritize high-signal facts, differential framing, and next diagnostic/management steps.
 - Use concise structure with practical action points.
 - ${commonGuardrail}
+- ${escalationGuardrail}
 `.trim()
     case "clinical_summary":
       return `
@@ -75,6 +78,7 @@ Prioritize a concise, chart-ready summary:
 - Preserve uncertainty and clearly label assumptions.
 - Keep language clinically precise and scannable.
 - ${commonGuardrail}
+- ${escalationGuardrail}
 `.trim()
     case "drug_interactions":
       return `
@@ -85,6 +89,7 @@ Prioritize medication safety analysis:
 - Flag high-risk combinations and monitoring requirements.
 - Offer safer alternatives when appropriate.
 - ${commonGuardrail}
+- ${escalationGuardrail}
 `.trim()
     case "stewardship":
       return `
@@ -95,6 +100,7 @@ Focus on antimicrobial stewardship:
 - Encourage narrowing/de-escalation when evidence allows.
 - Mention duration, culture follow-up, and resistance considerations.
 - ${commonGuardrail}
+- ${escalationGuardrail}
 `.trim()
     case "icd10_codes":
       return `
@@ -105,6 +111,7 @@ Focus on coding support:
 - Distinguish primary versus secondary coding options when relevant.
 - Note documentation details needed to improve coding specificity.
 - ${commonGuardrail}
+- ${escalationGuardrail}
 `.trim()
     case "med_review":
       return `
@@ -115,6 +122,7 @@ Run a medication optimization review:
 - Highlight deprescribing or optimization opportunities with rationale.
 - Prioritize patient-safety and monitoring actions.
 - ${commonGuardrail}
+- ${escalationGuardrail}
 `.trim()
     default:
       return ""

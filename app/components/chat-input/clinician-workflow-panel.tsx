@@ -52,7 +52,8 @@ export function ClinicianWorkflowPanel({
   const [allergies, setAllergies] = useState("")
   const [liverDisease, setLiverDisease] = useState("")
 
-  const baseShell = "rounded-3xl border border-border/50 bg-muted/25 p-4 sm:p-6"
+  const baseShell =
+    "rounded-3xl border border-border/50 bg-muted/25 p-4 sm:p-6 max-h-[70dvh] overflow-y-auto overscroll-contain md:max-h-none md:overflow-visible"
   const panelCard = "rounded-2xl border border-border/60 bg-background/80 shadow-xs"
 
   const submit = useCallback(
@@ -274,7 +275,7 @@ export function ClinicianWorkflowPanel({
             </Button>
           </div>
 
-          <div className="space-y-4 p-4">
+          <div className="space-y-4 p-4 pb-20 md:pb-4">
             <div>
               <p className="font-medium">Getting Started</p>
               <p className="text-sm text-muted-foreground">

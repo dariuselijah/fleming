@@ -1,0 +1,61 @@
+acute appendicitis diagnostic strategy
+acute aortic syndrome diagnosis
+stroke thrombolysis contraindications
+aspiration pneumonia treatment
+diabetic ketoacidosis emergency management
+community acquired pneumonia treatment
+chronic kidney disease treatment
+peripheral artery disease secondary prevention
+chronic kidney disease albuminuria management
+treatment resistant depression augmentation
+epilepsy first line antiseizure therapy
+osteoarthritis nonoperative management
+generalized anxiety disorder treatment
+cervical cancer screening
+cervical cancer treatment chemoradiation
+non hodgkin lymphoma treatment
+functional dyspepsia management
+scleroderma interstitial lung disease treatment
+contraception medical eligibility chronic disease
+adolescent depression treatment
+crohn disease treatment
+post marketing drug safety surveillance
+hiv antiretroviral therapy optimization
+endocrine resistant thyroid cancer targeted therapy
+thalassemia management transfusion complications
+sports medicine tendon injury management
+renal replacement therapy critical illness
+chikungunya long term outcomes
+vaccine hesitancy intervention outcomes
+poison control systems effectiveness
+amyloid cardiomyopathy tafamidis outcomes
+aortic stenosis asymptomatic intervention timing
+heart transplant rejection surveillance
+fibromuscular dysplasia cerebrovascular screening
+heparin induced thrombocytopenia management
+myelofibrosis targeted therapy outcomes
+coagulation reversal direct oral anticoagulants
+intrauterine fetal demise workup
+pelvic inflammatory disease treatment adherence
+small renal mass ablation outcomes
+nephrotic syndrome focal segmental glomerulosclerosis therapy
+kidney transplant delayed graft function prevention
+autoimmune hepatitis treatment withdrawal outcomes
+small bowel bleeding diagnostic algorithm
+fungal infection invasive candidiasis management
+rotator cuff repair rehabilitation protocols
+periprosthetic joint infection debridement implant retention outcomes
+rheumatology polymyalgia rheumatica treatment duration
+dermatology pemphigus vulgaris rituximab outcomes
+plastic surgery lymphedema surgery outcomes
+ophthalmology diabetic retinopathy anti vegf outcomes
+neurosurgery pituitary adenoma surgery outcomes
+vascular surgery venous ulcer intervention outcomes
+anesthesiology enhanced recovery after surgery anesthesia protocols
+prehospital airway management outcomes
+sports cardiology sudden cardiac death screening athletes
+allergy immunology eosinophilic asthma biologic selection
+infectious disease hiv aging multimorbidity management
+health services accountable care organization quality outcomes
+quality improvement sepsis bundle compliance interventions
+precision medicine multi omics integration clinical decision support

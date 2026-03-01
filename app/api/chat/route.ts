@@ -196,6 +196,52 @@ function needsFreshEvidence(query: string): boolean {
   )
 }
 
+const HIGH_RISK_EMERGENCY_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\b(crushing\s+)?chest pain\b/i, label: "chest_pain" },
+  { pattern: /\b(facial droop|slurred speech|stroke|hemiparesis|FAST)\b/i, label: "stroke_signs" },
+  { pattern: /\b(septic shock|sepsis)\b/i, label: "sepsis" },
+  { pattern: /\b(severe shortness of breath|cannot breathe|respiratory distress)\b/i, label: "respiratory_distress" },
+  { pattern: /\b(anaphylaxis|airway compromise)\b/i, label: "airway_emergency" },
+  { pattern: /\b(heavy bleeding|hemorrhage)\b/i, label: "hemorrhage" },
+  { pattern: /\b(loss of consciousness|unresponsive|syncope with injury)\b/i, label: "altered_consciousness" },
+  { pattern: /\b(suicidal|homicidal)\b/i, label: "behavioral_emergency" },
+];
+
+const URGENT_CONTEXT_PATTERN =
+  /\b(immediate|urgent|emergency|er|ed|call 911|wait until morning|send to the ed|when should.*ed)\b/i;
+
+function detectEmergencyEscalationNeed(query: string): {
+  shouldEscalate: boolean;
+  matchedSignals: string[];
+} {
+  const normalized = query.trim();
+  if (!normalized) {
+    return { shouldEscalate: false, matchedSignals: [] };
+  }
+
+  const matchedSignals = HIGH_RISK_EMERGENCY_PATTERNS
+    .filter(({ pattern }) => pattern.test(normalized))
+    .map(({ label }) => label);
+
+  const hasUrgentContext = URGENT_CONTEXT_PATTERN.test(normalized);
+  const shouldEscalate = matchedSignals.length > 0 || (hasUrgentContext && /\b(pain|shock|stroke|sepsis|bleeding|abdominal|dyspnea|breath)\b/i.test(normalized));
+
+  return { shouldEscalate, matchedSignals };
+}
+
+function buildEmergencyEscalationInstruction(matchedSignals: string[]): string {
+  const signalText = matchedSignals.length > 0 ? matchedSignals.join(", ") : "urgent red flags";
+  return `
+EMERGENCY ESCALATION OVERRIDE:
+- Emergency intent detected (${signalText}).
+- In your final answer, include a direct escalation sentence using explicit wording such as:
+  - "Call 911 now."
+  - "Go to the emergency department immediately."
+- Keep escalation clinically specific and place it near the top of the response.
+- After escalation, provide concise stabilization priorities while deferring definitive care to in-person emergency evaluation.
+`.trim();
+}
+
 const MEDICAL_QUERY_STOP_WORDS = new Set([
   "the",
   "and",
@@ -273,6 +319,62 @@ function getProvenanceUsPriorityScore(item: SourceProvenance): number {
     score += Math.max(0, 6 - item.evidenceLevel) * 0.5
   }
   return score
+}
+
+function encodeEvidenceCitationsHeader(
+  citations: Array<Record<string, any>>,
+  maxEncodedLength: number = 12000
+): string | null {
+  if (!Array.isArray(citations) || citations.length === 0) return null
+
+  const projectForHeader = (items: Array<Record<string, any>>) =>
+    items.map((citation) => ({
+      index: citation.index,
+      title: citation.title,
+      journal: citation.journal,
+      year: citation.year,
+      evidenceLevel: citation.evidenceLevel,
+      studyType: citation.studyType,
+      url: citation.url,
+      doi: citation.doi,
+      pmid: citation.pmid,
+      // Keep snippets short to prevent header overflow in benchmark/tooling clients.
+      snippet:
+        typeof citation.snippet === "string"
+          ? citation.snippet.slice(0, 140)
+          : undefined,
+      meshTerms: Array.isArray(citation.meshTerms)
+        ? citation.meshTerms.slice(0, 3)
+        : undefined,
+    }))
+
+  const tryEncode = (items: Array<Record<string, any>>): string => {
+    const payload = JSON.stringify(projectForHeader(items))
+    return Buffer.from(payload).toString("base64")
+  }
+
+  // 1) Try with all citations but compact fields.
+  let candidate = [...citations]
+  let encoded = tryEncode(candidate)
+  if (encoded.length <= maxEncodedLength) return encoded
+
+  // 2) Remove large optional fields.
+  candidate = candidate.map((citation) => ({
+    ...citation,
+    snippet: undefined,
+    meshTerms: undefined,
+  }))
+  encoded = tryEncode(candidate)
+  if (encoded.length <= maxEncodedLength) return encoded
+
+  // 3) Downsample citation count until it fits, preserving earliest/top entries.
+  while (candidate.length > 3) {
+    candidate = candidate.slice(0, candidate.length - 1)
+    encoded = tryEncode(candidate)
+    if (encoded.length <= maxEncodedLength) return encoded
+  }
+
+  return encoded.length <= maxEncodedLength ? encoded : null
 }
 
 function extractToolProvenance(
@@ -430,6 +532,7 @@ export async function POST(req: Request) {
       : ""
     const effectiveLearningMode = normalizeMedicalStudentLearningMode(learningMode)
     const effectiveClinicianMode = normalizeClinicianWorkflowMode(clinicianMode)
+    const emergencyEscalationIntent = detectEmergencyEscalationNeed(queryText)
 
     // Run all blocking work in parallel so streaming can start as soon as possible
     const effectiveModel = model
@@ -511,6 +614,12 @@ export async function POST(req: Request) {
     if (effectiveUserRole === "doctor") {
       effectiveSystemPrompt += `\n\n${getClinicianModeSystemInstructions(
         effectiveClinicianMode
+      )}`
+    }
+
+    if (emergencyEscalationIntent.shouldEscalate) {
+      effectiveSystemPrompt += `\n\n${buildEmergencyEscalationInstruction(
+        emergencyEscalationIntent.matchedSignals
       )}`
     }
 
@@ -738,7 +847,15 @@ export async function POST(req: Request) {
       : ({} as ToolSet)
 
     if (shouldEnableEvidenceTools) {
-      effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:\n- Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.\n- Use guidelineSearch for formal recommendations and regional guidance.\n- Use clinicalTrialsSearch for ongoing/new evidence.\n- Use drugSafetyLookup for contraindications/interactions/renal dosing checks.\n- Use evidenceConflictCheck when sources disagree.\n- IMPORTANT: Keep tool queries tightly aligned to the user question (specific condition/drug terms, not broad generic terms).\n- IMPORTANT: If a tool returns irrelevant records, explicitly discard them and retry with a narrower query before citing evidence.`
+      effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:
+- Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.
+- Use guidelineSearch for formal recommendations and regional guidance.
+- Use clinicalTrialsSearch for ongoing/new evidence.
+- Use drugSafetyLookup for contraindications/interactions/renal dosing checks.
+- Use evidenceConflictCheck when sources disagree.
+- IMPORTANT: Keep tool queries tightly aligned to the user question (specific condition/drug terms, not broad generic terms).
+- IMPORTANT: If a tool returns irrelevant records, explicitly discard them and retry with a narrower query before citing evidence.
+- CITATION DENSITY: For medical content, place citations after each factual sentence whenever evidence exists; avoid bundling multiple distinct claims under one citation.`
     } else if (shouldEnablePubMedTools) {
       effectiveSystemPrompt += `\n\nYou may use PubMed tools when the question requests latest evidence, guideline updates, or when provided evidence is sparse. Prefer retrieved PubMed records for recency-sensitive claims and cite them explicitly.`
     }
@@ -885,23 +1002,33 @@ export async function POST(req: Request) {
                   // Log extraction results for debugging
                   if (extractionResult.hasCitations) {
                     console.log(`📚 [CITATION EXTRACTION] Found ${citationsToSave.length} referenced citations (indices: [${extractionResult.citationIndices.join(', ')}])`)
+                    if (extractionResult.verificationStats.fallbackAdded > 0) {
+                      console.warn(
+                        `📚 [CITATION EXTRACTION] Added ${extractionResult.verificationStats.fallbackAdded} fallback citations to preserve minimum evidence references`
+                      )
+                    }
                     if (extractionResult.verificationStats.missingCitations.length > 0) {
                       console.warn(`📚 [CITATION EXTRACTION] ${extractionResult.verificationStats.missingCitations.length} retrieved citations were not referenced`)
                     }
                   } else if (contextToUse.context.citations.length > 0) {
                     console.warn(`📚 [CITATION EXTRACTION] ⚠️ No citation markers found in response despite ${contextToUse.context.citations.length} citations being provided`)
                     console.warn(`📚 [CITATION EXTRACTION] Response preview: ${responseText.substring(0, 300)}...`)
-                    // Fallback: if no citations found but we have evidence, include all retrieved citations
-                    // This helps debug why citations aren't being generated
-                    citationsToSave = contextToUse.context.citations
-                    console.warn(`📚 [CITATION EXTRACTION] Fallback: Including all ${citationsToSave.length} retrieved citations for debugging`)
+                    // Fallback safety net: include a compact core set instead of all retrieved citations.
+                    citationsToSave = contextToUse.context.citations.slice(
+                      0,
+                      Math.min(3, contextToUse.context.citations.length)
+                    )
+                    console.warn(`📚 [CITATION EXTRACTION] Fallback: Including top ${citationsToSave.length} retrieved citations`)
                   }
                 } else {
                   console.warn(`📚 [CITATION EXTRACTION] ⚠️ Could not extract response text for citation parsing`)
                   // Fallback: include all citations if we can't parse the response
                   if (contextToUse.context.citations.length > 0) {
-                    citationsToSave = contextToUse.context.citations
-                    console.warn(`📚 [CITATION EXTRACTION] Fallback: Including all ${citationsToSave.length} retrieved citations`)
+                    citationsToSave = contextToUse.context.citations.slice(
+                      0,
+                      Math.min(3, contextToUse.context.citations.length)
+                    )
+                    console.warn(`📚 [CITATION EXTRACTION] Fallback: Including top ${citationsToSave.length} retrieved citations`)
                   }
                 }
                 } else {
@@ -1059,10 +1186,19 @@ export async function POST(req: Request) {
             if (contextForHeaders?.context?.citations && contextForHeaders.context.citations.length > 0) {
               try {
                 console.log(`📚 [HEADERS] Adding ${contextForHeaders.context.citations.length} retrieved citations to response headers`)
-                // Encode citations as base64 to handle special characters
-                const citationsJson = JSON.stringify(contextForHeaders.context.citations)
-                responseHeaders['X-Evidence-Citations'] = Buffer.from(citationsJson).toString('base64')
-                console.log(`📚 EVIDENCE MODE: Sending ${contextForHeaders.context.citations.length} citations to client`)
+                const encodedHeader = encodeEvidenceCitationsHeader(
+                  contextForHeaders.context.citations as unknown as Array<Record<string, any>>
+                )
+                if (encodedHeader) {
+                  responseHeaders["X-Evidence-Citations"] = encodedHeader
+                  console.log(
+                    `📚 EVIDENCE MODE: Sending ${contextForHeaders.context.citations.length} citations to client (header bytes=${encodedHeader.length})`
+                  )
+                } else {
+                  console.warn(
+                    "📚 [HEADERS] Skipping X-Evidence-Citations: could not fit within safe header size"
+                  )
+                }
               } catch (e) {
                 console.error('Failed to encode evidence citations:', e)
               }

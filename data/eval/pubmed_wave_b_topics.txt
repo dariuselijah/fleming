@@ -1,0 +1,82 @@
+type 2 diabetes management
+diabetic nephropathy treatment
+chronic kidney disease treatment
+medication dosing chronic kidney disease
+hyperlipidemia treatment
+hypertension management outpatient
+resistant hypertension workup
+secondary hypertension evaluation
+heart failure reduced ejection fraction gdmt
+heart failure preserved ejection fraction management
+stable ischemic heart disease management
+chronic coronary syndrome management
+atrial fibrillation anticoagulation selection
+venous thromboembolism extended anticoagulation
+peripheral artery disease secondary prevention
+type 1 diabetes management adults
+prediabetes prevention strategy
+diabetes cardiovascular risk reduction
+diabetes obesity overlap pharmacotherapy
+diabetic retinopathy management
+diabetic neuropathy pain management
+diabetic foot ulcer prevention
+obesity lifestyle intervention long term outcomes
+obesity surgery outcomes
+metabolic dysfunction associated steatotic liver disease management
+nonalcoholic steatohepatitis treatment
+chronic kidney disease albuminuria management
+chronic kidney disease mineral bone disorder
+anemia chronic kidney disease treatment
+hemodialysis vascular access complications
+peritoneal dialysis outcomes
+chronic glomerulonephritis management
+kidney stone prevention recurrent nephrolithiasis
+benign prostatic hyperplasia medical treatment
+overactive bladder management
+erectile dysfunction management
+urinary incontinence management older adults
+major depressive disorder first line therapy
+treatment resistant depression augmentation
+generalized anxiety disorder pharmacotherapy
+panic disorder treatment
+bipolar disorder maintenance therapy
+schizophrenia long acting antipsychotics
+attention deficit hyperactivity disorder adults treatment
+insomnia cognitive behavioral therapy
+post traumatic stress disorder treatment
+substance use disorder medication assisted treatment
+alzheimer disease pharmacologic therapy
+mild cognitive impairment progression prevention
+parkinson disease motor symptom treatment
+epilepsy first line antiseizure therapy
+migraine preventive therapy
+tension headache chronic management
+multiple sclerosis disease modifying therapy
+peripheral neuropathy management
+essential tremor treatment
+falls prevention multifactorial older adults
+frailty interventions geriatrics
+polypharmacy deprescribing older adults
+delirium prevention hospitalized older adults
+osteoporosis fracture prevention
+osteoporosis pharmacologic treatment
+osteoarthritis nonoperative management
+rheumatoid arthritis treat to target
+gout urate lowering therapy
+fibromyalgia multidisciplinary treatment
+chronic low back pain non opioid treatment
+primary care preventive screening adults
+cardiovascular risk primary prevention
+aspirin primary prevention risk benefit
+adult immunization schedule uptake
+smoking cessation pharmacotherapy
+alcohol use disorder outpatient management
+major depressive disorder treatment
+generalized anxiety disorder treatment
+alzheimer disease treatment
+parkinson disease treatment
+falls prevention older adults
+polypharmacy deprescribing
+preventive care adults screening
+obesity treatment pharmacotherapy
+metabolic syndrome management

@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "createdAt": "2026-03-01T00:56:50.799Z",
+  "lastUpdated": "2026-03-01T00:56:56.556Z",
+  "queries": {
+    "acute abdominal pain diagnostic workup guideline adults": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-03-01T00:56:52.539Z"
+    },
+    "hypertension first line treatment adults guideline": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-03-01T00:56:54.095Z"
+    },
+    "sepsis initial management adult emergency guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-03-01T00:56:55.746Z"
+    },
+    "acetaminophen paracetamol overdose guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-03-01T00:56:56.556Z"
+    }
+  }
+}

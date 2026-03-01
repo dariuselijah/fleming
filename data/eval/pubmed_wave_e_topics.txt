@@ -1,0 +1,185 @@
+interventional cardiology stent thrombosis prevention
+interventional cardiology chronic total occlusion outcomes
+transcatheter aortic valve replacement durability
+transcatheter mitral edge to edge repair outcomes
+left atrial appendage occlusion anticoagulation strategy
+electrophysiology atrial flutter ablation outcomes
+electrophysiology ventricular tachycardia ablation strategy
+electrophysiology cardiac resynchronization therapy optimization
+implantable cardioverter defibrillator primary prevention criteria
+hypertrophic cardiomyopathy risk stratification sudden death
+arrhythmogenic right ventricular cardiomyopathy management
+amyloid cardiomyopathy tafamidis outcomes
+restrictive cardiomyopathy differential diagnosis
+myocarditis diagnosis cardiac magnetic resonance
+pericarditis recurrent treatment colchicine
+pulmonary hypertension group 1 targeted therapy sequencing
+pulmonary hypertension chronic thromboembolic treatment
+adult congenital heart disease pregnancy risk
+fontan circulation long term complications
+tetralogy of fallot adult follow up
+coarctation of aorta adult hypertension management
+marfan syndrome aortic root surveillance
+ehlers danlos vascular type management
+aortic stenosis asymptomatic intervention timing
+mitral regurgitation primary versus secondary management
+tricuspid regurgitation transcatheter intervention outcomes
+infective endocarditis surgical indications timing
+prosthetic valve thrombosis management
+anticoagulation mechanical heart valve bridging
+lipoprotein a cardiovascular risk therapy
+familial hypercholesterolemia cascade screening outcomes
+pcsk9 inhibitor long term outcomes
+inclisiran lipid lowering effectiveness
+bempedoic acid cardiovascular outcomes
+cardio renal syndrome management
+heart transplant rejection surveillance
+heart transplant immunosuppression minimization
+left ventricular assist device infection prevention
+left ventricular assist device thrombosis management
+critical care right ventricular failure management
+advanced heart failure palliative integration
+syncope autonomic dysfunction evaluation
+postural orthostatic tachycardia syndrome treatment
+vasovagal syncope nonpharmacologic interventions
+coronary vasospasm diagnosis management
+microvascular angina treatment options
+spontaneous coronary artery dissection management
+fibromuscular dysplasia cerebrovascular screening
+peripheral artery disease endovascular versus surgery
+chronic limb threatening ischemia revascularization
+carotid stenosis asymptomatic management
+renal artery stenosis intervention outcomes
+mesenteric ischemia chronic management
+venous insufficiency intervention outcomes
+deep venous thrombosis catheter directed thrombolysis
+post thrombotic syndrome prevention
+hypercoagulable workup unprovoked thrombosis
+antiphospholipid syndrome pregnancy management
+thrombophilia testing utility clinical outcomes
+heparin induced thrombocytopenia management
+thrombotic thrombocytopenic purpura plasma exchange outcomes
+hemolytic uremic syndrome atypical complement therapy
+paroxysmal nocturnal hemoglobinuria complement inhibition
+sickle cell vaso occlusive crisis management
+sickle cell hydroxyurea adherence outcomes
+sickle cell gene editing outcomes
+thalassemia iron chelation optimization
+myelodysplastic syndrome risk adapted therapy
+myeloproliferative neoplasm thrombosis prevention
+polycythemia vera treatment strategy
+essential thrombocythemia risk stratification
+myelofibrosis targeted therapy outcomes
+aplastic anemia immunosuppressive therapy outcomes
+immune neutropenia management
+hemophagocytic lymphohistiocytosis adult treatment
+hematopoietic stem cell transplant conditioning strategies
+graft versus host disease prophylaxis
+graft versus host disease steroid refractory management
+transfusion medicine massive transfusion outcomes
+patient blood management perioperative outcomes
+iron deficiency without anemia treatment
+anemia of inflammation management
+hemoglobinopathies screening adult populations
+coagulation reversal direct oral anticoagulants
+warfarin reversal intracranial hemorrhage
+factor xi inhibitor thrombosis prevention
+anticoagulation in obesity pharmacokinetics
+anticoagulation in liver disease safety
+pregnancy associated venous thromboembolism treatment
+postpartum venous thromboembolism prophylaxis
+placenta accreta spectrum management
+preterm labor tocolysis effectiveness
+preterm premature rupture membranes management
+fetal growth restriction surveillance protocols
+intrahepatic cholestasis of pregnancy management
+intrauterine fetal demise workup
+recurrent pregnancy loss evaluation
+recurrent implantation failure management
+assisted reproductive technology ovarian hyperstimulation prevention
+male infertility varicocele repair outcomes
+hypogonadism testosterone therapy cardiovascular safety
+polycystic ovary syndrome infertility treatment
+endometriosis fertility preservation
+adenomyosis management outcomes
+uterine fibroid embolization outcomes
+hysteroscopic myomectomy fertility outcomes
+abnormal placentation postpartum management
+pelvic inflammatory disease treatment adherence
+bacterial vaginosis recurrent treatment
+vulvodynia multidisciplinary treatment
+interstitial cystitis bladder pain syndrome management
+stress urinary incontinence surgical outcomes
+urge urinary incontinence neuromodulation outcomes
+pelvic organ prolapse mesh complications management
+urologic oncology bladder preservation protocols
+muscle invasive bladder cancer trimodality therapy
+non muscle invasive bladder bacillus calmette guerin failure
+upper tract urothelial carcinoma management
+renal mass active surveillance outcomes
+small renal mass ablation outcomes
+metastatic renal cell carcinoma sequence therapy
+prostate cancer biochemical recurrence management
+prostate cancer salvage radiotherapy timing
+benign prostatic hyperplasia holmium laser enucleation outcomes
+chronic prostatitis chronic pelvic pain management
+male lower urinary tract symptoms combination therapy
+testosterone replacement infertility risk counseling
+nephrolithiasis metabolic evaluation outcomes
+recurrent kidney stone pharmacologic prevention
+cystinuria long term management
+primary hyperoxaluria treatment outcomes
+nephrotic syndrome focal segmental glomerulosclerosis therapy
+iga nephropathy risk stratification treatment
+lupus nephritis induction therapy comparisons
+anca vasculitis renal involvement management
+membranous nephropathy treatment algorithms
+minimal change disease relapse prevention
+diabetic kidney disease finerenone outcomes
+hyponatremia outpatient chronic management
+hypernatremia correction protocols
+acid base disorders mixed metabolic respiratory interpretation
+renal tubular acidosis management
+secondary hyperparathyroidism chronic kidney disease treatment
+kidney transplant delayed graft function prevention
+kidney transplant antibody mediated rejection treatment
+kidney transplant calcineurin inhibitor minimization
+living donor kidney transplantation outcomes
+simultaneous pancreas kidney transplant outcomes
+peritoneal dialysis peritonitis prevention
+hemodialysis intradialytic hypotension management
+home hemodialysis clinical outcomes
+chronic liver disease portal vein thrombosis management
+hepatocellular carcinoma locoregional therapy sequencing
+hepatocellular carcinoma transplant criteria outcomes
+noncirrhotic portal hypertension management
+autoimmune hepatitis treatment withdrawal outcomes
+primary biliary cholangitis treatment response
+primary sclerosing cholangitis surveillance strategies
+acute on chronic liver failure management
+hepatorenal syndrome vasoconstrictor therapy
+liver transplant allocation outcomes
+liver transplant recurrent disease management
+pancreatic cyst surveillance intervals outcomes
+intraductal papillary mucinous neoplasm risk stratification
+chronic pancreatitis pain intervention outcomes
+exocrine pancreatic insufficiency enzyme dosing outcomes
+neuroendocrine tumor systemic therapy sequencing
+small bowel bleeding diagnostic algorithm
+capsule endoscopy yield obscure gastrointestinal bleeding
+eosinophilic esophagitis elimination diet outcomes
+achalasia peroral endoscopic myotomy outcomes
+gastroparesis prokinetic therapy outcomes
+functional gastrointestinal disorders gut brain therapy
+celiac refractory disease treatment
+microscopic colitis management
+diverticular disease recurrent prevention
+clostridioides difficile fecal microbiota transplantation outcomes
+antimicrobial stewardship in transplant populations
+drug resistant gram negative infection treatment
+fungal infection invasive candidiasis management
+aspergillosis treatment immunocompromised adults
+cytomegalovirus management transplant recipients
+epstein barr virus post transplant lymphoproliferative disorder management
+travel medicine pre travel prophylaxis outcomes
+vaccine effectiveness immunocompromised adults

@@ -1,0 +1,198 @@
+orthopedic trauma hip fracture geriatric pathways
+orthopedic trauma pelvic fracture hemorrhage control
+orthopedic trauma open fracture infection prevention
+orthopedic trauma compartment syndrome diagnosis
+anterior cruciate ligament reconstruction graft selection outcomes
+meniscal repair versus meniscectomy long term outcomes
+rotator cuff repair rehabilitation protocols
+shoulder instability recurrent dislocation management
+frozen shoulder treatment comparative effectiveness
+carpal tunnel syndrome surgical versus conservative outcomes
+ulnar neuropathy cubital tunnel treatment outcomes
+lumbar spinal stenosis decompression outcomes
+cervical myelopathy surgical timing outcomes
+degenerative disc disease nonoperative management
+adult spinal deformity surgery outcomes
+vertebral compression fracture management
+osteomyelitis chronic management
+prosthetic joint infection two stage revision outcomes
+periprosthetic joint infection debridement implant retention outcomes
+total knee arthroplasty enhanced recovery pathways
+total hip arthroplasty venous thromboprophylaxis
+revision joint arthroplasty outcomes
+bone sarcoma limb salvage outcomes
+pediatric orthopedic scoliosis management
+clubfoot ponseti method long term outcomes
+developmental dysplasia hip screening outcomes
+cerebral palsy spasticity orthopedic management
+rheumatology rheumatoid arthritis remission maintenance
+rheumatology lupus flare prediction biomarkers
+rheumatology giant cell arteritis steroid sparing therapy
+rheumatology polymyalgia rheumatica treatment duration
+rheumatology gout flare prophylaxis urate lowering therapy
+rheumatology pseudogout calcium pyrophosphate disease management
+rheumatology sjogren syndrome systemic treatment
+rheumatology antiphospholipid syndrome obstetric management
+rheumatology juvenile idiopathic arthritis transition care
+dermatology atopic dermatitis biologic therapy
+dermatology psoriasis psoriatic arthritis overlap treatment
+dermatology hidradenitis suppurativa surgery outcomes
+dermatology acne isotretinoin safety monitoring
+dermatology rosacea treatment algorithms
+dermatology chronic urticaria biologic therapy
+dermatology pemphigus vulgaris rituximab outcomes
+dermatology bullous pemphigoid management
+dermatology cutaneous lymphoma treatment
+dermatology melanoma sentinel node biopsy outcomes
+dermatology non melanoma skin cancer prevention high risk
+dermatology wound healing chronic ulcers management
+dermatology pressure injury prevention outcomes
+burn injury fluid resuscitation protocols
+burn injury infection prevention outcomes
+burn injury grafting timing outcomes
+plastic surgery microsurgical flap outcomes
+plastic surgery breast reconstruction implant versus autologous outcomes
+plastic surgery lymphedema surgery outcomes
+craniofacial surgery cleft palate long term outcomes
+otolaryngology chronic rhinosinusitis biologic therapy
+otolaryngology chronic otitis media surgery outcomes
+otolaryngology sudden sensorineural hearing loss treatment
+otolaryngology vestibular migraine management
+otolaryngology benign paroxysmal positional vertigo recurrence prevention
+otolaryngology meniere disease management
+otolaryngology obstructive sleep apnea surgery outcomes
+otolaryngology thyroid nodule risk stratification
+otolaryngology thyroid cancer neck dissection outcomes
+otolaryngology laryngeal cancer organ preservation outcomes
+ophthalmology diabetic retinopathy anti vegf outcomes
+ophthalmology age related macular degeneration treatment intervals
+ophthalmology glaucoma progression prevention
+ophthalmology cataract surgery complications prevention
+ophthalmology retinal detachment repair outcomes
+ophthalmology uveitis immunomodulatory therapy
+ophthalmology keratoconus corneal crosslinking outcomes
+ophthalmology dry eye disease treatment algorithms
+ophthalmology pediatric amblyopia treatment outcomes
+ophthalmology ocular trauma emergency management
+neurosurgery glioblastoma treatment sequencing
+neurosurgery meningioma recurrence risk factors
+neurosurgery pituitary adenoma surgery outcomes
+neurosurgery normal pressure hydrocephalus shunt outcomes
+neurosurgery trigeminal neuralgia surgery outcomes
+neurosurgery subdural hematoma management
+neurosurgery aneurysm clipping versus coiling outcomes
+neurosurgery spinal cord injury neuroprotection trials
+interventional neuroradiology thrombectomy workflow optimization
+interventional neuroradiology aneurysm flow diversion outcomes
+vascular surgery abdominal aortic aneurysm repair outcomes
+vascular surgery carotid endarterectomy versus stenting outcomes
+vascular surgery peripheral bypass graft patency outcomes
+vascular surgery dialysis access fistula maturation outcomes
+vascular surgery venous ulcer intervention outcomes
+thoracic surgery lung volume reduction surgery outcomes
+thoracic surgery esophagectomy enhanced recovery outcomes
+thoracic surgery mediastinal tumor management
+cardiothoracic surgery coronary bypass graft patency
+cardiothoracic surgery mitral valve repair durability
+cardiothoracic surgery postoperative atrial fibrillation prevention
+anesthesiology difficult airway management algorithms
+anesthesiology perioperative hypotension outcomes
+anesthesiology opioid free anesthesia outcomes
+anesthesiology regional anesthesia complication rates
+anesthesiology postoperative nausea vomiting prevention
+anesthesiology enhanced recovery after surgery anesthesia protocols
+anesthesiology perioperative delirium prevention older adults
+pain medicine spinal cord stimulation outcomes
+pain medicine radiofrequency ablation chronic pain outcomes
+pain medicine ketamine infusion depression pain overlap
+emergency medicine crowding interventions outcomes
+emergency medicine triage algorithm validation
+emergency medicine point of care ultrasound outcomes
+emergency medicine pediatric sepsis recognition tools
+emergency medicine trauma transfusion ratio outcomes
+prehospital medicine out of hospital cardiac arrest outcomes
+prehospital stroke mobile unit outcomes
+prehospital airway management outcomes
+critical care sepsis phenotypes precision therapy
+critical care hemodynamic monitoring outcomes
+critical care nutrition timing outcomes
+critical care early mobilization outcomes
+critical care family communication interventions outcomes
+critical care end of life decision support
+rehabilitation medicine stroke telerehab outcomes
+rehabilitation medicine spinal cord injury functional outcomes
+rehabilitation medicine traumatic brain injury cognitive rehab outcomes
+rehabilitation medicine chronic pain interdisciplinary rehab outcomes
+rehabilitation medicine cardiac rehab remote monitoring outcomes
+sports cardiology sudden cardiac death screening athletes
+sports medicine anterior cruciate ligament injury prevention
+sports medicine overuse injury prevention youth athletes
+sports medicine concussion return to learn outcomes
+occupational medicine musculoskeletal disorder prevention workplace
+occupational medicine shift work sleep disorder management
+occupational medicine burnout healthcare workers interventions
+toxicology synthetic opioid exposure management
+toxicology stimulant induced psychosis treatment
+toxicology carbon monoxide poisoning outcomes
+toxicology snakebite antivenom outcomes
+allergy immunology food allergy oral immunotherapy outcomes
+allergy immunology eosinophilic asthma biologic selection
+allergy immunology hereditary angioedema prophylaxis outcomes
+allergy immunology mast cell activation syndrome management
+immunology primary immunodeficiency diagnosis pathways
+immunology autoimmune disease biologic safety infections
+infectious disease prosthetic valve endocarditis outcomes
+infectious disease prosthetic joint infection suppressive therapy
+infectious disease outpatient parenteral antibiotic therapy outcomes
+infectious disease nontuberculous mycobacteria treatment duration
+infectious disease latent tuberculosis treatment adherence
+infectious disease sexually transmitted infection partner therapy outcomes
+infectious disease syphilis neurosyphilis treatment outcomes
+infectious disease hiv aging multimorbidity management
+infectious disease hepatitis delta treatment outcomes
+infectious disease antiviral resistance monitoring strategies
+public health vaccination campaign implementation effectiveness
+public health maternal child health intervention outcomes
+public health opioid epidemic policy outcomes
+public health overdose prevention center outcomes
+public health suicide prevention interventions effectiveness
+public health chronic disease self management program outcomes
+public health food insecurity intervention health outcomes
+public health homelessness healthcare models outcomes
+health services value based care outcomes
+health services accountable care organization quality outcomes
+health services care coordination complex patients outcomes
+health services readmission reduction interventions
+health services transitions of care medication reconciliation outcomes
+health services hospital at home outcomes
+health services remote patient monitoring reimbursement impact
+health policy prior authorization impact clinical outcomes
+health policy medication affordability interventions outcomes
+medical education competency based training outcomes
+medical education simulation based learning clinical outcomes
+medical education interprofessional education outcomes
+medical education resident duty hours patient safety outcomes
+quality improvement sepsis bundle compliance interventions
+quality improvement antimicrobial stewardship quality metrics
+quality improvement handoff standardization patient outcomes
+quality improvement diagnostic error reduction interventions
+patient safety medication reconciliation inpatient outcomes
+patient safety alarm fatigue reduction outcomes
+patient safety falls bundle hospital outcomes
+patient safety pressure injury prevention bundle outcomes
+genetics whole exome sequencing diagnostic yield adults
+genetics whole genome sequencing neonatal intensive care outcomes
+genetics hereditary cancer panel clinical utility
+genetics pharmacogenomic implementation primary care outcomes
+precision medicine multi omics integration clinical decision support
+digital health conversational ai triage safety outcomes
+digital health remote spirometry monitoring outcomes
+digital health continuous glucose monitoring type 1 diabetes outcomes
+digital health wearable arrhythmia detection outcomes
+digital health app based cognitive behavioral therapy outcomes
+environmental health air pollution cardiovascular outcomes
+environmental health wildfire smoke respiratory outcomes
+environmental health lead exposure neurodevelopment outcomes
+environmental health microplastics human health evidence
+climate health heat vulnerability intervention outcomes
+climate health extreme weather disaster preparedness healthcare

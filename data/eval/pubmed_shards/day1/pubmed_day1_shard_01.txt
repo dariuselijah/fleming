@@ -1,0 +1,62 @@
+acute coronary syndrome
+subarachnoid hemorrhage emergency care
+ventricular tachycardia emergency treatment
+community acquired pneumonia severe criteria
+bacteremia source investigation
+heat stroke emergency treatment
+hypertension treatment
+resistant hypertension workup
+diabetes obesity overlap pharmacotherapy
+peritoneal dialysis outcomes
+schizophrenia long acting antipsychotics
+peripheral neuropathy management
+chronic low back pain non opioid treatment
+polypharmacy deprescribing
+colorectal cancer adjuvant chemotherapy
+gastric cancer perioperative treatment
+thyroid cancer differentiated treatment
+hepatic encephalopathy management
+cutaneous squamous cell carcinoma management
+menopause hormone therapy risk benefit
+preterm infant respiratory distress management
+rare disease guideline update
+pulmonary hypertension targeted therapy
+clostridioides difficile recurrence prevention
+pheochromocytoma perioperative management
+myasthenia gravis immunotherapy
+burn care long term outcomes
+end of life symptom management
+large language model clinical workflow safety
+workplace health intervention outcomes
+transcatheter mitral edge to edge repair outcomes
+pulmonary hypertension group 1 targeted therapy sequencing
+prosthetic valve thrombosis management
+critical care right ventricular failure management
+renal artery stenosis intervention outcomes
+sickle cell vaso occlusive crisis management
+hematopoietic stem cell transplant conditioning strategies
+anticoagulation in liver disease safety
+male infertility varicocele repair outcomes
+stress urinary incontinence surgical outcomes
+benign prostatic hyperplasia holmium laser enucleation outcomes
+membranous nephropathy treatment algorithms
+simultaneous pancreas kidney transplant outcomes
+hepatorenal syndrome vasoconstrictor therapy
+gastroparesis prokinetic therapy outcomes
+travel medicine pre travel prophylaxis outcomes
+ulnar neuropathy cubital tunnel treatment outcomes
+bone sarcoma limb salvage outcomes
+rheumatology antiphospholipid syndrome obstetric management
+dermatology non melanoma skin cancer prevention high risk
+otolaryngology sudden sensorineural hearing loss treatment
+ophthalmology retinal detachment repair outcomes
+neurosurgery aneurysm clipping versus coiling outcomes
+cardiothoracic surgery coronary bypass graft patency
+pain medicine ketamine infusion depression pain overlap
+critical care early mobilization outcomes
+occupational medicine musculoskeletal disorder prevention workplace
+immunology autoimmune disease biologic safety infections
+public health maternal child health intervention outcomes
+health services hospital at home outcomes
+patient safety medication reconciliation inpatient outcomes
+digital health wearable arrhythmia detection outcomes

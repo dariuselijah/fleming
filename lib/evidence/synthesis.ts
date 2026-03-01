@@ -39,7 +39,7 @@ export async function synthesizeEvidence(
   
   const {
     query,
-    maxResults = 8,
+    maxResults = 12,
     minEvidenceLevel = 5,
     includeContext = true,
     minMedicalConfidence,

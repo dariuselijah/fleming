@@ -1,0 +1,96 @@
+breast cancer treatment
+colorectal cancer treatment
+lung cancer treatment
+prostate cancer treatment
+cervical cancer screening
+breast cancer adjuvant endocrine therapy
+triple negative breast cancer immunotherapy
+her2 positive breast cancer targeted therapy
+colorectal cancer adjuvant chemotherapy
+metastatic colorectal cancer molecular targeted therapy
+lung cancer non small cell first line therapy
+small cell lung cancer treatment
+prostate cancer active surveillance outcomes
+metastatic prostate cancer androgen deprivation combinations
+ovarian cancer maintenance therapy
+endometrial cancer treatment
+cervical cancer treatment chemoradiation
+pancreatic cancer systemic therapy
+hepatocellular carcinoma systemic therapy
+cholangiocarcinoma targeted therapy
+gastric cancer perioperative treatment
+esophageal cancer multimodality treatment
+renal cell carcinoma immunotherapy combinations
+bladder cancer non muscle invasive management
+testicular cancer risk adapted treatment
+multiple myeloma first line treatment
+acute myeloid leukemia induction regimens
+chronic lymphocytic leukemia targeted therapy
+non hodgkin lymphoma treatment
+hodgkin lymphoma treatment
+melanoma adjuvant immunotherapy
+sarcoma management strategy
+thyroid cancer differentiated treatment
+head and neck squamous cell carcinoma treatment
+ulcerative colitis biologic sequencing
+crohn disease biologic therapy optimization
+celiac disease diagnosis and management
+irritable bowel syndrome treatment
+gastroesophageal reflux disease management
+peptic ulcer disease h pylori eradication
+functional dyspepsia management
+chronic constipation management
+inflammatory bowel disease colorectal cancer surveillance
+cirrhosis ascites management
+hepatic encephalopathy management
+portal hypertension variceal bleeding prevention
+acute liver failure management
+rheumatoid arthritis biologic therapy
+psoriatic arthritis treatment
+ankylosing spondylitis treatment
+systemic lupus erythematosus treatment
+vasculitis induction therapy
+scleroderma interstitial lung disease treatment
+dermatitis atopic treatment
+hidradenitis suppurativa management
+acne vulgaris treatment strategy
+cutaneous squamous cell carcinoma management
+basal cell carcinoma management
+preeclampsia prevention
+preeclampsia severe features management
+gestational diabetes treatment
+pregestational diabetes pregnancy management
+postpartum hypertension management
+postpartum depression screening treatment
+contraception medical eligibility chronic disease
+abnormal uterine bleeding management
+endometriosis pain management
+polycystic ovary syndrome treatment
+menopause hormone therapy risk benefit
+vulvovaginal infections treatment
+pediatric asthma management
+pediatric bronchiolitis treatment
+pediatric pneumonia treatment
+acute otitis media children antibiotics
+pediatric sepsis recognition treatment
+pediatric obesity treatment
+adolescent depression treatment
+attention deficit hyperactivity disorder pediatrics treatment
+autism spectrum disorder early intervention
+neonatal jaundice treatment thresholds
+preterm infant respiratory distress management
+congenital heart disease long term outcomes
+perioperative antibiotic prophylaxis surgery
+enhanced recovery after surgery protocols
+venous thromboembolism prophylaxis surgery
+postoperative pain multimodal analgesia
+wound infection prevention surgery
+ulcerative colitis treatment
+crohn disease treatment
+rheumatoid arthritis treatment
+psoriasis treatment
+preeclampsia prevention
+gestational diabetes treatment
+pediatric asthma management
+acute otitis media children antibiotics
+ptsd treatment

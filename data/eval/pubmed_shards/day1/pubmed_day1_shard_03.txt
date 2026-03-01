@@ -1,0 +1,62 @@
+acute ischemic stroke treatment
+status epilepticus emergency treatment
+atrial fibrillation rapid ventricular response emergency
+influenza severe disease treatment
+toxic alcohol ingestion management
+major trauma initial management
+atrial fibrillation management
+heart failure reduced ejection fraction gdmt
+diabetic neuropathy pain management
+kidney stone prevention recurrent nephrolithiasis
+insomnia cognitive behavioral therapy
+falls prevention multifactorial older adults
+cardiovascular risk primary prevention
+obesity treatment pharmacotherapy
+lung cancer non small cell first line therapy
+renal cell carcinoma immunotherapy combinations
+ulcerative colitis biologic sequencing
+acute liver failure management
+preeclampsia prevention
+pediatric asthma management
+perioperative antibiotic prophylaxis surgery
+long covid treatment
+bronchiectasis long term management
+hospital acquired infection prevention bundles
+hyponatremia syndrome of inappropriate adh management
+huntington disease symptomatic management
+transplant liver rejection management
+health equity intervention effectiveness
+wearable biosensor monitoring clinical outcomes
+environmental exposure health outcomes
+electrophysiology atrial flutter ablation outcomes
+adult congenital heart disease pregnancy risk
+lipoprotein a cardiovascular risk therapy
+syncope autonomic dysfunction evaluation
+venous insufficiency intervention outcomes
+sickle cell gene editing outcomes
+graft versus host disease steroid refractory management
+postpartum venous thromboembolism prophylaxis
+polycystic ovary syndrome infertility treatment
+pelvic organ prolapse mesh complications management
+male lower urinary tract symptoms combination therapy
+diabetic kidney disease finerenone outcomes
+hemodialysis intradialytic hypotension management
+liver transplant recurrent disease management
+celiac refractory disease treatment
+orthopedic trauma hip fracture geriatric pathways
+cervical myelopathy surgical timing outcomes
+clubfoot ponseti method long term outcomes
+dermatology atopic dermatitis biologic therapy
+dermatology pressure injury prevention outcomes
+otolaryngology benign paroxysmal positional vertigo recurrence prevention
+ophthalmology keratoconus corneal crosslinking outcomes
+interventional neuroradiology thrombectomy workflow optimization
+cardiothoracic surgery postoperative atrial fibrillation prevention
+emergency medicine triage algorithm validation
+critical care end of life decision support
+occupational medicine burnout healthcare workers interventions
+infectious disease prosthetic joint infection suppressive therapy
+public health overdose prevention center outcomes
+health policy prior authorization impact clinical outcomes
+patient safety falls bundle hospital outcomes
+environmental health air pollution cardiovascular outcomes

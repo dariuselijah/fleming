@@ -36,30 +36,32 @@ export function ClinicianModeSelector({
   onChange,
 }: ClinicianModeSelectorProps) {
   return (
-    <div className="mb-2 flex items-center justify-center">
-      <div className="bg-muted/60 inline-flex rounded-full p-1">
-        {MODE_OPTIONS.map((mode) => {
-          const isActive = mode.id === value
-          const Icon = mode.icon
-          return (
-            <Button
-              key={mode.id}
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => onChange(mode.id)}
-              className={cn(
-                "rounded-full px-3 transition-all",
-                isActive
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Icon className="size-3.5" />
-              {CLINICIAN_MODE_LABELS[mode.id]}
-            </Button>
-          )
-        })}
+    <div className="mb-2">
+      <div className="overflow-x-auto px-1">
+        <div className="bg-muted/60 inline-flex min-w-max rounded-full p-1">
+          {MODE_OPTIONS.map((mode) => {
+            const isActive = mode.id === value
+            const Icon = mode.icon
+            return (
+              <Button
+                key={mode.id}
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => onChange(mode.id)}
+                className={cn(
+                  "rounded-full px-3 whitespace-nowrap transition-all",
+                  isActive
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Icon className="size-3.5" />
+                {CLINICIAN_MODE_LABELS[mode.id]}
+              </Button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

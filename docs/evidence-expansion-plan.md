@@ -79,6 +79,56 @@ Scoring heuristics (`computeProvenanceConfidence`):
 3. Fail-safe policy:
    - if evidence sparse/conflicting, tell user clearly and avoid over-claiming.
 
+### Wave runbook (2.5M+ path)
+
+Use wave-based ingestion with checkpointing and explicit quality gates.
+
+#### Guideline waves (fast quality lift)
+
+- `benchmark_core`: abdominal pain workup, hypertension first-line, sepsis first-hour bundle, acetaminophen safety.
+- `emergency_critical`: ACS/chest pain, stroke thrombolysis, anaphylaxis, septic shock escalation.
+- `cardio_metabolic`: HFrEF GDMT, AF anticoagulation, diabetes+CKD cardiometabolic guidance, lipid secondary prevention.
+- `pulmonary_infectious`: CAP outpatient treatment, COPD exacerbation, asthma step-up, uncomplicated cystitis.
+- `medication_safety`: warfarin interactions, CKD dosing, polypharmacy deprescribing, DOAC renal dosing.
+
+Command pattern:
+
+- `npm run ingest:guidelines -- --wave benchmark_core --resume --checkpoint data/eval/guideline_ingestion_checkpoint.json --out data/eval/guideline_wave_benchmark_core.json`
+- `npm run ingest:guidelines -- --wave emergency_critical,cardio_metabolic --resume --stop-on-gate-fail --min-results-per-query 2 --min-sources-per-run 2`
+
+#### PubMed scale waves (coverage lift)
+
+Drive large-scale PubMed ingestion using topic files by wave, with checkpoint/resume.
+
+- Wave A (high-yield emergency + core IM): cardiology, emergency, infectious disease, pulmonary.
+- Wave B (chronic disease breadth): endocrine, nephrology, neurology, geriatrics, primary care.
+- Wave C (specialty expansion): oncology, women’s health, pediatrics, psychiatry, GI, rheum, derm, urology.
+- Wave D (long tail + recency sweeps): low-frequency topics, updates, and annual refresh.
+- Wave E (ultra long-tail subspecialty): interventional/electrophysiology, transplant, complex hematology, advanced hepato-pancreatic, uro-gyne complexity.
+- Wave F (systems + edge domains): surgery/peri-op subspecialties, rehab, occupational/public health, genetics/precision medicine, digital safety, climate/environment health.
+
+Command pattern:
+
+- `npm run ingest:scale -- --workers 10 --max-per-topic 10000 --from-year 2012 --high-evidence --checkpoint ingestion-checkpoint-wave-a.json --topics-file data/eval/pubmed_wave_a_topics.txt`
+- `npm run ingest:scale -- --resume --checkpoint ingestion-checkpoint-wave-a.json --workers 10`
+- `npm run ingest:scale -- --workers 10 --max-per-topic 6000 --from-year 2012 --checkpoint ingestion-checkpoint-wave-e.json --topics-file data/eval/pubmed_wave_e_topics.txt`
+- `npm run ingest:scale -- --workers 10 --max-per-topic 5000 --from-year 2012 --checkpoint ingestion-checkpoint-wave-f.json --topics-file data/eval/pubmed_wave_f_topics.txt`
+
+### Stop/Go criteria per wave
+
+Stop the wave and tune before proceeding if any of the following are true:
+
+- Guideline gate fails: <2 results per query on required benchmark-core prompts.
+- Source diversity gate fails: <2 unique guideline sources in wave output.
+- Benchmark regression: release-check fails on `avgCitationCoverage`, `escalationCompliance`, or `guidelineHitRate`.
+- Data quality drift: citation relevance pass rate drops below threshold in release-check.
+
+Go to next wave only when:
+
+- Current wave quality gates pass.
+- `npm run benchmark:release` and `npm run benchmark:release-check` are green.
+- Checkpoint and wave report are archived with timestamp for rollback traceability.
+
 ### Run log (execution #1)
 
 - Ran: `npm run benchmark:release`

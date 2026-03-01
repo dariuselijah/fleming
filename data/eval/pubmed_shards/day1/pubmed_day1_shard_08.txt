@@ -1,0 +1,62 @@
+adult abdominal pain workup emergency
+deep vein thrombosis acute treatment
+stroke thrombectomy selection
+spontaneous pneumothorax acute management
+hyponatremia acute symptomatic management
+ectopic pregnancy emergency care
+diabetic nephropathy treatment
+venous thromboembolism extended anticoagulation
+nonalcoholic steatohepatitis treatment
+major depressive disorder first line therapy
+parkinson disease motor symptom treatment
+osteoporosis pharmacologic treatment
+major depressive disorder treatment
+prostate cancer treatment
+endometrial cancer treatment
+chronic lymphocytic leukemia targeted therapy
+peptic ulcer disease h pylori eradication
+vasculitis induction therapy
+postpartum depression screening treatment
+pediatric obesity treatment
+ulcerative colitis treatment
+perioperative care complications prevention
+non tuberculous mycobacterial disease management
+chronic pelvic pain multidisciplinary management
+sickle cell disease disease modifying therapy
+interventional pain procedures comparative effectiveness
+extracorporeal membrane oxygenation outcomes
+dengue severe disease management
+orphan drug effectiveness real world evidence
+radiation exposure medical management
+arrhythmogenic right ventricular cardiomyopathy management
+ehlers danlos vascular type management
+cardio renal syndrome management
+spontaneous coronary artery dissection management
+thrombophilia testing utility clinical outcomes
+essential thrombocythemia risk stratification
+hemoglobinopathies screening adult populations
+intrahepatic cholestasis of pregnancy management
+abnormal placentation postpartum management
+renal mass active surveillance outcomes
+primary hyperoxaluria treatment outcomes
+secondary hyperparathyroidism chronic kidney disease treatment
+noncirrhotic portal hypertension management
+neuroendocrine tumor systemic therapy sequencing
+drug resistant gram negative infection treatment
+meniscal repair versus meniscectomy long term outcomes
+prosthetic joint infection two stage revision outcomes
+rheumatology giant cell arteritis steroid sparing therapy
+dermatology chronic urticaria biologic therapy
+plastic surgery breast reconstruction implant versus autologous outcomes
+otolaryngology laryngeal cancer organ preservation outcomes
+neurosurgery meningioma recurrence risk factors
+vascular surgery dialysis access fistula maturation outcomes
+anesthesiology postoperative nausea vomiting prevention
+prehospital stroke mobile unit outcomes
+rehabilitation medicine cardiac rehab remote monitoring outcomes
+allergy immunology food allergy oral immunotherapy outcomes
+infectious disease syphilis neurosyphilis treatment outcomes
+health services value based care outcomes
+medical education resident duty hours patient safety outcomes
+genetics pharmacogenomic implementation primary care outcomes
+climate health extreme weather disaster preparedness healthcare

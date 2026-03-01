@@ -1,0 +1,61 @@
+acute pancreatitis early management
+acute heart failure emergency management
+transient ischemic attack high risk workup
+necrotizing soft tissue infection management
+hyperosmolar hyperglycemic state management
+copd exacerbation treatment
+medication dosing chronic kidney disease
+type 1 diabetes management adults
+chronic kidney disease mineral bone disorder
+generalized anxiety disorder pharmacotherapy
+migraine preventive therapy
+rheumatoid arthritis treat to target
+alzheimer disease treatment
+breast cancer adjuvant endocrine therapy
+pancreatic cancer systemic therapy
+hodgkin lymphoma treatment
+chronic constipation management
+dermatitis atopic treatment
+abnormal uterine bleeding management
+attention deficit hyperactivity disorder pediatrics treatment
+rheumatoid arthritis treatment
+clinical decision support implementation
+hiv pre exposure prophylaxis outcomes
+pituitary adenoma management
+venous thromboembolism cancer associated thrombosis
+concussion return to play protocols
+nutrition critical care outcomes
+zika pregnancy outcomes
+maternal mortality reduction interventions
+interventional cardiology stent thrombosis prevention
+restrictive cardiomyopathy differential diagnosis
+mitral regurgitation primary versus secondary management
+heart transplant immunosuppression minimization
+peripheral artery disease endovascular versus surgery
+thrombotic thrombocytopenic purpura plasma exchange outcomes
+aplastic anemia immunosuppressive therapy outcomes
+warfarin reversal intracranial hemorrhage
+recurrent pregnancy loss evaluation
+bacterial vaginosis recurrent treatment
+metastatic renal cell carcinoma sequence therapy
+iga nephropathy risk stratification treatment
+kidney transplant antibody mediated rejection treatment
+primary biliary cholangitis treatment response
+capsule endoscopy yield obscure gastrointestinal bleeding
+aspergillosis treatment immunocompromised adults
+shoulder instability recurrent dislocation management
+total knee arthroplasty enhanced recovery pathways
+rheumatology gout flare prophylaxis urate lowering therapy
+dermatology bullous pemphigoid management
+craniofacial surgery cleft palate long term outcomes
+ophthalmology age related macular degeneration treatment intervals
+neurosurgery normal pressure hydrocephalus shunt outcomes
+thoracic surgery lung volume reduction surgery outcomes
+anesthesiology perioperative delirium prevention older adults
+critical care sepsis phenotypes precision therapy
+sports medicine anterior cruciate ligament injury prevention
+allergy immunology hereditary angioedema prophylaxis outcomes
+infectious disease hepatitis delta treatment outcomes
+health services care coordination complex patients outcomes
+quality improvement antimicrobial stewardship quality metrics
+digital health conversational ai triage safety outcomes

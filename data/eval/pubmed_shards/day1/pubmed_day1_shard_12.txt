@@ -1,0 +1,61 @@
+lower gastrointestinal bleeding management
+cardiogenic shock management
+copd exacerbation noninvasive ventilation
+infective endocarditis empiric treatment
+thyroid storm management
+pulmonary embolism diagnosis treatment
+hypertension management outpatient
+diabetes cardiovascular risk reduction
+hemodialysis vascular access complications
+bipolar disorder maintenance therapy
+multiple sclerosis disease modifying therapy
+fibromyalgia multidisciplinary treatment
+falls prevention older adults
+her2 positive breast cancer targeted therapy
+cholangiocarcinoma targeted therapy
+sarcoma management strategy
+cirrhosis ascites management
+acne vulgaris treatment strategy
+polycystic ovary syndrome treatment
+neonatal jaundice treatment thresholds
+ptsd treatment
+cardio oncology surveillance protocols
+hepatitis c direct acting antivirals outcomes
+adrenal incidentaloma workup
+autoimmune encephalitis diagnosis treatment
+amputation rehabilitation prosthetics outcomes
+serious illness communication interventions
+machine learning diagnostic support validation
+adolescent substance use prevention
+transcatheter aortic valve replacement durability
+pericarditis recurrent treatment colchicine
+infective endocarditis surgical indications timing
+left ventricular assist device thrombosis management
+carotid stenosis asymptomatic management
+paroxysmal nocturnal hemoglobinuria complement inhibition
+hemophagocytic lymphohistiocytosis adult treatment
+anticoagulation in obesity pharmacokinetics
+assisted reproductive technology ovarian hyperstimulation prevention
+interstitial cystitis bladder pain syndrome management
+prostate cancer salvage radiotherapy timing
+anca vasculitis renal involvement management
+living donor kidney transplantation outcomes
+acute on chronic liver failure management
+achalasia peroral endoscopic myotomy outcomes
+epstein barr virus post transplant lymphoproliferative disorder management
+carpal tunnel syndrome surgical versus conservative outcomes
+revision joint arthroplasty outcomes
+rheumatology sjogren syndrome systemic treatment
+dermatology melanoma sentinel node biopsy outcomes
+otolaryngology chronic otitis media surgery outcomes
+ophthalmology cataract surgery complications prevention
+neurosurgery subdural hematoma management
+thoracic surgery mediastinal tumor management
+pain medicine radiofrequency ablation chronic pain outcomes
+critical care nutrition timing outcomes
+sports medicine concussion return to learn outcomes
+immunology primary immunodeficiency diagnosis pathways
+public health vaccination campaign implementation effectiveness
+health services transitions of care medication reconciliation outcomes
+quality improvement diagnostic error reduction interventions
+digital health continuous glucose monitoring type 1 diabetes outcomes

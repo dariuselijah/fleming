@@ -1,0 +1,572 @@
+{
+  "version": "1.0",
+  "startTime": "2026-03-01T04:16:18.818Z",
+  "lastUpdate": "2026-03-01T04:55:38.425Z",
+  "topics": [
+    {
+      "topic": "acute ischemic stroke treatment",
+      "status": "completed",
+      "articlesProcessed": 13,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:18.818Z",
+      "completedAt": "2026-03-01T04:16:20.516Z"
+    },
+    {
+      "topic": "status epilepticus emergency treatment",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 13,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:18.818Z",
+      "completedAt": "2026-03-01T04:16:26.221Z"
+    },
+    {
+      "topic": "atrial fibrillation rapid ventricular response emergency",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:28.722Z",
+      "completedAt": "2026-03-01T04:16:29.817Z"
+    },
+    {
+      "topic": "influenza severe disease treatment",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:28.722Z",
+      "completedAt": "2026-03-01T04:16:30.744Z"
+    },
+    {
+      "topic": "toxic alcohol ingestion management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:33.245Z",
+      "completedAt": "2026-03-01T04:16:34.364Z"
+    },
+    {
+      "topic": "major trauma initial management",
+      "status": "completed",
+      "articlesProcessed": 9,
+      "chunksCreated": 27,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:33.245Z",
+      "completedAt": "2026-03-01T04:16:53.001Z"
+    },
+    {
+      "topic": "atrial fibrillation management",
+      "status": "completed",
+      "articlesProcessed": 12,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:55.502Z",
+      "completedAt": "2026-03-01T04:16:56.906Z"
+    },
+    {
+      "topic": "heart failure reduced ejection fraction gdmt",
+      "status": "completed",
+      "articlesProcessed": 35,
+      "chunksCreated": 100,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:55.502Z",
+      "completedAt": "2026-03-01T04:17:34.371Z"
+    },
+    {
+      "topic": "diabetic neuropathy pain management",
+      "status": "completed",
+      "articlesProcessed": 25,
+      "chunksCreated": 70,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:17:36.956Z",
+      "completedAt": "2026-03-01T04:18:51.089Z"
+    },
+    {
+      "topic": "kidney stone prevention recurrent nephrolithiasis",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:17:36.956Z",
+      "completedAt": "2026-03-01T04:17:38.033Z"
+    },
+    {
+      "topic": "insomnia cognitive behavioral therapy",
+      "status": "completed",
+      "articlesProcessed": 450,
+      "chunksCreated": 1266,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:18:53.591Z",
+      "completedAt": "2026-03-01T04:26:40.126Z"
+    },
+    {
+      "topic": "falls prevention multifactorial older adults",
+      "status": "completed",
+      "articlesProcessed": 36,
+      "chunksCreated": 120,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:18:53.591Z",
+      "completedAt": "2026-03-01T04:19:51.331Z"
+    },
+    {
+      "topic": "cardiovascular risk primary prevention",
+      "status": "failed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 1,
+      "startedAt": "2026-03-01T04:26:42.628Z",
+      "completedAt": "2026-03-01T04:43:26.678Z"
+    },
+    {
+      "topic": "obesity treatment pharmacotherapy",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:26:42.628Z",
+      "completedAt": "2026-03-01T04:26:43.896Z"
+    },
+    {
+      "topic": "lung cancer non small cell first line therapy",
+      "status": "completed",
+      "articlesProcessed": 141,
+      "chunksCreated": 443,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:43:29.181Z",
+      "completedAt": "2026-03-01T04:45:53.727Z"
+    },
+    {
+      "topic": "renal cell carcinoma immunotherapy combinations",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 11,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:43:29.181Z",
+      "completedAt": "2026-03-01T04:43:34.366Z"
+    },
+    {
+      "topic": "ulcerative colitis biologic sequencing",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:45:56.231Z",
+      "completedAt": "2026-03-01T04:45:57.349Z"
+    },
+    {
+      "topic": "acute liver failure management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:45:56.231Z",
+      "completedAt": "2026-03-01T04:45:57.349Z"
+    },
+    {
+      "topic": "preeclampsia prevention",
+      "status": "completed",
+      "articlesProcessed": 22,
+      "chunksCreated": 71,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:45:59.851Z",
+      "completedAt": "2026-03-01T04:46:23.687Z"
+    },
+    {
+      "topic": "pediatric asthma management",
+      "status": "completed",
+      "articlesProcessed": 5,
+      "chunksCreated": 15,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:45:59.852Z",
+      "completedAt": "2026-03-01T04:46:05.374Z"
+    },
+    {
+      "topic": "perioperative antibiotic prophylaxis surgery",
+      "status": "completed",
+      "articlesProcessed": 77,
+      "chunksCreated": 235,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:46:26.190Z",
+      "completedAt": "2026-03-01T04:47:47.391Z"
+    },
+    {
+      "topic": "long covid treatment",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 15,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:46:26.190Z",
+      "completedAt": "2026-03-01T04:46:31.295Z"
+    },
+    {
+      "topic": "bronchiectasis long term management",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 18,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:47:49.893Z",
+      "completedAt": "2026-03-01T04:47:58.613Z"
+    },
+    {
+      "topic": "hospital acquired infection prevention bundles",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:47:49.893Z",
+      "completedAt": "2026-03-01T04:47:50.949Z"
+    },
+    {
+      "topic": "hyponatremia syndrome of inappropriate adh management",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 7,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:48:01.115Z",
+      "completedAt": "2026-03-01T04:48:06.245Z"
+    },
+    {
+      "topic": "huntington disease symptomatic management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:48:01.115Z",
+      "completedAt": "2026-03-01T04:48:02.211Z"
+    },
+    {
+      "topic": "transplant liver rejection management",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 3,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:48:08.746Z",
+      "completedAt": "2026-03-01T04:48:13.590Z"
+    },
+    {
+      "topic": "health equity intervention effectiveness",
+      "status": "completed",
+      "articlesProcessed": 11,
+      "chunksCreated": 51,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:48:08.746Z",
+      "completedAt": "2026-03-01T04:48:31.676Z"
+    },
+    {
+      "topic": "wearable biosensor monitoring clinical outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:48:34.178Z",
+      "completedAt": "2026-03-01T04:48:35.272Z"
+    },
+    {
+      "topic": "environmental exposure health outcomes",
+      "status": "completed",
+      "articlesProcessed": 304,
+      "chunksCreated": 738,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:48:34.178Z",
+      "completedAt": "2026-03-01T04:53:00.926Z"
+    },
+    {
+      "topic": "electrophysiology atrial flutter ablation outcomes",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 3,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:03.429Z",
+      "completedAt": "2026-03-01T04:53:06.914Z"
+    },
+    {
+      "topic": "adult congenital heart disease pregnancy risk",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:03.430Z",
+      "completedAt": "2026-03-01T04:53:04.558Z"
+    },
+    {
+      "topic": "lipoprotein a cardiovascular risk therapy",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:09.416Z",
+      "completedAt": "2026-03-01T04:53:10.572Z"
+    },
+    {
+      "topic": "syncope autonomic dysfunction evaluation",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:09.416Z",
+      "completedAt": "2026-03-01T04:53:10.526Z"
+    },
+    {
+      "topic": "venous insufficiency intervention outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:13.075Z",
+      "completedAt": "2026-03-01T04:53:14.170Z"
+    },
+    {
+      "topic": "sickle cell gene editing outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:13.075Z",
+      "completedAt": "2026-03-01T04:53:14.144Z"
+    },
+    {
+      "topic": "graft versus host disease steroid refractory management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:16.672Z",
+      "completedAt": "2026-03-01T04:53:17.817Z"
+    },
+    {
+      "topic": "postpartum venous thromboembolism prophylaxis",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 6,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:16.672Z",
+      "completedAt": "2026-03-01T04:53:20.576Z"
+    },
+    {
+      "topic": "polycystic ovary syndrome infertility treatment",
+      "status": "completed",
+      "articlesProcessed": 11,
+      "chunksCreated": 46,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:23.079Z",
+      "completedAt": "2026-03-01T04:53:44.634Z"
+    },
+    {
+      "topic": "pelvic organ prolapse mesh complications management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:23.079Z",
+      "completedAt": "2026-03-01T04:53:24.152Z"
+    },
+    {
+      "topic": "male lower urinary tract symptoms combination therapy",
+      "status": "completed",
+      "articlesProcessed": 41,
+      "chunksCreated": 131,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:47.137Z",
+      "completedAt": "2026-03-01T04:54:34.223Z"
+    },
+    {
+      "topic": "diabetic kidney disease finerenone outcomes",
+      "status": "completed",
+      "articlesProcessed": 22,
+      "chunksCreated": 74,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:53:47.137Z",
+      "completedAt": "2026-03-01T04:54:10.014Z"
+    },
+    {
+      "topic": "hemodialysis intradialytic hypotension management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:36.726Z",
+      "completedAt": "2026-03-01T04:54:37.805Z"
+    },
+    {
+      "topic": "liver transplant recurrent disease management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:36.726Z",
+      "completedAt": "2026-03-01T04:54:37.805Z"
+    },
+    {
+      "topic": "celiac refractory disease treatment",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:40.308Z",
+      "completedAt": "2026-03-01T04:54:41.350Z"
+    },
+    {
+      "topic": "orthopedic trauma hip fracture geriatric pathways",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:40.308Z",
+      "completedAt": "2026-03-01T04:54:41.407Z"
+    },
+    {
+      "topic": "cervical myelopathy surgical timing outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:43.909Z",
+      "completedAt": "2026-03-01T04:54:45.102Z"
+    },
+    {
+      "topic": "clubfoot ponseti method long term outcomes",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 10,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:43.909Z",
+      "completedAt": "2026-03-01T04:54:49.704Z"
+    },
+    {
+      "topic": "dermatology atopic dermatitis biologic therapy",
+      "status": "completed",
+      "articlesProcessed": 4,
+      "chunksCreated": 7,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:52.206Z",
+      "completedAt": "2026-03-01T04:54:57.117Z"
+    },
+    {
+      "topic": "dermatology pressure injury prevention outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:52.207Z",
+      "completedAt": "2026-03-01T04:54:53.307Z"
+    },
+    {
+      "topic": "otolaryngology benign paroxysmal positional vertigo recurrence prevention",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:59.620Z",
+      "completedAt": "2026-03-01T04:55:00.823Z"
+    },
+    {
+      "topic": "ophthalmology keratoconus corneal crosslinking outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:54:59.620Z",
+      "completedAt": "2026-03-01T04:55:00.825Z"
+    },
+    {
+      "topic": "interventional neuroradiology thrombectomy workflow optimization",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:03.328Z",
+      "completedAt": "2026-03-01T04:55:05.473Z"
+    },
+    {
+      "topic": "cardiothoracic surgery postoperative atrial fibrillation prevention",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:03.328Z",
+      "completedAt": "2026-03-01T04:55:04.390Z"
+    },
+    {
+      "topic": "emergency medicine triage algorithm validation",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:07.975Z",
+      "completedAt": "2026-03-01T04:55:11.329Z"
+    },
+    {
+      "topic": "critical care end of life decision support",
+      "status": "completed",
+      "articlesProcessed": 8,
+      "chunksCreated": 29,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:07.976Z",
+      "completedAt": "2026-03-01T04:55:21.802Z"
+    },
+    {
+      "topic": "occupational medicine burnout healthcare workers interventions",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:24.303Z",
+      "completedAt": "2026-03-01T04:55:25.463Z"
+    },
+    {
+      "topic": "infectious disease prosthetic joint infection suppressive therapy",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:24.303Z",
+      "completedAt": "2026-03-01T04:55:25.448Z"
+    },
+    {
+      "topic": "public health overdose prevention center outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:27.967Z",
+      "completedAt": "2026-03-01T04:55:29.142Z"
+    },
+    {
+      "topic": "health policy prior authorization impact clinical outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:27.967Z",
+      "completedAt": "2026-03-01T04:55:29.142Z"
+    },
+    {
+      "topic": "patient safety falls bundle hospital outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:31.645Z",
+      "completedAt": "2026-03-01T04:55:32.752Z"
+    },
+    {
+      "topic": "environmental health air pollution cardiovascular outcomes",
+      "status": "completed",
+      "articlesProcessed": 8,
+      "chunksCreated": 15,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:55:31.645Z",
+      "completedAt": "2026-03-01T04:55:38.425Z"
+    }
+  ],
+  "stats": {
+    "totalTopics": 62,
+    "completedTopics": 62,
+    "totalArticles": 1256,
+    "totalChunks": 3524,
+    "totalErrors": 1
+  }
+}

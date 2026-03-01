@@ -1,0 +1,62 @@
+septic shock source control
+anaphylaxis epinephrine dosing safety
+stemi reperfusion strategy
+acute hypoxemic respiratory failure management
+salicylate toxicity management
+massive transfusion protocol
+drug interactions medication safety
+chronic coronary syndrome management
+obesity surgery outcomes
+erectile dysfunction management
+alzheimer disease pharmacologic therapy
+delirium prevention hospitalized older adults
+smoking cessation pharmacotherapy
+colorectal cancer treatment
+metastatic prostate cancer androgen deprivation combinations
+multiple myeloma first line treatment
+irritable bowel syndrome treatment
+ankylosing spondylitis treatment
+pregestational diabetes pregnancy management
+acute otitis media children antibiotics
+postoperative pain multimodal analgesia
+telemedicine chronic disease outcomes
+idiopathic pulmonary fibrosis management
+infertility assisted reproductive technology outcomes
+immune thrombocytopenia treatment
+chronic pain opioid stewardship
+bone marrow transplant graft versus host disease management
+global health noncommunicable disease programs
+polygenic risk score clinical utility
+mass casualty triage protocols
+implantable cardioverter defibrillator primary prevention criteria
+coarctation of aorta adult hypertension management
+inclisiran lipid lowering effectiveness
+coronary vasospasm diagnosis management
+hypercoagulable workup unprovoked thrombosis
+myeloproliferative neoplasm thrombosis prevention
+iron deficiency without anemia treatment
+preterm premature rupture membranes management
+uterine fibroid embolization outcomes
+non muscle invasive bladder bacillus calmette guerin failure
+recurrent kidney stone pharmacologic prevention
+acid base disorders mixed metabolic respiratory interpretation
+hepatocellular carcinoma locoregional therapy sequencing
+chronic pancreatitis pain intervention outcomes
+clostridioides difficile fecal microbiota transplantation outcomes
+orthopedic trauma compartment syndrome diagnosis
+vertebral compression fracture management
+rheumatology rheumatoid arthritis remission maintenance
+dermatology acne isotretinoin safety monitoring
+burn injury grafting timing outcomes
+otolaryngology thyroid nodule risk stratification
+ophthalmology ocular trauma emergency management
+vascular surgery carotid endarterectomy versus stenting outcomes
+anesthesiology opioid free anesthesia outcomes
+emergency medicine trauma transfusion ratio outcomes
+rehabilitation medicine traumatic brain injury cognitive rehab outcomes
+toxicology carbon monoxide poisoning outcomes
+infectious disease latent tuberculosis treatment adherence
+public health food insecurity intervention health outcomes
+medical education simulation based learning clinical outcomes
+genetics whole genome sequencing neonatal intensive care outcomes
+environmental health microplastics human health evidence

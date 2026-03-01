@@ -2,8 +2,8 @@
   "summary": {
     "totalCases": 39,
     "avgResults": 8,
-    "avgTopEvidenceLevel": 1.1282051282051282,
-    "avgLatestYear": 2024.8461538461538
+    "avgTopEvidenceLevel": 1.0769230769230769,
+    "avgLatestYear": 2024.4871794871794
   },
   "results": [
     {
@@ -13,7 +13,7 @@
         "cardiology"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -24,7 +24,7 @@
         "cardiology"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -36,7 +36,7 @@
         "primary-care"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 8,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -47,9 +47,9 @@
         "cardiology"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
-      "latestYear": 2023
+      "latestYear": 2024
     },
     {
       "id": "retr-endo-t2dm",
@@ -80,7 +80,7 @@
         "endocrine"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 4,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -91,9 +91,9 @@
         "respiratory"
       ],
       "resultCount": 8,
-      "uniquePmids": 4,
-      "topEvidenceLevel": 2,
-      "latestYear": 2025
+      "uniquePmids": 2,
+      "topEvidenceLevel": 1,
+      "latestYear": 2022
     },
     {
       "id": "retr-resp-copd",
@@ -102,7 +102,7 @@
         "respiratory"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 5,
       "topEvidenceLevel": 2,
       "latestYear": 2025
     },
@@ -113,7 +113,7 @@
         "respiratory"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 4,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -125,9 +125,9 @@
         "critical-care"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
-      "topEvidenceLevel": 1,
-      "latestYear": 2025
+      "uniquePmids": 3,
+      "topEvidenceLevel": 2,
+      "latestYear": 2022
     },
     {
       "id": "retr-id-uti",
@@ -136,9 +136,9 @@
         "infectious-disease"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 4,
       "topEvidenceLevel": 1,
-      "latestYear": 2025
+      "latestYear": 2026
     },
     {
       "id": "retr-id-cap",
@@ -161,7 +161,7 @@
       ],
       "resultCount": 8,
       "uniquePmids": 5,
-      "topEvidenceLevel": 2,
+      "topEvidenceLevel": 1,
       "latestYear": 2025
     },
     {
@@ -172,7 +172,7 @@
         "emergency"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -206,7 +206,7 @@
         "psychiatry"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 4,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -217,7 +217,7 @@
         "psychiatry"
       ],
       "resultCount": 8,
-      "uniquePmids": 4,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -239,7 +239,7 @@
         "gastroenterology"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 4,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -262,7 +262,7 @@
         "endocrine"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -285,7 +285,7 @@
         "critical-care"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -309,7 +309,7 @@
         "urology"
       ],
       "resultCount": 8,
-      "uniquePmids": 4,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2024
     },
@@ -323,7 +323,7 @@
       "resultCount": 8,
       "uniquePmids": 4,
       "topEvidenceLevel": 1,
-      "latestYear": 2023
+      "latestYear": 2025
     },
     {
       "id": "retr-womens-preeclampsia",
@@ -333,9 +333,9 @@
         "obstetrics"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
-      "latestYear": 2025
+      "latestYear": 2024
     },
     {
       "id": "retr-geri-falls",
@@ -344,9 +344,9 @@
         "geriatrics"
       ],
       "resultCount": 8,
-      "uniquePmids": 2,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
-      "latestYear": 2025
+      "latestYear": 2026
     },
     {
       "id": "retr-pharm-warfarin",
@@ -355,7 +355,7 @@
         "pharmacology"
       ],
       "resultCount": 8,
-      "uniquePmids": 3,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -367,7 +367,7 @@
         "nephrology"
       ],
       "resultCount": 8,
-      "uniquePmids": 8,
+      "uniquePmids": 7,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -380,7 +380,7 @@
         "guideline-priority"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -404,9 +404,9 @@
         "guideline-priority"
       ],
       "resultCount": 8,
-      "uniquePmids": 3,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
-      "latestYear": 2025
+      "latestYear": 2023
     },
     {
       "id": "retr-clinical-sepsis-bundle",
@@ -417,9 +417,9 @@
         "guideline-priority"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
-      "topEvidenceLevel": 2,
-      "latestYear": 2025
+      "uniquePmids": 4,
+      "topEvidenceLevel": 1,
+      "latestYear": 2014
     },
     {
       "id": "retr-ortho-oa",
@@ -428,9 +428,9 @@
         "musculoskeletal"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
-      "latestYear": 2025
+      "latestYear": 2026
     },
     {
       "id": "retr-rheum-ra",

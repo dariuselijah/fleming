@@ -1,0 +1,572 @@
+{
+  "version": "1.0",
+  "startTime": "2026-03-01T04:16:18.473Z",
+  "lastUpdate": "2026-03-01T04:24:10.807Z",
+  "topics": [
+    {
+      "topic": "sepsis lactate resuscitation targets",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:18.474Z",
+      "completedAt": "2026-03-01T04:16:19.944Z"
+    },
+    {
+      "topic": "pulmonary embolism risk stratification",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:18.474Z",
+      "completedAt": "2026-03-01T04:16:20.069Z"
+    },
+    {
+      "topic": "nstemi early invasive strategy",
+      "status": "completed",
+      "articlesProcessed": 9,
+      "chunksCreated": 28,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:22.571Z",
+      "completedAt": "2026-03-01T04:16:31.946Z"
+    },
+    {
+      "topic": "hemoptysis emergency workup",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:22.571Z",
+      "completedAt": "2026-03-01T04:16:23.648Z"
+    },
+    {
+      "topic": "hyperkalemia emergency management",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 3,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:34.448Z",
+      "completedAt": "2026-03-01T04:16:38.620Z"
+    },
+    {
+      "topic": "postpartum hemorrhage emergency management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:34.448Z",
+      "completedAt": "2026-03-01T04:16:35.515Z"
+    },
+    {
+      "topic": "type 2 diabetes management",
+      "status": "completed",
+      "articlesProcessed": 25,
+      "chunksCreated": 77,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:41.122Z",
+      "completedAt": "2026-03-01T04:17:16.794Z"
+    },
+    {
+      "topic": "atrial fibrillation anticoagulation selection",
+      "status": "completed",
+      "articlesProcessed": 68,
+      "chunksCreated": 230,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:16:41.122Z",
+      "completedAt": "2026-03-01T04:18:04.239Z"
+    },
+    {
+      "topic": "metabolic dysfunction associated steatotic liver disease management",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 3,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:18:06.741Z",
+      "completedAt": "2026-03-01T04:18:10.843Z"
+    },
+    {
+      "topic": "urinary incontinence management older adults",
+      "status": "completed",
+      "articlesProcessed": 12,
+      "chunksCreated": 41,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:18:06.741Z",
+      "completedAt": "2026-03-01T04:19:12.161Z"
+    },
+    {
+      "topic": "mild cognitive impairment progression prevention",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:19:14.664Z",
+      "completedAt": "2026-03-01T04:19:15.765Z"
+    },
+    {
+      "topic": "osteoporosis fracture prevention",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:19:14.664Z",
+      "completedAt": "2026-03-01T04:19:16.742Z"
+    },
+    {
+      "topic": "alcohol use disorder outpatient management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:19:19.246Z",
+      "completedAt": "2026-03-01T04:19:20.365Z"
+    },
+    {
+      "topic": "lung cancer treatment",
+      "status": "completed",
+      "articlesProcessed": 4,
+      "chunksCreated": 16,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:19:19.246Z",
+      "completedAt": "2026-03-01T04:19:34.321Z"
+    },
+    {
+      "topic": "ovarian cancer maintenance therapy",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:19:36.824Z",
+      "completedAt": "2026-03-01T04:19:37.938Z"
+    },
+    {
+      "topic": "acute myeloid leukemia induction regimens",
+      "status": "completed",
+      "articlesProcessed": 8,
+      "chunksCreated": 14,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:19:36.824Z",
+      "completedAt": "2026-03-01T04:19:58.597Z"
+    },
+    {
+      "topic": "gastroesophageal reflux disease management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:01.098Z",
+      "completedAt": "2026-03-01T04:20:02.192Z"
+    },
+    {
+      "topic": "systemic lupus erythematosus treatment",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 4,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:01.098Z",
+      "completedAt": "2026-03-01T04:20:06.779Z"
+    },
+    {
+      "topic": "postpartum hypertension management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:09.280Z",
+      "completedAt": "2026-03-01T04:20:10.444Z"
+    },
+    {
+      "topic": "pediatric sepsis recognition treatment",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:09.280Z",
+      "completedAt": "2026-03-01T04:20:10.372Z"
+    },
+    {
+      "topic": "wound infection prevention surgery",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:12.946Z",
+      "completedAt": "2026-03-01T04:20:14.043Z"
+    },
+    {
+      "topic": "critical care ards management",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 9,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:12.946Z",
+      "completedAt": "2026-03-01T04:20:17.406Z"
+    },
+    {
+      "topic": "tuberculosis multidrug resistant treatment",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:19.907Z",
+      "completedAt": "2026-03-01T04:20:22.226Z"
+    },
+    {
+      "topic": "urogyn pelvic floor dysfunction management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:19.907Z",
+      "completedAt": "2026-03-01T04:20:22.226Z"
+    },
+    {
+      "topic": "hemophilia gene therapy outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:24.729Z",
+      "completedAt": "2026-03-01T04:20:25.823Z"
+    },
+    {
+      "topic": "opioid tapering chronic pain outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:24.729Z",
+      "completedAt": "2026-03-01T04:20:25.823Z"
+    },
+    {
+      "topic": "critical care sedation delirium protocols",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:28.324Z",
+      "completedAt": "2026-03-01T04:20:29.978Z"
+    },
+    {
+      "topic": "tropical medicine malaria severe management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:28.324Z",
+      "completedAt": "2026-03-01T04:20:29.410Z"
+    },
+    {
+      "topic": "rare disease diagnostic odyssey genomic sequencing",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:32.479Z",
+      "completedAt": "2026-03-01T04:20:33.580Z"
+    },
+    {
+      "topic": "biodefense preparedness healthcare systems",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:32.479Z",
+      "completedAt": "2026-03-01T04:20:33.580Z"
+    },
+    {
+      "topic": "hypertrophic cardiomyopathy risk stratification sudden death",
+      "status": "completed",
+      "articlesProcessed": 6,
+      "chunksCreated": 13,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:36.083Z",
+      "completedAt": "2026-03-01T04:21:15.812Z"
+    },
+    {
+      "topic": "marfan syndrome aortic root surveillance",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 6,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:20:36.083Z",
+      "completedAt": "2026-03-01T04:20:45.373Z"
+    },
+    {
+      "topic": "bempedoic acid cardiovascular outcomes",
+      "status": "completed",
+      "articlesProcessed": 8,
+      "chunksCreated": 22,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:18.315Z",
+      "completedAt": "2026-03-01T04:21:29.332Z"
+    },
+    {
+      "topic": "microvascular angina treatment options",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 6,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:18.315Z",
+      "completedAt": "2026-03-01T04:21:25.134Z"
+    },
+    {
+      "topic": "antiphospholipid syndrome pregnancy management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:31.836Z",
+      "completedAt": "2026-03-01T04:21:32.936Z"
+    },
+    {
+      "topic": "polycythemia vera treatment strategy",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 3,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:31.836Z",
+      "completedAt": "2026-03-01T04:21:35.461Z"
+    },
+    {
+      "topic": "anemia of inflammation management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:37.972Z",
+      "completedAt": "2026-03-01T04:21:39.102Z"
+    },
+    {
+      "topic": "fetal growth restriction surveillance protocols",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:37.972Z",
+      "completedAt": "2026-03-01T04:21:40.103Z"
+    },
+    {
+      "topic": "hysteroscopic myomectomy fertility outcomes",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 10,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:42.606Z",
+      "completedAt": "2026-03-01T04:21:48.775Z"
+    },
+    {
+      "topic": "upper tract urothelial carcinoma management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:42.606Z",
+      "completedAt": "2026-03-01T04:21:43.730Z"
+    },
+    {
+      "topic": "cystinuria long term management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:51.277Z",
+      "completedAt": "2026-03-01T04:21:52.444Z"
+    },
+    {
+      "topic": "renal tubular acidosis management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:51.277Z",
+      "completedAt": "2026-03-01T04:21:52.410Z"
+    },
+    {
+      "topic": "hepatocellular carcinoma transplant criteria outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:54.947Z",
+      "completedAt": "2026-03-01T04:21:56.003Z"
+    },
+    {
+      "topic": "exocrine pancreatic insufficiency enzyme dosing outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:54.947Z",
+      "completedAt": "2026-03-01T04:21:56.051Z"
+    },
+    {
+      "topic": "antimicrobial stewardship in transplant populations",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:58.553Z",
+      "completedAt": "2026-03-01T04:21:59.631Z"
+    },
+    {
+      "topic": "anterior cruciate ligament reconstruction graft selection outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:21:58.553Z",
+      "completedAt": "2026-03-01T04:21:59.738Z"
+    },
+    {
+      "topic": "osteomyelitis chronic management",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:02.240Z",
+      "completedAt": "2026-03-01T04:22:03.332Z"
+    },
+    {
+      "topic": "rheumatology lupus flare prediction biomarkers",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:02.240Z",
+      "completedAt": "2026-03-01T04:22:03.359Z"
+    },
+    {
+      "topic": "dermatology rosacea treatment algorithms",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:05.862Z",
+      "completedAt": "2026-03-01T04:22:06.966Z"
+    },
+    {
+      "topic": "plastic surgery microsurgical flap outcomes",
+      "status": "completed",
+      "articlesProcessed": 3,
+      "chunksCreated": 11,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:05.862Z",
+      "completedAt": "2026-03-01T04:22:12.369Z"
+    },
+    {
+      "topic": "otolaryngology thyroid cancer neck dissection outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:14.871Z",
+      "completedAt": "2026-03-01T04:22:15.915Z"
+    },
+    {
+      "topic": "neurosurgery glioblastoma treatment sequencing",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:14.871Z",
+      "completedAt": "2026-03-01T04:22:15.960Z"
+    },
+    {
+      "topic": "vascular surgery peripheral bypass graft patency outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:18.463Z",
+      "completedAt": "2026-03-01T04:22:19.524Z"
+    },
+    {
+      "topic": "anesthesiology regional anesthesia complication rates",
+      "status": "completed",
+      "articlesProcessed": 27,
+      "chunksCreated": 80,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:18.463Z",
+      "completedAt": "2026-03-01T04:22:48.692Z"
+    },
+    {
+      "topic": "prehospital medicine out of hospital cardiac arrest outcomes",
+      "status": "completed",
+      "articlesProcessed": 2,
+      "chunksCreated": 6,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:51.195Z",
+      "completedAt": "2026-03-01T04:23:12.355Z"
+    },
+    {
+      "topic": "rehabilitation medicine chronic pain interdisciplinary rehab outcomes",
+      "status": "completed",
+      "articlesProcessed": 22,
+      "chunksCreated": 75,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:22:51.195Z",
+      "completedAt": "2026-03-01T04:23:30.264Z"
+    },
+    {
+      "topic": "toxicology snakebite antivenom outcomes",
+      "status": "completed",
+      "articlesProcessed": 4,
+      "chunksCreated": 14,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:23:32.767Z",
+      "completedAt": "2026-03-01T04:23:57.340Z"
+    },
+    {
+      "topic": "infectious disease sexually transmitted infection partner therapy outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:23:32.767Z",
+      "completedAt": "2026-03-01T04:23:33.937Z"
+    },
+    {
+      "topic": "public health homelessness healthcare models outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:23:59.843Z",
+      "completedAt": "2026-03-01T04:24:01.048Z"
+    },
+    {
+      "topic": "medical education interprofessional education outcomes",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 4,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:23:59.843Z",
+      "completedAt": "2026-03-01T04:24:04.600Z"
+    },
+    {
+      "topic": "genetics hereditary cancer panel clinical utility",
+      "status": "completed",
+      "articlesProcessed": 1,
+      "chunksCreated": 4,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:24:07.102Z",
+      "completedAt": "2026-03-01T04:24:10.807Z"
+    },
+    {
+      "topic": "climate health heat vulnerability intervention outcomes",
+      "status": "completed",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T04:24:07.102Z",
+      "completedAt": "2026-03-01T04:24:08.171Z"
+    }
+  ],
+  "stats": {
+    "totalTopics": 62,
+    "completedTopics": 62,
+    "totalArticles": 216,
+    "totalChunks": 679,
+    "totalErrors": 0
+  }
+}

@@ -447,12 +447,14 @@ You have access to ${citations.length} peer-reviewed medical evidence sources. Y
    - Format: [1], [2], [3] for single citations
    - Format: [1,2,3] for multiple citations supporting the same claim
    - Format: [1-3] for ranges (use sparingly)
+   - Citation density target: **at least one citation per factual sentence** whenever evidence is available
    
 2. **DO NOT make claims without citations** - If you cannot cite it, say "This information is not available in the provided sources"
 
 3. **CITE IMMEDIATELY after each claim**, not at the end of paragraphs
    - ✅ CORRECT: "ACE inhibitors reduce mortality [1]. They are first-line therapy [2]."
    - ❌ WRONG: "ACE inhibitors reduce mortality. They are first-line therapy. [1,2]"
+   - ❌ WRONG: "First-hour sepsis care includes blood cultures, lactate, broad-spectrum antibiotics, and fluids [1]" (multiple independent claims, only one citation)
 
 4. **PRIORITIZE HIGH EVIDENCE**: Weight meta-analyses (Level 1) and RCTs (Level 2) more heavily than lower-quality studies
 
@@ -480,6 +482,7 @@ ${citations.map(c => `[${c.index}] ${c.title} (${c.journal}, ${c.year || 'n.d.'}
 ### REMINDER: 
 - Every medical fact needs a citation [X]
 - Multiple facts need multiple citations [X,Y,Z]
+- If you make 5 factual claims, you should usually have ~5 citation placements
 - If you cannot cite it, say so explicitly
 - DO NOT invent citations or use citations that don't exist
 

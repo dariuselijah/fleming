@@ -1,0 +1,570 @@
+{
+  "version": "1.0",
+  "startTime": "2026-03-01T03:41:18.350Z",
+  "lastUpdate": "2026-03-01T03:41:18.351Z",
+  "topics": [
+    {
+      "topic": "acute coronary syndrome",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "crushing chest pain emergency management",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "acute ischemic stroke treatment",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "sepsis treatment bundle",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "septic shock vasopressor management",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "septic shock source control",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "sepsis lactate resuscitation targets",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "adult abdominal pain workup emergency",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "acute appendicitis diagnostic strategy",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "acute pancreatitis early management",
+      "status": "processing",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0,
+      "startedAt": "2026-03-01T03:41:18.351Z"
+    },
+    {
+      "topic": "upper gastrointestinal bleeding emergency management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "lower gastrointestinal bleeding management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "subarachnoid hemorrhage emergency care",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "intracerebral hemorrhage blood pressure management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "status epilepticus emergency treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acute meningitis empiric therapy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "anaphylaxis emergency treatment adults",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "anaphylaxis epinephrine dosing safety",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "pulmonary embolism risk stratification",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "deep vein thrombosis acute treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acute aortic syndrome diagnosis",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acute heart failure emergency management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hypertensive emergency treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "cardiogenic shock management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "ventricular tachycardia emergency treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "bradycardia acute management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "atrial fibrillation rapid ventricular response emergency",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "syncope high risk evaluation",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acute coronary syndrome antiplatelet strategy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "stemi reperfusion strategy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "nstemi early invasive strategy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "stroke thrombectomy selection",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "stroke thrombolysis contraindications",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "transient ischemic attack high risk workup",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "severe asthma exacerbation emergency",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "copd exacerbation noninvasive ventilation",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "community acquired pneumonia severe criteria",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "healthcare associated pneumonia empiric therapy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "influenza severe disease treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "covid 19 severe disease treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acute respiratory distress syndrome ventilation",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acute hypoxemic respiratory failure management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hemoptysis emergency workup",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "spontaneous pneumothorax acute management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "aspiration pneumonia treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "necrotizing soft tissue infection management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "cellulitis severe management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "infective endocarditis empiric treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "bacteremia source investigation",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "neutropenic fever emergency management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "toxic alcohol ingestion management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "opioid overdose naloxone protocol",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "acetaminophen overdose management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "salicylate toxicity management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hyperkalemia emergency management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hyponatremia acute symptomatic management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "diabetic ketoacidosis emergency management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hyperosmolar hyperglycemic state management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "adrenal crisis emergency treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "thyroid storm management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "heat stroke emergency treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hypothermia rewarming protocols",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "major trauma initial management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "traumatic brain injury acute care",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "cervical spine trauma evaluation",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "massive transfusion protocol",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "postpartum hemorrhage emergency management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "ectopic pregnancy emergency care",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "community acquired pneumonia treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "copd exacerbation treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "asthma treatment step up",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "pulmonary embolism diagnosis treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "hypertension treatment",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "heart failure therapy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "atrial fibrillation management",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "anticoagulation therapy",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "urinary tract infection antibiotic",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    },
+    {
+      "topic": "drug interactions medication safety",
+      "status": "pending",
+      "articlesProcessed": 0,
+      "chunksCreated": 0,
+      "errors": 0
+    }
+  ],
+  "stats": {
+    "totalTopics": 78,
+    "completedTopics": 0,
+    "totalArticles": 0,
+    "totalChunks": 0,
+    "totalErrors": 0
+  }
+}

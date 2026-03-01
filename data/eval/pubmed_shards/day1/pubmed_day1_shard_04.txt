@@ -1,0 +1,62 @@
+sepsis treatment bundle
+acute meningitis empiric therapy
+syncope high risk evaluation
+covid 19 severe disease treatment
+opioid overdose naloxone protocol
+traumatic brain injury acute care
+anticoagulation therapy
+heart failure preserved ejection fraction management
+diabetic foot ulcer prevention
+benign prostatic hyperplasia medical treatment
+post traumatic stress disorder treatment
+frailty interventions geriatrics
+aspirin primary prevention risk benefit
+metabolic syndrome management
+small cell lung cancer treatment
+bladder cancer non muscle invasive management
+crohn disease biologic therapy optimization
+rheumatoid arthritis biologic therapy
+preeclampsia severe features management
+pediatric bronchiolitis treatment
+enhanced recovery after surgery protocols
+precision medicine oncology
+cystic fibrosis modulator therapy
+maternal sepsis management
+hypercalcemia malignancy management
+spinal muscular atrophy treatment
+transplant heart allograft vasculopathy prevention
+social determinants screening healthcare outcomes
+remote patient monitoring heart failure
+climate change heat illness healthcare response
+electrophysiology ventricular tachycardia ablation strategy
+fontan circulation long term complications
+familial hypercholesterolemia cascade screening outcomes
+postural orthostatic tachycardia syndrome treatment
+deep venous thrombosis catheter directed thrombolysis
+thalassemia iron chelation optimization
+transfusion medicine massive transfusion outcomes
+placenta accreta spectrum management
+endometriosis fertility preservation
+urologic oncology bladder preservation protocols
+testosterone replacement infertility risk counseling
+hyponatremia outpatient chronic management
+home hemodialysis clinical outcomes
+pancreatic cyst surveillance intervals outcomes
+microscopic colitis management
+orthopedic trauma pelvic fracture hemorrhage control
+degenerative disc disease nonoperative management
+developmental dysplasia hip screening outcomes
+dermatology psoriasis psoriatic arthritis overlap treatment
+burn injury fluid resuscitation protocols
+otolaryngology meniere disease management
+ophthalmology dry eye disease treatment algorithms
+interventional neuroradiology aneurysm flow diversion outcomes
+anesthesiology difficult airway management algorithms
+emergency medicine point of care ultrasound outcomes
+rehabilitation medicine stroke telerehab outcomes
+toxicology synthetic opioid exposure management
+infectious disease outpatient parenteral antibiotic therapy outcomes
+public health suicide prevention interventions effectiveness
+health policy medication affordability interventions outcomes
+patient safety pressure injury prevention bundle outcomes
+environmental health wildfire smoke respiratory outcomes

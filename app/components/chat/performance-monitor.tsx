@@ -92,14 +92,14 @@ export function PerformanceMonitor() {
         variant="outline"
         size="sm"
         onClick={() => setIsVisible(!isVisible)}
-        className="fixed bottom-4 right-4 z-50"
+        className="fixed right-4 bottom-4 z-50 hidden md:flex"
       >
         <TimerIcon className="w-4 h-4 mr-2" />
         Performance
       </Button>
 
       {isVisible && (
-        <Card className="fixed bottom-20 right-4 w-96 z-50 max-h-96 overflow-y-auto">
+        <Card className="fixed right-4 bottom-20 z-50 hidden max-h-96 w-96 overflow-y-auto md:block">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <LightningIcon className="w-4 h-4" />

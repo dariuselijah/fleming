@@ -1,0 +1,62 @@
+sepsis lactate resuscitation targets
+pulmonary embolism risk stratification
+nstemi early invasive strategy
+hemoptysis emergency workup
+hyperkalemia emergency management
+postpartum hemorrhage emergency management
+type 2 diabetes management
+atrial fibrillation anticoagulation selection
+metabolic dysfunction associated steatotic liver disease management
+urinary incontinence management older adults
+mild cognitive impairment progression prevention
+osteoporosis fracture prevention
+alcohol use disorder outpatient management
+lung cancer treatment
+ovarian cancer maintenance therapy
+acute myeloid leukemia induction regimens
+gastroesophageal reflux disease management
+systemic lupus erythematosus treatment
+postpartum hypertension management
+pediatric sepsis recognition treatment
+wound infection prevention surgery
+critical care ards management
+tuberculosis multidrug resistant treatment
+urogyn pelvic floor dysfunction management
+hemophilia gene therapy outcomes
+opioid tapering chronic pain outcomes
+critical care sedation delirium protocols
+tropical medicine malaria severe management
+rare disease diagnostic odyssey genomic sequencing
+biodefense preparedness healthcare systems
+hypertrophic cardiomyopathy risk stratification sudden death
+marfan syndrome aortic root surveillance
+bempedoic acid cardiovascular outcomes
+microvascular angina treatment options
+antiphospholipid syndrome pregnancy management
+polycythemia vera treatment strategy
+anemia of inflammation management
+fetal growth restriction surveillance protocols
+hysteroscopic myomectomy fertility outcomes
+upper tract urothelial carcinoma management
+cystinuria long term management
+renal tubular acidosis management
+hepatocellular carcinoma transplant criteria outcomes
+exocrine pancreatic insufficiency enzyme dosing outcomes
+antimicrobial stewardship in transplant populations
+anterior cruciate ligament reconstruction graft selection outcomes
+osteomyelitis chronic management
+rheumatology lupus flare prediction biomarkers
+dermatology rosacea treatment algorithms
+plastic surgery microsurgical flap outcomes
+otolaryngology thyroid cancer neck dissection outcomes
+neurosurgery glioblastoma treatment sequencing
+vascular surgery peripheral bypass graft patency outcomes
+anesthesiology regional anesthesia complication rates
+prehospital medicine out of hospital cardiac arrest outcomes
+rehabilitation medicine chronic pain interdisciplinary rehab outcomes
+toxicology snakebite antivenom outcomes
+infectious disease sexually transmitted infection partner therapy outcomes
+public health homelessness healthcare models outcomes
+medical education interprofessional education outcomes
+genetics hereditary cancer panel clinical utility
+climate health heat vulnerability intervention outcomes

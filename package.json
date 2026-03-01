@@ -11,6 +11,7 @@
     "ingest": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts",
     "ingest:recommended": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --high-evidence",
     "ingest:dry-run": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --dry-run",
+    "ingest:make-shards": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/generate-pubmed-shards.ts",
     "ingest:scale": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed-scale.ts",
     "ingest:bulk": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed-bulk.ts",
     "ingest:guidelines": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-guidelines.ts",

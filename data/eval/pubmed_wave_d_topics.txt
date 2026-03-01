@@ -1,0 +1,105 @@
+rare disease guideline update
+emerging infectious disease management
+long covid treatment
+precision medicine oncology
+pharmacogenomics clinical implementation
+telemedicine chronic disease outcomes
+critical care ards management
+perioperative care complications prevention
+post marketing drug safety surveillance
+clinical decision support implementation
+adult congenital heart disease management
+cardio oncology surveillance protocols
+pulmonary hypertension targeted therapy
+interstitial lung disease antifibrotic therapy
+bronchiectasis long term management
+cystic fibrosis modulator therapy
+sleep apnea cpap adherence outcomes
+idiopathic pulmonary fibrosis management
+tuberculosis multidrug resistant treatment
+non tuberculous mycobacterial disease management
+hiv antiretroviral therapy optimization
+hiv pre exposure prophylaxis outcomes
+hepatitis b antiviral treatment
+hepatitis c direct acting antivirals outcomes
+clostridioides difficile recurrence prevention
+antimicrobial stewardship implementation hospitals
+hospital acquired infection prevention bundles
+maternal sepsis management
+fertility preservation oncology
+infertility assisted reproductive technology outcomes
+urogyn pelvic floor dysfunction management
+chronic pelvic pain multidisciplinary management
+endocrine resistant thyroid cancer targeted therapy
+pituitary adenoma management
+primary hyperparathyroidism surgical indications
+adrenal incidentaloma workup
+pheochromocytoma perioperative management
+electrolyte disorders refractory management
+hyponatremia syndrome of inappropriate adh management
+hypercalcemia malignancy management
+hematology thrombocytopenia workup
+immune thrombocytopenia treatment
+hemophilia gene therapy outcomes
+sickle cell disease disease modifying therapy
+thalassemia management transfusion complications
+venous thromboembolism cancer associated thrombosis
+antiphospholipid syndrome anticoagulation
+autoimmune encephalitis diagnosis treatment
+myasthenia gravis immunotherapy
+amyotrophic lateral sclerosis multidisciplinary care
+huntington disease symptomatic management
+spinal muscular atrophy treatment
+neuromuscular disease rehabilitation outcomes
+chronic pain opioid stewardship
+opioid tapering chronic pain outcomes
+interventional pain procedures comparative effectiveness
+sports medicine tendon injury management
+concussion return to play protocols
+rehabilitation stroke recovery interventions
+amputation rehabilitation prosthetics outcomes
+burn care long term outcomes
+transplant kidney immunosuppression optimization
+transplant liver rejection management
+transplant heart allograft vasculopathy prevention
+solid organ transplant infection prophylaxis
+bone marrow transplant graft versus host disease management
+critical care sedation delirium protocols
+extracorporeal membrane oxygenation outcomes
+renal replacement therapy critical illness
+nutrition critical care outcomes
+palliative care early integration oncology
+serious illness communication interventions
+end of life symptom management
+home based primary care outcomes
+health equity intervention effectiveness
+social determinants screening healthcare outcomes
+rural health telemedicine implementation
+global health noncommunicable disease programs
+tropical medicine malaria severe management
+dengue severe disease management
+chikungunya long term outcomes
+zika pregnancy outcomes
+antimicrobial resistance surveillance methods
+machine learning diagnostic support validation
+large language model clinical workflow safety
+digital therapeutics chronic disease outcomes
+wearable biosensor monitoring clinical outcomes
+remote patient monitoring heart failure
+genomic screening population health outcomes
+polygenic risk score clinical utility
+rare disease diagnostic odyssey genomic sequencing
+orphan drug effectiveness real world evidence
+vaccine hesitancy intervention outcomes
+maternal mortality reduction interventions
+pediatric rare disease treatment access
+adolescent substance use prevention
+workplace health intervention outcomes
+occupational lung disease management
+environmental exposure health outcomes
+climate change heat illness healthcare response
+disaster medicine surge response systems
+mass casualty triage protocols
+biodefense preparedness healthcare systems
+radiation exposure medical management
+poison control systems effectiveness

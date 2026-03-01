@@ -203,7 +203,7 @@ export function ChatInput({
   const isMedicalStudent = preferences.userRole === "medical_student"
   const isDoctor = preferences.userRole === "doctor"
   const showClinicianWorkflowPanel =
-    isDoctor && !hasMessages && clinicianMode !== "open_search"
+    isDoctor && clinicianMode !== "open_search"
   const shouldShowInlineSuggestions =
     isDoctor &&
     !hasMessages &&

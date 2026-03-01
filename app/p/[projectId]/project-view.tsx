@@ -100,6 +100,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
   const {
     messages,
     input,
+    append,
     handleSubmit,
     status,
     reload,
@@ -325,6 +326,69 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     clinicianMode,
   ])
 
+  const handleClinicianSuggestion = useCallback(
+    async (suggestion: string) => {
+      setIsSubmitting(true)
+      setEvidenceCitations([])
+
+      if (!user?.id) {
+        setIsSubmitting(false)
+        return
+      }
+
+      try {
+        const ensuredChatId = await ensureChatExists(user.id)
+        if (!ensuredChatId) return
+
+        if (suggestion.length > MESSAGE_MAX_LENGTH) {
+          toast({
+            title: `The message you submitted was too long, please submit something shorter. (Max ${MESSAGE_MAX_LENGTH} characters)`,
+            status: "error",
+          })
+          return
+        }
+
+        append(
+          { role: "user", content: suggestion },
+          {
+            body: {
+              chatId: ensuredChatId,
+              userId: user.id,
+              model: selectedModel,
+              isAuthenticated: true,
+              systemPrompt: getSystemPromptByRole(preferences?.userRole),
+              enableSearch,
+              enableEvidence: shouldForceEvidence,
+              learningMode,
+              clinicianMode,
+            },
+          }
+        )
+
+        if (messages.length > 0) {
+          bumpChat(ensuredChatId)
+        }
+      } catch {
+        toast({ title: "Failed to send message", status: "error" })
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    [
+      append,
+      bumpChat,
+      clinicianMode,
+      enableSearch,
+      ensureChatExists,
+      learningMode,
+      messages.length,
+      preferences?.userRole,
+      selectedModel,
+      shouldForceEvidence,
+      user,
+    ]
+  )
+
   const handleReload = useCallback(async () => {
     if (!user?.id) {
       return
@@ -380,7 +444,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
   const chatInputProps = useMemo(
     () => ({
       value: input,
-      onSuggestion: () => {},
+      onSuggestion: handleClinicianSuggestion,
       onValueChange: handleInputChange,
       onSend: submit,
       isSubmitting,
@@ -403,6 +467,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     }),
     [
       input,
+      handleClinicianSuggestion,
       handleInputChange,
       submit,
       isSubmitting,
