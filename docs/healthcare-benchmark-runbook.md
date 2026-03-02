@@ -57,6 +57,12 @@ npm run benchmark:healthcare:report -- --retrieval data/eval/retrieval_release_r
 npm run benchmark:healthcare
 ```
 
+Set external dataset path explicitly for full runs:
+
+```bash
+EXTERNAL_BENCH_INPUT=data/eval/external/normalized/healthcare_external_release.json npm run benchmark:healthcare
+```
+
 This runs:
 
 1. Internal strict release benchmarks

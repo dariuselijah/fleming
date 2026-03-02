@@ -541,6 +541,17 @@ export function useChatCore({
     },
     // Optimize for streaming performance
     onFinish: async (message) => {
+      // CRITICAL: Restore evidence citations from stream body when headers were stripped (e.g. in production)
+      const annotations = (message as { annotations?: Array<{ type?: string; citations?: unknown[] }> }).annotations
+      if (annotations && Array.isArray(annotations)) {
+        const evidencePart = annotations.find((a) => a?.type === 'evidence-citations' && Array.isArray(a.citations))
+        if (evidencePart?.citations && evidencePart.citations.length > 0) {
+          const citations = evidencePart.citations as any[]
+          setEvidenceCitations(citations)
+          console.log(`📚 [EVIDENCE] Restored ${citations.length} citations from stream body (message.annotations)`)
+        }
+      }
+
       // CRITICAL: Save all messages when streaming completes
       // Use the real chatId (not temp) if available
       const realChatId = chatId && !chatId.startsWith('temp-chat-') ? chatId : currentChatIdForSavingRef.current
@@ -549,7 +560,15 @@ export function useChatCore({
           const { setMessages: saveMessagesToDb } = await import("@/lib/chat-store/messages/api")
           // CRITICAL: Get evidence citations from ref, or try sessionStorage as fallback
           let citationsToSave = evidenceCitationsRef.current.length > 0 ? evidenceCitationsRef.current : undefined
-          
+
+          // Fallback 0: Use citations we just restored from message.annotations above
+          if (!citationsToSave && annotations && Array.isArray(annotations)) {
+            const evidencePart = annotations.find((a) => a?.type === 'evidence-citations' && Array.isArray(a.citations))
+            if (evidencePart?.citations?.length) {
+              citationsToSave = evidencePart.citations as any[]
+            }
+          }
+
           // Fallback 1: Check sessionStorage if ref is empty
           if (!citationsToSave && typeof window !== 'undefined') {
             try {

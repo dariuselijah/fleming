@@ -17,7 +17,13 @@ import {
   type SourceProvenance,
 } from "@/lib/evidence/provenance"
 import { Attachment } from "@ai-sdk/ui-utils"
-import { Message as MessageAISDK, streamText, ToolSet, tool } from "ai"
+import {
+  Message as MessageAISDK,
+  streamText,
+  ToolSet,
+  tool,
+  createDataStreamResponse,
+} from "ai"
 import { z } from "zod"
 import {
   incrementMessageCount,
@@ -1506,78 +1512,87 @@ export async function POST(req: Request) {
       'Connection': 'keep-alive',
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
-      // CRITICAL: Expose custom header to JavaScript
+      // CRITICAL: Expose custom header to JavaScript (kept for local/dev; production often strips custom headers)
       'Access-Control-Expose-Headers': 'X-Evidence-Citations',
     }
-    
-          // Add evidence citations to headers for frontend rendering
-          // CRITICAL: Only send citations if evidence mode is enabled
-          // Send all retrieved citations initially - frontend will filter to referenced ones after parsing response
-          // CRITICAL: Use capturedEvidenceContext to ensure we have the right context
-          if (finalEnableEvidence) {
-            const contextForHeaders = capturedEvidenceContext || evidenceContext
-            if (contextForHeaders?.context?.citations && contextForHeaders.context.citations.length > 0) {
-              try {
-                const guidelinePriority = benchStrictMode || hasGuidelineIntent(queryText)
-                const strictCitationFloor = benchStrictMode ? STRICT_MIN_CITATION_FLOOR : 6
-                const rankedHeaderPool = rankCitationsForQuery(
-                  contextForHeaders.context.citations,
-                  queryText,
-                  { guidelinePriority }
-                )
-                let curatedHeaderSelection = filterLowRelevanceCitations(
-                  rankedHeaderPool,
-                  queryText,
-                  benchStrictMode ? strictCitationFloor : 6
-                )
-                if (benchStrictMode) {
-                  curatedHeaderSelection = ensureCitationFloor(
-                    curatedHeaderSelection,
-                    rankedHeaderPool,
-                    strictCitationFloor
-                  )
-                }
-                if (guidelinePriority) {
-                  curatedHeaderSelection = ensureGuidelineCitations(
-                    curatedHeaderSelection,
-                    rankedHeaderPool,
-                    STRICT_MIN_GUIDELINE_CITATIONS
-                  )
-                }
-                const curatedHeaderCitations = dedupeAndReindexCitations(
-                  curatedHeaderSelection
-                ).slice(0, 12)
-                console.log(`📚 [HEADERS] Adding ${curatedHeaderCitations.length} curated citations to response headers`)
-                const encodedHeader = encodeEvidenceCitationsHeader(
-                  curatedHeaderCitations
-                )
-                if (encodedHeader) {
-                  responseHeaders["X-Evidence-Citations"] = encodedHeader
-                  console.log(
-                    `📚 EVIDENCE MODE: Sending ${curatedHeaderCitations.length} citations to client (header bytes=${encodedHeader.length})`
-                  )
-                } else {
-                  console.warn(
-                    "📚 [HEADERS] Skipping X-Evidence-Citations: could not fit within safe header size"
-                  )
-                }
-              } catch (e) {
-                console.error('Failed to encode evidence citations:', e)
-              }
-            } else {
-              console.log(`📚 [HEADERS] No citations to add to headers (contextForHeaders: ${!!contextForHeaders})`)
-            }
-          } else {
-            console.log(`📚 [HEADERS] Evidence mode is OFF - not sending citations in headers`)
+
+    // Citations to send in the stream body so they are not stripped by production proxies
+    let evidenceCitationsForStream: EvidenceCitation[] = []
+
+    if (finalEnableEvidence) {
+      const contextForHeaders = capturedEvidenceContext || evidenceContext
+      if (contextForHeaders?.context?.citations && contextForHeaders.context.citations.length > 0) {
+        try {
+          const guidelinePriority = benchStrictMode || hasGuidelineIntent(queryText)
+          const strictCitationFloor = benchStrictMode ? STRICT_MIN_CITATION_FLOOR : 6
+          const rankedHeaderPool = rankCitationsForQuery(
+            contextForHeaders.context.citations,
+            queryText,
+            { guidelinePriority }
+          )
+          let curatedHeaderSelection = filterLowRelevanceCitations(
+            rankedHeaderPool,
+            queryText,
+            benchStrictMode ? strictCitationFloor : 6
+          )
+          if (benchStrictMode) {
+            curatedHeaderSelection = ensureCitationFloor(
+              curatedHeaderSelection,
+              rankedHeaderPool,
+              strictCitationFloor
+            )
           }
-    
-    return result.toDataStreamResponse({
-      sendReasoning: true,
-      sendSources: true,
-      // Optimize streaming response
+          if (guidelinePriority) {
+            curatedHeaderSelection = ensureGuidelineCitations(
+              curatedHeaderSelection,
+              rankedHeaderPool,
+              STRICT_MIN_GUIDELINE_CITATIONS
+            )
+          }
+          const curatedHeaderCitations = dedupeAndReindexCitations(
+            curatedHeaderSelection
+          ).slice(0, 12)
+          evidenceCitationsForStream = curatedHeaderCitations
+          console.log(`📚 [STREAM] Adding ${curatedHeaderCitations.length} curated citations to stream body (production-safe)`)
+          const encodedHeader = encodeEvidenceCitationsHeader(
+            curatedHeaderCitations
+          )
+          if (encodedHeader) {
+            responseHeaders["X-Evidence-Citations"] = encodedHeader
+            console.log(
+              `📚 EVIDENCE MODE: Sending ${curatedHeaderCitations.length} citations (header + stream body)`
+            )
+          } else {
+            console.warn(
+              "📚 [HEADERS] Skipping X-Evidence-Citations: could not fit within safe header size"
+            )
+          }
+        } catch (e) {
+          console.error('Failed to encode evidence citations:', e)
+        }
+      } else {
+        console.log(`📚 [HEADERS] No citations to add (contextForHeaders: ${!!contextForHeaders})`)
+      }
+    } else {
+      console.log(`📚 [HEADERS] Evidence mode is OFF - not sending citations`)
+    }
+
+    return createDataStreamResponse({
+      status: 200,
       headers: responseHeaders,
-      getErrorMessage: (error: unknown) => {
-        console.error("Error forwarded to client:", error)
+      execute: (writer) => {
+        if (evidenceCitationsForStream.length > 0) {
+          writer.writeMessageAnnotation(
+            { type: 'evidence-citations', citations: evidenceCitationsForStream } as unknown as Parameters<typeof writer.writeMessageAnnotation>[0]
+          )
+        }
+        result.mergeIntoDataStream(writer, {
+          sendReasoning: true,
+          sendSources: true,
+        })
+      },
+      onError: (error: unknown) => {
+        console.error("Stream error:", error)
         return extractErrorMessage(error)
       },
     })

@@ -6,7 +6,7 @@
     "accuracy": 1,
     "answeredRate": 1,
     "citationMarkerRate": 0.8333333333333334,
-    "avgCitationCoverage": 0.33434829059829063,
+    "avgCitationCoverage": 0.3668803418803419,
     "perSuite": {
       "medqa_usmle": {
         "total": 2,
@@ -14,7 +14,7 @@
         "correct": 2,
         "accuracy": 1,
         "citationMarkerRate": 1,
-        "avgCitationCoverage": 0.28846153846153844
+        "avgCitationCoverage": 0.475
       },
       "pubmedqa": {
         "total": 2,
@@ -30,7 +30,7 @@
         "correct": 2,
         "accuracy": 1,
         "citationMarkerRate": 1,
-        "avgCitationCoverage": 0.38125
+        "avgCitationCoverage": 0.2923076923076923
       }
     },
     "perCategory": {
@@ -40,7 +40,7 @@
         "correct": 1,
         "accuracy": 1,
         "citationMarkerRate": 1,
-        "avgCitationCoverage": 0.5
+        "avgCitationCoverage": 0.75
       },
       "infectious_disease": {
         "total": 1,
@@ -48,7 +48,7 @@
         "correct": 1,
         "accuracy": 1,
         "citationMarkerRate": 1,
-        "avgCitationCoverage": 0.07692307692307693
+        "avgCitationCoverage": 0.2
       },
       "nephrology": {
         "total": 1,
@@ -72,7 +72,7 @@
         "correct": 1,
         "accuracy": 1,
         "citationMarkerRate": 1,
-        "avgCitationCoverage": 0.5625
+        "avgCitationCoverage": 0.38461538461538464
       },
       "primary_care": {
         "total": 1,
@@ -93,9 +93,9 @@
       "expected": "B",
       "predicted": "B",
       "isCorrect": true,
-      "responseText": "For a patient with **heart failure with reduced ejection fraction (HFrEF)** who remains symptomatic on an **ACE inhibitor** and **beta-blocker**, guideline-directed medical therapy (GDMT) now includes additional agents proven to reduce mortality.\n\n**Key Recommendation**  \nSGLT2 inhibitors (e.g., dapagliflozin or empagliflozin) are recommended as a class to add next, as they reduce major adverse cardiovascular events (MACE), including cardiovascular death and heart failure hospitalization, across broad HFrEF populations regardless of diabetes status [1,4,6].  \nThis is supported by high-level evidence from meta-analyses and RCTs showing consistent benefits [1,7,9].\n\n**Why Not the Others?**  \n- **Loop diuretics** (Option A): Primarily for symptom relief in congestion; no mortality benefit in chronic HFrEF [3].  \n- **Digoxin** (Option C): May reduce hospitalizations but does not improve survival in HFrEF.  \n- **Nitrate monotherapy** (Option D): Not guideline-recommended as monotherapy for mortality reduction; limited to specific cases like African American patients on hydralazine-nitrate combination.\n\nCurrent guidelines (e.g., 2022 AHA/ACC/HFSA) endorse SGLT2 inhibitors as a foundational pillar of GDMT alongside ACE inhibitors/ARNI, beta-blockers, and MRAs for mortality risk reduction in symptomatic HFrEF [1,5,7].\n\nAnswer: B",
-      "citationMarkers": 4,
-      "citationCoverage": 0.5
+      "responseText": "SGLT2 inhibitors are now a cornerstone of guideline-directed medical therapy (GDMT) for HFrEF, recommended for addition after ACE inhibitor (or ARNI) and beta-blocker to reduce mortality and hospitalizations, irrespective of diabetes status [1,4].\n\nThis is supported by high-level evidence showing significant reductions in cardiovascular death and heart failure events [1,6].\n\nOther options like loop diuretics address symptoms but not mortality [3]; digoxin has limited mortality benefit [2]; and nitrate monotherapy lacks broad mortality reduction evidence in this context [5].\n\nAnswer: B",
+      "citationMarkers": 5,
+      "citationCoverage": 0.75
     },
     {
       "id": "medqa-sample-2",
@@ -105,9 +105,9 @@
       "expected": "A",
       "predicted": "A",
       "isCorrect": true,
-      "responseText": "**Nitrofurantoin is the preferred first-line oral antibiotic for uncomplicated cystitis in non-pregnant women when local resistance patterns support its use.**\n\nThis recommendation aligns with major guidelines, which prioritize agents with low resistance rates and minimal collateral damage.\n\n**Key guideline recommendations:**\n- **IDSA 2010 Guidelines**: Nitrofurantoin (100 mg twice daily for 5 days) is a first-line option due to high efficacy (93% clinical success) and low E. coli resistance (<1% in many regions) [from pubmedLookup on PMID 21292654].\n- **ACP Best Practice Advice (2021)**: Short-course nitrofurantoin is favored for uncomplicated UTIs to reduce overuse, with 5-day duration showing comparable outcomes to longer courses [4].\n- Other first-line options include trimethoprim-sulfamethoxazole (if local resistance <20%) or fosfomycin, but nitrofurantoin is often preferred for its narrow spectrum and oral availability.\n\n**Why not the other options?**\n- **Linezolid (B)**: Reserved for resistant gram-positive infections like VRE or MRSA; not indicated for typical E. coli cystitis [no supporting evidence in sources].\n- **Vancomycin (C)**: Primarily IV for severe gram-positive infections; oral form is for C. difficile, not UTIs [no supporting evidence in sources].\n- **Meropenem (D)**: Broad-spectrum IV carbapenem for complicated or hospitalized cases; not oral or first-line for uncomplicated cystitis [no supporting evidence in sources].\n\nLocal resistance testing is key—confirm <20% for alternatives like TMP-SMX. If symptoms persist or worsen, seek re-evaluation.\n\nAnswer: A",
-      "citationMarkers": 1,
-      "citationCoverage": 0.07692307692307693
+      "responseText": "That's a straightforward question on managing uncomplicated cystitis, which is a common lower urinary tract infection in otherwise healthy, non-pregnant women.\n\nBased on current guidelines, the preferred first-line oral antibiotic is **nitrofurantoin** when local E. coli resistance rates are below 20% [from standard IDSA recommendations, though not directly in provided sources; supported by broader evidence on short-course therapy for common infections [4]].\n\nThe other options are not appropriate:\n- **Linezolid**: Reserved for resistant gram-positive infections like VRE or MRSA, not first-line for UTI.\n- **Vancomycin**: Primarily IV for severe infections; oral form is for C. difficile, not systemic UTI.\n- **Meropenem**: An IV carbapenem for complicated or resistant cases, not oral or first-line for uncomplicated cystitis.\n\nNitrofurantoin (100 mg orally twice daily for 5 days) offers good efficacy, low resistance, and minimal collateral damage to gut flora [4].\n\nIf resistance patterns differ locally, alternatives like TMP-SMX or fosfomycin may be considered, but among the choices, A is best.\n\nAnswer: A",
+      "citationMarkers": 2,
+      "citationCoverage": 0.2
     },
     {
       "id": "pubmedqa-sample-1",
@@ -117,8 +117,8 @@
       "expected": "yes",
       "predicted": "yes",
       "isCorrect": true,
-      "responseText": "Yes, SGLT2 inhibitors reduce the risk of kidney disease progression in adults with type 2 diabetes and chronic kidney disease (CKD).\n\nMultiple meta-analyses of randomized controlled trials demonstrate consistent renal benefits. For instance, SGLT2 inhibitors lower the hazard ratio for primary renal outcomes, including progression to kidney failure, by 31% (HR 0.69, 95% CI 0.61-0.79) in patients with CKD, with or without type 2 diabetes [7]. They also provide the most consistent renal protection compared to other antidiabetic agents, with dapagliflozin showing the greatest efficacy in reducing eGFR decline and end-stage kidney disease [1].\n\nReal-world observational data further supports a 46% lower risk of kidney failure events versus other glucose-lowering drugs (HR 0.54, 95% CI 0.50-0.59) in type 2 diabetes populations [5]. Benefits extend across CKD stages, including reduced albuminuria progression and slower eGFR decline [1,3].\n\n**Key caveats:** Effects are strongest in earlier CKD stages (e.g., eGFR >20 mL/min/1.73 m²), with dose adjustments needed for advanced CKD [1,7]. No significant differences by diabetes status in some analyses [7].\n\nAnswer: yes",
-      "citationMarkers": 6,
+      "responseText": "SGLT2 inhibitors have been extensively studied in adults with type 2 diabetes and chronic kidney disease (CKD), showing consistent benefits on renal outcomes.\n\nKey evidence includes:\n\n- A network meta-analysis of 80,670 patients found SGLT2 inhibitors provided the most consistent renal protection, with dapagliflozin showing greatest efficacy in reducing kidney disease progression and canagliflozin strongly reducing albuminuria [1].\n- In real-world observational studies (1,494,373 patients), SGLT2 inhibitors were associated with a 46% lower risk of kidney failure events compared to other glucose-lowering drugs (HR 0.54) [5].\n- A meta-analysis of 14 RCTs (n not specified) reported a 31% reduction in the primary renal outcome, including progression to kidney failure, across CKD stages with or without type 2 diabetes (HR 0.69, 95% CI 0.61-0.79) [7].\n\nThese findings align with broader meta-analyses indicating reduced progression to kidney failure and slower albuminuria worsening in this population [1,5,7].\n\nAnswer: yes",
+      "citationMarkers": 4,
       "citationCoverage": 0.6666666666666666
     },
     {
@@ -129,7 +129,7 @@
       "expected": "no",
       "predicted": "no",
       "isCorrect": true,
-      "responseText": "No, routine antibiotic treatment is not recommended for all children with acute otitis media (AOM) regardless of age or severity.\n\nGuidelines differentiate management based on risk factors, severity, and age. For healthy children over 6 months with mild, unilateral AOM, watchful waiting for 48-72 hours is advised, with symptomatic relief and close follow-up, as many cases resolve without antibiotics [Italian intersociety consensus, 2025].\n\nImmediate antibiotics (e.g., high-dose amoxicillin) are recommended for severe AOM (e.g., high fever, severe otalgia), bilateral AOM in young infants (<6 months), or high-risk children (e.g., immunocompromised) to reduce complications [Italian intersociety consensus, 2025; NICE guideline, 2022].\n\nThis approach promotes antibiotic stewardship, reducing overuse while addressing bacterial cases effectively [European guidelines appraisal, 2021].\n\nAnswer: no",
+      "responseText": "Guidelines from the American Academy of Pediatrics (AAP) do not recommend routine antibiotic treatment for all children with acute otitis media (AOM), as management depends on age, severity, and other factors [PMID: 23439909]. \n\nFor nonsevere AOM in children ≥2 years, observation without antibiotics is an option if follow-up is ensured, to promote antibiotic stewardship and reduce resistance [PMID: 23439909]. \n\nAntibiotics (e.g., amoxicillin) are recommended for severe cases, children <2 years with bilateral AOM, or those at higher risk, but not universally [PMID: 23439909]. \n\nEuropean and other national guidelines similarly support selective use, emphasizing observation in lower-risk scenarios [PMID: 32371515].\n\nAnswer: no",
       "citationMarkers": 0,
       "citationCoverage": 0
     },
@@ -141,9 +141,9 @@
       "expected": "B",
       "predicted": "B",
       "isCorrect": true,
-      "responseText": "I'm sorry to hear about the suspected stroke—this is a medical emergency where every minute counts.\n\n**Key Immediate Recommendation**  \nFor suspected ischemic stroke with symptom onset within 90 minutes, the primary goal is rapid evaluation and potential reperfusion therapy to minimize brain damage [1]. Delays in activation of emergency services increase prehospital time and reduce eligibility for time-sensitive treatments like thrombolysis [4,5,6].\n\n**Why This Matters**  \n- Acute ischemic stroke requires immediate transport to a stroke-capable facility for imaging and intervention [1].  \n- Prehospital notification via emergency medical services (EMS) can significantly shorten door-to-needle times for thrombolytic therapy [5].  \n- Factors like delayed EMS activation are associated with worse outcomes, including longer onset-to-treatment intervals [6].  \n\n**Evaluating Options**  \n- **A. Outpatient MRI in 1 week**: This delays critical imaging and treatment, which is contraindicated in acute stroke [1,3].  \n- **B. Call emergency services and activate stroke pathway**: This is the evidence-based first step to enable rapid triage, imaging (CT preferred initially), and potential reperfusion [1,2,4].  \n- **C. Start oral aspirin at home and monitor**: Aspirin is not recommended acutely without ruling out hemorrhage; home monitoring risks irreversible damage [1].  \n- **D. Delay treatment until deficits persist >24h**: This ignores the time-sensitive nature of stroke, where early intervention improves outcomes [1,3].  \n\nCall 911 now to activate the stroke pathway and get to the nearest stroke center immediately.\n\nAnswer: B",
-      "citationMarkers": 9,
-      "citationCoverage": 0.5625
+      "responseText": "I'm glad you're reviewing this important topic on acute stroke management. For suspected ischemic stroke with symptoms starting just 90 minutes ago, the priority is rapid evaluation to enable potential reperfusion therapies like thrombolysis, as delays worsen outcomes.\n\n### Key Recommendation\nThe evidence strongly supports immediate activation of emergency services to expedite hospital arrival and stroke team involvement. This reduces prehospital delays and increases chances of timely treatment [1,4,5].\n\n### Why Not the Other Options?\n- **A. Outpatient MRI in 1 week**: This delays critical imaging and intervention; non-contrast CT or MRI should occur urgently upon arrival to rule out hemorrhage before therapy [1,3].\n- **C. Start oral aspirin at home and monitor**: Antiplatelet therapy like aspirin is not recommended acutely without imaging to exclude hemorrhage; it's for secondary prevention post-evaluation [1].\n- **D. Delay treatment until deficits persist >24h**: Waiting exacerbates ischemic damage; \"time is brain,\" with treatment windows as short as 4.5 hours for IV thrombolysis [1].\n\nFactors like EMS activation are key to minimizing delays, with studies showing reduced door-to-needle times when prehospital protocols are engaged [2,5,6].\n\nAnswer: B",
+      "citationMarkers": 5,
+      "citationCoverage": 0.38461538461538464
     },
     {
       "id": "mmlu-clinical-sample-2",
@@ -153,7 +153,7 @@
       "expected": "A",
       "predicted": "A",
       "isCorrect": true,
-      "responseText": "Thiazide diuretics are a recommended first-line class for uncomplicated essential hypertension, alongside ACE inhibitors, ARBs, and calcium channel blockers [1].\n\nThe other options are not indicated for hypertension management:\n- **Class Ic antiarrhythmics** (e.g., flecainide) are used for cardiac arrhythmias, not blood pressure control.\n- **Systemic corticosteroids** treat inflammatory conditions and can actually worsen hypertension.\n- **Proton pump inhibitors** manage acid-related gastrointestinal issues, with no role in hypertension.\n\nAnswer: A",
+      "responseText": "Thiazide diuretics are a recommended first-line class for uncomplicated essential hypertension, alongside ACE inhibitors, ARBs, and calcium channel blockers [1].\n\nThe other options are not indicated for hypertension management:\n- **Class Ic antiarrhythmics** (e.g., flecainide) are used for cardiac arrhythmias, not blood pressure control.\n- **Systemic corticosteroids** treat inflammatory conditions but can worsen hypertension.\n- **Proton pump inhibitors** manage acid-related gastrointestinal issues.\n\nAnswer: A",
       "citationMarkers": 1,
       "citationCoverage": 0.2
     }
