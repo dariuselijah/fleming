@@ -19,10 +19,17 @@
     "check-env": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-env.ts",
     "eval:evidence": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/eval-evidence.ts",
     "benchmark:chat": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/benchmark-chat.ts",
+    "benchmark:chat:strict": "BENCH_STRICT_MODE=true npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/benchmark-chat.ts --user-role doctor --bench-strict true --retries 2 --timeout-ms 90000 --base-url http://127.0.0.1:3000",
+    "benchmark:external:prepare": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/prepare-external-healthcare-benchmarks.ts",
+    "benchmark:external": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/benchmark-external-healthcare.ts",
+    "benchmark:external:check": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-external-benchmarks.ts",
+    "benchmark:healthcare:report": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/generate-healthcare-benchmark-report.ts",
+    "benchmark:healthcare": "BENCH_STRICT_MODE=true npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-healthcare-benchmarks.ts",
     "benchmark:check": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-benchmark-thresholds.ts",
     "benchmark:report": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/generate-benchmark-report.ts",
     "benchmark:release-check": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-release-benchmarks.ts",
-    "benchmark:release": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts"
+    "benchmark:release": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts",
+    "benchmark:release:strict": "BENCH_STRICT_MODE=true npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.10",

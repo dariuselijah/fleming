@@ -3,7 +3,7 @@
     "totalCases": 39,
     "avgResults": 8,
     "avgTopEvidenceLevel": 1.0769230769230769,
-    "avgLatestYear": 2024.4871794871794
+    "avgLatestYear": 2024.4102564102564
   },
   "results": [
     {
@@ -13,7 +13,7 @@
         "cardiology"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -36,7 +36,7 @@
         "primary-care"
       ],
       "resultCount": 8,
-      "uniquePmids": 8,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -47,7 +47,7 @@
         "cardiology"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 7,
       "topEvidenceLevel": 1,
       "latestYear": 2024
     },
@@ -102,7 +102,7 @@
         "respiratory"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 6,
       "topEvidenceLevel": 2,
       "latestYear": 2025
     },
@@ -136,9 +136,9 @@
         "infectious-disease"
       ],
       "resultCount": 8,
-      "uniquePmids": 4,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
-      "latestYear": 2026
+      "latestYear": 2025
     },
     {
       "id": "retr-id-cap",
@@ -148,7 +148,7 @@
         "respiratory"
       ],
       "resultCount": 8,
-      "uniquePmids": 4,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -160,7 +160,7 @@
         "gastroenterology"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -172,7 +172,7 @@
         "emergency"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -239,7 +239,7 @@
         "gastroenterology"
       ],
       "resultCount": 8,
-      "uniquePmids": 4,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -309,7 +309,7 @@
         "urology"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 5,
       "topEvidenceLevel": 1,
       "latestYear": 2024
     },
@@ -333,7 +333,7 @@
         "obstetrics"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2024
     },
@@ -344,7 +344,7 @@
         "geriatrics"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2026
     },
@@ -367,7 +367,7 @@
         "nephrology"
       ],
       "resultCount": 8,
-      "uniquePmids": 7,
+      "uniquePmids": 6,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -406,7 +406,7 @@
       "resultCount": 8,
       "uniquePmids": 5,
       "topEvidenceLevel": 1,
-      "latestYear": 2023
+      "latestYear": 2021
     },
     {
       "id": "retr-clinical-sepsis-bundle",
@@ -439,7 +439,7 @@
         "musculoskeletal"
       ],
       "resultCount": 8,
-      "uniquePmids": 6,
+      "uniquePmids": 7,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     },
@@ -450,7 +450,7 @@
         "dermatology"
       ],
       "resultCount": 8,
-      "uniquePmids": 5,
+      "uniquePmids": 7,
       "topEvidenceLevel": 1,
       "latestYear": 2025
     }

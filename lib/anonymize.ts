@@ -75,6 +75,14 @@ const REPLACEMENTS = {
   medicalIdentifier: "[MEDICAL_ID_REDACTED]",
 };
 
+function extractReplaceCallbackContext(args: unknown[]): { offset: number; source: string } {
+  const maybeOffset = args.at(-2);
+  const maybeSource = args.at(-1);
+  const offset = typeof maybeOffset === "number" ? maybeOffset : 0;
+  const source = typeof maybeSource === "string" ? maybeSource : "";
+  return { offset, source };
+}
+
 /**
  * Anonymize a single text string by removing PII
  */
@@ -121,10 +129,12 @@ export function anonymizeText(text: string): string {
   // Remove common names (be conservative - only remove if clearly a name)
   for (const pattern of NAME_PATTERNS) {
     // Only replace if it looks like a name in context (capitalized, not part of medical terms)
-    anonymized = anonymized.replace(pattern, (match, offset, string) => {
+    anonymized = anonymized.replace(pattern, (...args: unknown[]) => {
+      const match = String(args[0] ?? "");
+      const { offset, source } = extractReplaceCallbackContext(args);
       // Check if it's at the start of sentence or after common name prefixes
-      const before = string.substring(Math.max(0, offset - 20), offset)
-      const after = string.substring(offset + match.length, Math.min(string.length, offset + match.length + 20))
+      const before = source.substring(Math.max(0, offset - 20), offset);
+      const after = source.substring(offset + match.length, Math.min(source.length, offset + match.length + 20));
       
       // If it's clearly a name context (after "I am", "My name is", "Patient:", etc.)
       if (/^(I am|My name is|Patient|Name|Called|Known as)/i.test(before.trim()) ||
@@ -143,8 +153,10 @@ export function anonymizeText(text: string): string {
 
   // Remove dates (but be careful with medical dates - only remove if clearly PII)
   // We'll be conservative and only remove dates that look like birth dates or personal dates
-  anonymized = anonymized.replace(PII_PATTERNS.date, (match, offset, string) => {
-    const context = string.substring(Math.max(0, offset - 30), Math.min(string.length, offset + match.length + 30)).toLowerCase()
+  anonymized = anonymized.replace(PII_PATTERNS.date, (...args: unknown[]) => {
+    const match = String(args[0] ?? "");
+    const { offset, source } = extractReplaceCallbackContext(args);
+    const context = source.substring(Math.max(0, offset - 30), Math.min(source.length, offset + match.length + 30)).toLowerCase()
     
     // If it's clearly a birth date or personal date context
     if (/(born|birth|dob|date of birth|age|years old|since)/i.test(context)) {
@@ -161,8 +173,10 @@ export function anonymizeText(text: string): string {
   })
 
   // Remove years that might be birth years (1900-2010 range, in personal contexts)
-  anonymized = anonymized.replace(PII_PATTERNS.year, (match, offset, string) => {
-    const context = string.substring(Math.max(0, offset - 30), Math.min(string.length, offset + match.length + 30)).toLowerCase()
+  anonymized = anonymized.replace(PII_PATTERNS.year, (...args: unknown[]) => {
+    const match = String(args[0] ?? "");
+    const { offset, source } = extractReplaceCallbackContext(args);
+    const context = source.substring(Math.max(0, offset - 30), Math.min(source.length, offset + match.length + 30)).toLowerCase()
     const year = parseInt(match)
     
     // If it's a birth year in personal context

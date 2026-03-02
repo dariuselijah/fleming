@@ -1,0 +1,23 @@
+{
+  "overall": {
+    "minimumCases": 50,
+    "minAccuracy": 0.55,
+    "minAnsweredRate": 0.95,
+    "minCitationMarkerRate": 0.5
+  },
+  "suites": {
+    "medqa_usmle": {
+      "minimumCases": 20,
+      "minAccuracy": 0.55
+    },
+    "pubmedqa": {
+      "minimumCases": 20,
+      "minAccuracy": 0.6,
+      "minCitationMarkerRate": 0.6
+    },
+    "mmlu_clinical": {
+      "minimumCases": 20,
+      "minAccuracy": 0.5
+    }
+  }
+}

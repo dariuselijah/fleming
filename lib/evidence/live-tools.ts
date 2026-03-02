@@ -1,6 +1,6 @@
 import { buildProvenance, type SourceProvenance } from "./provenance";
 import { searchGuidelineAdapters } from "./guidelines/registry";
-import type { GuidelineResult } from "./guidelines/types";
+import type { GuidelineRegion, GuidelineResult } from "./guidelines/types";
 
 type ClinicalTrialResult = {
   nctId: string;
@@ -61,6 +61,29 @@ function normalizeDrugLookupCandidates(drugName: string): string[] {
   )
 }
 
+function normalizeGuidelineQuery(query: string): string {
+  return query.replace(/\s+/g, " ").trim();
+}
+
+function buildGuidelineQueryVariants(query: string): string[] {
+  const normalized = normalizeGuidelineQuery(query);
+  if (!normalized) return [];
+  const lower = normalized.toLowerCase();
+  const variants = new Set<string>([normalized]);
+
+  if (!/\bguideline|recommendation|consensus|statement\b/i.test(lower)) {
+    variants.add(`${normalized} guideline`)
+  }
+  if (!/\bevidence|evidence-based\b/i.test(lower)) {
+    variants.add(`${normalized} evidence based recommendations`)
+  }
+  if (!/\bpractice\b/i.test(lower)) {
+    variants.add(`${normalized} clinical practice guideline`)
+  }
+
+  return Array.from(variants).slice(0, 4);
+}
+
 export async function searchEuropePmcGuidelines(
   query: string,
   maxResults: number = 5
@@ -79,13 +102,37 @@ export async function searchNiceGuidelines(
 
 export async function searchGuidelines(
   query: string,
-  maxResults: number = 6
+  maxResults: number = 6,
+  regionPriority: GuidelineRegion = "US"
 ): Promise<{ results: GuidelineResult[]; sourcesUsed: string[]; provenance: SourceProvenance[] }> {
-  const { results: merged, sourcesUsed } = await searchGuidelineAdapters(
-    query,
-    maxResults,
-    "US"
-  )
+  const queryVariants = buildGuidelineQueryVariants(query);
+  const regionsToTry: GuidelineRegion[] = Array.from(
+    new Set<GuidelineRegion>([regionPriority, "US", "GLOBAL", "UK", "EU"])
+  );
+  const mergedByKey = new Map<string, GuidelineResult>();
+  const sources = new Set<string>();
+
+  for (const variant of queryVariants) {
+    if (mergedByKey.size >= maxResults) break;
+    for (const region of regionsToTry) {
+      if (mergedByKey.size >= maxResults) break;
+      const remaining = Math.max(maxResults - mergedByKey.size, 2);
+      const { results, sourcesUsed } = await searchGuidelineAdapters(
+        variant,
+        Math.min(Math.max(remaining, maxResults), 12),
+        region
+      );
+      sourcesUsed.forEach(source => sources.add(source));
+      results.forEach(item => {
+        const key = `${item.url || ""}|${item.title.toLowerCase()}`;
+        if (!mergedByKey.has(key) && mergedByKey.size < maxResults) {
+          mergedByKey.set(key, item);
+        }
+      });
+    }
+  }
+
+  const merged = Array.from(mergedByKey.values()).slice(0, maxResults);
   const provenance = merged.map((item, idx) =>
     buildProvenance({
       id: `guideline_${idx + 1}`,
@@ -104,7 +151,7 @@ export async function searchGuidelines(
     })
   );
 
-  return { results: merged, sourcesUsed, provenance };
+  return { results: merged, sourcesUsed: Array.from(sources), provenance };
 }
 
 export async function searchClinicalTrials(

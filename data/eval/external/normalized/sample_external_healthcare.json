@@ -1,0 +1,80 @@
+[
+  {
+    "id": "medqa-sample-1",
+    "suite": "medqa_usmle",
+    "question": "A 63-year-old with HFrEF has persistent symptoms despite ACE inhibitor and beta-blocker. Which medication class is now guideline-directed for mortality reduction?",
+    "options": {
+      "A": "Loop diuretic",
+      "B": "SGLT2 inhibitor",
+      "C": "Digoxin",
+      "D": "Nitrate monotherapy"
+    },
+    "correctAnswer": "B",
+    "category": "cardiology"
+  },
+  {
+    "id": "medqa-sample-2",
+    "suite": "medqa_usmle",
+    "question": "Which first-line oral option is preferred for uncomplicated cystitis in non-pregnant women when local resistance patterns support use?",
+    "options": {
+      "A": "Nitrofurantoin",
+      "B": "Linezolid",
+      "C": "Vancomycin",
+      "D": "Meropenem"
+    },
+    "correctAnswer": "A",
+    "category": "infectious_disease"
+  },
+  {
+    "id": "pubmedqa-sample-1",
+    "suite": "pubmedqa",
+    "question": "Do SGLT2 inhibitors reduce risk of kidney disease progression in adults with type 2 diabetes and CKD?",
+    "options": {
+      "yes": "Yes",
+      "no": "No",
+      "maybe": "Maybe"
+    },
+    "correctAnswer": "yes",
+    "category": "nephrology",
+    "context": "Meta-analyses and large randomized trials suggest reduced progression to kidney failure and lower albuminuria progression."
+  },
+  {
+    "id": "pubmedqa-sample-2",
+    "suite": "pubmedqa",
+    "question": "Is routine antibiotic treatment recommended for all children with acute otitis media regardless of age or severity?",
+    "options": {
+      "yes": "Yes",
+      "no": "No",
+      "maybe": "Maybe"
+    },
+    "correctAnswer": "no",
+    "category": "pediatrics",
+    "context": "Guidelines support observation in selected lower-risk children and immediate antibiotics in higher-risk scenarios."
+  },
+  {
+    "id": "mmlu-clinical-sample-1",
+    "suite": "mmlu_clinical",
+    "question": "For suspected ischemic stroke with symptom onset 90 minutes ago, which is the key immediate recommendation?",
+    "options": {
+      "A": "Outpatient MRI in 1 week",
+      "B": "Call emergency services and activate stroke pathway",
+      "C": "Start oral aspirin at home and monitor",
+      "D": "Delay treatment until deficits persist >24h"
+    },
+    "correctAnswer": "B",
+    "category": "neurology"
+  },
+  {
+    "id": "mmlu-clinical-sample-2",
+    "suite": "mmlu_clinical",
+    "question": "Which blood pressure class is commonly first-line for uncomplicated essential hypertension?",
+    "options": {
+      "A": "Thiazide diuretic",
+      "B": "Class Ic antiarrhythmic",
+      "C": "Systemic corticosteroid",
+      "D": "Proton pump inhibitor"
+    },
+    "correctAnswer": "A",
+    "category": "primary_care"
+  }
+]

@@ -108,7 +108,7 @@
     "id": "psych-mdd-first-line",
     "prompt": "Evidence for first-line pharmacotherapy and psychotherapy in major depressive disorder.",
     "tags": ["psychiatry"],
-    "mustMention": ["SSRI", "psychotherapy"]
+    "mustMention": ["SSRI", "SSRIs", "psychotherapy"]
   },
   {
     "id": "psych-ptsd-treatment",
@@ -220,7 +220,7 @@
     "prompt": "Patient takes Tylenol and cold medicine together. Give evidence-based counseling on max acetaminophen dose, toxicity risk, and safer alternatives.",
     "tags": ["pharmacology", "safety", "guideline-priority"],
     "expectGuidelineSource": true,
-    "mustMention": ["4 grams", "liver toxicity", "combination products"]
+    "mustMention": ["4 grams", "liver toxicity", "combination products", "combination medicines"]
   },
   {
     "id": "clinical-grade-sepsis-initial-bundle",

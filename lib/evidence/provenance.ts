@@ -166,7 +166,7 @@ export function evaluateProvenanceQuality(
   let score = 0;
 
   const overlap = computeQueryOverlapScore(provenance, queryText);
-  const overlapThreshold = provenance.sourceType === "guideline" ? 0.15 : 0.2;
+  const overlapThreshold = provenance.sourceType === "guideline" ? 0.2 : 0.24;
   if (overlap >= overlapThreshold) {
     score += 0.35;
   } else {
@@ -201,8 +201,8 @@ export function evaluateProvenanceQuality(
 
   const minScoreThreshold =
     provenance.sourceType === "guideline" || provenance.sourceType === "pubmed"
-      ? 0.48
-      : 0.55;
+      ? 0.52
+      : 0.58;
   const hasBlockingReason = reasons.includes("unsupported_evidence_strength");
   const passed = score >= minScoreThreshold && !hasBlockingReason;
   return { passed, score: Number(score.toFixed(2)), reasons };

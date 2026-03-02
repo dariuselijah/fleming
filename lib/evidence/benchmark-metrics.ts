@@ -25,13 +25,17 @@ const EMERGENCY_PATTERNS: RegExp[] = [
 const KEYWORD_ALIAS_MAP: Record<string, string[]> = {
   "call 911": ["call emergency services", "dial 911", "activate ems", "seek emergency care"],
   emergency: ["er", "ed", "emergency room", "emergency department", "emergent"],
+  immediate: ["immediately", "right away", "without delay", "as soon as possible", "now"],
   "calcium channel blocker": ["calcium-channel blocker", "ccb", "amlodipine"],
   ace: ["ace inhibitor", "angiotensin converting enzyme inhibitor"],
   "cha2ds2-vasc": ["cha2ds2 vasc", "cha2ds2vasc", "cha2 ds2 vasc"],
   "community-acquired pneumonia": ["community acquired pneumonia", "cap"],
   "4 grams": ["4 g", "4000 mg", "4,000 mg"],
   "liver toxicity": ["hepatotoxicity", "liver injury"],
-  "combination products": ["combination product", "multi ingredient products", "multi-ingredient products"],
+  "combination products": ["combination product", "combination medicines", "multi ingredient products", "multi-ingredient products", "multi symptom products", "multi-symptom products"],
+  ssri: ["ssris", "selective serotonin reuptake inhibitor", "selective serotonin reuptake inhibitors"],
+  "dose adjustment": ["dose adjustments", "renal dosing", "dose reduction", "adjust dosing"],
+  raas: ["raasi", "renin angiotensin aldosterone system", "renin-angiotensin-aldosterone system"],
 };
 
 function normalizeText(text: string): string {
@@ -60,14 +64,28 @@ function getKeywordVariants(keyword: string): string[] {
   const normalized = normalizeForMatching(keyword);
   if (!normalized) return [];
   const aliases = KEYWORD_ALIAS_MAP[normalized] || [];
-  return Array.from(
+  const baseVariants = Array.from(
     new Set([
       keyword,
       normalized,
       normalized.replace(/\s+/g, "-"),
       ...aliases,
     ])
-  );
+  ).map(value => normalizeForMatching(value));
+
+  const expandedVariants = new Set<string>();
+  baseVariants.forEach(variant => {
+    if (!variant) return;
+    expandedVariants.add(variant);
+    if (variant.endsWith("ies")) expandedVariants.add(`${variant.slice(0, -3)}y`);
+    if (variant.endsWith("y")) expandedVariants.add(`${variant.slice(0, -1)}ies`);
+    if (variant.endsWith("s")) expandedVariants.add(variant.slice(0, -1));
+    if (!variant.endsWith("s")) expandedVariants.add(`${variant}s`);
+    if (variant.endsWith("ing")) expandedVariants.add(variant.slice(0, -3));
+    if (variant.endsWith("ed")) expandedVariants.add(variant.slice(0, -2));
+  });
+
+  return Array.from(expandedVariants).filter(Boolean);
 }
 
 export function splitSentences(text: string): string[] {

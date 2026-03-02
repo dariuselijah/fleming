@@ -33,6 +33,8 @@ async function getServerClient(): Promise<SupabaseClientType | null> {
 const DEFAULT_MEDICAL_CONFIDENCE = 0.35;
 const MAX_FALLBACK_TOKENS = 6;
 const DEFAULT_CANDIDATE_MULTIPLIER = 6;
+const MIN_CITABLE_KEYWORD_OVERLAP = 0.18;
+const MIN_CITABLE_RESULTS_FLOOR = 6;
 const US_GUIDELINE_ORG_PATTERN =
   /\b(aha|acc|acp|ada|acog|aafp|cdc|nih|idsa|nccn|uspstf|sccm|ats)\b/i;
 const HIGH_AUTHORITY_STUDY_TYPE_PATTERN =
@@ -221,8 +223,9 @@ function rerankResults(query: string, results: MedicalEvidenceResult[]): Medical
     const baseScore = typeof result.score === 'number' ? result.score : 0;
     const usFirstBoost = computeUsFirstEvidenceBoost(result);
     const citationWorthinessBoost = computeCitationWorthinessBoost(result);
+    const lowOverlapPenalty = overlapScore < 0.12 ? -0.3 : 0;
     const combinedScore =
-      baseScore + overlapScore * 0.35 + usFirstBoost + citationWorthinessBoost;
+      baseScore + overlapScore * 0.55 + usFirstBoost + citationWorthinessBoost + lowOverlapPenalty;
 
     return {
       ...result,
@@ -231,6 +234,28 @@ function rerankResults(query: string, results: MedicalEvidenceResult[]): Medical
   });
 
   return scored.sort((a, b) => b.score - a.score);
+}
+
+function filterLowRelevanceResults(
+  query: string,
+  results: MedicalEvidenceResult[],
+  maxResults: number
+): MedicalEvidenceResult[] {
+  if (results.length === 0) return results;
+  const scored = results.map(result => {
+    const overlap = computeKeywordOverlapScore(
+      query,
+      `${result.title || ''} ${result.content || ''} ${result.journal_name || ''}`
+    );
+    return { result, overlap };
+  });
+
+  const filtered = scored
+    .filter(item => item.overlap >= MIN_CITABLE_KEYWORD_OVERLAP)
+    .map(item => item.result);
+
+  const minimumKeepCount = Math.min(maxResults, MIN_CITABLE_RESULTS_FLOOR);
+  return filtered.length >= minimumKeepCount ? filtered : results;
 }
 
 async function fallbackKeywordSearch(
@@ -361,12 +386,14 @@ export async function searchMedicalEvidence(
     console.warn('[Evidence Search] Hybrid search failed, using fallback:', error.message);
     const fallbackResults = await fallbackKeywordSearch(supabaseClient, options, candidateCount);
     const rerankedFallback = enableRerank ? rerankResults(query, fallbackResults) : fallbackResults;
-    return rerankedFallback.slice(0, maxResults);
+    const relevanceFilteredFallback = filterLowRelevanceResults(query, rerankedFallback, maxResults);
+    return relevanceFilteredFallback.slice(0, maxResults);
   }
 
   const results = (data || []) as MedicalEvidenceResult[];
   const reranked = enableRerank ? rerankResults(query, results) : results;
-  return reranked.slice(0, maxResults);
+  const relevanceFiltered = filterLowRelevanceResults(query, reranked, maxResults);
+  return relevanceFiltered.slice(0, maxResults);
 }
 
 /**

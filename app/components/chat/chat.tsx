@@ -510,31 +510,20 @@ export function Chat() {
     }
   }, [chatId, isMounted])
 
-  const isDoctorWorkflowOnboarding =
-    showOnboarding &&
-    preferences.userRole === "doctor" &&
-    clinicianMode !== "open_search"
-
   return (
     <>
       <div className={cn(
         "relative flex h-full w-full flex-col",
-        showOnboarding
-          ? isDoctorWorkflowOnboarding
-            ? "items-center justify-start overflow-y-auto pt-4 pb-6"
-            : "items-center justify-center"
-          : "justify-end"
+        showOnboarding ? "items-center justify-center" : "justify-end"
       )}>
         {showOnboarding ? (
           <>
-            {!isDoctorWorkflowOnboarding && (
-              <div className="text-center mb-8">
-                <h1 className="text-3xl font-medium tracking-tight">
-                  What&apos;s on your mind?
-                </h1>
-              </div>
-            )}
-            <div className={cn("w-full max-w-3xl", isDoctorWorkflowOnboarding ? "px-2" : "")}>
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-medium tracking-tight">
+                What&apos;s on your mind?
+              </h1>
+            </div>
+            <div className="w-full max-w-3xl">
               <ChatInput {...chatInputProps} />
             </div>
           </>
