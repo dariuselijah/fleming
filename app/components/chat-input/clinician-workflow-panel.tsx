@@ -53,7 +53,7 @@ export function ClinicianWorkflowPanel({
   const [liverDisease, setLiverDisease] = useState("")
 
   const baseShell =
-    "rounded-3xl border border-border/50 bg-muted/25 p-4 sm:p-6 max-h-[70dvh] overflow-y-auto overscroll-contain md:max-h-none md:overflow-visible"
+    "min-w-0 w-full max-w-full rounded-3xl border border-border/50 bg-muted/25 p-4 sm:p-6 max-h-[70dvh] overflow-y-auto overscroll-contain md:max-h-none md:overflow-visible"
   const panelCard = "rounded-2xl border border-border/60 bg-background/80 shadow-xs"
 
   const submit = useCallback(
@@ -375,7 +375,7 @@ export function ClinicianWorkflowPanel({
               </Badge>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
               <div className="space-y-1">
                 <Label>Age</Label>
                 <Input value={age} onChange={(e) => setAge(e.target.value)} placeholder="Type age" />

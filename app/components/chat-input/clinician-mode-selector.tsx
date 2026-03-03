@@ -36,9 +36,12 @@ export function ClinicianModeSelector({
   onChange,
 }: ClinicianModeSelectorProps) {
   return (
-    <div className="mb-2">
-      <div className="overflow-x-auto px-1">
-        <div className="bg-muted/60 inline-flex min-w-max rounded-full p-1">
+    <div className="mb-2 w-full">
+      <div
+        className="overflow-x-auto overflow-y-hidden px-1 pb-1 -mb-1"
+        style={{ WebkitOverflowScrolling: "touch" }}
+      >
+        <div className="bg-muted/60 inline-flex min-w-max rounded-full p-1 gap-0.5 sm:gap-0">
           {MODE_OPTIONS.map((mode) => {
             const isActive = mode.id === value
             const Icon = mode.icon
@@ -50,13 +53,13 @@ export function ClinicianModeSelector({
                 variant="ghost"
                 onClick={() => onChange(mode.id)}
                 className={cn(
-                  "rounded-full px-3 whitespace-nowrap transition-all",
+                  "rounded-full px-2.5 py-1.5 sm:px-3 flex items-center gap-1.5 whitespace-nowrap transition-all text-xs sm:text-sm shrink-0 touch-manipulation",
                   isActive
                     ? "bg-background text-foreground shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <Icon className="size-3.5" />
+                <Icon className="size-3 sm:size-3.5 shrink-0" />
                 {CLINICIAN_MODE_LABELS[mode.id]}
               </Button>
             )

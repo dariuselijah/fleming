@@ -1316,6 +1316,8 @@ export function useChatCore({
     setInput("")
     setFiles([])
     clearDraft()
+    // Reset clinician mode so tabs stay hidden and placeholder is generic
+    setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
 
     // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
     const isOnChatRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/c/')
@@ -1518,6 +1520,8 @@ export function useChatCore({
 
       setIsSubmitting(true)
       clearEvidenceCitations()
+      // Reset clinician mode so tabs stay hidden after sending from workflow panel
+      setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
 
       // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
       const optimisticChatId = chatId || currentChatIdForSavingRef.current || "temp"
@@ -1533,7 +1537,7 @@ export function useChatCore({
           enableSearch,
           enableEvidence,
           learningMode,
-          clinicianMode,
+          clinicianMode: DEFAULT_CLINICIAN_WORKFLOW_MODE,
         },
       }
 

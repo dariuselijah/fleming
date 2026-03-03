@@ -81,8 +81,9 @@ export function ChatInput({
 }: ChatInputProps) {
   const { models } = useModel()
   const { preferences } = useUserPreferences()
-  const [isButtonDisabled, setIsButtonDisabled] = useState(true);
-  
+  const [isButtonDisabled, setIsButtonDisabled] = useState(true)
+  const [tabsDismissed, setTabsDismissed] = useState(false)
+
   // Use selectedModel directly - no model selector needed since only Fleming 4 is available
   // Migrate old model names to fleming-4
   const effectiveModelId = useMemo(() => {
@@ -192,7 +193,12 @@ export function ChatInput({
     
     const shouldDisable = !isStreaming && (!hasValidInput || isSubmittingButNotStreaming);
     setIsButtonDisabled(Boolean(shouldDisable));
-  }, [value, isSubmitting, status]);
+  }, [value, isSubmitting, status])
+
+  // Reset tabs-dismissed when conversation has no messages (e.g. new chat)
+  useEffect(() => {
+    if (!hasMessages) setTabsDismissed(false)
+  }, [hasMessages])
 
   const placeholderByMode: Record<MedicalStudentLearningMode, string> = {
     ask: "Ask Fleming anything...",
@@ -203,7 +209,7 @@ export function ChatInput({
   const isMedicalStudent = preferences.userRole === "medical_student"
   const isDoctor = preferences.userRole === "doctor"
   const showClinicianWorkflowPanel =
-    isDoctor && clinicianMode !== "open_search"
+    isDoctor && clinicianMode !== "open_search" && !hasMessages && !tabsDismissed
   const shouldShowInlineSuggestions =
     isDoctor &&
     !hasMessages &&
@@ -214,20 +220,21 @@ export function ChatInput({
       if (status === "streaming") {
         stop()
       }
+      setTabsDismissed(true)
       onSuggestion(prompt)
     },
     [onSuggestion, status, stop]
   )
 
   return (
-    <div className="relative flex w-full flex-col gap-4">
+    <div className="relative flex min-w-0 w-full max-w-full flex-col gap-4">
       {isMedicalStudent && (
         <LearningModeSelector
           value={learningMode}
           onChange={onLearningModeChange}
         />
       )}
-      {isDoctor && onClinicianModeChange && (
+      {isDoctor && onClinicianModeChange && !hasMessages && !tabsDismissed && (
         <ClinicianModeSelector
           value={clinicianMode}
           onChange={onClinicianModeChange}

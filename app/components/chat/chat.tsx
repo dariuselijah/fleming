@@ -530,7 +530,7 @@ export function Chat() {
         ) : (
           <>
             <Conversation {...conversationProps} />
-            <div className="w-full">
+            <div className="w-full min-w-0 max-w-full px-2 sm:px-4">
               <ChatInput {...chatInputProps} />
             </div>
           </>
