@@ -42,16 +42,6 @@ export function ClinicianWorkflowPanel({
   const [medicationSources, setMedicationSources] = useState<string[]>([])
   const [isMedicationSearchLoading, setIsMedicationSearchLoading] = useState(false)
 
-  const [infectionDescription, setInfectionDescription] = useState("")
-  const [age, setAge] = useState("")
-  const [gender, setGender] = useState("")
-  const [weight, setWeight] = useState("")
-  const [resistance, setResistance] = useState("")
-  const [pregnancyStatus, setPregnancyStatus] = useState("")
-  const [crcl, setCrcl] = useState("")
-  const [allergies, setAllergies] = useState("")
-  const [liverDisease, setLiverDisease] = useState("")
-
   const baseShell =
     "min-w-0 w-full max-w-full rounded-3xl border border-border/50 bg-muted/25 p-4 sm:p-6 max-h-[70dvh] overflow-y-auto overscroll-contain md:max-h-none md:overflow-visible"
   const panelCard = "rounded-2xl border border-border/60 bg-background/80 shadow-xs"
@@ -94,33 +84,6 @@ export function ClinicianWorkflowPanel({
   const removeDrug = useCallback((drugToRemove: string) => {
     setSelectedDrugs((prev) => prev.filter((drug) => drug !== drugToRemove))
   }, [])
-
-  const stewardshipPrompt = useMemo(() => {
-    return [
-      "Stewardship analysis request:",
-      `Infection description: ${infectionDescription || "Not provided"}`,
-      `Age: ${age || "Not provided"}`,
-      `Gender: ${gender || "Not provided"}`,
-      `Weight: ${weight ? `${weight} kg` : "Not provided"}`,
-      `Resistance context: ${resistance || "Not provided"}`,
-      `Pregnancy status: ${pregnancyStatus || "Not provided"}`,
-      `CrCl: ${crcl ? `${crcl} ml/min` : "Not provided"}`,
-      `Allergies: ${allergies || "Not provided"}`,
-      `Liver disease: ${liverDisease || "Not provided"}`,
-      "",
-      "Please provide empiric/targeted options, de-escalation strategy, and monitoring considerations.",
-    ].join("\n")
-  }, [
-    age,
-    allergies,
-    crcl,
-    gender,
-    infectionDescription,
-    liverDisease,
-    pregnancyStatus,
-    resistance,
-    weight,
-  ])
 
   useEffect(() => {
     if (mode !== "drug_interactions") return
@@ -345,115 +308,6 @@ export function ClinicianWorkflowPanel({
                 Analyze
               </Button>
             </div>
-          </div>
-        </div>
-      </section>
-    )
-  }
-
-  if (mode === "stewardship") {
-    return (
-      <section className={baseShell}>
-        <h3 className="mb-4 text-2xl font-medium tracking-tight">Antibiotic Stewardship</h3>
-
-        <div className={panelCard}>
-          <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
-            <MagnifyingGlass className="size-4 text-muted-foreground" />
-            <Input
-              value={infectionDescription}
-              onChange={(e) => setInfectionDescription(e.target.value)}
-              placeholder="Describe the infection for analysis"
-              className="border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
-            />
-          </div>
-
-          <div className="space-y-4 p-4">
-            <div className="flex items-center gap-2">
-              <p className="font-medium">Patient Details</p>
-              <Badge variant="outline" className="text-[10px] uppercase">
-                Optional
-              </Badge>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="space-y-1">
-                <Label>Age</Label>
-                <Input value={age} onChange={(e) => setAge(e.target.value)} placeholder="Type age" />
-              </div>
-              <div className="space-y-1">
-                <Label>Gender</Label>
-                <Select value={gender} onValueChange={setGender}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="female">Female</SelectItem>
-                    <SelectItem value="male">Male</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Weight (kgs)</Label>
-                <Input value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="kgs" />
-              </div>
-              <div className="space-y-1">
-                <Label>Resistance</Label>
-                <Input
-                  value={resistance}
-                  onChange={(e) => setResistance(e.target.value)}
-                  placeholder="Known resistance"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Pregnancy status</Label>
-                <Select value={pregnancyStatus} onValueChange={setPregnancyStatus}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="not-pregnant">Not pregnant</SelectItem>
-                    <SelectItem value="pregnant">Pregnant</SelectItem>
-                    <SelectItem value="unknown">Unknown</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>CrCl (Ml/Min)</Label>
-                <Input value={crcl} onChange={(e) => setCrcl(e.target.value)} placeholder="Ml/Min" />
-              </div>
-              <div className="space-y-1">
-                <Label>Allergies</Label>
-                <Input
-                  value={allergies}
-                  onChange={(e) => setAllergies(e.target.value)}
-                  placeholder="Drug allergies"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Liver disease</Label>
-                <Select value={liverDisease} onValueChange={setLiverDisease}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="mild">Mild</SelectItem>
-                    <SelectItem value="moderate">Moderate</SelectItem>
-                    <SelectItem value="severe">Severe</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <Button
-              type="button"
-              className="w-full"
-              disabled={isSubmitting || !infectionDescription.trim()}
-              onClick={() => submit(stewardshipPrompt)}
-            >
-              Analyze
-            </Button>
           </div>
         </div>
       </section>

@@ -2,7 +2,6 @@ export const CLINICIAN_WORKFLOW_MODES = [
   "open_search",
   "clinical_summary",
   "drug_interactions",
-  "stewardship",
   "icd10_codes",
   "med_review",
 ] as const
@@ -26,7 +25,6 @@ export const CLINICIAN_MODE_LABELS: Record<ClinicianWorkflowMode, string> = {
   open_search: "Open Search",
   clinical_summary: "Clinical Summary",
   drug_interactions: "Drug Interactions",
-  stewardship: "Stewardship",
   icd10_codes: "ICD10 Codes",
   med_review: "Med Review",
 }
@@ -41,8 +39,6 @@ export const CLINICIAN_MODE_PLACEHOLDERS: Record<
     "Generate a concise clinical summary (e.g., problem list, active issues, and plan)...",
   drug_interactions:
     "Check interactions and safety (e.g., interactions between apixaban, amiodarone, and clarithromycin)...",
-  stewardship:
-    "Request antimicrobial stewardship guidance (e.g., de-escalation options after cultures)...",
   icd10_codes:
     "Map assessment to ICD10 coding options (e.g., diabetes with CKD and hypertension)...",
   med_review:
@@ -88,17 +84,6 @@ Prioritize medication safety analysis:
 - Identify interaction pairs, mechanism, and expected clinical impact.
 - Flag high-risk combinations and monitoring requirements.
 - Offer safer alternatives when appropriate.
-- ${commonGuardrail}
-- ${escalationGuardrail}
-`.trim()
-    case "stewardship":
-      return `
-CLINICIAN WORKFLOW MODE: STEWARDSHIP
-
-Focus on antimicrobial stewardship:
-- Match likely source/pathogen risk with empiric or targeted options.
-- Encourage narrowing/de-escalation when evidence allows.
-- Mention duration, culture follow-up, and resistance considerations.
 - ${commonGuardrail}
 - ${escalationGuardrail}
 `.trim()

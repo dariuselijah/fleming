@@ -8,7 +8,6 @@ import {
   CheckCircle,
   ListMagnifyingGlass,
   ListNumbers,
-  ShieldCheck,
   Stethoscope,
   WarningIcon,
 } from "@phosphor-icons/react"
@@ -26,7 +25,6 @@ const MODE_OPTIONS: Array<{
   { id: "open_search", icon: ListMagnifyingGlass },
   { id: "clinical_summary", icon: Stethoscope },
   { id: "drug_interactions", icon: WarningIcon },
-  { id: "stewardship", icon: ShieldCheck },
   { id: "icd10_codes", icon: ListNumbers },
   { id: "med_review", icon: CheckCircle },
 ]

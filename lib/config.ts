@@ -552,30 +552,6 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
       icon: HeartIcon,
     },
   ],
-  stewardship: [
-    {
-      label: "Stewardship Strategy",
-      highlight: "Stewardship",
-      prompt: "Stewardship",
-      items: [
-        "Recommend empiric antibiotic options for this presentation with stewardship rationale.",
-        "Suggest de-escalation options now that culture and sensitivity data are available.",
-        "Propose duration and stop criteria for this infection scenario.",
-      ],
-      icon: MicroscopeIcon,
-    },
-    {
-      label: "Resistance Risk",
-      highlight: "Resistance",
-      prompt: "Resistance",
-      items: [
-        "Assess resistance risk factors and how they should change antibiotic choice.",
-        "Build a practical narrowing plan for this broad-spectrum regimen.",
-        "Highlight when to involve ID consult based on this case complexity.",
-      ],
-      icon: Lightbulb,
-    },
-  ],
   icd10_codes: [
     {
       label: "ICD10 Mapping",
