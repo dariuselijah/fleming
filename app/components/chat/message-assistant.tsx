@@ -95,7 +95,10 @@ export function MessageAssistant({
     () => parseLearningCard(children || ""),
     [children]
   )
-  const contentToRender = cleanContent || ""
+  const contentToRender = useMemo(
+    () => (cleanContent || "").replace(/\[CITE_PLACEHOLDER_\d+\]/g, ""),
+    [cleanContent]
+  )
   
   // Memoize derived data to prevent unnecessary recalculations during streaming
   const sources = useMemo(() => getSources(parts), [parts])

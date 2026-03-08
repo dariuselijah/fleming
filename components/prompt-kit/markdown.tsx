@@ -124,8 +124,12 @@ const MemoizedMarkdownBlock = memo(
     )
   },
   function propsAreEqual(prevProps, nextProps) {
-    // More aggressive memoization for streaming performance
-    return prevProps.content === nextProps.content
+    // Re-render when either content OR markdown component handlers change.
+    // Citation rendering relies on dynamic component handlers, not just content.
+    return (
+      prevProps.content === nextProps.content &&
+      prevProps.components === nextProps.components
+    )
   }
 )
 

@@ -836,6 +836,36 @@ function isUuidLike(value: string): boolean {
   )
 }
 
+function isEphemeralChatId(chatId: string): boolean {
+  return (
+    chatId === "temp" ||
+    chatId.startsWith("temp-chat-") ||
+    chatId.startsWith("benchmark-")
+  )
+}
+
+async function assertChatOwnership(params: {
+  supabase: Awaited<ReturnType<typeof validateAndTrackUsage>>
+  chatId: string
+  userId: string
+}): Promise<void> {
+  const { supabase, chatId, userId } = params
+  if (!supabase || isEphemeralChatId(chatId)) return
+
+  const { data: chat, error } = await supabase
+    .from("chats")
+    .select("id, user_id")
+    .eq("id", chatId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(`Failed to verify chat ownership: ${error.message}`)
+  }
+  if (!chat || chat.user_id !== userId) {
+    throw new Error("Chat ownership verification failed")
+  }
+}
+
 function mergeTopicContexts(
   baseContext: TopicContext | undefined,
   overrideContext: TopicContext | undefined
@@ -967,13 +997,26 @@ export async function POST(req: Request) {
       )
     }
 
+    if (!isEphemeralChatId(chatId) && !isUuidLike(chatId)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid chatId" }),
+        { status: 400 }
+      )
+    }
+
     // CRITICAL: Check rate limits FIRST - fail fast before any other work
-    if (userId !== "temp" && chatId !== "temp" && !chatId.startsWith("temp-chat-")) {
+    let validatedSupabase: Awaited<ReturnType<typeof validateAndTrackUsage>> = null
+    if (userId !== "temp" && !isEphemeralChatId(chatId)) {
       try {
-        await validateAndTrackUsage({
+        validatedSupabase = await validateAndTrackUsage({
           userId,
           model,
           isAuthenticated,
+        })
+        await assertChatOwnership({
+          supabase: validatedSupabase,
+          chatId,
+          userId,
         })
       } catch (error: any) {
         if (error.code === "DAILY_LIMIT_REACHED" || error.limitType === "hourly") {
@@ -1881,11 +1924,22 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
               console.log("📚 [CITATION] Temp chat detected - extracting citations but skipping DB save")
             }
 
-            const supabase = await validateAndTrackUsage({
-              userId,
-              model: effectiveModel,
-              isAuthenticated,
-            })
+            let supabase = validatedSupabase
+            if (!supabase && !isTempChat && !isEphemeralChatId(chatId)) {
+              supabase = await validateAndTrackUsage({
+                userId,
+                model: effectiveModel,
+                isAuthenticated,
+              })
+            }
+
+            if (!isTempChat) {
+              await assertChatOwnership({
+                supabase,
+                chatId,
+                userId,
+              })
+            }
 
             if (supabase) {
               // Save user message first (if not already saved)
@@ -1982,6 +2036,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                 try {
                   await storeAssistantMessage({
                     supabase,
+                    userId,
                     chatId,
                     messages:
                       response.messages as unknown as import("@/app/types/api.types").Message[],
@@ -2000,6 +2055,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                   try {
                     await storeAssistantMessage({
                       supabase,
+                      userId,
                       chatId,
                       messages:
                         response.messages as unknown as import("@/app/types/api.types").Message[],

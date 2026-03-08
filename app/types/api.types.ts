@@ -61,6 +61,7 @@ export interface LogUserMessageParams {
 
 export interface StoreAssistantMessageParams {
   supabase: SupabaseClientType
+  userId: string
   chatId: string
   messages: Message[]
   message_group_id?: string

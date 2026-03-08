@@ -1,4 +1,5 @@
 import { APP_DOMAIN } from "@/lib/config"
+import { normalizeStoredMessageRow } from "@/lib/chat-store/messages/normalize"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { createClient } from "@/lib/supabase/server"
 import type { Metadata } from "next"
@@ -90,7 +91,7 @@ export default async function ShareChat({
 
   const { data: messagesData, error: messagesError } = await supabase
     .from("messages")
-    .select("*")
+    .select("id, role, content, content_iv, experimental_attachments, created_at, parts, message_group_id, model")
     .eq("chat_id", chatId)
     .order("created_at", { ascending: true })
 
@@ -98,9 +99,13 @@ export default async function ShareChat({
     redirect("/")
   }
 
+  const normalizedMessages = messagesData.map((message) =>
+    normalizeStoredMessageRow(message as any)
+  )
+
   return (
     <Article
-      messages={messagesData}
+      messages={normalizedMessages as any}
       date={chatData.created_at || ""}
       title={chatData.title || ""}
       subtitle={"A conversation in Fleming"}

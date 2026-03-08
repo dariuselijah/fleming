@@ -13,6 +13,30 @@ import { checkUsageByModel, incrementUsage } from "@/lib/usage"
 import { getEffectiveApiKey, type ProviderWithoutOllama } from "@/lib/user-keys"
 import { encryptMessage, isEncryptionEnabled } from "@/lib/encryption"
 
+async function assertChatWriteOwnership(
+  supabase: SupabaseClientType,
+  chatId: string,
+  userId: string
+): Promise<boolean> {
+  const { data: chat, error } = await supabase
+    .from("chats")
+    .select("id, user_id")
+    .eq("id", chatId)
+    .maybeSingle()
+
+  if (error) {
+    console.error("Error verifying chat ownership:", error)
+    return false
+  }
+
+  if (!chat || chat.user_id !== userId) {
+    console.error("Chat ownership mismatch:", { chatId, userId })
+    return false
+  }
+
+  return true
+}
+
 export async function validateAndTrackUsage({
   userId,
   model,
@@ -82,6 +106,11 @@ export async function logUserMessage({
 }: LogUserMessageParams): Promise<void> {
   if (!supabase) return
 
+  const ownsChat = await assertChatWriteOwnership(supabase, chatId, userId)
+  if (!ownsChat) {
+    throw new Error("Chat ownership verification failed for user message write")
+  }
+
   // CRITICAL: Check if user message with this message_group_id already exists
   // This prevents duplicate saves when onFinish is called multiple times
   if (message_group_id) {
@@ -131,6 +160,7 @@ export async function logUserMessage({
 
 export async function storeAssistantMessage({
   supabase,
+  userId,
   chatId,
   messages,
   message_group_id,
@@ -139,6 +169,10 @@ export async function storeAssistantMessage({
   topicContext,
 }: StoreAssistantMessageParams & { evidenceCitations?: any[] }): Promise<void> {
   if (!supabase) return
+  const ownsChat = await assertChatWriteOwnership(supabase, chatId, userId)
+  if (!ownsChat) {
+    throw new Error("Chat ownership verification failed for assistant message write")
+  }
   try {
     await saveFinalAssistantMessage(
       supabase,

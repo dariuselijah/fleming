@@ -14,6 +14,7 @@ import {
   normalizeClinicianWorkflowMode,
   type ClinicianWorkflowMode,
 } from "@/lib/clinician-mode"
+import { resolveScopedSessionMessages } from "@/lib/chat-store/messages/session-restore"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { UserProfile } from "@/lib/user/types"
 import type { Message } from "@ai-sdk/react"
@@ -785,6 +786,8 @@ export function useChatCore({
       // Reset streaming state and clear messages
       isStreamingRef.current = false
       messagesBeforeNavigationRef.current = []
+      currentChatIdForSavingRef.current = null
+      lastSavedMessageCountRef.current = 0
       // CRITICAL: Reset status if stuck
       if (status !== 'ready' && status !== 'error') {
         // Force reset by clearing messages if status is stuck
@@ -840,16 +843,6 @@ export function useChatCore({
     }
   }, [])
   
-  // CRITICAL: Update prevChatIdRef FIRST, before any logic
-  // This ensures we can detect transitions properly on the next render
-  useEffect(() => {
-    const prev = prevChatIdRef.current
-    if (chatId !== prev) {
-      prevChatIdRef.current = chatId
-      console.log('[🐛 PREV CHATID] Updated:', { from: prev, to: chatId })
-    }
-  }, [chatId])
-  
   // CRITICAL: Consolidated message syncing - SINGLE SOURCE OF TRUTH
   // This prevents race conditions and conflicting effects
   useEffect(() => {
@@ -873,45 +866,26 @@ export function useChatCore({
     // CRITICAL: Try to restore from sessionStorage IMMEDIATELY if messages are empty
     // This handles the case where useChat reset cleared messages
     if (messages.length === 0 && typeof window !== 'undefined') {
-      // First, try "latest" key (most recent messages before navigation)
-      const latest = sessionStorage.getItem('pendingMessages:latest')
-      if (latest) {
-        try {
-          const latestData = JSON.parse(latest)
-          if (latestData.messages && Array.isArray(latestData.messages) && latestData.messages.length > 0) {
-            // Check if these messages are recent (within last 10 seconds)
-            const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 10000)
-            if (isRecent) {
-              console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring', latestData.messages.length, 'messages from latest key (useChat reset)')
-              setMessages(latestData.messages)
-              messagesBeforeNavigationRef.current = latestData.messages
-              // Don't remove yet - keep for next render if needed
-              return // Don't continue - we've restored messages
-            }
-          }
-        } catch (e) {
-          console.error('[🐛 MESSAGE SYNC] Failed to parse latest messages:', e)
+      const pendingKey = chatId ? `pendingMessages:${chatId}` : null
+      const restoredMessages = resolveScopedSessionMessages({
+        chatId,
+        pendingRaw: pendingKey ? sessionStorage.getItem(pendingKey) : null,
+        latestRaw: sessionStorage.getItem("pendingMessages:latest"),
+      })
+
+      if (Array.isArray(restoredMessages) && restoredMessages.length > 0) {
+        console.log(
+          "[🐛 MESSAGE SYNC] Restored chat-scoped pending messages:",
+          restoredMessages.length,
+          "for chat:",
+          chatId ?? "home"
+        )
+        setMessages(restoredMessages as Message[])
+        messagesBeforeNavigationRef.current = restoredMessages as Message[]
+        if (pendingKey) {
+          sessionStorage.removeItem(pendingKey)
         }
-      }
-      
-      // Second, try with current chatId
-      if (chatId) {
-        const pendingKey = `pendingMessages:${chatId}`
-        const pending = sessionStorage.getItem(pendingKey)
-        if (pending) {
-          try {
-            const parsed = JSON.parse(pending)
-            if (parsed.length > 0) {
-              console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring', parsed.length, 'messages from sessionStorage for chatId:', chatId)
-              setMessages(parsed)
-              messagesBeforeNavigationRef.current = parsed
-              sessionStorage.removeItem(pendingKey)
-              return // Don't continue - we've restored messages
-            }
-          } catch (e) {
-            console.error('[🐛 MESSAGE SYNC] Failed to restore from sessionStorage:', e)
-          }
-        }
+        return
       }
     }
     
@@ -1066,7 +1040,7 @@ export function useChatCore({
         return // Don't sync - preserve restored messages
       } else if (typeof window !== 'undefined' && chatId) {
         // Try to get messages from sessionStorage for this chatId
-        const sessionKey = `messages:${chatId}`
+        const sessionKey = `pendingMessages:${chatId}`
         const sessionData = sessionStorage.getItem(sessionKey)
         if (sessionData) {
           try {
@@ -1159,23 +1133,18 @@ export function useChatCore({
         return
       }
       
-      // Also check if we have messages in sessionStorage for this chatId
+      // Also check if we have messages in sessionStorage for this chatId (strictly scoped).
       if (typeof window !== 'undefined' && chatId) {
         const sessionKey = `pendingMessages:${chatId}`
-        const latestKey = 'pendingMessages:latest'
-        const sessionData = sessionStorage.getItem(sessionKey) || sessionStorage.getItem(latestKey)
+        const sessionData = sessionStorage.getItem(sessionKey)
         if (sessionData) {
           try {
             const sessionMessages = JSON.parse(sessionData)
-            if (Array.isArray(sessionMessages.messages) && sessionMessages.messages.length > 0) {
-              // Check if these messages are recent (within last 30 seconds)
-              const isRecent = !sessionMessages.timestamp || (Date.now() - sessionMessages.timestamp < 30000)
-              if (isRecent) {
-                console.log('[🐛 MESSAGE SYNC] ⚠️ Found recent messages in sessionStorage, restoring instead of syncing:', sessionMessages.messages.length)
-                setMessages(sessionMessages.messages)
-                messagesRef.current = sessionMessages.messages
-                return
-              }
+            if (Array.isArray(sessionMessages) && sessionMessages.length > 0) {
+              console.log('[🐛 MESSAGE SYNC] Found chat-scoped session messages, restoring:', sessionMessages.length)
+              setMessages(sessionMessages)
+              messagesRef.current = sessionMessages
+              return
             }
           } catch (e) {
             console.error('[🐛 MESSAGE SYNC] Failed to parse sessionStorage messages:', e)
@@ -1213,6 +1182,15 @@ export function useChatCore({
     }
     
   }, [chatId, initialMessages, status, isSubmitting, setMessages, messages, stableChatId]) // Include messages to detect when they're cleared
+
+  // Update previous chat ID AFTER synchronization logic runs.
+  useEffect(() => {
+    const prev = prevChatIdRef.current
+    if (prev !== chatId) {
+      prevChatIdRef.current = chatId
+      console.log('[🐛 PREV CHATID] Updated:', { from: prev, to: chatId })
+    }
+  }, [chatId, messages.length, status, isSubmitting])
   
   // Cache messages to temp chat ID as they come in (for migration)
   useEffect(() => {
@@ -1305,10 +1283,9 @@ export function useChatCore({
     // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
     const isOnChatRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/c/')
     const chatIdFromUrl = isOnChatRoute ? window.location.pathname.split('/c/')[1] : null
-    const existingChatIdFromRef = currentChatIdForSavingRef.current
     
     // Quick synchronous chatId resolution (priority: URL > prop > ref > temp)
-    let optimisticChatId = chatIdFromUrl || chatId || existingChatIdFromRef || "temp"
+    let optimisticChatId = chatIdFromUrl || (chatId && !chatId.startsWith("temp-chat-") ? chatId : null) || "temp"
     
     // Create optimistic attachments immediately (no upload yet)
     let optimisticAttachments: Attachment[] | undefined = undefined
@@ -1508,7 +1485,7 @@ export function useChatCore({
       setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
 
       // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
-      const optimisticChatId = chatId || currentChatIdForSavingRef.current || "temp"
+      const optimisticChatId = (chatId && !chatId.startsWith("temp-chat-") ? chatId : null) || "temp"
 
       // CRITICAL: Append message IMMEDIATELY with optimistic values - message appears instantly
       const optimisticOptions = {

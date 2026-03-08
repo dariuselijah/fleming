@@ -1,48 +1,58 @@
-import { createClient } from "@/lib/supabase/client"
-import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { loadAttachmentsWithSignedUrls, refreshEvidenceCitationsWithSignedUrls } from "@/lib/file-handling"
 import type { Message as MessageAISDK } from "ai"
 import { readFromIndexedDB, writeToIndexedDB } from "../persist"
-import { decryptMessage } from "@/lib/encryption"
+const MESSAGE_FETCH_TIMEOUT_MS = 12000
+
+function looksLikeCiphertext(value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  if (/^[0-9a-f]{32,}:[0-9a-f]{16,}$/i.test(trimmed)) return true
+  if (/^[A-Za-z0-9+/=]{80,}$/.test(trimmed) && !/\s/.test(trimmed)) return true
+  return false
+}
+
+function textFromParts(parts: unknown): string {
+  if (!Array.isArray(parts)) return ""
+  const textParts: string[] = []
+  for (const part of parts as Array<{ type?: string; text?: unknown }>) {
+    if (part?.type === "text" && typeof part.text === "string" && part.text.trim().length > 0) {
+      textParts.push(part.text)
+    }
+  }
+  return textParts.join("\n\n").trim()
+}
+
+async function fetchMessagesFromServer(chatId: string): Promise<MessageAISDK[]> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), MESSAGE_FETCH_TIMEOUT_MS)
+  try {
+    const response = await fetch(
+      `/api/chats/${chatId}/messages?ts=${Date.now()}`,
+      {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal,
+      }
+    )
+    if (!response.ok) {
+      throw new Error(`Failed to fetch messages (${response.status})`)
+    }
+    const result = await response.json()
+    return Array.isArray(result?.messages) ? result.messages : []
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 
 export async function getMessagesFromDb(
   chatId: string,
   retries = 3
 ): Promise<MessageAISDK[]> {
-  // fallback to local cache only
-  if (!isSupabaseEnabled) {
-    const cached = await getCachedMessages(chatId)
-    return cached
-  }
-
-  const supabase = createClient()
-  if (!supabase) {
-    // Fallback to cache if Supabase not available
-    return await getCachedMessages(chatId)
-  }
-
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const { data, error } = await supabase
-        .from("messages")
-        .select(
-          "id, content, content_iv, role, experimental_attachments, created_at, parts, message_group_id, model"
-        )
-        .eq("chat_id", chatId)
-        .order("created_at", { ascending: true })
-
-      if (error) {
-        throw error
-      }
-
-      if (!data) {
-        // No messages found, return empty array
-        return []
-      }
-
-      // Process messages and load fresh signed URLs for attachments
+      const serverMessages = await fetchMessagesFromServer(chatId)
       const processedMessages = await Promise.all(
-        data.map(async (message: any) => {
+        serverMessages.map(async (message: any) => {
           let processedAttachments = message.experimental_attachments || []
           
           // If there are attachments, load fresh signed URLs
@@ -56,52 +66,12 @@ export async function getMessagesFromDb(
               // Keep original attachments if signed URL generation fails
             }
           }
-
-          // Decrypt message content if encrypted
-          // Note: content_iv column may not exist in database yet (migration pending)
-          let decryptedContent: string = ""
-          try {
-            // Ensure we have a valid string to work with
-            const rawContent = (message as any).content
-            if (typeof rawContent === 'string') {
-              decryptedContent = rawContent
-            } else if (rawContent === null || rawContent === undefined) {
-              decryptedContent = ""
-            } else {
-              // Handle unexpected types (convert to string)
-              console.warn("[getMessagesFromDb] Unexpected content type, converting to string:", typeof rawContent)
-              decryptedContent = String(rawContent)
-            }
-
-            // Try to get content_iv if it exists (using raw query or type assertion)
-            const messageWithIv = message as any
-            const contentIv = messageWithIv.content_iv
-            if (contentIv && decryptedContent) {
-              try {
-                decryptedContent = decryptMessage(decryptedContent, contentIv)
-                console.log("🔓 Message decrypted during retrieval")
-              } catch (error) {
-                console.error("Error decrypting message:", error)
-                // If decryption fails, use original content (might be plaintext)
-                // decryptedContent already contains the original value
-              }
-            }
-          } catch (error) {
-            // If content_iv column doesn't exist yet, content is plaintext
-            // This is fine for backward compatibility
-            // Ensure we have a fallback string
-            if (!decryptedContent && message.content) {
-              decryptedContent = typeof message.content === 'string' 
-                ? message.content 
-                : String(message.content || '')
-            }
-          }
-
-          // Ensure content is always a string (not null, undefined, or object)
-          // The AI SDK expects content to be string | ContentPart[], but we store it as string
-          const normalizedContent = typeof decryptedContent === 'string' 
-            ? decryptedContent 
-            : (decryptedContent ? String(decryptedContent) : '')
+          const normalizedContent =
+            typeof message.content === "string"
+              ? message.content
+              : message.content == null
+                ? ""
+                : ""
 
           // Extract evidence citations from parts if available
           const parts = ((message as any)?.parts as MessageAISDK["parts"]) || undefined
@@ -159,129 +129,6 @@ export async function getMessagesFromDb(
   return await getCachedMessages(chatId)
 }
 
-async function insertMessageToDb(chatId: string, message: MessageAISDK, retries = 3): Promise<boolean> {
-  const supabase = createClient()
-  if (!supabase) return false
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      // CRITICAL: Handle createdAt - it might be a Date object or a string (from sessionStorage)
-      let createdAt: string
-      if (message.createdAt) {
-        if (typeof message.createdAt === 'string') {
-          // Already a string (from JSON serialization), use it directly
-          createdAt = message.createdAt
-        } else if (message.createdAt instanceof Date) {
-          // Date object, convert to ISO string
-          createdAt = message.createdAt.toISOString()
-        } else {
-          // Fallback to current date
-          createdAt = new Date().toISOString()
-        }
-      } else {
-        createdAt = new Date().toISOString()
-      }
-
-      // CRITICAL: Include parts field to preserve evidence citations and other metadata
-      const { error } = await supabase.from("messages").insert({
-        chat_id: chatId,
-        role: message.role,
-        content: message.content,
-        experimental_attachments: message.experimental_attachments,
-        created_at: createdAt,
-        message_group_id: (message as any).message_group_id || null,
-        model: (message as any).model || null,
-        parts: (message.parts as any) || null,
-      } as any)
-
-      if (error) {
-        throw error
-      }
-      return true
-    } catch (error) {
-      console.error(`[insertMessageToDb] Attempt ${attempt}/${retries} failed:`, error)
-      if (attempt === retries) {
-        console.error("[insertMessageToDb] All retry attempts failed")
-        return false
-      }
-      // Exponential backoff
-      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 100))
-    }
-  }
-  return false
-}
-
-async function insertMessagesToDb(chatId: string, messages: MessageAISDK[], retries = 3): Promise<boolean> {
-  const supabase = createClient()
-  if (!supabase) return false
-
-  if (messages.length === 0) return true
-
-  const payload = messages.map((message) => {
-    // CRITICAL: Handle createdAt - it might be a Date object or a string (from sessionStorage)
-    let createdAt: string
-    if (message.createdAt) {
-      if (typeof message.createdAt === 'string') {
-        // Already a string (from JSON serialization), use it directly
-        createdAt = message.createdAt
-      } else if (message.createdAt instanceof Date) {
-        // Date object, convert to ISO string
-        createdAt = message.createdAt.toISOString()
-      } else {
-        // Fallback to current date
-        createdAt = new Date().toISOString()
-      }
-    } else {
-      createdAt = new Date().toISOString()
-    }
-
-    // CRITICAL: Include parts field to preserve evidence citations and other metadata
-    return {
-      chat_id: chatId,
-      role: message.role,
-      content: message.content,
-      experimental_attachments: message.experimental_attachments,
-      created_at: createdAt,
-      message_group_id: (message as any).message_group_id || null,
-      model: (message as any).model || null,
-      parts: (message.parts as any) || null,
-    } as any
-  })
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const { error } = await supabase.from("messages").insert(payload as any)
-      if (error) {
-        throw error
-      }
-      return true
-    } catch (error) {
-      console.error(`[insertMessagesToDb] Attempt ${attempt}/${retries} failed:`, error)
-      if (attempt === retries) {
-        console.error("[insertMessagesToDb] All retry attempts failed")
-        return false
-      }
-      // Exponential backoff
-      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 100))
-    }
-  }
-  return false
-}
-
-async function deleteMessagesFromDb(chatId: string) {
-  const supabase = createClient()
-  if (!supabase) return
-
-  const { error } = await supabase
-    .from("messages")
-    .delete()
-    .eq("chat_id", chatId)
-
-  if (error) {
-    console.error("Failed to clear messages from database:", error)
-  }
-}
-
 type ChatMessageEntry = {
   id: string
   messages: MessageAISDK[]
@@ -294,9 +141,21 @@ export async function getCachedMessages(
 
   if (!entry || Array.isArray(entry)) return []
 
-  return (entry.messages || []).sort(
-    (a, b) => +new Date(a.createdAt || 0) - +new Date(b.createdAt || 0)
-  )
+  return (entry.messages || [])
+    .map((message) => {
+      const content =
+        typeof message.content === "string"
+          ? message.content
+          : ""
+      const fallback = textFromParts(message.parts)
+      const safeContent =
+        content && !looksLikeCiphertext(content) ? content : fallback
+      return {
+        ...message,
+        content: safeContent,
+      }
+    })
+    .sort((a, b) => +new Date(a.createdAt || 0) - +new Date(b.createdAt || 0))
 }
 
 export async function cacheMessages(
@@ -310,7 +169,6 @@ export async function addMessage(
   chatId: string,
   message: MessageAISDK
 ): Promise<void> {
-  await insertMessageToDb(chatId, message)
   const current = await getCachedMessages(chatId)
   const updated = [...current, message]
 
@@ -334,21 +192,8 @@ export async function setMessages(
     console.log(`📚 [SET MESSAGES] Adding ${evidenceCitations.length} evidence citations to assistant messages`)
   }
   
-  // Save to IndexedDB first (fast, local)
+  // Local cache only. Durable persistence is server-authoritative from /api/chat.
   await writeToIndexedDB("messages", { id: chatId, messages: messagesWithCitations })
-  
-  // Save to Supabase in background (slower, persistent)
-  Promise.resolve().then(async () => {
-    try {
-      const success = await insertMessagesToDb(chatId, messagesWithCitations)
-      if (!success) {
-        console.warn("[setMessages] Failed to save messages to database, but cached locally")
-      }
-    } catch (error) {
-      console.error("[setMessages] Error saving messages to database:", error)
-      // Don't throw - messages are already cached locally
-    }
-  })
 }
 
 /**
@@ -432,36 +277,7 @@ export async function saveMessageIncremental(
     console.error("[saveMessageIncremental] Failed to cache message:", error)
   }
 
-  // Save to Supabase in background (slower, but important for persistence)
-  // CRITICAL: Check database for duplicates before inserting
-  Promise.resolve().then(async () => {
-    try {
-      // Check if message already exists in database (by message_group_id or content)
-      const supabase = createClient()
-      if (supabase && (messageWithCitations as any).message_group_id) {
-        const { data: existing } = await supabase
-          .from("messages")
-          .select("id")
-          .eq("chat_id", chatId)
-          .eq("message_group_id", (messageWithCitations as any).message_group_id)
-          .eq("role", messageWithCitations.role)
-          .limit(1)
-        
-        if (existing && existing.length > 0) {
-          console.log('[saveMessageIncremental] Message already exists in DB, skipping:', (messageWithCitations as any).message_group_id)
-          return
-        }
-      }
-      
-      const success = await insertMessageToDb(chatId, messageWithCitations)
-      if (!success) {
-        console.warn("[saveMessageIncremental] Failed to save message to database, will retry later")
-      }
-    } catch (error) {
-      console.error("[saveMessageIncremental] Error saving message to database:", error)
-      // Don't throw - message is already cached locally
-    }
-  })
+  // Local cache only. Durable persistence is server-authoritative from /api/chat.
 }
 
 export async function clearMessagesCache(chatId: string): Promise<void> {
@@ -469,6 +285,5 @@ export async function clearMessagesCache(chatId: string): Promise<void> {
 }
 
 export async function clearMessagesForChat(chatId: string): Promise<void> {
-  await deleteMessagesFromDb(chatId)
   await clearMessagesCache(chatId)
 }

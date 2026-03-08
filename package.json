@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
+    "test:chat-history": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-chat-history-regressions.ts",
     "ingest": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts",
     "ingest:recommended": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --high-evidence",
     "ingest:dry-run": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --dry-run",

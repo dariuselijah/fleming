@@ -176,6 +176,14 @@ export function CitationMarkdown({
   className,
   evidenceCitations 
 }: CitationMarkdownProps) {
+  const sanitizedChildren = useMemo(
+    () =>
+      String(children || "")
+        .replace(/\[CITE_PLACEHOLDER_\d+\]/g, "")
+        .replace(/\n{3,}/g, "\n\n"),
+    [children]
+  )
+
   // Build evidence citation map for fast lookup
   const evidenceCitationMap = useMemo(() => {
     if (!evidenceCitations || evidenceCitations.length === 0) return null
@@ -197,7 +205,7 @@ export function CitationMarkdown({
     }
     
     // First try the standard parser for [CITATION:X] format
-    let result = parseCitationMarkers(children)
+    let result = parseCitationMarkers(sanitizedChildren)
     
     // Also look for simple [1] pattern - this is what evidence mode uses
     // Only do this if we have evidence citations to match them to
@@ -205,7 +213,7 @@ export function CitationMarkdown({
       // Parse simple [1], [2,3], [1-3] patterns manually
       const simplePattern = /\[(\d+(?:[\s,]+\d+)*(?:-\d+)?)\]/g
       let match
-      while ((match = simplePattern.exec(children)) !== null) {
+      while ((match = simplePattern.exec(sanitizedChildren)) !== null) {
         const content = match[1]
         const indices: number[] = []
         
@@ -247,7 +255,7 @@ export function CitationMarkdown({
 
       const pmidPattern = /\[PMID\s*:\s*(\d+)\]/gi
       let pmidMatch: RegExpExecArray | null
-      while ((pmidMatch = pmidPattern.exec(children)) !== null) {
+      while ((pmidMatch = pmidPattern.exec(sanitizedChildren)) !== null) {
         const pmid = pmidMatch[1]?.trim()
         if (!pmid) continue
         const resolvedIndex = citationByPmid.get(pmid)
@@ -273,19 +281,19 @@ export function CitationMarkdown({
     // Resolve named bracket citations for non-evidence mode, e.g.
     // [OpenFDA drug labels for acetaminophen, dapagliflozin, and metformin]
     if (!evidenceCitationMap && citations.size > 0) {
-      const namedMarkers = collectNamedMarkers(children, result, citations)
+      const namedMarkers = collectNamedMarkers(sanitizedChildren, result, citations)
       result.push(...namedMarkers)
     }
 
     result.sort((a, b) => a.startIndex - b.startIndex)
     
     return result
-  }, [children, citations, evidenceCitationMap, shouldRenderCitations])
+  }, [sanitizedChildren, citations, evidenceCitationMap, shouldRenderCitations])
   
   // Replace citation markers with unique placeholders BEFORE markdown processing
   // Use a format that react-markdown won't escape or treat specially
   const { processedText, markerMap } = useMemo(() => {
-    let text = children
+    let text = sanitizedChildren
     const map = new Map<string, typeof markers[0]>()
     
     // Replace in reverse order to preserve indices
@@ -301,7 +309,7 @@ export function CitationMarkdown({
     }
     
     return { processedText: text, markerMap: map }
-  }, [children, markers])
+  }, [sanitizedChildren, markers])
   
 
   // Custom components for markdown that handle citation placeholders

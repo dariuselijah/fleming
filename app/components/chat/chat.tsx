@@ -475,7 +475,10 @@ export function Chat() {
   // Check if messages are being migrated (stored in sessionStorage)
   const hasMigratedMessages = useMemo(() => {
     if (typeof window === 'undefined' || !chatId) return false
-    return sessionStorage.getItem(`messages:${chatId}`) !== null
+    return (
+      sessionStorage.getItem(`pendingMessages:${chatId}`) !== null ||
+      sessionStorage.getItem(`messages:${chatId}`) !== null
+    )
   }, [chatId])
   
   // Only redirect in very specific circumstances - avoid redirecting after sending a message or recent navigation
