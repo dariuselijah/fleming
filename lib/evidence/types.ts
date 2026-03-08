@@ -38,6 +38,38 @@ export interface EvidenceCitation {
   url: string | null;
   snippet: string;
   score: number;
+  sourceType?: "medical_evidence" | "user_upload";
+  sourceLabel?: string | null;
+  uploadId?: string | null;
+  chunkId?: string | null;
+  sourceUnitId?: string | null;
+  sourceUnitType?: "page" | "slide" | "image" | "section" | null;
+  sourceUnitNumber?: number | null;
+  sourceOffsetStart?: number | null;
+  sourceOffsetEnd?: number | null;
+  uploadFilePath?: string | null;
+  uploadFileName?: string | null;
+  pageLabel?: string | null;
+  snippetOrigin?: string | null;
+  previewReference?: UploadVisualReference | null;
+  figureReferences?: UploadVisualReference[];
+}
+
+export interface UploadVisualReference {
+  assetId: string;
+  type: "preview" | "figure";
+  label: string;
+  caption?: string | null;
+  signedUrl?: string | null;
+  fullUrl?: string | null;
+  contentType?: string | null;
+  width?: number | null;
+  height?: number | null;
+  storageBucket?: string | null;
+  filePath?: string | null;
+  sourceUnitId?: string | null;
+  sourceUnitType?: "page" | "slide" | "image" | "section" | null;
+  sourceUnitNumber?: number | null;
 }
 
 export interface EvidenceSynthesisResult {

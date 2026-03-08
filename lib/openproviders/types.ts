@@ -7,6 +7,8 @@ export type OpenAIModel =
   | "o1-preview-2024-09-12"
   | "o3-mini"
   | "o3-mini-2025-01-31"
+  | "gpt-5.4"
+  | "gpt-5.2"
   | "gpt-5"
   | "gpt-4.1"
   | "gpt-4.1-2025-04-14"
@@ -72,7 +74,12 @@ export type GeminiModel =
   | "gemini-1.5-pro-latest"
   | "gemini-1.5-pro-001"
   | "gemini-1.5-pro-002"
+  | "gemini-2.5-flash"
+  | "gemini-2.5-pro"
   | "gemini-2.5-pro-exp-03-25"
+  | "gemini-3.1-pro-preview"
+  | "gemini-3-flash-preview"
+  | "gemini-3.1-flash-lite-preview"
   | "gemini-2.0-flash-lite-preview-02-05"
   | "gemini-2.0-pro-exp-02-05"
   | "gemini-2.0-flash-thinking-exp-01-21"
@@ -83,6 +90,9 @@ export type GeminiModel =
 
 export type AnthropicModel =
   | "claude-3-7-sonnet-20250219"
+  | "claude-sonnet-4-6"
+  | "claude-opus-4-6"
+  | "claude-haiku-4-5"
   | "claude-3-5-sonnet-latest"
   | "claude-3-5-sonnet-20241022"
   | "claude-3-5-sonnet-20240620"
@@ -115,6 +125,7 @@ export type XaiModel =
   | "grok-vision-beta"
   | "grok-beta"
   | "grok-4-fast-reasoning"
+  | "grok-4-1-fast-reasoning"
   | "o3"
 
 export type OpenRouterModel =

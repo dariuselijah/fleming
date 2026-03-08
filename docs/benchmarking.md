@@ -85,6 +85,23 @@ Check only (without re-running):
 npm run benchmark:release-check
 ```
 
+### Governance And Reproducibility Checks
+
+Before release benchmark publication:
+
+```
+npm run benchmark:governance:check
+```
+
+This verifies:
+- dataset lock hashes in `data/eval/dataset-lock-manifest.json`
+- run manifest structure in `data/eval/benchmark-run-manifest.template.json`
+
+See also:
+- `docs/benchmark-governance.md`
+- `docs/benchmark-methodology-public.md`
+- `docs/compliance/*`
+
 #### Dataset
 
 Located at: `data/eval/clinical_benchmarks.json`

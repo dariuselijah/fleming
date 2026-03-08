@@ -5,6 +5,8 @@
 
 const EMBEDDING_MODEL = 'text-embedding-3-large'
 const EMBEDDING_DIMENSION = 1536
+const MAX_EMBEDDING_TOKENS_PER_REQUEST = 240000
+const APPROX_CHARS_PER_TOKEN = 4
 
 export interface EmbeddingOptions {
   model?: string
@@ -151,6 +153,42 @@ async function generateEmbeddingsBatch(
   throw new Error('Failed to generate embeddings after retries')
 }
 
+function estimateTokenCount(text: string): number {
+  if (!text) return 1
+  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+}
+
+function isMaxTokensError(errorMessage: string): boolean {
+  const normalized = errorMessage.toLowerCase()
+  return (
+    normalized.includes('max_tokens_per_request') ||
+    (normalized.includes('requested') && normalized.includes('tokens') && normalized.includes('max'))
+  )
+}
+
+async function generateEmbeddingsBatchWithAutoSplit(
+  batch: string[],
+  model: string,
+  dimension: number,
+  apiKey: string
+): Promise<number[][]> {
+  if (batch.length === 0) return []
+
+  try {
+    return await generateEmbeddingsBatch(batch, model, dimension, apiKey)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    if (!isMaxTokensError(errorMessage) || batch.length === 1) {
+      throw error
+    }
+
+    const midpoint = Math.ceil(batch.length / 2)
+    const left = await generateEmbeddingsBatchWithAutoSplit(batch.slice(0, midpoint), model, dimension, apiKey)
+    const right = await generateEmbeddingsBatchWithAutoSplit(batch.slice(midpoint), model, dimension, apiKey)
+    return [...left, ...right]
+  }
+}
+
 // Global rate limit state to coordinate across batches
 let rateLimitState = {
   lastRateLimitTime: 0,
@@ -168,7 +206,7 @@ export async function generateEmbeddings(
   apiKey?: string,
   options?: EmbeddingOptions
 ): Promise<number[][]> {
-  const batchSize = options?.batchSize || 200
+  const batchSize = options?.batchSize || 96
   let parallelBatches = options?.parallelBatches || rateLimitState.currentParallelism
   const results: number[][] = []
   const model = options?.model || EMBEDDING_MODEL
@@ -179,19 +217,34 @@ export async function generateEmbeddings(
     throw new Error('OpenAI API key is required for embedding generation')
   }
 
-  // Process in batches with adaptive parallelism
-  for (let i = 0; i < texts.length; i += batchSize * parallelBatches) {
-    const batchGroup: string[][] = []
-    
-    // Create batch group (up to parallelBatches batches)
-    // Reduce parallelism if we've been rate limited recently
-    const currentParallel = Math.max(1, parallelBatches)
-    for (let j = 0; j < currentParallel && i + j * batchSize < texts.length; j++) {
-      const batch = texts.slice(i + j * batchSize, i + (j + 1) * batchSize)
-      if (batch.length > 0) {
-        batchGroup.push(batch)
-      }
+  const safeBatches: string[][] = []
+  let cursor = 0
+  while (cursor < texts.length) {
+    const batch: string[] = []
+    let tokenBudget = 0
+    while (cursor < texts.length && batch.length < batchSize) {
+      const nextText = texts[cursor]
+      const nextTokens = estimateTokenCount(nextText)
+      const nextTotal = tokenBudget + nextTokens
+      if (batch.length > 0 && nextTotal > MAX_EMBEDDING_TOKENS_PER_REQUEST) {
+        break
     }
+      batch.push(nextText)
+      tokenBudget = nextTotal
+      cursor += 1
+    }
+
+    // Ensure forward progress for very large single chunks.
+    if (batch.length === 0) {
+      batch.push(texts[cursor])
+      cursor += 1
+    }
+    safeBatches.push(batch)
+  }
+
+  // Process in batch groups with adaptive parallelism
+  for (let i = 0; i < safeBatches.length; i += parallelBatches) {
+    const batchGroup = safeBatches.slice(i, i + Math.max(1, parallelBatches))
 
     // Process batches with staggered delays to avoid thundering herd
     // Each batch waits a bit longer before starting
@@ -201,7 +254,7 @@ export async function generateEmbeddings(
       return new Promise<number[][]>((resolve, reject) => {
         setTimeout(async () => {
           try {
-            const result = await generateEmbeddingsBatch(batch, model, dimension, key)
+            const result = await generateEmbeddingsBatchWithAutoSplit(batch, model, dimension, key)
             resolve(result)
           } catch (error) {
             reject(error)
@@ -249,7 +302,7 @@ export async function generateEmbeddings(
         const waitTime = Math.min(5000, 1000 * rateLimitState.consecutiveRateLimits)
         console.log(`[Embeddings] Waiting ${waitTime}ms before next batch group due to rate limits`)
         await new Promise(resolve => setTimeout(resolve, waitTime))
-      } else if (i + batchSize * parallelBatches < texts.length) {
+      } else if (i + parallelBatches < safeBatches.length) {
         // Normal delay between batch groups
         await new Promise(resolve => setTimeout(resolve, 100))
       }

@@ -24,11 +24,11 @@ export function parseCitationMarkers(text: string): CitationMarker[] {
   const markers: CitationMarker[] = []
   
   // Pattern 1: [CITATION:1] or [CITATION:1,2,3] or [CITATION:1:QUOTE:"text"]
-  const citationPattern = /\[CITATION:(\d+(?:,\d+)*)(?::QUOTE:"([^"]+)")?\]/g
+  const citationPattern = /\[CITATION:(\d+(?:\s*,\s*\d+)*)(?::QUOTE:"([^"]+)")?\]/g
   let match
   
   while ((match = citationPattern.exec(text)) !== null) {
-    const indices = match[1].split(',').map(n => parseInt(n, 10))
+    const indices = match[1].split(/\s*,\s*/).map(n => parseInt(n, 10))
     markers.push({
       type: 'citation',
       indices,
@@ -40,7 +40,7 @@ export function parseCitationMarkers(text: string): CitationMarker[] {
   }
   
   // Pattern 2: [1] or [1,2,3] (simple numbered citations)
-  const numberedPattern = /\[(\d+(?:,\d+)*)\]/g
+  const numberedPattern = /\[(\d+(?:\s*,\s*\d+)*)\]/g
   while ((match = numberedPattern.exec(text)) !== null) {
     // Skip if already matched as CITATION pattern
     const alreadyMatched = markers.some(m => 
@@ -48,7 +48,34 @@ export function parseCitationMarkers(text: string): CitationMarker[] {
     )
     
     if (!alreadyMatched) {
-      const indices = match[1].split(',').map(n => parseInt(n, 10))
+      const indices = match[1].split(/\s*,\s*/).map(n => parseInt(n, 10))
+      markers.push({
+        type: 'numbered',
+        indices,
+        startIndex: match.index,
+        endIndex: match.index + match[0].length,
+        fullMatch: match[0]
+      })
+    }
+  }
+
+  // Pattern 3: [1-3] (range format)
+  const rangePattern = /\[(\d+)\s*-\s*(\d+)\]/g
+  while ((match = rangePattern.exec(text)) !== null) {
+    const alreadyMatched = markers.some(m =>
+      m.startIndex <= match!.index && m.endIndex >= match!.index + match![0].length
+    )
+
+    if (!alreadyMatched) {
+      const start = parseInt(match[1], 10)
+      const end = parseInt(match[2], 10)
+      const rangeStart = Math.min(start, end)
+      const rangeEnd = Math.max(start, end)
+      const indices: number[] = []
+      for (let i = rangeStart; i <= rangeEnd; i++) {
+        indices.push(i)
+      }
+
       markers.push({
         type: 'numbered',
         indices,
@@ -59,8 +86,8 @@ export function parseCitationMarkers(text: string): CitationMarker[] {
     }
   }
   
-  // Pattern 3: (1) or (1,2,3) (parentheses format)
-  const parenPattern = /\((\d+(?:,\d+)*)\)/g
+  // Pattern 4: (1) or (1,2,3) (parentheses format)
+  const parenPattern = /\((\d+(?:\s*,\s*\d+)*)\)/g
   while ((match = parenPattern.exec(text)) !== null) {
     // Skip if already matched
     const alreadyMatched = markers.some(m => 
@@ -68,7 +95,7 @@ export function parseCitationMarkers(text: string): CitationMarker[] {
     )
     
     if (!alreadyMatched) {
-      const indices = match[1].split(',').map(n => parseInt(n, 10))
+      const indices = match[1].split(/\s*,\s*/).map(n => parseInt(n, 10))
       markers.push({
         type: 'numbered',
         indices,

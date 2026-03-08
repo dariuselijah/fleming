@@ -18,6 +18,8 @@ import {
   EVIDENCE_LEVEL_SHORT,
   EVIDENCE_LEVEL_LABELS 
 } from "@/lib/evidence/types"
+import Image from "next/image"
+import Link from "next/link"
 
 interface EvidenceReferencesSectionProps {
   citations: EvidenceCitation[]
@@ -58,6 +60,17 @@ export function EvidenceReferencesSection({
     if (authors.length === 0) return ''
     if (authors.length === 1) return authors[0]
     return `${authors[0]} et al.`
+  }
+
+  const getVisuals = (citation: EvidenceCitation) => {
+    const visuals = []
+    if (citation.previewReference?.signedUrl) {
+      visuals.push(citation.previewReference)
+    }
+    if (citation.figureReferences?.length) {
+      visuals.push(...citation.figureReferences.filter((item) => item.signedUrl).slice(0, 2))
+    }
+    return visuals
   }
 
   const handleCitationRating = (citation: EvidenceCitation, rating: 'up' | 'down') => {
@@ -170,6 +183,11 @@ export function EvidenceReferencesSection({
                     <div className="space-y-2 pl-2 border-l-2 border-border">
                       {levelCitations.map((citation) => {
                         const rating = ratedCitations.get(citation.index)
+                        const isUploadCitation =
+                          citation.sourceType === "user_upload" &&
+                          typeof citation.url === "string" &&
+                          citation.url.startsWith("/uploads/")
+                        const citationHref = citation.url || "#"
                         return (
                           <div
                             key={citation.index}
@@ -180,16 +198,79 @@ export function EvidenceReferencesSection({
                             </span>
                             
                             <div className="flex-1 min-w-0">
+                              {getVisuals(citation).length > 0 ? (
+                                <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+                                  {getVisuals(citation).map((visual) => (
+                                    isUploadCitation ? (
+                                      <Link
+                                        key={visual.assetId}
+                                        href={citationHref}
+                                        className="group/visual shrink-0"
+                                      >
+                                        <div className="bg-muted flex h-20 w-24 overflow-hidden rounded-lg border border-border">
+                                          {visual.signedUrl ? (
+                                            <Image
+                                              src={visual.signedUrl}
+                                              alt={visual.label}
+                                              width={96}
+                                              height={80}
+                                              className="h-full w-full object-cover transition-transform group-hover/visual:scale-[1.02]"
+                                              unoptimized
+                                            />
+                                          ) : null}
+                                        </div>
+                                        <p className="text-muted-foreground mt-1 max-w-24 truncate text-[10px]">
+                                          {visual.label}
+                                        </p>
+                                      </Link>
+                                    ) : (
+                                      <a
+                                        key={visual.assetId}
+                                        href={visual.fullUrl || visual.signedUrl || "#"}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="group/visual shrink-0"
+                                      >
+                                        <div className="bg-muted flex h-20 w-24 overflow-hidden rounded-lg border border-border">
+                                          {visual.signedUrl ? (
+                                            <Image
+                                              src={visual.signedUrl}
+                                              alt={visual.label}
+                                              width={96}
+                                              height={80}
+                                              className="h-full w-full object-cover transition-transform group-hover/visual:scale-[1.02]"
+                                              unoptimized
+                                            />
+                                          ) : null}
+                                        </div>
+                                        <p className="text-muted-foreground mt-1 max-w-24 truncate text-[10px]">
+                                          {visual.label}
+                                        </p>
+                                      </a>
+                                    )
+                                  ))}
+                                </div>
+                              ) : null}
                               {citation.url ? (
-                                <a
-                                  href={citation.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block font-medium text-foreground hover:text-primary transition-colors line-clamp-1"
-                                >
-                                  {citation.title}
-                                  <ArrowSquareOut className="inline ml-1 h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </a>
+                                isUploadCitation ? (
+                                  <Link
+                                    href={citationHref}
+                                    className="block font-medium text-foreground hover:text-primary transition-colors line-clamp-1"
+                                  >
+                                    {citation.title}
+                                    <ArrowSquareOut className="inline ml-1 h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  </Link>
+                                ) : (
+                                  <a
+                                    href={citationHref}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block font-medium text-foreground hover:text-primary transition-colors line-clamp-1"
+                                  >
+                                    {citation.title}
+                                    <ArrowSquareOut className="inline ml-1 h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  </a>
+                                )
                               ) : (
                                 <span className="block font-medium text-foreground line-clamp-1">
                                   {citation.title}
@@ -197,13 +278,19 @@ export function EvidenceReferencesSection({
                               )}
                               
                               <div className="flex items-center gap-2 text-muted-foreground mt-0.5">
-                                <span>{formatAuthors(citation.authors)}</span>
-                                {citation.authors.length > 0 && <span>•</span>}
-                                <span>{citation.journal}</span>
+                                <span>{formatAuthors(Array.isArray(citation.authors) ? citation.authors : [])}</span>
+                                {(Array.isArray(citation.authors) ? citation.authors.length : 0) > 0 && <span>•</span>}
+                                <span>{citation.sourceLabel || citation.journal}</span>
                                 {citation.year && (
                                   <>
                                     <span>•</span>
                                     <span>{citation.year}</span>
+                                  </>
+                                )}
+                                {citation.pageLabel && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{citation.pageLabel}</span>
                                   </>
                                 )}
                                 {citation.sampleSize && (
@@ -213,6 +300,28 @@ export function EvidenceReferencesSection({
                                   </>
                                 )}
                               </div>
+
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                                  Why cited: {citation.studyType || (citation.sourceType === "user_upload" ? "Relevant upload excerpt" : "Relevant source")}
+                                </span>
+                                {citation.snippet ? (
+                                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+                                    Claim support available
+                                  </span>
+                                ) : null}
+                                {citation.sourceType === "user_upload" ? (
+                                  <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-700 dark:text-blue-300">
+                                    Private upload
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              {citation.snippet ? (
+                                <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
+                                  {citation.snippet}
+                                </p>
+                              ) : null}
                             </div>
 
                             {/* Thumbs up/down buttons */}

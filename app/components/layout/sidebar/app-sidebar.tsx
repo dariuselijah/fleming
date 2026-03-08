@@ -13,11 +13,13 @@ import {
 import { useChats } from "@/lib/chat-store/chats/provider"
 import {
   ChatTeardropText,
+  FolderSimple,
   MagnifyingGlass,
   NotePencilIcon,
   X,
 } from "@phosphor-icons/react"
-import { useParams, useRouter } from "next/navigation"
+import Link from "next/link"
+import { useParams, usePathname, useRouter } from "next/navigation"
 import { useMemo } from "react"
 import { FeedbackTrigger } from "../feedback/feedback-trigger"
 import { HistoryTrigger } from "../../history/history-trigger"
@@ -37,6 +39,7 @@ export function AppSidebar() {
   }, [chats])
   const hasChats = chats.length > 0
   const router = useRouter()
+  const pathname = usePathname()
 
   return (
     <Sidebar collapsible="offcanvas" variant="sidebar" className="border-none">
@@ -92,6 +95,19 @@ export function AppSidebar() {
               }
               hasPopover={false}
             />
+            <Link
+              href="/uploads"
+              className={`relative inline-flex w-full items-center rounded-md px-2 py-2 text-sm transition-colors ${
+                pathname === "/uploads"
+                  ? "bg-accent text-foreground"
+                  : "text-primary hover:bg-accent/80 hover:text-foreground bg-transparent"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <FolderSimple size={20} />
+                Uploads
+              </div>
+            </Link>
           </div>
           <SidebarProject />
           {isLoading ? (

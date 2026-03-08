@@ -5,6 +5,14 @@ import type { SupportedModel } from "@/lib/openproviders/types"
 
 export type SupabaseClientType = SupabaseClient<Database>
 
+export interface TopicContext {
+  activeTopic?: string | null
+  lastUploadId?: string | null
+  recentPages?: number[]
+  recentEvidenceIds?: string[]
+  followUpType?: "clarify" | "next_page" | "previous_page" | "drill_down" | "switch_topic" | "unknown"
+}
+
 export interface ContentPart {
   type: string
   text?: string
@@ -22,6 +30,10 @@ export interface ContentPart {
   }
   reasoning?: string
   details?: Json[]
+  metadata?: {
+    evidenceCitations?: unknown[]
+    topicContext?: TopicContext
+  }
 }
 
 export interface Message {
@@ -53,6 +65,7 @@ export interface StoreAssistantMessageParams {
   messages: Message[]
   message_group_id?: string
   model?: SupportedModel
+  topicContext?: TopicContext
 }
 
 export interface ApiErrorResponse {

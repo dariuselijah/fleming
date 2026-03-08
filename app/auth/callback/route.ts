@@ -1,4 +1,4 @@
-import { MODEL_DEFAULT } from "@/lib/config"
+import { DEFAULT_FAVORITE_MODELS } from "@/lib/config"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { createGuestServerClient } from "@/lib/supabase/server-guest"
 import { createServerClient } from "@supabase/ssr"
@@ -98,7 +98,7 @@ export async function GET(request: Request) {
       created_at: new Date().toISOString(),
       message_count: 0,
       premium: false,
-      favorite_models: [MODEL_DEFAULT],
+      favorite_models: DEFAULT_FAVORITE_MODELS,
     })
 
     if (insertError && insertError.code !== "23505") {

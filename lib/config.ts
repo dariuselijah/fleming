@@ -26,6 +26,11 @@ export const AUTH_DAILY_MESSAGE_LIMIT = 1000
 export const REMAINING_QUERY_ALERT_THRESHOLD = 2
 export const DAILY_FILE_UPLOAD_LIMIT = 25
 export const DAILY_LIMIT_PRO_MODELS = 500
+export const ENABLE_UPLOAD_CONTEXT_SEARCH =
+  process.env.NEXT_PUBLIC_ENABLE_UPLOAD_CONTEXT_SEARCH !== "false"
+export const ENABLE_YOUTUBE_TOOL = process.env.ENABLE_YOUTUBE_TOOL !== "false"
+export const ENABLE_WEB_SEARCH_TOOL =
+  process.env.ENABLE_WEB_SEARCH_TOOL !== "false"
 
 // Hourly rate limits (ChatGPT-style)
 export const NON_AUTH_HOURLY_MESSAGE_LIMIT = 3
@@ -45,6 +50,11 @@ export const FREE_MODELS_IDS = [
 ]
 
 export const MODEL_DEFAULT = "fleming-4"
+export const DEFAULT_FAVORITE_MODELS = [
+  "fleming-4",
+  "gpt-5.2",
+  "gemini-2.5-flash",
+]
 
 export const APP_NAME = "Fleming"
 export const APP_DOMAIN = "https://askfleming.perkily.io"
@@ -288,106 +298,93 @@ export const HEALTHCARE_PROFESSIONAL_SUGGESTIONS = [
 // Medical student suggestions - tailored for medical education and learning
 export const MEDICAL_STUDENT_SUGGESTIONS = [
   {
-    label: "Basic Sciences",
-    highlight: "Basic",
-    prompt: `Basic`,
+    label: "Upload + Ask",
+    highlight: "Upload",
+    prompt: `Upload`,
     items: [
-      "Can you explain the pathophysiology of hypertension?",
-      "What are the key differences between type 1 and type 2 diabetes?",
-      "How does the renin-angiotensin system work?",
-      "What causes the symptoms of heart failure?",
-      "Explain the mechanism of action of common antibiotics",
+      "I uploaded my cardiology textbook and lecture slides. Explain HFrEF pathophysiology using only those materials and cite exact pages.",
+      "Use my uploaded notes to compare nephritic vs nephrotic syndrome in a high-yield table with page-level citations.",
+      "Find where my upload explains Starling forces and teach it back in plain language with exact source references.",
+      "Use upload context search to summarize what page 50 says and what pages around it add important nuance.",
+      "Create a concise exam-ready explanation from my uploaded chapter and show confidence + citation strength.",
     ],
     icon: MicroscopeIcon,
-  },
-  {
-    label: "Clinical Skills",
-    highlight: "Clinical",
-    prompt: `Clinical`,
-    items: [
-      "How do I take a proper patient history?",
-      "What are the key components of a physical exam?",
-      "How do I present a patient case to my attending?",
-      "What's the SOAP note format and how do I use it?",
-      "How do I develop a differential diagnosis?",
-    ],
-    icon: StethoscopeIcon,
-  },
-  {
-    label: "Study Strategies",
-    highlight: "Study",
-    prompt: `Study`,
-    items: [
-      "What's the best way to study for Step 1?",
-      "How do I memorize all the drug names and mechanisms?",
-      "What resources should I use for clinical rotations?",
-      "How do I prepare for shelf exams?",
-      "What's the most effective way to study anatomy?",
-    ],
-    icon: BookOpenText,
   },
   {
     label: "Clinical Reasoning",
     highlight: "Reasoning",
     prompt: `Reasoning`,
     items: [
-      "How do I approach a patient with chest pain?",
-      "What's the workup for abdominal pain?",
-      "How do I think through a case of shortness of breath?",
-      "What causes altered mental status and how do I evaluate it?",
-      "How do I approach a patient with fever?",
-    ],
-    icon: Brain,
-  },
-  {
-    label: "Medical Knowledge",
-    highlight: "Knowledge",
-    prompt: `Knowledge`,
-    items: [
-      "What are the most common causes of chest pain?",
-      "How do I interpret basic lab values?",
-      "What are the red flags I should never miss?",
-      "How do I read an ECG?",
-      "What are the signs of sepsis?",
-    ],
-    icon: Lightbulb,
-  },
-  {
-    label: "Professional Development",
-    highlight: "Professional",
-    prompt: `Professional`,
-    items: [
-      "How do I choose a medical specialty?",
-      "What should I look for in a residency program?",
-      "How do I build relationships with faculty and mentors?",
-      "What extracurricular activities are important for residency?",
-      "How do I prepare for residency interviews?",
-    ],
-    icon: UserIcon,
-  },
-  {
-    label: "Clinical Rotations",
-    highlight: "Rotations",
-    prompt: `Rotations`,
-    items: [
-      "What should I expect on my internal medicine rotation?",
-      "How do I succeed on surgery rotation?",
-      "What's the best way to prepare for pediatrics?",
-      "How do I make the most of my OB/GYN rotation?",
-      "What should I focus on during emergency medicine?",
+      "Walk me through chest pain using a stepwise differential, red flags, and first tests, then cite strongest evidence.",
+      "Build a structured workup for acute dyspnea with likely diagnoses, must-not-miss causes, and escalation triggers.",
+      "Teach me how to prioritize altered mental status causes using a practical bedside algorithm.",
+      "Give me a rapid sepsis reasoning flow: what to do first, what to reassess, and what data changes management.",
+      "Show clinical reasoning for syncope in an older adult and explain why each branch matters.",
     ],
     icon: StethoscopeIcon,
   },
   {
-    label: "Evidence-Based Medicine",
+    label: "Exam Prep",
+    highlight: "Prep",
+    prompt: `Prep`,
+    items: [
+      "Turn this topic into a 7-day high-yield study plan with active recall questions and common traps.",
+      "Create 10 shelf-style questions with explanations from my uploaded notes and label weak spots I should review.",
+      "Condense this chapter into a one-page memory scaffold and 5 must-know exam pearls.",
+      "Quiz me in rounds: easy to hard, then give a targeted remediation plan for missed concepts.",
+      "Make a rapid-fire pharmacology drill based on mechanisms, contraindications, and adverse effects.",
+    ],
+    icon: BookOpenText,
+  },
+  {
+    label: "Guidelines + Trust",
+    highlight: "Trust",
+    prompt: `Trust`,
+    items: [
+      "Summarize current guideline recommendations for hypertension and clearly separate strong vs weak evidence.",
+      "Explain this ACS management question with citations only from high-quality sources and include caveats.",
+      "Give me the trust summary: evidence tier, recency, and what uncertainties remain.",
+      "Teach this topic and tag each recommendation by confidence level and source quality.",
+      "Show what recommendations are likely outdated and what newer evidence says instead.",
+    ],
+    icon: Lightbulb,
+  },
+  {
+    label: "Tool Workflows",
+    highlight: "Tools",
+    prompt: `Tools`,
+    items: [
+      "Use youtubeSearch to find a high-yield ECG interpretation walkthrough, then summarize key takeaways with citations.",
+      "Use webSearch to pull the latest guideline update on asthma, then translate it into exam-ready bullets.",
+      "Use uploadContextSearch on my uploaded renal notes and build a page-cited comparison chart.",
+      "Combine my uploaded lecture + web evidence and explain where they agree, conflict, or are outdated.",
+      "For this topic, choose the right tools (uploads, YouTube, web evidence) and explain why that tool mix is best.",
+    ],
+    icon: Sparkle,
+  },
+  {
+    label: "Rotation Playbooks",
+    highlight: "Rotation",
+    prompt: `Rotation`,
+    items: [
+      "Build a first-week internal medicine rotation playbook: pre-rounding, note structure, and presentation script.",
+      "Give me a surgery rotation checklist with common pimp questions and how to answer safely.",
+      "Create a pediatrics rounding framework with age-specific red flags and communication tips.",
+      "Make an OB/GYN triage prep sheet with must-not-miss emergencies and first actions.",
+      "For EM, give me a shift survival guide: triage priorities, common pitfalls, and escalation language.",
+    ],
+    icon: StethoscopeIcon,
+  },
+  {
+    label: "Evidence + Media",
     highlight: "Evidence",
     prompt: `Evidence`,
     items: [
-      "How do I critically appraise a research paper?",
-      "What's the difference between relative and absolute risk?",
-      "How do I understand confidence intervals?",
-      "What makes a study valid and reliable?",
-      "How do I apply research findings to patient care?",
+      "Teach me critical appraisal on this paper, then give a one-minute version I can present on rounds.",
+      "Use YouTube + guideline evidence to explain STEMI criteria visually, then provide source-backed caveats.",
+      "Break down relative risk vs absolute risk with a clinical example and exam-style checkpoint questions.",
+      "Show me how confidence intervals change clinical certainty using this treatment decision.",
+      "Convert this evidence summary into 'what to do at bedside' steps with confidence tags.",
     ],
     icon: MicroscopeIcon,
   },
@@ -404,10 +401,11 @@ export const MEDICAL_STUDENT_MODE_SUGGESTIONS: Record<
       highlight: "Simulation",
       prompt: "Simulation",
       items: [
-        "Run a chest pain simulation with evolving vitals and ask me for the next management step.",
-        "Give me a sepsis simulation in the ED with staged lab results and branching decisions.",
-        "Simulate shortness of breath in a patient with COPD and heart failure overlap.",
-        "Create an OSCE-style abdominal pain case and grade my clinical reasoning after each step.",
+        "Run a chest pain simulation with evolving vitals and force key branching decisions at each step.",
+        "Give me an ED sepsis simulation with staged labs and treatment tradeoffs under time pressure.",
+        "Simulate acute dyspnea with overlapping etiologies and require me to justify every next test.",
+        "Create an OSCE-style abdominal pain station and score my reasoning after each response.",
+        "After the simulation, use youtubeSearch to recommend one visual refresher and summarize why it helps.",
       ],
       icon: StethoscopeIcon,
     },
@@ -416,10 +414,10 @@ export const MEDICAL_STUDENT_MODE_SUGGESTIONS: Record<
       highlight: "Cases",
       prompt: "Cases",
       items: [
-        "Run an internal medicine ward case with daily progression and key handoff decisions.",
-        "Simulate a pediatrics fever workup and challenge me with age-specific red flags.",
-        "Create a surgery pre-op simulation and ask for risk stratification choices.",
-        "Run an OB/GYN triage case and ask me to prioritize differential diagnosis.",
+        "Run an internal medicine ward simulation with day-by-day changes and handoff priorities.",
+        "Simulate a pediatrics fever workup and challenge me on age-specific red flags.",
+        "Create a surgery pre-op simulation focused on risk stratification and optimization.",
+        "Run an OB/GYN triage scenario and make me prioritize differential + immediate actions.",
       ],
       icon: Brain,
     },
@@ -428,10 +426,10 @@ export const MEDICAL_STUDENT_MODE_SUGGESTIONS: Record<
       highlight: "Skill",
       prompt: "Skill",
       items: [
-        "Give me a focused history-taking simulation and score my interview structure.",
-        "Simulate a physical exam scenario and ask what maneuvers I would do next.",
-        "Run a SOAP note simulation and critique my assessment and plan.",
-        "Create a differential diagnosis simulation and highlight missed high-risk conditions.",
+        "Give me a focused history-taking simulation and score structure, efficiency, and safety questions.",
+        "Simulate a physical exam scenario and ask which maneuvers I would perform next and why.",
+        "Run a SOAP note simulation and critique my assessment and plan for missing logic.",
+        "Create a differential simulation and highlight must-not-miss diagnoses I failed to include.",
       ],
       icon: BookOpenText,
     },
@@ -442,10 +440,11 @@ export const MEDICAL_STUDENT_MODE_SUGGESTIONS: Record<
       highlight: "Guideline",
       prompt: "Guideline",
       items: [
-        "Summarize current hypertension guideline targets and first-line therapy.",
-        "Compare heart failure guideline-directed therapy with practical sequencing.",
-        "Show me diabetes guideline updates for CKD and cardiovascular risk reduction.",
-        "Walk through community-acquired pneumonia treatment guidance by severity.",
+        "Summarize current hypertension targets and first-line therapy with recommendation strength.",
+        "Compare guideline-directed HFrEF therapy with practical sequencing and contraindication checks.",
+        "Show diabetes guideline updates for CKD/CV risk with what changed recently.",
+        "Walk through CAP treatment guidance by severity and local resistance considerations.",
+        "Use webSearch for the newest update, then contrast it with my uploaded notes and explain differences.",
       ],
       icon: MicroscopeIcon,
     },
@@ -454,10 +453,10 @@ export const MEDICAL_STUDENT_MODE_SUGGESTIONS: Record<
       highlight: "Evidence",
       prompt: "Evidence",
       items: [
-        "For ACS management, show recommendation strength and the key trials behind it.",
-        "For anticoagulation in atrial fibrillation, explain confidence and uncertainty areas.",
-        "For sepsis bundles, show where guideline consensus is strong versus evolving.",
-        "For lipid management, break down class of recommendation and evidence quality.",
+        "For ACS management, show recommendation class and key trials driving each recommendation.",
+        "For AF anticoagulation, explain where evidence is strong versus uncertain.",
+        "For sepsis bundles, identify consensus areas and unresolved controversies.",
+        "For lipid management, break down class/level and practical implementation caveats.",
       ],
       icon: Lightbulb,
     },
@@ -466,10 +465,10 @@ export const MEDICAL_STUDENT_MODE_SUGGESTIONS: Record<
       highlight: "Apply",
       prompt: "Apply",
       items: [
-        "Apply current asthma guideline steps to a case with persistent nighttime symptoms.",
-        "Use stroke prevention guidelines for a patient with AF and high bleeding risk.",
-        "Apply PE workup guidelines to a moderate pretest probability patient.",
-        "Map guideline recommendations to this case and identify exceptions I should remember.",
+        "Apply asthma guideline steps to a case with persistent nighttime symptoms and adherence concerns.",
+        "Use stroke prevention guidance for AF with high bleeding risk and competing comorbidities.",
+        "Apply PE workup guidance to moderate pretest probability and justify imaging/lab choices.",
+        "Map guideline recommendations to this case and call out exceptions I should remember on exams.",
       ],
       icon: HeartIcon,
     },
@@ -486,9 +485,9 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
       highlight: "Search",
       prompt: "Open Search",
       items: [
-        "Synthesize likely causes of fever in this immunocompromised patient and suggest immediate next data points.",
-        "Build a focused differential for acute dyspnea with this history and triage priorities.",
-        "Summarize high-yield red flags and next diagnostics for chest pain with equivocal ECG findings.",
+        "Synthesize likely causes of fever in this immunocompromised patient and prioritize immediate next data points.",
+        "Build a focused differential for acute dyspnea with triage priorities and escalation triggers.",
+        "Summarize red flags and next diagnostics for chest pain with equivocal ECG findings.",
       ],
       icon: StethoscopeIcon,
     },
@@ -497,9 +496,9 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
       highlight: "Evidence",
       prompt: "Evidence Pull",
       items: [
-        "Give me a point-of-care evidence summary for this treatment decision with caveats.",
-        "What recent guideline updates should change management in this case?",
-        "Compare two management approaches and tell me where evidence is strongest.",
+        "Give a point-of-care evidence summary with source quality, recency, and key caveats.",
+        "What recent guideline updates should change management in this exact case?",
+        "Compare two management approaches and identify where evidence is strongest and weakest.",
       ],
       icon: MicroscopeIcon,
     },
@@ -511,8 +510,8 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
       prompt: "Clinical Summary",
       items: [
         "Create a one-liner, active problem list, and immediate plan from this case.",
-        "Turn this messy note into a concise sign-out summary with critical watch items.",
-        "Generate a SOAP-style summary with assessment confidence and gaps.",
+        "Turn this note into a concise sign-out summary with critical watch items.",
+        "Generate a SOAP-style summary with confidence statements and explicit data gaps.",
       ],
       icon: StethoscopeIcon,
     },
@@ -521,11 +520,22 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
       highlight: "Handoff",
       prompt: "Handoff",
       items: [
-        "Prepare a handoff summary with what to monitor overnight and escalation triggers.",
-        "Extract key trends from these labs/vitals and integrate them into plan bullets.",
-        "Draft a progress-note style summary focused on decisions made today.",
+        "Prepare a handoff summary with overnight monitoring targets and escalation triggers.",
+        "Extract key trends from labs/vitals and integrate them into plan bullets.",
+        "Draft a progress-note summary focused on decisions made today and unresolved questions.",
       ],
       icon: UserIcon,
+    },
+    {
+      label: "Uploads Context",
+      highlight: "Uploads",
+      prompt: "Uploads",
+      items: [
+        "Use uploaded consult notes + guideline PDFs to generate a page-cited handoff summary.",
+        "Pull relevant sections from my uploaded protocol and map them to this patient's plan.",
+        "Summarize this case using uploaded context first, then external evidence where needed.",
+      ],
+      icon: BookOpenText,
     },
   ],
   drug_interactions: [
@@ -536,7 +546,7 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
       items: [
         "Screen this med list for major interaction risks and rank by severity.",
         "Check interaction risk between apixaban, amiodarone, clarithromycin, and diltiazem.",
-        "Identify QT-prolongation concerns in this regimen and monitoring strategy.",
+        "Identify QT-prolongation concerns in this regimen and a monitoring strategy.",
       ],
       icon: PillIcon,
     },
@@ -550,6 +560,52 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
         "Flag contraindications for this patient profile and provide fallback options.",
       ],
       icon: HeartIcon,
+    },
+    {
+      label: "Label-Backed",
+      highlight: "Labels",
+      prompt: "Labels",
+      items: [
+        "Use OpenFDA and guideline sources, then cite each interaction claim inline with confidence.",
+        "For each interaction, show mechanism, severity tier, and what should trigger immediate action.",
+        "Generate a patient-specific safety plan from this regimen with explicit monitoring intervals.",
+      ],
+      icon: MicroscopeIcon,
+    },
+  ],
+  stewardship: [
+    {
+      label: "Empiric Plan",
+      highlight: "Stewardship",
+      prompt: "Stewardship",
+      items: [
+        "Build an empiric antibiotic plan for severe CAP with ICU risk factors.",
+        "Suggest initial antimicrobials for pyelonephritis with recent ESBL history and renal impairment.",
+        "Outline early management for neutropenic fever with source uncertainty and early coverage priorities.",
+      ],
+      icon: PillIcon,
+    },
+    {
+      label: "De-escalation",
+      highlight: "De-escalation",
+      prompt: "De-escalation",
+      items: [
+        "Given these cultures and susceptibilities, how should I narrow therapy and for how long?",
+        "Review this broad-spectrum regimen and identify the safest de-escalation path once cultures finalize.",
+        "Create a stewardship plan with cultures to follow, stop rules, and duration checkpoints.",
+      ],
+      icon: MicroscopeIcon,
+    },
+    {
+      label: "Protocol Match",
+      highlight: "Protocol",
+      prompt: "Protocol",
+      items: [
+        "Compare this case against my uploaded local antibiogram/protocol and propose a reconciled plan.",
+        "Use uploaded stewardship policy pages and cite exact sections for each recommendation.",
+        "Show where patient-specific factors override default protocol steps.",
+      ],
+      icon: BookOpenText,
     },
   ],
   icd10_codes: [
@@ -575,6 +631,17 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
       ],
       icon: Notepad,
     },
+    {
+      label: "Audit Ready",
+      highlight: "Audit",
+      prompt: "Audit",
+      items: [
+        "Crosswalk this assessment to code options with audit-risk notes and required supporting language.",
+        "Flag coding choices likely to be denied and propose stronger alternatives with rationale.",
+        "Convert this plan into coder-ready bullets with explicit diagnosis specificity.",
+      ],
+      icon: Sparkle,
+    },
   ],
   med_review: [
     {
@@ -598,6 +665,17 @@ export const CLINICIAN_MODE_SUGGESTIONS: Record<
         "Identify highest-risk meds that need closer follow-up in the next 1-2 weeks.",
       ],
       icon: UserIcon,
+    },
+    {
+      label: "Trust Summary",
+      highlight: "Trust",
+      prompt: "Trust",
+      items: [
+        "After med review, give trust summary: evidence tier, recency, and uncertainty for each major recommendation.",
+        "Highlight which medication changes are strongly evidence-backed vs preference-sensitive.",
+        "Create an action plan ranked by impact, safety risk, and confidence.",
+      ],
+      icon: Lightbulb,
     },
   ],
 }
@@ -1224,6 +1302,7 @@ You are Fleming 4, an advanced medical AI doctor providing concise, evidence-bas
 - **Maximum Length:** Keep responses to 4-5 paragraphs maximum. Be concise and focused.
 - **Mandatory Citations:** Every factual claim, statistic, guideline, or medical statement MUST be followed by [CITATION:X] where X is the source number. Use web search results to find and cite sources.
 - **Citation Format:** Use [CITATION:1], [CITATION:2], or [CITATION:1,2,3] for multiple sources supporting the same claim.
+- **Inline Citations Only:** Do NOT add a manual "References", "Bibliography", or "Sources" section in the response body; use inline citation markers only.
 - **Evidence-Based:** Ground all statements in current medical research, clinical guidelines, or authoritative sources. Never make unsupported claims.
 
 **Response Structure:**

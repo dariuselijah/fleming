@@ -46,6 +46,26 @@ const optionalVars = {
     where: 'https://www.ncbi.nlm.nih.gov/account/settings/',
     example: 'your_ncbi_key',
   },
+  'EXA_API_KEY': {
+    description: 'Exa API key (optional, enables explicit web search tool)',
+    where: 'https://dashboard.exa.ai/api-keys',
+    example: 'exa_...',
+  },
+  'ENABLE_WEB_SEARCH_TOOL': {
+    description: 'Server feature flag for Exa-backed web search tool (optional, default true)',
+    where: 'Set in .env or deployment environment variables',
+    example: 'true',
+  },
+  'YOUTUBE_API_KEY': {
+    description: 'YouTube Data API v3 key (optional, enables conditional video tool)',
+    where: 'Google Cloud Console → APIs & Services → Credentials',
+    example: 'AIza...',
+  },
+  'ENABLE_YOUTUBE_TOOL': {
+    description: 'Server feature flag for YouTube tool (optional, default true)',
+    where: 'Set in .env or deployment environment variables',
+    example: 'true',
+  },
 };
 
 console.log('\n🔍 Environment Variables Check\n');

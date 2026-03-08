@@ -20,7 +20,6 @@ import type { Message } from "@ai-sdk/react"
 import { useChat } from "@ai-sdk/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
-import { getModelInfo } from "@/lib/models"
 
 type UseChatCoreProps = {
   initialMessages: Message[]
@@ -95,6 +94,7 @@ export function useChatCore({
   // Use ref to persist across hook reinitializations (e.g., URL changes)
   const evidenceCitationsRef = useRef<any[]>([])
   const [evidenceCitations, setEvidenceCitationsState] = useState<any[]>([])
+  const topicContextRef = useRef<any | null>(null)
   
   // Wrapper to update both state, ref, and sessionStorage
   const setEvidenceCitations = useCallback((citations: any[]) => {
@@ -119,6 +119,17 @@ export function useChatCore({
     evidenceCitationsRef.current = []
     setEvidenceCitationsState([])
   }, [])
+
+  const setTopicContext = useCallback((topicContext: any | null) => {
+    topicContextRef.current = topicContext
+    if (typeof window !== "undefined" && chatId && topicContext) {
+      try {
+        sessionStorage.setItem(`topicContext:${chatId}`, JSON.stringify(topicContext))
+      } catch (error) {
+        console.error("Failed to persist topic context:", error)
+      }
+    }
+  }, [chatId])
   
   // Track which chatId we've already restored citations for to prevent duplicate restores
   const restoredChatIdRef = useRef<string | null>(null)
@@ -157,7 +168,15 @@ export function useChatCore({
         break // Only restore from the most recent assistant message
       }
     }
-  }, [initialMessages, chatId])
+
+    for (let i = initialMessages.length - 1; i >= 0; i--) {
+      const msg = initialMessages[i] as any
+      if (msg.role === "assistant" && msg.topicContext) {
+        setTopicContext(msg.topicContext)
+        break
+      }
+    }
+  }, [initialMessages, chatId, setTopicContext])
   
   // Restore evidence citations from sessionStorage when chatId changes (only once per chatId)
   useEffect(() => {
@@ -258,6 +277,20 @@ export function useChatCore({
     }
   }, [chatId, clearEvidenceCitations]) // Only depend on chatId, NOT evidenceCitations
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !chatId) return
+    try {
+      const stored = sessionStorage.getItem(`topicContext:${chatId}`)
+      if (!stored) return
+      const parsed = JSON.parse(stored)
+      if (parsed && typeof parsed === "object") {
+        topicContextRef.current = parsed
+      }
+    } catch (error) {
+      console.error("Failed to restore topic context:", error)
+    }
+  }, [chatId])
+
   // Get user preferences at the top level
   const { useUserPreferences } = require("@/lib/user-preference-store/provider")
   const userPreferences = useUserPreferences()
@@ -329,19 +362,6 @@ export function useChatCore({
     const normalized = normalizeClinicianWorkflowMode(mode)
     setClinicianModeState(normalized)
   }, [])
-
-  // Auto-enable web search for healthcare professionals using Fleming 4
-  useEffect(() => {
-    const isHealthcareMode = userPreferences.preferences.userRole === "doctor" || 
-                            userPreferences.preferences.userRole === "medical_student"
-    const isFleming4 = selectedModel === "fleming-4"
-    const modelConfig = getModelInfo(selectedModel)
-    const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
-    
-    if (isHealthcareMode && isFleming4 && hasWebSearchSupport && !enableSearch) {
-      setEnableSearch(true)
-    }
-  }, [selectedModel, userPreferences.preferences.userRole, enableSearch, setEnableSearch])
 
   // Refs and derived state
   const hasSentFirstMessageRef = useRef(false)
@@ -458,59 +478,14 @@ export function useChatCore({
     return stableChatIdRef.current || undefined
   }, [chatId])
   
-  // CRITICAL: Get messages from sessionStorage BEFORE useChat initializes
-  // This ensures messages are available when useChat resets due to id change
-  // CRITICAL: Don't restore messages if we're on home page (chatId is null) - clear them instead
+  // Keep initial messages deterministic between server and client first render.
+  // Session/local storage restoration happens after mount in dedicated effects.
   const restoredInitialMessages = useMemo(() => {
-    // CRITICAL: If we're on home page (no chatId), don't restore any messages
-    // This prevents old messages from being restored when starting a new chat
-    // Server always has no messages on home page, so client should match
     if (!chatId) {
       return []
     }
-    
-    // First, try to get from "latest" key (most recent messages before navigation)
-    if (typeof window !== 'undefined' && chatId) {
-      const latest = sessionStorage.getItem('pendingMessages:latest')
-      if (latest) {
-        try {
-          const latestData = JSON.parse(latest)
-          if (latestData.messages && Array.isArray(latestData.messages) && latestData.messages.length > 0) {
-            // Only restore if messages match current chatId (not from a different chat)
-            const matchesChatId = latestData.chatId === chatId
-            const isRecent = !latestData.timestamp || (Date.now() - latestData.timestamp < 10000)
-            if (matchesChatId && isRecent) {
-              console.log('[🐛 RESTORE] Found', latestData.messages.length, 'messages in latest key for chatId:', chatId)
-              return latestData.messages
-            } else {
-              // Clear stale messages that don't match
-              sessionStorage.removeItem('pendingMessages:latest')
-            }
-          }
-        } catch (e) {
-          console.error('[🐛 RESTORE] Failed to parse latest messages:', e)
-          sessionStorage.removeItem('pendingMessages:latest')
-        }
-      }
-      
-      // Second, try with current chatId
-      const pendingKey = `pendingMessages:${chatId}`
-      const pending = sessionStorage.getItem(pendingKey)
-      if (pending) {
-        try {
-          const parsed = JSON.parse(pending)
-          if (parsed.length > 0) {
-            console.log('[🐛 RESTORE] Found', parsed.length, 'messages for chatId:', chatId)
-            return parsed
-          }
-        } catch (e) {
-          console.error('[🐛 RESTORE] Failed to parse pending messages:', e)
-          sessionStorage.removeItem(pendingKey)
-        }
-      }
-    }
-    
-    // Fallback to initialMessages from provider
+
+    // Use provider-supplied snapshot for hydration-safe first render.
     return initialMessages
   }, [chatId, initialMessages])
   
@@ -542,13 +517,21 @@ export function useChatCore({
     // Optimize for streaming performance
     onFinish: async (message) => {
       // CRITICAL: Restore evidence citations from stream body when headers were stripped (e.g. in production)
-      const annotations = (message as { annotations?: Array<{ type?: string; citations?: unknown[] }> }).annotations
+      const annotations = (
+        message as {
+          annotations?: Array<{ type?: string; citations?: unknown[]; topicContext?: unknown }>
+        }
+      ).annotations
       if (annotations && Array.isArray(annotations)) {
         const evidencePart = annotations.find((a) => a?.type === 'evidence-citations' && Array.isArray(a.citations))
         if (evidencePart?.citations && evidencePart.citations.length > 0) {
           const citations = evidencePart.citations as any[]
           setEvidenceCitations(citations)
           console.log(`📚 [EVIDENCE] Restored ${citations.length} citations from stream body (message.annotations)`)
+        }
+        const topicContextPart = annotations.find((a: any) => a?.type === "topic-context" && a?.topicContext)
+        if (topicContextPart?.topicContext) {
+          setTopicContext(topicContextPart.topicContext)
         }
       }
 
@@ -1354,6 +1337,7 @@ export function useChatCore({
         clinicalDecisionSupport: userPreferences.preferences.clinicalDecisionSupport,
         medicalLiteratureAccess: userPreferences.preferences.medicalLiteratureAccess,
         medicalComplianceMode: userPreferences.preferences.medicalComplianceMode,
+        topicContext: topicContextRef.current || undefined,
       },
     }
 
@@ -1538,6 +1522,7 @@ export function useChatCore({
           enableEvidence,
           learningMode,
           clinicianMode: DEFAULT_CLINICIAN_WORKFLOW_MODE,
+          topicContext: topicContextRef.current || undefined,
         },
       }
 
@@ -1638,8 +1623,11 @@ export function useChatCore({
         model: selectedModel,
         isAuthenticated,
         systemPrompt: systemPrompt || getSystemPromptByRole(userPreferences.preferences.userRole),
+        enableSearch,
+        enableEvidence,
         learningMode,
         clinicianMode,
+        topicContext: topicContextRef.current || undefined,
       },
     }
 
@@ -1650,6 +1638,8 @@ export function useChatCore({
     selectedModel,
     isAuthenticated,
     systemPrompt,
+    enableSearch,
+    enableEvidence,
     learningMode,
     clinicianMode,
     clearEvidenceCitations,

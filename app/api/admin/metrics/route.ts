@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createGuestServerClient } from '@/lib/supabase/server-guest'
 import { validateAdminPassword } from '@/lib/admin/password'
+import { getBenchmarkDashboardData } from '@/lib/benchmark-dashboard'
 
 export async function POST(request: NextRequest) {
   try {
@@ -144,6 +145,7 @@ export async function POST(request: NextRequest) {
         totalAttachments: totalAttachmentsResult.count || 0
       },
       models: topModels,
+      quality: getBenchmarkDashboardData(),
       lastUpdated: new Date().toISOString()
     }
 

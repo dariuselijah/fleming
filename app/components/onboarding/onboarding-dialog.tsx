@@ -271,7 +271,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                     />
                     <DemographicOption
                       icon={Stethoscope}
-                      title="As a healthcare professional"
+                      title="As a clinician"
                       description="Clinical tools with medical literature access"
                       selected={selectedDemographic === "doctor"}
                       onClick={() => handleDemographicSelect("doctor")}

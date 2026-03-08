@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    const { filePath, expiresIn = 3600 } = await request.json()
+    const { filePath, expiresIn = 3600, bucket = "chat-attachments" } = await request.json()
 
     if (!filePath) {
       return NextResponse.json({ error: "File path is required" }, { status: 400 })
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     // Generate signed URL
     const { data, error } = await supabase.storage
-      .from("chat-attachments")
+      .from(bucket)
       .createSignedUrl(filePath, expiresIn)
 
     if (error) {

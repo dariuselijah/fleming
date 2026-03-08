@@ -12,12 +12,22 @@ import {
   Wrench,
 } from "@phosphor-icons/react"
 import { AnimatePresence, motion } from "framer-motion"
+import Image from "next/image"
 import { useMemo, useState } from "react"
 
 interface ToolInvocationProps {
   toolInvocations: ToolInvocationUIPart[]
   className?: string
   defaultOpen?: boolean
+}
+
+type YouTubeToolResultItem = {
+  videoId: string
+  url: string
+  title: string
+  description?: string
+  channelTitle: string
+  thumbnailUrl?: string | null
 }
 
 const TRANSITION = {
@@ -271,8 +281,64 @@ function SingleToolCard({
   const renderResults = () => {
     if (!parsedResult) return "No result data available"
 
+    const renderYouTubeResultItems = (items: YouTubeToolResultItem[]) => (
+      <div className="space-y-2">
+        {items.map((item) => (
+          <a
+            key={item.videoId}
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="border-border hover:bg-accent/30 flex gap-2 rounded-md border p-2 transition-colors"
+          >
+            <div className="bg-muted relative h-20 w-32 shrink-0 overflow-hidden rounded">
+              {item.thumbnailUrl ? (
+                <Image
+                  src={item.thumbnailUrl}
+                  alt={item.title}
+                  fill
+                  sizes="128px"
+                  unoptimized
+                  className="object-cover"
+                />
+              ) : (
+                <div className="text-muted-foreground flex h-full items-center justify-center text-[10px]">
+                  No thumbnail
+                </div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="line-clamp-2 font-medium">{item.title}</div>
+              <div className="text-muted-foreground mt-1 text-xs">
+                {item.channelTitle}
+              </div>
+              {item.description ? (
+                <div className="text-muted-foreground mt-1 line-clamp-2 text-xs">
+                  {item.description}
+                </div>
+              ) : null}
+            </div>
+          </a>
+        ))}
+      </div>
+    )
+
     // Handle array of items with url, title, and snippet (like search results)
     if (Array.isArray(parsedResult) && parsedResult.length > 0) {
+      if (
+        parsedResult.every(
+          (item) =>
+            item &&
+            typeof item === "object" &&
+            "videoId" in item &&
+            "url" in item &&
+            "title" in item &&
+            "channelTitle" in item
+        )
+      ) {
+        return renderYouTubeResultItems(parsedResult as YouTubeToolResultItem[])
+      }
+
       // Check if items look like search results
       if (
         parsedResult[0] &&
@@ -328,6 +394,23 @@ function SingleToolCard({
     // Handle object results
     if (typeof parsedResult === "object" && parsedResult !== null) {
       const resultObj = parsedResult as Record<string, unknown>
+      if (
+        Array.isArray(resultObj.results) &&
+        resultObj.results.length > 0 &&
+        resultObj.results.every(
+          (item) =>
+            item &&
+            typeof item === "object" &&
+            "videoId" in item &&
+            "url" in item &&
+            "title" in item &&
+            "channelTitle" in item
+        )
+      ) {
+        return renderYouTubeResultItems(
+          resultObj.results as YouTubeToolResultItem[]
+        )
+      }
       const title = typeof resultObj.title === "string" ? resultObj.title : null
       const htmlUrl =
         typeof resultObj.html_url === "string" ? resultObj.html_url : null

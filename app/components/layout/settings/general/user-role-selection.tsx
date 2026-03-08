@@ -97,7 +97,7 @@ export function UserRoleSelection() {
           User Role & Specialty
         </CardTitle>
         <CardDescription>
-          Select your role to customize the AI assistant for your specific needs and learning goals.
+          Select your role to customize suggestions, workflows, and evidence behavior for how you practice or study.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -127,11 +127,18 @@ export function UserRoleSelection() {
               <SelectItem value="doctor">
                 <div className="flex items-center gap-2">
                   <RobotIcon className="size-4" />
-                  Healthcare Professional
+                  Clinician
                 </div>
               </SelectItem>
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            {preferences.userRole === "doctor"
+              ? "Clinician mode enables workflow-specific support for clinical summary, interactions, stewardship, coding, and med review."
+              : preferences.userRole === "medical_student"
+                ? "Medical Student mode emphasizes upload-aware learning, simulations, guideline walkthroughs, and cited explanations."
+                : "General mode is optimized for everyday health guidance and plain-language education."}
+          </p>
         </div>
 
         {(preferences.userRole === "doctor" || preferences.userRole === "medical_student") && (

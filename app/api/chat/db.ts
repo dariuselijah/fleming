@@ -1,4 +1,5 @@
 import type { ContentPart, Message } from "@/app/types/api.types"
+import type { TopicContext } from "@/app/types/api.types"
 import type { Database, Json } from "@/app/types/database.types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { encryptMessage, isEncryptionEnabled } from "@/lib/encryption"
@@ -11,7 +12,8 @@ export async function saveFinalAssistantMessage(
   messages: Message[],
   message_group_id?: string,
   model?: string,
-  evidenceCitations?: any[]
+  evidenceCitations?: any[],
+  topicContext?: TopicContext
 ) {
   const parts: ContentPart[] = []
   const toolMap = new Map<string, ContentPart>()
@@ -74,17 +76,20 @@ export async function saveFinalAssistantMessage(
   // Merge tool parts at the end
   parts.push(...toolMap.values())
   
-  // Add evidence citations as metadata part if available
-  // Store in parts as a custom metadata object
-  if (evidenceCitations && evidenceCitations.length > 0) {
+  if ((evidenceCitations && evidenceCitations.length > 0) || topicContext) {
     const metadataPart: any = {
       type: "metadata",
       metadata: {
-        evidenceCitations: evidenceCitations,
+        ...(evidenceCitations && evidenceCitations.length > 0
+          ? { evidenceCitations: evidenceCitations }
+          : {}),
+        ...(topicContext ? { topicContext } : {}),
       },
     }
     parts.push(metadataPart)
-    console.log(`📚 [SAVE] Storing ${evidenceCitations.length} evidence citations with message`)
+    if (evidenceCitations && evidenceCitations.length > 0) {
+      console.log(`📚 [SAVE] Storing ${evidenceCitations.length} evidence citations with message`)
+    }
   }
 
   const finalPlainText = textParts.join("\n\n")

@@ -12,6 +12,7 @@ import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { Info } from "@phosphor-icons/react"
 import Link from "next/link"
+import { SavedClinicianQuestionsDialog } from "../chat-input/saved-clinician-questions-dialog"
 import { DialogPublish } from "./dialog-publish"
 import { HeaderSidebarTrigger } from "./header-sidebar-trigger"
 
@@ -66,6 +67,16 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
       
               <ButtonNewChat />
               {!hasSidebar && <HistoryTrigger hasSidebar={hasSidebar} />}
+              {preferences.userRole === "doctor" && (
+                <SavedClinicianQuestionsDialog
+                  showLabel={!isMobile}
+                  className={
+                    isMobile
+                      ? "size-8 rounded-full p-0"
+                      : "h-8 rounded-full px-2.5 text-xs sm:px-3"
+                  }
+                />
+              )}
               <UserMenu />
             </div>
           )}

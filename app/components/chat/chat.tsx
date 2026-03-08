@@ -16,6 +16,10 @@ import {
   normalizeClinicianWorkflowMode,
   type ClinicianWorkflowMode,
 } from "@/lib/clinician-mode"
+import {
+  RUN_SAVED_QUESTION_EVENT,
+  type RunSavedQuestionEventDetail,
+} from "@/lib/saved-clinician-questions"
 import { toast } from "@/components/ui/toast"
 import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
@@ -320,6 +324,41 @@ export function Chat() {
     prevUserRef.current = currentUser
   }, [user, sendPendingMessage])
 
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleRunSavedQuestion = (
+      event: Event
+    ) => {
+      const customEvent = event as CustomEvent<RunSavedQuestionEventDetail>
+      const detail = customEvent.detail
+      if (!detail?.question?.prompt) return
+
+      const prompt = detail.refreshMode
+        ? `${detail.question.prompt}\n\nRefresh this answer with the latest evidence, highlight anything that would change management, and keep the output concise and actionable.`
+        : detail.question.prompt
+
+      if (status === "streaming") {
+        stop()
+      }
+
+      setClinicianMode(detail.question.workflow)
+      handleSuggestion(prompt)
+    }
+
+    window.addEventListener(
+      RUN_SAVED_QUESTION_EVENT,
+      handleRunSavedQuestion as EventListener
+    )
+
+    return () => {
+      window.removeEventListener(
+        RUN_SAVED_QUESTION_EVENT,
+        handleRunSavedQuestion as EventListener
+      )
+    }
+  }, [handleSuggestion, setClinicianMode, status, stop])
+
   // Memoize the conversation props to prevent unnecessary rerenders
   const conversationProps = useMemo(
     () => ({
@@ -337,10 +376,7 @@ export function Chat() {
   const chatInputProps = useMemo(
     () => {
       // Show suggestions when there are no messages, regardless of chatId
-      const shouldShowDoctorSuggestions =
-        preferences.userRole === "doctor" &&
-        (clinicianMode === "open_search" ||
-          clinicianMode === "clinical_summary")
+      const shouldShowDoctorSuggestions = preferences.userRole === "doctor"
       const hasSuggestions =
         preferences.promptSuggestions &&
         messages.length === 0 &&
@@ -514,7 +550,9 @@ export function Chat() {
     <>
       <div className={cn(
         "relative flex h-full w-full flex-col",
-        showOnboarding ? "items-center justify-center" : "justify-end"
+        showOnboarding
+          ? "items-center justify-start px-2 pt-[calc(var(--spacing-app-header)+1rem)] sm:justify-center sm:px-0 sm:pt-0"
+          : "justify-end"
       )}>
         {showOnboarding ? (
           <>

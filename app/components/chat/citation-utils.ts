@@ -167,6 +167,8 @@ export function extractJournalFromUrl(url: string): string | null {
     if (hostname.includes('science.org')) return 'Science'
     if (hostname.includes('cell.com')) return 'Cell'
     if (hostname.includes('pubmed') || hostname.includes('ncbi.nlm.nih.gov')) return 'PubMed'
+    if (hostname.includes('open.fda.gov')) return 'OpenFDA'
+    if (hostname === 'fda.gov' || hostname.endsWith('.fda.gov')) return 'FDA'
     if (hostname.includes('acpjournals.org')) return 'Annals of Internal Medicine'
     if (hostname.includes('mayoclinic.org') || hostname.includes('mcpiqojournal.org')) return 'Mayo Clinic Proceedings'
     if (hostname.includes('onlinelibrary.wiley.com')) return 'Journal of the American Geriatrics Society'

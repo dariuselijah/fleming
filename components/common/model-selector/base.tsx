@@ -25,7 +25,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useModel } from "@/lib/model-store/provider"
-import { filterAndSortModels } from "@/lib/model-store/utils"
 import { ModelConfig } from "@/lib/models/types"
 import { PROVIDERS } from "@/lib/providers"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
@@ -35,9 +34,28 @@ import {
   MagnifyingGlassIcon,
   StarIcon,
 } from "@phosphor-icons/react"
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { ProModelDialog } from "./pro-dialog"
 import { SubMenu } from "./sub-menu"
+
+const AUTO_MODEL_ID = "fleming-4"
+const POPULAR_MODEL_IDS = ["claude-sonnet-4-6", "gpt-5.2", "gemini-2.5-flash"] as const
+const LATEST_MODEL_IDS = [
+  "grok-4-1-fast-reasoning",
+  "gpt-5.4",
+  "claude-opus-4-6",
+  "gemini-2.5-pro",
+] as const
+const CURATED_MODEL_IDS = [
+  AUTO_MODEL_ID,
+  ...POPULAR_MODEL_IDS,
+  ...LATEST_MODEL_IDS,
+] as const
+const MODEL_LABEL_OVERRIDES: Record<string, string> = {
+  "fleming-4": "Auto",
+  "claude-sonnet-4-6": "Claude Sonnet",
+  "gemini-2.5-flash": "Gemini 2.5 Fast",
+}
 
 type ModelSelectorProps = {
   selectedModelId: string
@@ -52,7 +70,7 @@ export function ModelSelector({
   className,
   isUserAuthenticated = true,
 }: ModelSelectorProps) {
-  const { models, isLoading: isLoadingModels, favoriteModels } = useModel()
+  const { models, isLoading: isLoadingModels } = useModel()
   const { isModelHidden } = useUserPreferences()
 
   const currentModel = models.find((model) => model.id === selectedModelId)
@@ -60,13 +78,15 @@ export function ModelSelector({
     (provider) => provider.id === currentModel?.icon
   )
   const isMobile = useBreakpoint(768)
-
   const [hoveredModel, setHoveredModel] = useState<string | null>(null)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [isProDialogOpen, setIsProDialogOpen] = useState(false)
   const [selectedProModel, setSelectedProModel] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+
+  const getDisplayModelName = (model: ModelConfig) =>
+    MODEL_LABEL_OVERRIDES[model.id] ?? model.name
 
   // Ref for input to maintain focus
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -111,7 +131,7 @@ export function ModelSelector({
         <div className="flex items-center gap-3">
           {provider?.icon && <provider.icon className="size-5" />}
           <div className="flex flex-col gap-0">
-            <span className="text-sm">{model.name}</span>
+            <span className="text-sm">{getDisplayModelName(model)}</span>
           </div>
         </div>
         {isLocked && (
@@ -124,19 +144,46 @@ export function ModelSelector({
     )
   }
 
-  // Only show Fleming 4 model (Fleming 3.5 has been removed)
-  const flemingModels = models.filter(
-    (model) => model.id === "fleming-4"
+  const frontierModels = models.filter((model) => {
+    if (!["xai", "openai", "google", "anthropic"].includes(model.providerId)) {
+      return false
+    }
+    if (!CURATED_MODEL_IDS.includes(model.id as (typeof CURATED_MODEL_IDS)[number])) {
+      return false
+    }
+    return !isModelHidden(model.id)
+  })
+
+  const normalizedQuery = searchQuery.trim().toLowerCase()
+  const filteredModels = useMemo(() => {
+    if (!normalizedQuery) return frontierModels
+    return frontierModels.filter((model) => {
+      const displayName = getDisplayModelName(model).toLowerCase()
+      const providerName = String(model.provider ?? "").toLowerCase()
+      return (
+        displayName.includes(normalizedQuery) ||
+        model.id.toLowerCase().includes(normalizedQuery) ||
+        providerName.includes(normalizedQuery)
+      )
+    })
+  }, [frontierModels, normalizedQuery])
+
+  const hoveredModelData = filteredModels.find((model) => model.id === hoveredModel)
+  const modelsById = useMemo(
+    () => new Map(filteredModels.map((model) => [model.id, model])),
+    [filteredModels]
   )
-
-  // Get the hovered model data from Fleming models
-  const hoveredModelData = flemingModels.find((model) => model.id === hoveredModel)
-
-  const filteredModels = filterAndSortModels(
-    flemingModels,
-    favoriteModels || [],
-    searchQuery,
-    isModelHidden
+  const sectionedModels = useMemo(
+    () => ({
+      auto: [modelsById.get(AUTO_MODEL_ID)].filter(Boolean) as ModelConfig[],
+      popular: POPULAR_MODEL_IDS.map((id) => modelsById.get(id)).filter(
+        Boolean
+      ) as ModelConfig[],
+      latest: LATEST_MODEL_IDS.map((id) => modelsById.get(id)).filter(
+        Boolean
+      ) as ModelConfig[],
+    }),
+    [modelsById]
   )
 
   const trigger = (
@@ -147,11 +194,68 @@ export function ModelSelector({
     >
       <div className="flex items-center gap-2">
         {currentProvider?.icon && <currentProvider.icon className="size-5" />}
-        <span>{currentModel?.name || "Select model"}</span>
+        <span>{currentModel ? getDisplayModelName(currentModel) : "Select model"}</span>
       </div>
       <CaretDownIcon className="size-4 opacity-50" />
     </Button>
   )
+
+  const renderSection = (title: string, sectionModels: ModelConfig[]) => {
+    if (sectionModels.length === 0) return null
+    return (
+      <div className="mb-2">
+        <div className="text-muted-foreground sticky top-0 z-10 bg-inherit px-3 py-1 text-[11px] font-semibold tracking-wide uppercase">
+          {title}
+        </div>
+        {sectionModels.map((model) => {
+          const isLocked = !model.accessible
+          const provider = PROVIDERS.find((provider) => provider.id === model.icon)
+
+          return (
+            <DropdownMenuItem
+              key={model.id}
+              className={cn(
+                "hover:bg-accent/70 flex w-full items-center justify-between rounded-lg px-3 py-2 transition-colors",
+                selectedModelId === model.id && "bg-accent"
+              )}
+              onSelect={() => {
+                if (isLocked) {
+                  setSelectedProModel(model.id)
+                  setIsProDialogOpen(true)
+                  return
+                }
+
+                setSelectedModelId(model.id)
+                setIsDropdownOpen(false)
+              }}
+              onFocus={() => {
+                if (isDropdownOpen) {
+                  setHoveredModel(model.id)
+                }
+              }}
+              onMouseEnter={() => {
+                if (isDropdownOpen) {
+                  setHoveredModel(model.id)
+                }
+              }}
+            >
+              <div className="flex items-center gap-3">
+                {provider?.icon && <provider.icon className="size-5" />}
+                <div className="flex flex-col gap-0">
+                  <span className="text-sm">{getDisplayModelName(model)}</span>
+                </div>
+              </div>
+              {isLocked && (
+                <div className="border-input bg-accent text-muted-foreground flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
+                  <span>Locked</span>
+                </div>
+              )}
+            </DropdownMenuItem>
+          )
+        })}
+      </div>
+    )
+  }
 
   // Handle input change without losing focus
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,7 +282,7 @@ export function ModelSelector({
                 {currentProvider?.icon && (
                   <currentProvider.icon className="size-5" />
                 )}
-                {currentModel?.name}
+                {currentModel ? getDisplayModelName(currentModel) : "Select model"}
                 <CaretDownIcon className="size-4" />
               </Button>
             </PopoverTrigger>
@@ -225,7 +329,26 @@ export function ModelSelector({
                   </p>
                 </div>
               ) : filteredModels.length > 0 ? (
-                filteredModels.map((model) => renderModelItem(model))
+                <>
+                  <div className="mb-2">
+                    <div className="text-muted-foreground px-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
+                      Auto
+                    </div>
+                    {sectionedModels.auto.map((model) => renderModelItem(model))}
+                  </div>
+                  <div className="mb-2">
+                    <div className="text-muted-foreground px-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
+                      Popular
+                    </div>
+                    {sectionedModels.popular.map((model) => renderModelItem(model))}
+                  </div>
+                  <div className="mb-1">
+                    <div className="text-muted-foreground px-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
+                      Latest
+                    </div>
+                    {sectionedModels.latest.map((model) => renderModelItem(model))}
+                  </div>
+                </>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center p-6 text-center">
                   <p className="text-muted-foreground mb-2 text-sm">
@@ -273,7 +396,7 @@ export function ModelSelector({
           </TooltipTrigger>
           <TooltipContent>Switch model ⌘⇧P</TooltipContent>
           <DropdownMenuContent
-            className="flex h-[320px] w-[300px] flex-col space-y-0.5 overflow-visible p-0"
+            className="flex h-[330px] w-[320px] flex-col space-y-0.5 overflow-visible rounded-xl p-0"
             align="start"
             sideOffset={4}
             forceMount
@@ -302,54 +425,11 @@ export function ModelSelector({
                   </p>
                 </div>
               ) : filteredModels.length > 0 ? (
-                filteredModels.map((model) => {
-                  const isLocked = !model.accessible
-                  const provider = PROVIDERS.find(
-                    (provider) => provider.id === model.icon
-                  )
-
-                  return (
-                    <DropdownMenuItem
-                      key={model.id}
-                      className={cn(
-                        "flex w-full items-center justify-between px-3 py-2",
-                        selectedModelId === model.id && "bg-accent"
-                      )}
-                      onSelect={() => {
-                        if (isLocked) {
-                          setSelectedProModel(model.id)
-                          setIsProDialogOpen(true)
-                          return
-                        }
-
-                        setSelectedModelId(model.id)
-                        setIsDropdownOpen(false)
-                      }}
-                      onFocus={() => {
-                        if (isDropdownOpen) {
-                          setHoveredModel(model.id)
-                        }
-                      }}
-                      onMouseEnter={() => {
-                        if (isDropdownOpen) {
-                          setHoveredModel(model.id)
-                        }
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        {provider?.icon && <provider.icon className="size-5" />}
-                        <div className="flex flex-col gap-0">
-                          <span className="text-sm">{model.name}</span>
-                        </div>
-                      </div>
-                      {isLocked && (
-                        <div className="border-input bg-accent text-muted-foreground flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
-                          <span>Locked</span>
-                        </div>
-                      )}
-                    </DropdownMenuItem>
-                  )
-                })
+                <>
+                  {renderSection("Auto", sectionedModels.auto)}
+                  {renderSection("Popular", sectionedModels.popular)}
+                  {renderSection("Latest", sectionedModels.latest)}
+                </>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center p-6 text-center">
                   <p className="text-muted-foreground mb-1 text-sm">

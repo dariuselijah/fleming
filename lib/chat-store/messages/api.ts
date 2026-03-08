@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/client"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
-import { loadAttachmentsWithSignedUrls } from "@/lib/file-handling"
+import { loadAttachmentsWithSignedUrls, refreshEvidenceCitationsWithSignedUrls } from "@/lib/file-handling"
 import type { Message as MessageAISDK } from "ai"
 import { readFromIndexedDB, writeToIndexedDB } from "../persist"
 import { decryptMessage } from "@/lib/encryption"
@@ -106,15 +106,22 @@ export async function getMessagesFromDb(
           // Extract evidence citations from parts if available
           const parts = ((message as any)?.parts as MessageAISDK["parts"]) || undefined
           let evidenceCitations: any[] | undefined = undefined
+          let topicContext: any | undefined = undefined
           
           if (parts && Array.isArray(parts)) {
-            const metadataPart = parts.find((p: any) => p.type === "metadata" && (p as any).metadata?.evidenceCitations)
+            const metadataPart = parts.find((p: any) => p.type === "metadata" && (p as any).metadata)
             if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
               evidenceCitations = (metadataPart as any).metadata.evidenceCitations
+              if (evidenceCitations) {
+                evidenceCitations = await refreshEvidenceCitationsWithSignedUrls(evidenceCitations)
+              }
               const messageId = (message as any).id
               if (evidenceCitations) {
                 console.log(`📚 [LOAD] Found ${evidenceCitations.length} evidence citations in message ${messageId}`)
               }
+            }
+            if (metadataPart && (metadataPart as any).metadata?.topicContext) {
+              topicContext = (metadataPart as any).metadata.topicContext
             }
           }
 
@@ -130,6 +137,7 @@ export async function getMessagesFromDb(
             experimental_attachments: processedAttachments,
             // Store evidence citations in a custom field for easy access
             evidenceCitations: evidenceCitations,
+            topicContext,
           } as MessageAISDK & { evidenceCitations?: any[] }
         })
       )
@@ -359,15 +367,17 @@ function addEvidenceCitationsToMessage(
   
   // Check if metadata part with citations already exists
   const existingMetadataIndex = parts.findIndex(
-    (p: any) => p.type === "metadata" && p.metadata?.evidenceCitations
+    (p: any) => p.type === "metadata" && p.metadata
   )
   
   if (existingMetadataIndex >= 0) {
     // Update existing metadata part
     const updatedParts = [...parts]
+    const existingMetadata = (updatedParts[existingMetadataIndex] as any)?.metadata || {}
     updatedParts[existingMetadataIndex] = {
       type: "metadata" as any,
       metadata: {
+        ...existingMetadata,
         evidenceCitations: evidenceCitations,
       },
     } as any

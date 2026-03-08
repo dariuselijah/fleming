@@ -67,6 +67,10 @@ export function Conversation({
         }
       }
 
+      const previousUserMessage = [...uniqueMessages.slice(0, index)]
+        .reverse()
+        .find((candidate) => candidate.role === "user")
+
       return (
         <Message
           key={message.id}
@@ -81,6 +85,7 @@ export function Conversation({
           parts={message.parts}
           status={status}
           evidenceCitations={messageEvidenceCitations}
+          contextPrompt={previousUserMessage?.content}
         >
           {message.content}
         </Message>

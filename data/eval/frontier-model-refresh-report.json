@@ -1,0 +1,93 @@
+{
+  "generatedAt": "2026-03-08T18:59:04.637Z",
+  "providerChecks": {
+    "xai": {
+      "expectedModels": [
+        "fleming-4",
+        "grok-4-1-fast-reasoning"
+      ],
+      "missingModels": [],
+      "referenceUrls": [
+        {
+          "url": "https://docs.x.ai/docs/models?cluster=us-west-1",
+          "reachable": true,
+          "status": 200,
+          "error": null
+        },
+        {
+          "url": "https://docs.x.ai/docs/release-notes",
+          "reachable": true,
+          "status": 200,
+          "error": null
+        }
+      ]
+    },
+    "openai": {
+      "expectedModels": [
+        "gpt-5.4",
+        "gpt-5.2"
+      ],
+      "missingModels": [],
+      "referenceUrls": [
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-5.4",
+          "reachable": true,
+          "status": 200,
+          "error": null
+        },
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-5.2",
+          "reachable": true,
+          "status": 200,
+          "error": null
+        }
+      ]
+    },
+    "anthropic": {
+      "expectedModels": [
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5"
+      ],
+      "missingModels": [],
+      "referenceUrls": [
+        {
+          "url": "https://docs.anthropic.com/en/release-notes/overview",
+          "reachable": true,
+          "status": 200,
+          "error": null
+        },
+        {
+          "url": "https://www.anthropic.com/news/claude-sonnet-4-6",
+          "reachable": true,
+          "status": 200,
+          "error": null
+        }
+      ]
+    },
+    "google": {
+      "expectedModels": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview"
+      ],
+      "missingModels": [],
+      "referenceUrls": [
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/changelog",
+          "reachable": true,
+          "status": 200,
+          "error": null
+        },
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/models",
+          "reachable": true,
+          "status": 200,
+          "error": null
+        }
+      ]
+    }
+  }
+}

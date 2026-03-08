@@ -4,6 +4,8 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { UserUploadService } from '@/lib/uploads/server'
+import type { EvidenceCitation } from '@/lib/evidence/types'
 import { generateEmbedding } from './embeddings'
 import type {
   CitationChunk,
@@ -116,6 +118,21 @@ export class CitationRAGSystem {
       .slice(0, maxResults)
 
     return this.mapChunksToCitationChunks(chunksWithSimilarity)
+  }
+
+  async retrieveUserUploadCitations(
+    userId: string,
+    queryText: string,
+    apiKey?: string,
+    maxResults: number = 4
+  ): Promise<EvidenceCitation[]> {
+    const service = new UserUploadService(await this.getSupabase())
+    return service.retrieveUploadCitations({
+      userId,
+      query: queryText,
+      apiKey,
+      maxResults,
+    })
   }
 
   /**

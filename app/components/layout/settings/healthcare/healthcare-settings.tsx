@@ -93,6 +93,12 @@ export function HealthcareSettings() {
   }
 
   const SpecialtyIcon = preferences.medicalSpecialty ? specialtyIcons[preferences.medicalSpecialty] : UserIcon
+  const roleLabel =
+    preferences.userRole === "doctor"
+      ? "Clinician"
+      : preferences.userRole === "medical_student"
+        ? "Medical Student"
+        : "General User"
 
   return (
     <div className="space-y-6">
@@ -111,7 +117,7 @@ export function HealthcareSettings() {
             User Role
           </CardTitle>
           <CardDescription>
-            Select your role to customize the AI assistant for your specific needs.
+            Choose your role to unlock role-specific workflows, prompts, and evidence behavior.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -141,7 +147,7 @@ export function HealthcareSettings() {
                 <SelectItem value="doctor">
                   <div className="flex items-center gap-2">
                     <RobotIcon className="size-4" />
-                    Healthcare Professional
+                    Clinician
                   </div>
                 </SelectItem>
               </SelectContent>
@@ -194,8 +200,8 @@ export function HealthcareSettings() {
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">Role:</span>
-                <span className="text-sm text-muted-foreground capitalize">
-                  {preferences.userRole === "medical_student" ? "Medical Student" : preferences.userRole}
+                <span className="text-sm text-muted-foreground">
+                  {roleLabel}
                 </span>
               </div>
               
@@ -209,26 +215,39 @@ export function HealthcareSettings() {
               )}
               
               {preferences.userRole === "doctor" && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Features Enabled:</span>
-                  <div className="flex gap-1">
-                    {preferences.clinicalDecisionSupport && (
-                      <Badge variant="secondary" className="text-xs">
-                        Clinical Support
-                      </Badge>
-                    )}
-                    {preferences.medicalLiteratureAccess && (
-                      <Badge variant="secondary" className="text-xs">
-                        Literature Access
-                      </Badge>
-                    )}
-                    {preferences.medicalComplianceMode && (
-                      <Badge variant="secondary" className="text-xs">
-                        Compliance Mode
-                      </Badge>
-                    )}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Features Enabled:</span>
+                    <div className="flex gap-1">
+                      {preferences.clinicalDecisionSupport && (
+                        <Badge variant="secondary" className="text-xs">
+                          Clinical Support
+                        </Badge>
+                      )}
+                      {preferences.medicalLiteratureAccess && (
+                        <Badge variant="secondary" className="text-xs">
+                          Literature Access
+                        </Badge>
+                      )}
+                      {preferences.medicalComplianceMode && (
+                        <Badge variant="secondary" className="text-xs">
+                          Compliance Mode
+                        </Badge>
+                      )}
+                    </div>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Best use: start in Open Search for fast synthesis, then switch to Drug Interactions,
+                    Stewardship, ICD10, or Med Review for targeted clinical workflows.
+                  </p>
                 </div>
+              )}
+
+              {preferences.userRole === "medical_student" && (
+                <p className="text-xs text-muted-foreground">
+                  Best use: choose Ask, Simulate, or Guideline mode, upload your course PDFs, and request
+                  page-cited explanations. You can also ask for YouTube-supported walkthroughs plus evidence recap.
+                </p>
               )}
             </div>
           </CardContent>

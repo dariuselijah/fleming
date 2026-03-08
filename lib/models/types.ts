@@ -10,6 +10,14 @@ type ModelConfig = {
 
   description?: string // Short 1–2 line summary
   tags?: string[] // ["fast", "cheap", "vision", "OSS"]
+  useCases?: string[] // ["Coding", "Clinical reasoning", ...]
+  healthcareBenchmarks?: string[] // ["PubMed QA: strong", "Guideline fidelity: high"]
+  verifiedBenchmarks?: Array<{
+    label: string
+    value: string
+    source: string
+    sourceUrl: string
+  }>
 
   contextWindow?: number // in tokens
   inputCost?: number // USD per 1M input tokens
@@ -23,7 +31,7 @@ type ModelConfig = {
   webSearch?: boolean
   openSource?: boolean
 
-  speed?: "Fast" | "Medium" | "Slow"
+  speed?: "Super Fast" | "Fast" | "Medium" | "Slow"
   intelligence?: "Low" | "Medium" | "High"
 
   website?: string // official website (e.g. https://openai.com)

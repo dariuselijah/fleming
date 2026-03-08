@@ -143,7 +143,19 @@ export function MessageUser({
             <div className="text-primary mb-3 h-24 w-40 overflow-hidden rounded-md border p-2 text-xs">
               {getTextFromDataUrl(attachment.url)}
             </div>
-          ) : null}
+          ) : (
+            <div className="bg-muted/60 mb-2 flex h-16 w-48 items-center gap-3 rounded-xl border border-border px-3">
+              <div className="bg-background flex h-9 w-9 items-center justify-center rounded-lg border border-border text-[10px] font-semibold uppercase text-muted-foreground">
+                {(attachment.name?.split(".").pop() || "file").slice(0, 4)}
+              </div>
+              <div className="min-w-0">
+                <p className="line-clamp-1 text-sm font-medium">{attachment.name || "File"}</p>
+                <p className="text-muted-foreground line-clamp-1 text-[11px]">
+                  {attachment.contentType || "Document"}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       ))}
       {isEditing ? (

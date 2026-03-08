@@ -19,6 +19,7 @@ import {
 } from "@/components/prompt-kit/prompt-input"
 import { Button } from "@/components/ui/button"
 import { PromptSystem } from "../suggestions/prompt-system"
+import { ModelSelector } from "@/components/common/model-selector/base"
 import { ButtonFileUpload } from "./button-file-upload"
 import { ButtonSearch } from "./button-search"
 import { ClinicianWorkflowPanel } from "./clinician-workflow-panel"
@@ -84,8 +85,7 @@ export function ChatInput({
   const [isButtonDisabled, setIsButtonDisabled] = useState(true)
   const [tabsDismissed, setTabsDismissed] = useState(false)
 
-  // Use selectedModel directly - no model selector needed since only Fleming 4 is available
-  // Migrate old model names to fleming-4
+  // Migrate old model aliases to the default model id.
   const effectiveModelId = useMemo(() => {
     if (selectedModel === 'grok-4' || selectedModel === 'grok-4-fast-reasoning' || selectedModel === 'fleming-3.5') {
       return 'fleming-4'
@@ -124,7 +124,9 @@ export function ChatInput({
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        if (!value || isOnlyWhitespace(value)) {
+        const hasMessageText = Boolean(value && !isOnlyWhitespace(value))
+        const hasAttachedFiles = files.length > 0
+        if (!hasMessageText && !hasAttachedFiles) {
           return
         }
 
@@ -132,7 +134,7 @@ export function ChatInput({
         onSend()
       }
     },
-    [isSubmitting, onSend, status, value]
+    [files.length, isSubmitting, onSend, status, value]
   )
 
   const handlePaste = useCallback(
@@ -188,12 +190,13 @@ export function ChatInput({
     // 1. No input and not streaming
     // 2. Submitting (but not streaming)
     const hasValidInput = value && !isOnlyWhitespace(value);
+    const hasAttachedFiles = files.length > 0
     const isStreaming = status === "streaming";
     const isSubmittingButNotStreaming = isSubmitting && !isStreaming;
     
-    const shouldDisable = !isStreaming && (!hasValidInput || isSubmittingButNotStreaming);
+    const shouldDisable = !isStreaming && ((!hasValidInput && !hasAttachedFiles) || isSubmittingButNotStreaming);
     setIsButtonDisabled(Boolean(shouldDisable));
-  }, [value, isSubmitting, status])
+  }, [files.length, value, isSubmitting, status])
 
   // Reset tabs-dismissed when conversation has no messages (e.g. new chat)
   useEffect(() => {
@@ -209,11 +212,11 @@ export function ChatInput({
   const isMedicalStudent = preferences.userRole === "medical_student"
   const isDoctor = preferences.userRole === "doctor"
   const showClinicianWorkflowPanel =
-    isDoctor && clinicianMode !== "open_search" && !hasMessages && !tabsDismissed
-  const shouldShowInlineSuggestions =
     isDoctor &&
     !hasMessages &&
-    (clinicianMode === "open_search" || clinicianMode === "clinical_summary")
+    !tabsDismissed &&
+    clinicianMode !== "open_search"
+  const shouldShowInlineSuggestions = showClinicianWorkflowPanel
 
   const handleClinicianPanelSubmit = useCallback(
     (prompt: string) => {
@@ -235,17 +238,12 @@ export function ChatInput({
         />
       )}
       {isDoctor && onClinicianModeChange && !hasMessages && !tabsDismissed && (
-        <ClinicianModeSelector
-          value={clinicianMode}
-          onChange={onClinicianModeChange}
-        />
-      )}
-      {showClinicianWorkflowPanel && (
-        <ClinicianWorkflowPanel
-          mode={clinicianMode}
-          onSubmitPrompt={handleClinicianPanelSubmit}
-          isSubmitting={isSubmitting || status === "streaming"}
-        />
+        <div className="-mx-1 bg-background px-1 pt-1 pb-2">
+          <ClinicianModeSelector
+            value={clinicianMode}
+            onChange={onClinicianModeChange}
+          />
+        </div>
       )}
       {hasSuggestions && (
         <PromptSystem
@@ -255,6 +253,13 @@ export function ChatInput({
           learningMode={learningMode}
           clinicianMode={clinicianMode}
           position={shouldShowInlineSuggestions ? "inline" : "floating"}
+        />
+      )}
+      {showClinicianWorkflowPanel && (
+        <ClinicianWorkflowPanel
+          mode={clinicianMode}
+          onSubmitPrompt={handleClinicianPanelSubmit}
+          isSubmitting={isSubmitting || status === "streaming"}
         />
       )}
       {!showClinicianWorkflowPanel && (
@@ -292,6 +297,12 @@ export function ChatInput({
                     isAuthenticated={isUserAuthenticated}
                   />
                 ) : null}
+                <ModelSelector
+                  selectedModelId={effectiveModelId}
+                  setSelectedModelId={onSelectModel}
+                  isUserAuthenticated={isUserAuthenticated}
+                  className="h-9 rounded-full"
+                />
               </div>
               <PromptInputAction tooltip={status === "streaming" ? "Stop" : "Send"}>
                 <Button

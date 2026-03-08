@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { createPortal } from "react-dom"
+import Link from "next/link"
 import { 
   X, 
   ArrowSquareOut, 
@@ -389,7 +390,10 @@ export function EvidenceCitationPill({
       
       // Check bounds
       const popupWidth = 420
-      const popupHeight = 320
+      const popupHeight =
+        citation.previewReference || (citation.figureReferences?.length ?? 0) > 0
+          ? 460
+          : 320
       
       if (x + popupWidth > window.innerWidth + scrollX) {
         x = rect.left - popupWidth - 12 + scrollX
@@ -407,8 +411,15 @@ export function EvidenceCitationPill({
     setIsPopupOpen(true)
   }
 
+  const isUploadCitation = citation.sourceType === "user_upload"
+  const uploadDisplayName =
+    citation.uploadFileName || citation.sourceLabel || citation.title || "Your upload"
+  const shortName = isUploadCitation
+    ? shortenJournalName(uploadDisplayName, 20)
+    : shortenJournalName(citation.journal)
+
   // Try to get favicon - first from journal name, then from DOI domain
-  let faviconUrl = getJournalFavicon(citation.journal)
+  let faviconUrl = isUploadCitation ? null : getJournalFavicon(citation.journal)
   
   // Fallback: try to extract favicon from DOI URL if available
   if (!faviconUrl && citation.doi) {
@@ -434,8 +445,6 @@ export function EvidenceCitationPill({
     }
   }
   
-  const shortName = shortenJournalName(citation.journal)
-
   return (
     <>
       <span
@@ -493,6 +502,19 @@ interface EvidencePopupProps {
 function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
   const evidenceColor = EVIDENCE_LEVEL_COLORS[citation.evidenceLevel] || 'bg-gray-500'
   const evidenceLabel = EVIDENCE_LEVEL_LABELS[citation.evidenceLevel] || 'Unknown'
+  const citationAuthors = Array.isArray(citation.authors) ? citation.authors : []
+  const citationMeshTerms = Array.isArray(citation.meshTerms) ? citation.meshTerms : []
+  const isUploadCitation =
+    citation.sourceType === "user_upload" &&
+    typeof citation.url === "string" &&
+    citation.url.startsWith("/uploads/")
+  const primaryHref = citation.url || "#"
+  const primaryTarget = isUploadCitation ? undefined : "_blank"
+  const primaryRel = isUploadCitation ? undefined : "noopener noreferrer"
+  const visualReferences = [
+    ...(citation.previewReference ? [citation.previewReference] : []),
+    ...(citation.figureReferences || []),
+  ].filter((item) => item?.signedUrl)
 
   const formatAuthors = (authors: string[]): string => {
     if (authors.length === 0) return 'Unknown authors'
@@ -552,15 +574,25 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
         <div className="p-4 space-y-3">
           {/* Title */}
           {citation.url ? (
-            <a
-              href={citation.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-sm font-medium leading-snug text-primary hover:text-primary/80 transition-colors"
-            >
-              [{citation.index}] {citation.title}
-              <ArrowSquareOut className="inline ml-1 h-3.5 w-3.5" />
-            </a>
+            isUploadCitation ? (
+              <Link
+                href={primaryHref}
+                className="block text-sm font-medium leading-snug text-primary hover:text-primary/80 transition-colors"
+              >
+                [{citation.index}] {citation.title}
+                <ArrowSquareOut className="inline ml-1 h-3.5 w-3.5" />
+              </Link>
+            ) : (
+              <a
+                href={primaryHref}
+                target={primaryTarget}
+                rel={primaryRel}
+                className="block text-sm font-medium leading-snug text-primary hover:text-primary/80 transition-colors"
+              >
+                [{citation.index}] {citation.title}
+                <ArrowSquareOut className="inline ml-1 h-3.5 w-3.5" />
+              </a>
+            )
           ) : (
             <h4 className="text-sm font-medium leading-snug">
               [{citation.index}] {citation.title}
@@ -572,7 +604,7 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
             {/* Journal */}
             <div className="flex items-start gap-1.5 text-muted-foreground">
               <Book className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-              <span>{citation.journal}{citation.year ? `, ${citation.year}` : ''}</span>
+              <span>{citation.sourceLabel || citation.journal}{citation.year ? `, ${citation.year}` : ''}</span>
             </div>
             
             {/* Study Type */}
@@ -592,18 +624,69 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
             )}
 
             {/* Authors */}
-            {citation.authors.length > 0 && (
+            {citationAuthors.length > 0 && (
               <div className="flex items-start gap-1.5 text-muted-foreground col-span-2">
                 <FileText className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-                <span>{formatAuthors(citation.authors)}</span>
+                <span>{formatAuthors(citationAuthors)}</span>
+              </div>
+            )}
+            {citation.pageLabel && (
+              <div className="flex items-start gap-1.5 text-muted-foreground col-span-2">
+                <Newspaper className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                <span>{citation.pageLabel}</span>
               </div>
             )}
           </div>
 
+          {visualReferences.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-foreground">Linked visuals</div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {visualReferences.map((visual) => (
+                  isUploadCitation ? (
+                    <Link key={visual.assetId} href={primaryHref} className="group/visual shrink-0">
+                      <div className="bg-muted h-24 w-28 overflow-hidden rounded-lg border border-border">
+                        <img
+                          src={visual.signedUrl || ""}
+                          alt={visual.label}
+                          className="h-full w-full object-cover transition-transform group-hover/visual:scale-[1.02]"
+                        />
+                      </div>
+                      <div className="mt-1 max-w-28 text-[10px] text-muted-foreground">
+                        <div className="truncate">{visual.label}</div>
+                        {visual.caption ? <div className="line-clamp-2">{visual.caption}</div> : null}
+                      </div>
+                    </Link>
+                  ) : (
+                    <a
+                      key={visual.assetId}
+                      href={visual.fullUrl || visual.signedUrl || primaryHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group/visual shrink-0"
+                    >
+                      <div className="bg-muted h-24 w-28 overflow-hidden rounded-lg border border-border">
+                        <img
+                          src={visual.signedUrl || ""}
+                          alt={visual.label}
+                          className="h-full w-full object-cover transition-transform group-hover/visual:scale-[1.02]"
+                        />
+                      </div>
+                      <div className="mt-1 max-w-28 text-[10px] text-muted-foreground">
+                        <div className="truncate">{visual.label}</div>
+                        {visual.caption ? <div className="line-clamp-2">{visual.caption}</div> : null}
+                      </div>
+                    </a>
+                  )
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* MeSH Terms */}
-          {citation.meshTerms.length > 0 && (
+          {citationMeshTerms.length > 0 && citation.sourceType !== "user_upload" && (
             <div className="flex flex-wrap gap-1">
-              {citation.meshTerms.slice(0, 5).map((term, i) => (
+              {citationMeshTerms.slice(0, 5).map((term, i) => (
                 <span
                   key={i}
                   className="inline-flex items-center rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground"
@@ -611,9 +694,9 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
                   {term}
                 </span>
               ))}
-              {citation.meshTerms.length > 5 && (
+              {citationMeshTerms.length > 5 && (
                 <span className="text-[10px] text-muted-foreground">
-                  +{citation.meshTerms.length - 5} more
+                  +{citationMeshTerms.length - 5} more
                 </span>
               )}
             </div>
@@ -629,17 +712,27 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
           {/* Actions */}
           <div className="flex items-center gap-2 pt-2 border-t border-border">
             {citation.url && (
-              <a
-                href={citation.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-              >
-                View on PubMed
-                <CaretRight className="h-3 w-3" />
-              </a>
+              isUploadCitation ? (
+                <Link
+                  href={primaryHref}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  Open source file
+                  <CaretRight className="h-3 w-3" />
+                </Link>
+              ) : (
+                <a
+                  href={primaryHref}
+                  target={primaryTarget}
+                  rel={primaryRel}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  View on PubMed
+                  <CaretRight className="h-3 w-3" />
+                </a>
+              )
             )}
-            {citation.doi && (
+            {citation.doi && citation.sourceType !== "user_upload" && (
               <a
                 href={`https://doi.org/${citation.doi}`}
                 target="_blank"

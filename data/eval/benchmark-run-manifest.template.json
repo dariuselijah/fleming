@@ -1,0 +1,33 @@
+{
+  "runId": "replace-with-uuid-or-timestamp",
+  "timestampUtc": "2026-03-06T00:00:00.000Z",
+  "gitCommitSha": "replace-with-commit-sha",
+  "gitBranchOrTag": "replace-with-branch-or-tag",
+  "trigger": "manual",
+  "operator": "replace-with-user-or-ci-identity",
+  "datasetLockVersion": "2026-03-06",
+  "thresholdConfigVersion": "2026-03-06",
+  "mode": "release",
+  "benchmarkCommands": [
+    "npm run benchmark:release:strict",
+    "npm run benchmark:external -- --input data/eval/external/normalized/sample_external_healthcare.json --out data/eval/external_results.json",
+    "npm run benchmark:external:check -- --input data/eval/external_results.json --thresholds data/eval/external_benchmark_thresholds.json",
+    "npm run benchmark:healthcare:report -- --chat data/eval/chat_release_results.json --retrieval data/eval/retrieval_release_results.json --external data/eval/external_results.json --out data/eval/healthcare_benchmark_report.md"
+  ],
+  "runtimeConfig": {
+    "baseUrl": "http://127.0.0.1:3000",
+    "model": "fleming-4",
+    "userRole": "doctor",
+    "benchStrictMode": true,
+    "retries": 2,
+    "timeoutMs": 90000
+  },
+  "artifacts": {
+    "chatResults": "data/eval/chat_release_results.json",
+    "retrievalResults": "data/eval/retrieval_release_results.json",
+    "externalResults": "data/eval/external_results.json",
+    "report": "data/eval/healthcare_benchmark_report.md"
+  },
+  "notes": "replace-with-run-notes"
+}
+

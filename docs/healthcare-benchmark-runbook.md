@@ -2,6 +2,19 @@
 
 This runbook covers external healthcare benchmark execution (MedQA, PubMedQA, MMLU-clinical) and unified reporting alongside internal release benchmarks.
 
+## Governance Prerequisites (Required)
+
+Before running release or public benchmark jobs:
+
+```bash
+npm run benchmark:dataset-lock:verify
+npm run benchmark:run-manifest:validate -- --input data/eval/benchmark-run-manifest.template.json
+```
+
+- Locked benchmark assets are versioned in `data/eval/dataset-lock-manifest.json`.
+- Run metadata template is stored in `data/eval/benchmark-run-manifest.template.json`.
+- Governance policy is in `docs/benchmark-governance.md`.
+
 ## Prerequisites
 
 - App server is running at `http://127.0.0.1:3000`.
@@ -69,3 +82,18 @@ This runs:
 2. External healthcare benchmark suite
 3. External threshold checks
 4. Unified healthcare report generation
+
+## Frontier Baseline vs Fleming Setup (Publication Path)
+
+To publish "frontier model alone" versus "frontier model + Fleming setup":
+
+1. Run baseline outside Fleming pipeline (same dataset and scoring).
+2. Run the same model through Fleming benchmark pipeline:
+
+```bash
+npm run benchmark:external -- --input data/eval/external/normalized/sample_external_healthcare.json --out data/eval/external_results.frontier_plus_fleming.json --model <frontier-model-id>
+```
+
+3. Compare baseline and augmented outputs in the report.
+
+Keep both runs and methodology notes for anti-cherry-pick compliance.

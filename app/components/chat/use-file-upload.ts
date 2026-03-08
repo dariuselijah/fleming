@@ -50,23 +50,13 @@ export const useFileUpload = () => {
   }
 
   const createOptimisticAttachments = (files: File[]): Attachment[] => {
-    // Use blob URLs immediately (non-blocking) instead of data URLs
-    // Blob URLs are fast and non-blocking for instant UI feedback
-    return files.map((file) => {
-      if (file.type.startsWith("image/")) {
-        return {
-          name: file.name,
-          contentType: file.type,
-          url: URL.createObjectURL(file), // Fast, non-blocking blob URL
-        }
-      } else {
-        return {
-          name: file.name,
-          contentType: file.type,
-          url: "",
-        }
-      }
-    })
+    // Use blob URLs immediately (non-blocking) for instant UI feedback.
+    // These are converted to data URLs right before submit.
+    return files.map((file) => ({
+      name: file.name,
+      contentType: file.type || "application/octet-stream",
+      url: URL.createObjectURL(file),
+    }))
   }
 
   // Helper function to convert File to data URL
@@ -97,13 +87,17 @@ export const useFileUpload = () => {
   ): Promise<Attachment[]> => {
     return await Promise.all(
       attachments.map(async (attachment, index) => {
-        // Only convert blob URLs for images
-        if (attachment.url?.startsWith("blob:") && attachment.contentType?.startsWith("image/")) {
+        // Convert all blob URLs so the server/model can access file contents.
+        if (attachment.url?.startsWith("blob:")) {
           try {
             const file = files[index]
             if (file) {
               const dataUrl = await fileToDataUrl(file)
-              return { ...attachment, url: dataUrl }
+              return {
+                ...attachment,
+                url: dataUrl,
+                contentType: attachment.contentType || file.type || "application/octet-stream",
+              }
             }
           } catch (error) {
             console.error("Failed to convert blob URL to data URL:", error)
@@ -169,7 +163,7 @@ export const useFileUpload = () => {
       return {
         name: file.name,
         contentType: file.type,
-        url: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
+        url: "",
       }
     } catch (error) {
       console.error("Background validation failed for:", file.name, error)

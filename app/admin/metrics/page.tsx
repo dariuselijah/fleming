@@ -29,6 +29,24 @@ interface Metrics {
     totalAttachments: number
   }
   models: Array<{ model: string; count: number }>
+  quality?: {
+    chat: {
+      cards: Array<{
+        label: string
+        actual: string
+        threshold: string
+        status: 'pass' | 'fail' | 'unknown'
+      }>
+    }
+    retrieval: {
+      cards: Array<{
+        label: string
+        actual: string
+        threshold: string
+        status: 'pass' | 'fail' | 'unknown'
+      }>
+    }
+  }
   lastUpdated: string
 }
 
@@ -337,6 +355,69 @@ export default function AdminMetricsPage() {
                   )}
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Quality Benchmarks */}
+          <Card className="md:col-span-2 lg:col-span-3">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Release Quality Scorecards
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <p className="mb-3 text-sm font-medium text-muted-foreground">Chat benchmarks</p>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {metrics?.quality?.chat.cards?.map((card) => (
+                    <div key={card.label} className="rounded-xl border border-border/60 bg-muted/40 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium">{card.label}</span>
+                        <Badge
+                          className={
+                            card.status === 'pass'
+                              ? 'bg-emerald-500/15 text-emerald-700'
+                              : card.status === 'fail'
+                                ? 'bg-red-500/15 text-red-700'
+                                : ''
+                          }
+                        >
+                          {card.status}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 text-lg font-semibold">{card.actual}</div>
+                      <p className="text-xs text-muted-foreground">Threshold {card.threshold}</p>
+                    </div>
+                  )) || <p className="text-sm text-muted-foreground">No chat benchmark data available.</p>}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-3 text-sm font-medium text-muted-foreground">Retrieval benchmarks</p>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {metrics?.quality?.retrieval.cards?.map((card) => (
+                    <div key={card.label} className="rounded-xl border border-border/60 bg-muted/40 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium">{card.label}</span>
+                        <Badge
+                          className={
+                            card.status === 'pass'
+                              ? 'bg-emerald-500/15 text-emerald-700'
+                              : card.status === 'fail'
+                                ? 'bg-red-500/15 text-red-700'
+                                : ''
+                          }
+                        >
+                          {card.status}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 text-lg font-semibold">{card.actual}</div>
+                      <p className="text-xs text-muted-foreground">Threshold {card.threshold}</p>
+                    </div>
+                  )) || <p className="text-sm text-muted-foreground">No retrieval benchmark data available.</p>}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

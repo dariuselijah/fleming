@@ -1,0 +1,32 @@
+{
+  "version": "2026-03-06",
+  "description": "Locked benchmark datasets and threshold configs used for release and public reporting.",
+  "files": [
+    {
+      "path": "data/eval/healthcare_clinical_benchmarks.json",
+      "sha256": "a2db656c6294db33c112b8b1fafc7fb73275ef0daf5e60db5de20ff17f217c66",
+      "role": "internal-clinical-chat-release-set"
+    },
+    {
+      "path": "data/eval/healthcare_retrieval_queries.json",
+      "sha256": "a31777465ccf96a9c5603146c6afe2209051f5aadcde11dbc310a5e4f3dd347c",
+      "role": "internal-retrieval-release-set"
+    },
+    {
+      "path": "data/eval/external/normalized/sample_external_healthcare.json",
+      "sha256": "729bb657abe8f00a1742d4ed415dcc5c488bd16e838302523f67a5bb29488807",
+      "role": "external-healthcare-benchmark-set"
+    },
+    {
+      "path": "data/eval/release_benchmark_thresholds.json",
+      "sha256": "8aa642e416405ed51998e5502b6b81ae0beecd7447d117acf6707c019da6b709",
+      "role": "internal-release-thresholds"
+    },
+    {
+      "path": "data/eval/external_benchmark_thresholds.json",
+      "sha256": "16112c3d0a050ff1cf14f056fd1f5b9a32eb867be7a443a71475e17b8158f29b",
+      "role": "external-release-thresholds"
+    }
+  ]
+}
+

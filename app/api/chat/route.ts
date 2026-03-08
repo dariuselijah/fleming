@@ -1,4 +1,9 @@
-import { getSystemPromptByRole } from "@/lib/config"
+import {
+  ENABLE_WEB_SEARCH_TOOL,
+  ENABLE_UPLOAD_CONTEXT_SEARCH,
+  ENABLE_YOUTUBE_TOOL,
+  getSystemPromptByRole,
+} from "@/lib/config"
 import { getAllModels, getModelInfo } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { SupportedModel } from "@/lib/openproviders/types"
@@ -10,6 +15,8 @@ import {
   lookupDrugSafety,
   detectEvidenceConflicts,
 } from "@/lib/evidence/live-tools"
+import { searchYouTubeVideos } from "@/lib/youtube"
+import { hasWebSearchConfigured, searchWeb } from "@/lib/web-search"
 import {
   buildProvenance,
   evaluateProvenanceQuality,
@@ -19,6 +26,7 @@ import {
 import { Attachment } from "@ai-sdk/ui-utils"
 import {
   Message as MessageAISDK,
+  convertToCoreMessages,
   streamText,
   ToolSet,
   tool,
@@ -58,6 +66,10 @@ import {
   normalizeClinicianWorkflowMode,
   type ClinicianWorkflowMode,
 } from "@/lib/clinician-mode"
+import { UserUploadService } from "@/lib/uploads/server"
+import pdfParse from "pdf-parse/lib/pdf-parse.js"
+import type { UploadContextSearchMode, UploadTopicContext } from "@/lib/uploads/server"
+import type { TopicContext } from "@/app/types/api.types"
 
 export const maxDuration = 60
 const BENCH_STRICT_MODE = process.env.BENCH_STRICT_MODE === "true"
@@ -151,6 +163,111 @@ function stripCitationMarkers(text: string): string {
   return cleaned.trim()
 }
 
+async function runWithTimeBudget<T>(
+  label: string,
+  run: () => Promise<T>,
+  timeoutMs: number,
+  fallbackValue: T
+): Promise<T> {
+  const startedAt = Date.now()
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    const result = await Promise.race<T>([
+      run(),
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallbackValue), timeoutMs)
+      }),
+    ])
+
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+
+    const elapsedMs = Date.now() - startedAt
+    if (elapsedMs >= timeoutMs) {
+      console.warn(`⏱️ [${label}] hit time budget (${timeoutMs}ms), using fallback`)
+    }
+    return result
+  } catch (error) {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    console.warn(`⏱️ [${label}] failed, using fallback:`, error)
+    return fallbackValue
+  }
+}
+
+type ChatAttachment = {
+  name?: string
+  contentType?: string
+  url?: string
+}
+
+function decodeDataUrl(dataUrl: string): { mimeType: string; buffer: Buffer } | null {
+  const match = dataUrl.match(/^data:([^;,]+)?;base64,(.+)$/)
+  if (!match?.[2]) return null
+  const mimeType = match[1] || "application/octet-stream"
+  try {
+    return {
+      mimeType,
+      buffer: Buffer.from(match[2], "base64"),
+    }
+  } catch {
+    return null
+  }
+}
+
+async function extractAttachmentText(attachment: ChatAttachment): Promise<string | null> {
+  if (!attachment?.url || !attachment.url.startsWith("data:")) return null
+  const decoded = decodeDataUrl(attachment.url)
+  if (!decoded) return null
+
+  const contentType = String(
+    attachment.contentType || decoded.mimeType || "application/octet-stream"
+  ).toLowerCase()
+
+  try {
+    if (contentType === "application/pdf") {
+      const parsed = await pdfParse(decoded.buffer)
+      const text = String(parsed?.text || "").replace(/\s+/g, " ").trim()
+      return text ? text.slice(0, 6000) : null
+    }
+
+    if (
+      contentType.startsWith("text/") ||
+      contentType === "application/json" ||
+      contentType === "text/csv" ||
+      contentType === "application/csv"
+    ) {
+      return decoded.buffer.toString("utf-8").replace(/\s+/g, " ").trim().slice(0, 6000)
+    }
+  } catch (error) {
+    console.warn("[ATTACHMENT CONTEXT] Failed to extract attachment text:", error)
+  }
+
+  return null
+}
+
+async function buildAttachmentContext(message?: MessageAISDK): Promise<string> {
+  const attachments = (message as any)?.experimental_attachments as ChatAttachment[] | undefined
+  if (!attachments || attachments.length === 0) return ""
+
+  const chunks: string[] = []
+  for (const attachment of attachments) {
+    const text = await extractAttachmentText(attachment)
+    if (text) {
+      chunks.push(
+        `Attachment: ${attachment.name || "Untitled"}\nExtracted content preview:\n${text}`
+      )
+    }
+  }
+
+  if (chunks.length === 0) return ""
+  return chunks.join("\n\n---\n\n")
+}
+
 // Function to quickly assess query complexity for smart orchestration
 function assessQueryComplexity(query: string): "simple" | "complex" {
   const queryLower = query.toLowerCase()
@@ -207,6 +324,83 @@ function needsFreshEvidence(query: string): boolean {
     /\btrial|rct|meta-analysis|systematic review\b/.test(q) ||
     /\b202[4-9]\b/.test(q)
   )
+}
+
+type YouTubeIntentDecision = {
+  shouldUse: boolean
+  explicitRequest: boolean
+  reason:
+    | "empty_query"
+    | "negative_non_tutorial_intent"
+    | "tutorial_or_training_intent"
+    | "emergency_without_explicit_video_request"
+    | "no_video_intent"
+}
+
+function detectYouTubeIntent(
+  query: string,
+  options: { emergencyEscalation: boolean }
+): YouTubeIntentDecision {
+  const normalized = query.trim()
+  if (!normalized) {
+    return {
+      shouldUse: false,
+      explicitRequest: false,
+      reason: "empty_query",
+    }
+  }
+
+  const lower = normalized.toLowerCase()
+  const explicitYouTubeRequest =
+    /\b(youtube|yt)\b/i.test(normalized) ||
+    /\bvideo(s)?\b/i.test(normalized)
+
+  const tutorialIntent =
+    /\b(tutorial|walkthrough|demonstration|demo|step[- ]?by[- ]?step|show me|watch)\b/i.test(
+      normalized
+    ) || /\bhow to\b/i.test(lower)
+  const trainingIntent =
+    /\b(cpr|history taking|history-taking|osce|physical exam|examination technique|procedural|procedure|skill)\b/i.test(
+      normalized
+    )
+  const explicitTrainingVideoIntent =
+    /\b(training video|educational video|video example|show me (a )?video)\b/i.test(
+      normalized
+    ) || (tutorialIntent && trainingIntent)
+  const negativeOnlyMedicalIntent =
+    /\b(diagnosis|diagnostic|differential|dosage|dose|contraindication|interaction|lab|imaging)\b/i.test(
+      normalized
+    ) && !tutorialIntent && !trainingIntent && !explicitYouTubeRequest
+
+  if (negativeOnlyMedicalIntent) {
+    return {
+      shouldUse: false,
+      explicitRequest: explicitYouTubeRequest,
+      reason: "negative_non_tutorial_intent",
+    }
+  }
+
+  if (options.emergencyEscalation && !explicitYouTubeRequest && !explicitTrainingVideoIntent) {
+    return {
+      shouldUse: false,
+      explicitRequest: false,
+      reason: "emergency_without_explicit_video_request",
+    }
+  }
+
+  if (explicitYouTubeRequest || tutorialIntent || trainingIntent) {
+    return {
+      shouldUse: true,
+      explicitRequest: explicitYouTubeRequest,
+      reason: "tutorial_or_training_intent",
+    }
+  }
+
+  return {
+    shouldUse: false,
+    explicitRequest: false,
+    reason: "no_video_intent",
+  }
 }
 
 const HIGH_RISK_EMERGENCY_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
@@ -431,6 +625,54 @@ function ensureGuidelineCitations(
   return result
 }
 
+function encodeEvidenceCitationsHeader(
+  citations: EvidenceCitation[],
+  maxEncodedLength: number = 12000
+): string | null {
+  if (!Array.isArray(citations) || citations.length === 0) return null
+
+  const compact = (items: EvidenceCitation[]) =>
+    items.map((citation) => ({
+      index: citation.index,
+      title: citation.title,
+      journal: citation.journal,
+      authors: Array.isArray(citation.authors) ? citation.authors : [],
+      year: citation.year,
+      evidenceLevel: citation.evidenceLevel,
+      studyType: citation.studyType,
+      url: citation.url,
+      doi: citation.doi,
+      pmid: citation.pmid,
+      meshTerms: Array.isArray(citation.meshTerms) ? citation.meshTerms : [],
+      sourceType: citation.sourceType,
+      sourceLabel: citation.sourceLabel,
+      pageLabel: citation.pageLabel,
+      uploadId: citation.uploadId,
+      chunkId: citation.chunkId,
+      sourceUnitId: citation.sourceUnitId,
+      sourceUnitType: citation.sourceUnitType,
+      sourceUnitNumber: citation.sourceUnitNumber,
+      sourceOffsetStart: citation.sourceOffsetStart,
+      sourceOffsetEnd: citation.sourceOffsetEnd,
+      snippet:
+        typeof citation.snippet === "string" ? citation.snippet.slice(0, 220) : "",
+      previewReference: citation.previewReference || null,
+      figureReferences: citation.figureReferences || [],
+    }))
+
+  let candidate = [...citations]
+  while (candidate.length > 0) {
+    const payload = JSON.stringify(compact(candidate))
+    const encoded = Buffer.from(payload).toString("base64")
+    if (encoded.length <= maxEncodedLength) {
+      return encoded
+    }
+    candidate = candidate.slice(0, candidate.length - 1)
+  }
+
+  return null
+}
+
 async function fetchGuidelineFallbackCitations(
   queryText: string,
   maxResults: number
@@ -515,8 +757,6 @@ const MEDICAL_QUERY_STOP_WORDS = new Set([
   "patient",
   "patients",
 ])
-const US_PRIORITY_SOURCE_PATTERN =
-  /\b(aha|acc|acp|ada|acog|aafp|cdc|nih|idsa|nccn|uspstf|sccm|ats)\b/i
 
 function extractClinicalQueryTerms(query: string): string[] {
   return query
@@ -556,158 +796,124 @@ function isTextRelevantToClinicalQuery(text: string, query: string): boolean {
   return matchCount >= minMatches
 }
 
-function getProvenanceUsPriorityScore(item: SourceProvenance): number {
-  const title = item.title || ""
-  const journal = item.journal || ""
-  const source = item.sourceName || ""
-  const studyType = item.studyType || ""
-  const region = (item.region || "").toUpperCase()
+function normalizeTopicContext(input: unknown): TopicContext | undefined {
+  if (!input || typeof input !== "object") return undefined
+  const candidate = input as Record<string, unknown>
+  const recentPages = Array.isArray(candidate.recentPages)
+    ? candidate.recentPages
+        .map((value) => Number.parseInt(String(value), 10))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .slice(0, 6)
+    : []
+  const recentEvidenceIds = Array.isArray(candidate.recentEvidenceIds)
+    ? candidate.recentEvidenceIds
+        .map((value) => String(value))
+        .filter(Boolean)
+        .slice(0, 10)
+    : []
 
-  let score = 0
-  if (item.sourceType === "guideline") score += 4
-  if (/guideline|recommendation|consensus|statement/i.test(studyType)) score += 3
-  if (region === "US") score += 4
-  if (US_PRIORITY_SOURCE_PATTERN.test(`${source} ${journal} ${title}`)) score += 2
-  if (/meta-analysis|systematic/i.test(studyType)) score += 2
-  if (/randomized|rct/i.test(studyType)) score += 1
-  if (typeof item.evidenceLevel === "number") {
-    score += Math.max(0, 6 - item.evidenceLevel) * 0.5
+  return {
+    activeTopic:
+      typeof candidate.activeTopic === "string" && candidate.activeTopic.trim().length > 0
+        ? candidate.activeTopic.trim()
+        : null,
+    lastUploadId:
+      typeof candidate.lastUploadId === "string" && candidate.lastUploadId.trim().length > 0
+        ? candidate.lastUploadId.trim()
+        : null,
+    recentPages,
+    recentEvidenceIds,
+    followUpType:
+      typeof candidate.followUpType === "string"
+        ? (candidate.followUpType as TopicContext["followUpType"])
+        : "unknown",
   }
-  return score
 }
 
-function encodeEvidenceCitationsHeader(
-  citations: Array<Record<string, any>>,
-  maxEncodedLength: number = 12000
-): string | null {
-  if (!Array.isArray(citations) || citations.length === 0) return null
-
-  const projectForHeader = (items: Array<Record<string, any>>) =>
-    items.map((citation) => ({
-      index: citation.index,
-      title: citation.title,
-      journal: citation.journal,
-      year: citation.year,
-      evidenceLevel: citation.evidenceLevel,
-      studyType: citation.studyType,
-      url: citation.url,
-      doi: citation.doi,
-      pmid: citation.pmid,
-      // Keep snippets short to prevent header overflow in benchmark/tooling clients.
-      snippet:
-        typeof citation.snippet === "string"
-          ? citation.snippet.slice(0, 140)
-          : undefined,
-      meshTerms: Array.isArray(citation.meshTerms)
-        ? citation.meshTerms.slice(0, 3)
-        : undefined,
-    }))
-
-  const tryEncode = (items: Array<Record<string, any>>): string => {
-    const payload = JSON.stringify(projectForHeader(items))
-    return Buffer.from(payload).toString("base64")
-  }
-
-  // 1) Try with all citations but compact fields.
-  let candidate = [...citations]
-  let encoded = tryEncode(candidate)
-  if (encoded.length <= maxEncodedLength) return encoded
-
-  // 2) Remove large optional fields.
-  candidate = candidate.map((citation) => ({
-    ...citation,
-    snippet: undefined,
-    meshTerms: undefined,
-  }))
-  encoded = tryEncode(candidate)
-  if (encoded.length <= maxEncodedLength) return encoded
-
-  // 3) Downsample citation count until it fits, preserving earliest/top entries.
-  while (candidate.length > 3) {
-    candidate = candidate.slice(0, candidate.length - 1)
-    encoded = tryEncode(candidate)
-    if (encoded.length <= maxEncodedLength) return encoded
-  }
-
-  return encoded.length <= maxEncodedLength ? encoded : null
+function isUuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value.trim()
+  )
 }
 
-function extractToolProvenance(
-  toolInvocationParts: any[],
+function mergeTopicContexts(
+  baseContext: TopicContext | undefined,
+  overrideContext: TopicContext | undefined
+): TopicContext | undefined {
+  if (!baseContext && !overrideContext) return undefined
+  return {
+    activeTopic: overrideContext?.activeTopic ?? baseContext?.activeTopic ?? null,
+    lastUploadId: overrideContext?.lastUploadId ?? baseContext?.lastUploadId ?? null,
+    recentPages:
+      overrideContext?.recentPages && overrideContext.recentPages.length > 0
+        ? overrideContext.recentPages
+        : baseContext?.recentPages ?? [],
+    recentEvidenceIds:
+      overrideContext?.recentEvidenceIds && overrideContext.recentEvidenceIds.length > 0
+        ? overrideContext.recentEvidenceIds
+        : baseContext?.recentEvidenceIds ?? [],
+    followUpType: overrideContext?.followUpType ?? baseContext?.followUpType ?? "unknown",
+  }
+}
+
+function extractTopicContextFromMessages(messages: MessageAISDK[]): TopicContext | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index] as any
+    if (message?.role !== "assistant") continue
+    const parts = Array.isArray(message?.parts) ? message.parts : []
+    for (const part of parts) {
+      if (part?.type === "metadata" && part?.metadata?.topicContext) {
+        const parsed = normalizeTopicContext(part.metadata.topicContext)
+        if (parsed) {
+          return parsed
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+function deriveTopicContextFromCitations(
+  baseContext: TopicContext | undefined,
+  citations: EvidenceCitation[],
   queryText: string
-): SourceProvenance[] {
-  const flattened = toolInvocationParts.flatMap((part: any) => {
-    const result = part?.toolInvocation?.result
-    if (!result) return []
-    if (Array.isArray(result?.provenance)) return result.provenance
-    if (result?.article && typeof result.article === "object") {
-      const article = result.article
-      return [
-        buildProvenance({
-          id: `pubmed_${article.pmid || "lookup"}`,
-          sourceType: "pubmed",
-          sourceName: "PubMed",
-          title: article.title || "PubMed article",
-          url: article.url || null,
-          publishedAt: article.year ? String(article.year) : null,
-          region: null,
-          journal: article.journal || "PubMed",
-          doi: article.doi || null,
-          pmid: article.pmid || null,
-          evidenceLevel: 2,
-          studyType: "Literature record",
-          snippet: article.abstract || "",
-        }),
-      ]
-    }
-    if (Array.isArray(result?.articles)) {
-      return result.articles.map((article: any, idx: number) =>
-        buildProvenance({
-          id: `pubmed_${article.pmid || idx + 1}`,
-          sourceType: "pubmed",
-          sourceName: "PubMed",
-          title: article.title || "PubMed article",
-          url: article.url || null,
-          publishedAt: article.year ? String(article.year) : null,
-          region: null,
-          journal: article.journal || "PubMed",
-          doi: article.doi || null,
-          pmid: article.pmid || null,
-          evidenceLevel: 2,
-          studyType: "Literature record",
-          snippet: "",
-        })
-      )
-    }
-    return []
-  })
+): TopicContext | undefined {
+  const uploadCitations = citations.filter(
+    (citation) => citation.sourceType === "user_upload"
+  )
+  if (uploadCitations.length === 0) {
+    return baseContext
+  }
 
-  const deduped = new Map<string, SourceProvenance>()
-  flattened.forEach((item: SourceProvenance) => {
-    const key = item.pmid || item.doi || item.url || `${item.sourceName}:${item.title}`
-    if (!deduped.has(key)) {
-      deduped.set(key, item)
-    }
-  })
-
-  return Array.from(deduped.values())
-    .filter((item) => {
-      const relevanceText = `${item.title || ""} ${item.journal || ""} ${item.snippet || ""}`
-      if (!isTextRelevantToClinicalQuery(relevanceText, queryText)) {
-        return false
-      }
-      const gate = evaluateProvenanceQuality(item, queryText)
-      if (!gate.passed) {
-        console.warn(
-          `[PROVENANCE GATE] Dropped citation "${item.title}" (score=${gate.score}, reasons=${gate.reasons.join(",")})`
-        )
-      }
-      return gate.passed
-    })
-    .sort(
-      (a, b) =>
-        getProvenanceUsPriorityScore(b) - getProvenanceUsPriorityScore(a)
+  const recentPages = Array.from(
+    new Set(
+      uploadCitations
+        .map((citation) => citation.sourceUnitNumber)
+        .filter((value): value is number => typeof value === "number" && value > 0)
     )
+  ).slice(0, 6)
+  const recentEvidenceIds = Array.from(
+    new Set(
+      uploadCitations
+        .map((citation) => citation.chunkId)
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    )
+  ).slice(0, 10)
+  const lastUploadId =
+    uploadCitations[0]?.uploadId ||
+    baseContext?.lastUploadId ||
+    null
+
+  return {
+    activeTopic: baseContext?.activeTopic || queryText.trim().slice(0, 160),
+    lastUploadId,
+    recentPages: recentPages.length > 0 ? recentPages : baseContext?.recentPages ?? [],
+    recentEvidenceIds:
+      recentEvidenceIds.length > 0
+        ? recentEvidenceIds
+        : baseContext?.recentEvidenceIds ?? [],
+    followUpType: baseContext?.followUpType ?? "unknown",
+  }
 }
 
 type ChatRequest = {
@@ -728,6 +934,7 @@ type ChatRequest = {
   learningMode?: MedicalStudentLearningMode
   clinicianMode?: ClinicianWorkflowMode
   benchmarkStrictMode?: boolean
+  topicContext?: TopicContext
 }
 
 export async function POST(req: Request) {
@@ -750,6 +957,7 @@ export async function POST(req: Request) {
       learningMode,
       clinicianMode,
       benchmarkStrictMode,
+      topicContext: topicContextFromRequest,
     } = (await req.json()) as ChatRequest
 
     if (!messages || !chatId || !userId) {
@@ -787,9 +995,18 @@ export async function POST(req: Request) {
     const queryText = typeof lastUserMessage?.content === "string"
       ? lastUserMessage.content
       : ""
+    const attachmentContext = await buildAttachmentContext(lastUserMessage)
+    const persistedTopicContext = extractTopicContextFromMessages(messages)
+    const effectiveTopicContext = mergeTopicContexts(
+      persistedTopicContext,
+      normalizeTopicContext(topicContextFromRequest)
+    )
     const effectiveLearningMode = normalizeMedicalStudentLearningMode(learningMode)
     const effectiveClinicianMode = normalizeClinicianWorkflowMode(clinicianMode)
     const emergencyEscalationIntent = detectEmergencyEscalationNeed(queryText)
+    const youtubeIntentDecision = detectYouTubeIntent(queryText, {
+      emergencyEscalation: emergencyEscalationIntent.shouldEscalate,
+    })
     const requestBenchStrictMode =
       benchmarkStrictMode === true ||
       req.headers.get("x-bench-strict-mode") === "true" ||
@@ -844,28 +1061,108 @@ export async function POST(req: Request) {
       enableEvidenceFromClient === true || clinicianRoleFromResolvedRole
     const minEvidenceLevelForQuery = clinicianRoleFromResolvedRole ? 3 : 5
 
-    const evidenceContextResult =
-      finalEnableEvidence && queryText.length > 0
-        ? await synthesizeEvidence({
-            query: queryText,
-            maxResults: 12,
-            minEvidenceLevel: minEvidenceLevelForQuery,
-            candidateMultiplier: 6,
-            enableRerank: true,
-            queryExpansion: true,
-            minMedicalConfidence: 0.25,
-            forceEvidence: queryText.trim().length >= 8,
-          }).catch((err) => {
-            console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", err)
-            return null
-          })
-        : null
+    const uploadService = new UserUploadService()
+    const uploadSearchMode: UploadContextSearchMode =
+      /\b(page|pp?\.?)\s*\d+/i.test(queryText) || /\bpages?\s*\d+\s*(?:-|to)\s*\d+\b/i.test(queryText)
+        ? "auto"
+        : "hybrid"
+    const shouldRunEvidenceSynthesis = finalEnableEvidence && queryText.length > 0
+    const shouldRunUploadContextSearch =
+      ENABLE_UPLOAD_CONTEXT_SEARCH &&
+      isAuthenticated &&
+      userId !== "temp" &&
+      queryText.length > 0
+
+    const [evidenceContextResult, uploadContextResult] = await Promise.all([
+      shouldRunEvidenceSynthesis
+        ? runWithTimeBudget(
+            "EVIDENCE_SYNTHESIS",
+            async () =>
+              synthesizeEvidence({
+                query: queryText,
+                maxResults: 12,
+                minEvidenceLevel: minEvidenceLevelForQuery,
+                candidateMultiplier: 6,
+                enableRerank: true,
+                queryExpansion: true,
+                minMedicalConfidence: 0.25,
+                forceEvidence: queryText.trim().length >= 8,
+              }).catch((err) => {
+                console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", err)
+                return null
+              }),
+            2400,
+            null
+          )
+        : Promise.resolve(null),
+      shouldRunUploadContextSearch
+        ? runWithTimeBudget(
+            "UPLOAD_CONTEXT_SEARCH",
+            async () =>
+              uploadService
+                .uploadContextSearch({
+                  userId,
+                  query: queryText,
+                  apiKey,
+                  mode: uploadSearchMode,
+                  topK: 6,
+                  includeNeighborPages: 1,
+                  topicContext: (effectiveTopicContext ??
+                    undefined) as UploadTopicContext | undefined,
+                  maxDurationMs: 2200,
+                })
+                .catch((err) => {
+                  console.warn("📚 [UPLOAD RETRIEVAL] Structured retrieval failed:", err)
+                  return null
+                }),
+            2300,
+            null
+          )
+        : Promise.resolve(null),
+    ])
+
+    const uploadEvidenceCitations =
+      uploadContextResult?.citations ??
+      (isAuthenticated && userId !== "temp" && queryText.length > 0
+        ? await runWithTimeBudget(
+            "UPLOAD_LEGACY_CITATIONS",
+            async () =>
+              uploadService
+                .retrieveUploadCitations({
+                  userId,
+                  query: queryText,
+                  apiKey,
+                  maxResults: 4,
+                })
+                .catch((err) => {
+                  console.warn("📚 [UPLOAD RETRIEVAL] Legacy retrieval failed:", err)
+                  return []
+                }),
+            1400,
+            []
+          )
+        : [])
+
+    if (uploadContextResult?.warnings && uploadContextResult.warnings.length > 0) {
+      console.log(
+        "📚 [UPLOAD RETRIEVAL] Warnings:",
+        uploadContextResult.warnings.join(" | ")
+      )
+    }
+
+    const resolvedTopicContext = mergeTopicContexts(
+      effectiveTopicContext,
+      normalizeTopicContext(uploadContextResult?.topicContext)
+    )
 
     let evidenceContext = evidenceContextResult
     if (finalEnableEvidence && queryText.length > 0) {
       let mergedCitations = evidenceContextResult?.context?.citations
         ? [...evidenceContextResult.context.citations]
         : []
+      if (uploadEvidenceCitations.length > 0) {
+        mergedCitations = [...mergedCitations, ...uploadEvidenceCitations]
+      }
       const guidelinePriority = benchStrictMode || hasGuidelineIntent(queryText)
       const strictCitationFloor = benchStrictMode ? STRICT_MIN_CITATION_FLOOR : 6
 
@@ -947,6 +1244,10 @@ export async function POST(req: Request) {
       effectiveSystemPrompt = buildEvidenceSystemPrompt(effectiveSystemPrompt, evidenceContext.context)
     }
 
+    if (attachmentContext) {
+      effectiveSystemPrompt += `\n\nUSER ATTACHMENT CONTEXT (from uploaded document content):\n${attachmentContext}\n\nUse this attachment content directly when answering the user's question. If the user asks whether you can see/read the file, explicitly confirm and reference the attachment by name.`
+    }
+
     if (benchStrictMode && finalEnableEvidence) {
       effectiveSystemPrompt += `\n\n${buildBenchStrictPrompt({
         citationCount: evidenceContext?.context?.citations?.length ?? 0,
@@ -955,10 +1256,40 @@ export async function POST(req: Request) {
       })}`
     }
 
-    const isHealthcareMode = effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
-    const isFleming4 = effectiveModel === "fleming-4"
     const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
-    const finalEnableSearch = enableSearchFromClient || (isHealthcareMode && isFleming4 && hasWebSearchSupport)
+    const finalEnableSearch =
+      ENABLE_WEB_SEARCH_TOOL &&
+      enableSearchFromClient === true &&
+      hasWebSearchSupport
+    const shouldRunWebSearchPreflight = finalEnableSearch && queryText.length > 0
+    const webSearchPreflight = shouldRunWebSearchPreflight
+      ? await runWithTimeBudget<Awaited<ReturnType<typeof searchWeb>> | null>(
+          "WEB_SEARCH_PREFLIGHT",
+          async () =>
+            searchWeb(queryText, {
+              maxResults: 4,
+              timeoutMs: 1200,
+              retries: 1,
+              medicalOnly: clinicianRoleFromResolvedRole,
+            }),
+          1400,
+          null
+        )
+      : null
+
+    if (webSearchPreflight?.results?.length) {
+      const serializedResults = webSearchPreflight.results
+        .slice(0, 4)
+        .map(
+          (result, index) =>
+            `[WEB:${index + 1}] ${result.title}\nURL: ${result.url}\nSnippet: ${result.snippet}`
+        )
+        .join("\n\n")
+      effectiveSystemPrompt += `\n\nWEB SEARCH SNAPSHOT (latest web context from user-enabled search):\n${serializedResults}`
+    } else if (finalEnableSearch && !hasWebSearchConfigured()) {
+      effectiveSystemPrompt +=
+        "\n\nWeb search was requested but EXA_API_KEY is not configured, so continue without live web sources."
+    }
 
     if (!finalEnableEvidence) {
       effectiveSystemPrompt = removeCitationInstructions(effectiveSystemPrompt)
@@ -969,15 +1300,24 @@ export async function POST(req: Request) {
     // Vision models can process both data URLs (base64) and blob URLs directly
     const filteredMessages = messages.map(message => {
       if (message.experimental_attachments) {
-        // Keep all valid attachments including data URLs and blob URLs for vision models
-        const filteredAttachments = message.experimental_attachments.filter(
-          (attachment: any) => {
-            // Keep if it has a valid URL (including data URLs and blob URLs for vision models)
-            return attachment.url && attachment.name && attachment.contentType
-          }
-        )
+        // Keep only provider-safe visual attachments in model messages.
+        // Non-image docs (e.g. PDF) are handled via upload ingestion + retrieval citations.
+        const filteredAttachments = message.experimental_attachments
+          .filter((attachment: any) => {
+            if (!attachment?.url || !attachment?.name) return false
+            const contentType = String(
+              attachment.contentType || attachment.mimeType || ""
+            ).toLowerCase()
+            return contentType.startsWith("image/")
+          })
+          .map((attachment: any) => ({
+            ...attachment,
+            contentType: attachment.contentType || "application/octet-stream",
+          }))
         
-        console.log(`Processing attachments for message: ${filteredAttachments.length}/${message.experimental_attachments.length} valid`)
+        console.log(
+          `Processing provider-safe image attachments for message: ${filteredAttachments.length}/${message.experimental_attachments.length} kept`
+        )
         if (filteredAttachments.length > 0) {
           console.log('Valid attachments:', filteredAttachments.map(a => ({ 
             name: a.name, 
@@ -986,6 +1326,10 @@ export async function POST(req: Request) {
                  a.url?.startsWith('data:') ? 'data:...' : 
                  a.url?.substring(0, 50) + '...' 
           })))
+        } else if (message.experimental_attachments.length > 0) {
+          console.log(
+            "No provider-safe image attachments kept; non-image uploads will be used via upload retrieval citations."
+          )
         }
         
         return {
@@ -1000,18 +1344,20 @@ export async function POST(req: Request) {
     // This ensures no PII/PHI is sent to third-party LLM services (HIPAA compliance)
     const anonymizedMessages = anonymizeMessages(filteredMessages) as MessageAISDK[]
     console.log("🔒 Messages anonymized before sending to LLM provider")
+    const coreMessages = convertToCoreMessages(
+      anonymizedMessages as Array<Omit<MessageAISDK, "id">>
+    )
 
     // START STREAMING IMMEDIATELY with basic prompt
     const startTime = performance.now()
     
-    // Create model with REAL web search settings
-    // When enableSearch=true, this passes { web_search: true } to xAI API
-    const modelWithSearch = modelConfig.apiSdk(apiKey, { 
-      enableSearch: finalEnableSearch // REAL web search flag - passed to xAI API
+    // Disable provider-native web search and rely on explicit Exa-backed tooling.
+    const modelWithSearch = modelConfig.apiSdk(apiKey, {
+      enableSearch: false,
     })
-    
+
     if (finalEnableSearch) {
-      console.log("✅ WEB SEARCH ENABLED - Using real web search from xAI/Grok")
+      console.log("✅ WEB SEARCH ENABLED - Using explicit Exa webSearch tool path")
     }
     
     // CRITICAL: Capture evidenceContext in a const to ensure it's available in closure
@@ -1024,6 +1370,11 @@ export async function POST(req: Request) {
     
     // Optional live PubMed tools for freshness and sparse-corpus gaps
     const supportsTools = Boolean(modelConfig?.tools)
+    const shouldEnableWebSearchTool =
+      finalEnableSearch &&
+      supportsTools &&
+      queryText.length > 0 &&
+      hasWebSearchConfigured()
     const shouldEnablePubMedTools =
       finalEnableEvidence &&
       supportsTools &&
@@ -1033,9 +1384,128 @@ export async function POST(req: Request) {
         (capturedEvidenceContext?.context?.citations?.length ?? 0) < 4
       )
     const shouldEnableEvidenceTools = finalEnableEvidence && supportsTools && queryText.length > 0
+    const shouldEnableYoutubeTool =
+      ENABLE_YOUTUBE_TOOL &&
+      supportsTools &&
+      queryText.length > 0 &&
+      youtubeIntentDecision.shouldUse
+    let webSearchCallCount = 0
+    let youtubeSearchCallCount = 0
 
-    const runtimeTools: ToolSet = shouldEnableEvidenceTools
+    if (ENABLE_YOUTUBE_TOOL && supportsTools && queryText.length > 0) {
+      console.log("[YOUTUBE INTENT]", {
+        shouldEnableYoutubeTool,
+        reason: youtubeIntentDecision.reason,
+        explicitRequest: youtubeIntentDecision.explicitRequest,
+      })
+    }
+
+    const evidenceRuntimeTools: ToolSet = shouldEnableEvidenceTools
       ? {
+          ...(ENABLE_UPLOAD_CONTEXT_SEARCH
+            ? { uploadContextSearch: tool({
+            description:
+              "Search user-uploaded documents with page-aware and topic-aware retrieval modes.",
+            parameters: z.object({
+              query: z.string().min(1).describe("Query to search within uploaded documents"),
+              // Accepts either a UUID or a human label; non-UUID values are safely ignored.
+              uploadId: z.string().min(1).optional().describe("Optional upload identifier to scope retrieval"),
+              mode: z
+                .enum(["auto", "page_lookup", "range_lookup", "semantic", "hybrid"])
+                .default("auto"),
+              page: z.number().int().min(1).optional(),
+              pageStart: z.number().int().min(1).optional(),
+              pageEnd: z.number().int().min(1).optional(),
+              topK: z.number().int().min(1).max(20).default(6),
+              includeNeighborPages: z.number().int().min(0).max(3).default(1),
+              conversationContext: z
+                .object({
+                  activeTopic: z.string().optional(),
+                  lastUploadId: z.string().optional(),
+                  recentPages: z.array(z.number().int().min(1)).optional(),
+                  recentEvidenceIds: z.array(z.string()).optional(),
+                  followUpType: z
+                    .enum([
+                      "clarify",
+                      "next_page",
+                      "previous_page",
+                      "drill_down",
+                      "switch_topic",
+                      "unknown",
+                    ])
+                    .optional(),
+                })
+                .optional(),
+            }),
+            execute: async ({
+              query,
+              uploadId,
+              mode,
+              page,
+              pageStart,
+              pageEnd,
+              topK,
+              includeNeighborPages,
+              conversationContext,
+            }) => {
+              const normalizedUploadId =
+                typeof uploadId === "string" && isUuidLike(uploadId) ? uploadId : undefined
+
+              if (!isAuthenticated || userId === "temp") {
+                return {
+                  intent: { modeResolved: mode, page: page ?? null, pageStart: pageStart ?? null, pageEnd: pageEnd ?? null },
+                  results: [],
+                  pagesReturned: [],
+                  warnings: ["User must be authenticated to search uploads."],
+                  metrics: {
+                    candidateCount: 0,
+                    elapsedMs: 0,
+                    fallbackUsed: false,
+                  },
+                }
+              }
+
+              const result = await uploadService.uploadContextSearch({
+                userId,
+                query,
+                apiKey,
+                uploadId: normalizedUploadId,
+                mode,
+                page,
+                pageStart,
+                pageEnd,
+                topK,
+                includeNeighborPages,
+                topicContext: (mergeTopicContexts(
+                  resolvedTopicContext,
+                  normalizeTopicContext(conversationContext)
+                ) ?? undefined) as UploadTopicContext | undefined,
+                maxDurationMs: 2200,
+              })
+
+              return {
+                intent: result.intent,
+                results: result.citations.map((citation) => ({
+                  index: citation.index,
+                  title: citation.title,
+                  sourceLabel: citation.sourceLabel,
+                  uploadId: citation.uploadId,
+                  sourceUnitId: citation.sourceUnitId,
+                  sourceUnitType: citation.sourceUnitType,
+                  sourceUnitNumber: citation.sourceUnitNumber,
+                  sourceOffsetStart: citation.sourceOffsetStart,
+                  sourceOffsetEnd: citation.sourceOffsetEnd,
+                  url: citation.url,
+                  snippet: citation.snippet,
+                  score: citation.score,
+                })),
+                pagesReturned: result.pagesReturned,
+                warnings: result.warnings,
+                metrics: result.metrics,
+              }
+            },
+          }) }
+            : {}),
           pubmedSearch: tool({
             description: "Search PubMed for recent or guideline-related medical literature.",
             parameters: z.object({
@@ -1179,8 +1649,116 @@ export async function POST(req: Request) {
         }
       : ({} as ToolSet)
 
+    const youtubeRuntimeTools: ToolSet = shouldEnableYoutubeTool
+      ? {
+          youtubeSearch: tool({
+            description:
+              "Search YouTube for educational clinical videos and procedural demonstrations when video learning is requested.",
+            parameters: z.object({
+              query: z.string().min(3).describe("YouTube video search query"),
+              maxResults: z.number().int().min(7).max(9).default(8),
+              regionCode: z
+                .string()
+                .length(2)
+                .optional()
+                .describe("Optional ISO 3166-1 alpha-2 region code (e.g., US, GB)"),
+              safeSearch: z.enum(["none", "moderate", "strict"]).default("strict"),
+              medicalOnly: z
+                .boolean()
+                .default(true)
+                .describe("Prioritize clinically relevant educational content"),
+            }),
+            execute: async ({
+              query,
+              maxResults,
+              regionCode,
+              safeSearch,
+              medicalOnly,
+            }) => {
+              youtubeSearchCallCount += 1
+              if (youtubeSearchCallCount > 1) {
+                return {
+                  results: [],
+                  warnings: [
+                    "youtubeSearch already executed for this response; reusing prior results.",
+                  ],
+                  metrics: {
+                    cacheHit: false,
+                    elapsedMs: 0,
+                    searchCalls: 0,
+                    videosCalls: 0,
+                    quotaUnitsEstimate: 0,
+                  },
+                }
+              }
+              return searchYouTubeVideos(query, {
+                maxResults,
+                regionCode: regionCode?.toUpperCase(),
+                relevanceLanguage: "en",
+                safeSearch,
+                medicalOnly,
+              })
+            },
+          }),
+        }
+      : ({} as ToolSet)
+
+    const webSearchRuntimeTools: ToolSet = shouldEnableWebSearchTool
+      ? {
+          webSearch: tool({
+            description:
+              "Search the public web for current, high-quality references and return source URLs/snippets.",
+            parameters: z.object({
+              query: z
+                .string()
+                .min(3)
+                .describe("Focused query for web search retrieval"),
+              maxResults: z.number().int().min(1).max(8).default(5),
+              medicalOnly: z
+                .boolean()
+                .default(clinicianRoleFromResolvedRole)
+                .describe(
+                  "Prioritize clinically relevant sources and medical domains."
+                ),
+            }),
+            execute: async ({ query, maxResults, medicalOnly }) => {
+              webSearchCallCount += 1
+              if (webSearchCallCount > 1) {
+                return {
+                  query,
+                  results: [],
+                  warnings: [
+                    "webSearch already executed for this response; reusing earlier web context.",
+                  ],
+                  metrics: {
+                    cacheHit: false,
+                    elapsedMs: 0,
+                    retriesUsed: 0,
+                    totalCandidates: 0,
+                  },
+                }
+              }
+
+              return searchWeb(query, {
+                maxResults,
+                timeoutMs: 1800,
+                retries: 1,
+                medicalOnly,
+              })
+            },
+          }),
+        }
+      : ({} as ToolSet)
+
+    const runtimeTools: ToolSet = {
+      ...webSearchRuntimeTools,
+      ...evidenceRuntimeTools,
+      ...youtubeRuntimeTools,
+    }
+
     if (shouldEnableEvidenceTools) {
       effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:
+${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded documents, especially page-specific prompts (e.g., \"page 50\") and follow-up continuity (\"next page\", \"expand this section\")." : ""}
 - Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.
 - Use guidelineSearch for formal recommendations and regional guidance.
 - Use clinicalTrialsSearch for ongoing/new evidence.
@@ -1188,6 +1766,7 @@ export async function POST(req: Request) {
 - Use evidenceConflictCheck when sources disagree.
 - IMPORTANT: Keep tool queries tightly aligned to the user question (specific condition/drug terms, not broad generic terms).
 - IMPORTANT: If a tool returns irrelevant records, explicitly discard them and retry with a narrower query before citing evidence.
+- IMPORTANT: Do not append manual references/bibliography sections; keep citations inline in the answer body only.
 - CITATION DENSITY: For medical content, place citations after each factual sentence whenever evidence exists; avoid bundling multiple distinct claims under one citation.`
       if (benchStrictMode) {
         effectiveSystemPrompt += `\n- BENCH STRICT: If guideline evidence is requested or clinically relevant, run guidelineSearch before finalizing your answer.
@@ -1199,12 +1778,41 @@ export async function POST(req: Request) {
       effectiveSystemPrompt += `\n\nYou may use PubMed tools when the question requests latest evidence, guideline updates, or when provided evidence is sparse. Prefer retrieved PubMed records for recency-sensitive claims and cite them explicitly.`
     }
 
+    if (shouldEnableYoutubeTool) {
+      effectiveSystemPrompt += `\n\nYou may use youtubeSearch only when the user asks for video-based learning (tutorials, demonstrations, or procedural walkthroughs).
+- Prefer trusted medical education channels when available.
+- Do not use YouTube videos as primary clinical evidence for diagnosis/treatment claims.
+- If no clinically relevant videos are returned, continue with normal text guidance without forcing video references.
+- When the user asks for videos/tutorials and youtubeSearch is available, you MUST call youtubeSearch before giving recommendations.
+- Do not invent or fabricate YouTube links. Only include links returned by youtubeSearch.
+- If youtubeSearch returns results, provide direct full video URLs using the exact \`url\` values from tool output (for example \`https://www.youtube.com/watch?v=...\`). Do not output plain \`youtube.com\` placeholders.
+- Call youtubeSearch at most once per answer.
+- Response style requirement when videos are requested:
+  1) Start with 1 short intro paragraph.
+  2) Add a heading exactly: "Recommended Videos:"
+  3) Provide 7-9 recommendations (target 8) in this format:
+     - <Video Title> by <Channel>
+       <One-line summary from tool description>
+       <Exact URL from tool result>
+  4) End with one short suggestion sentence.
+- Keep output sleek and concise with real links only.`
+    }
+
+    if (finalEnableSearch) {
+      effectiveSystemPrompt += `\n\nWeb search is explicitly enabled by user toggle.
+- Use the webSearch tool when you need fresh or external sources.
+- Never claim web-browsing unless webSearch returns results.
+- Cite only URLs returned by webSearch or listed in WEB SEARCH SNAPSHOT context.
+- Prefer high-quality medical and institutional sources when clinical claims are involved.
+- If webSearch returns no relevant results, continue with internal reasoning and state that no strong fresh sources were found.`
+    }
+
     const result = streamText({
       model: modelWithSearch,
       system: effectiveSystemPrompt,
-      messages: anonymizedMessages, // Use anonymized messages for LLM
+      messages: coreMessages,
       tools: runtimeTools,
-      maxSteps: 10,
+      maxSteps: shouldEnableYoutubeTool ? 4 : 10,
       onError: (err: unknown) => {
         console.error("Streaming error occurred:", err)
       },
@@ -1283,7 +1891,7 @@ export async function POST(req: Request) {
               // Save user message first (if not already saved)
               // Use original (non-anonymized) message for storage - it will be encrypted
               const userMessage = messages[messages.length - 1]
-              if (userMessage?.role === "user") {
+              if (!isTempChat && userMessage?.role === "user") {
                 try {
                   await logUserMessage({
                     supabase,
@@ -1352,43 +1960,22 @@ export async function POST(req: Request) {
                   } else if (contextToUse.context.citations.length > 0) {
                     console.warn(`📚 [CITATION EXTRACTION] ⚠️ No citation markers found in response despite ${contextToUse.context.citations.length} citations being provided`)
                     console.warn(`📚 [CITATION EXTRACTION] Response preview: ${responseText.substring(0, 300)}...`)
-                    // Fallback safety net: include a compact core set instead of all retrieved citations.
-                    citationsToSave = contextToUse.context.citations.slice(
-                      0,
-                      Math.min(3, contextToUse.context.citations.length)
-                    )
-                    console.warn(`📚 [CITATION EXTRACTION] Fallback: Including top ${citationsToSave.length} retrieved citations`)
                   }
                 } else {
                   console.warn(`📚 [CITATION EXTRACTION] ⚠️ Could not extract response text for citation parsing`)
-                  // Fallback: include all citations if we can't parse the response
-                  if (contextToUse.context.citations.length > 0) {
-                    citationsToSave = contextToUse.context.citations.slice(
-                      0,
-                      Math.min(3, contextToUse.context.citations.length)
-                    )
-                    console.warn(`📚 [CITATION EXTRACTION] Fallback: Including top ${citationsToSave.length} retrieved citations`)
-                  }
                 }
                 } else {
                   console.log(`📚 [CITATION EXTRACTION] No evidence context available (capturedEvidenceContext: ${!!capturedEvidenceContext}, evidenceContext: ${!!evidenceContext})`)
                 }
-
-                // Add normalized provenance from tool results to feed citation UX
-                const toolProvenance = extractToolProvenance(
-                  toolInvocationParts,
-                  queryText
-                )
-                if (toolProvenance.length > 0) {
-                  const provenanceCitations = toolProvenance.map((item, idx) =>
-                    provenanceToEvidenceCitation(item, citationsToSave.length + idx + 1)
-                  )
-                  citationsToSave = [...citationsToSave, ...provenanceCitations]
-                  console.log(`📚 [PROVENANCE] Added ${provenanceCitations.length} normalized tool citations`)
-                }
               } else {
                 console.log(`📚 [CITATION EXTRACTION] Evidence mode is OFF - skipping citation extraction`)
               }
+
+              const topicContextForSave = deriveTopicContextFromCitations(
+                resolvedTopicContext,
+                citationsToSave as EvidenceCitation[],
+                queryText
+              )
               
               // Only save to database if not a temp chat
               if (!isTempChat && supabase) {
@@ -1401,6 +1988,7 @@ export async function POST(req: Request) {
                     message_group_id,
                     model: effectiveModel,
                     evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
+                    topicContext: topicContextForSave,
                   })
                   if (citationsToSave.length > 0) {
                     console.log(`📚 [CITATION SAVE] ✅ Saved ${citationsToSave.length} citations to database`)
@@ -1418,6 +2006,7 @@ export async function POST(req: Request) {
                       message_group_id,
                       model: effectiveModel,
                       evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
+                      topicContext: topicContextForSave,
                     })
                   } catch (retryError) {
                     console.error("Retry also failed to save assistant message:", retryError)
@@ -1506,84 +2095,49 @@ export async function POST(req: Request) {
 
     console.log("✅ Streaming response ready, returning to client")
     
-    // Build response headers - include evidence citations if available
     const responseHeaders: Record<string, string> = {
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
-      // CRITICAL: Expose custom header to JavaScript (kept for local/dev; production often strips custom headers)
-      'Access-Control-Expose-Headers': 'X-Evidence-Citations',
     }
-
-    // Citations to send in the stream body so they are not stripped by production proxies
     let evidenceCitationsForStream: EvidenceCitation[] = []
-
+    const topicContextForStream =
+      normalizeTopicContext(uploadContextResult?.topicContext) ??
+      normalizeTopicContext(resolvedTopicContext)
     if (finalEnableEvidence) {
-      const contextForHeaders = capturedEvidenceContext || evidenceContext
-      if (contextForHeaders?.context?.citations && contextForHeaders.context.citations.length > 0) {
-        try {
-          const guidelinePriority = benchStrictMode || hasGuidelineIntent(queryText)
-          const strictCitationFloor = benchStrictMode ? STRICT_MIN_CITATION_FLOOR : 6
-          const rankedHeaderPool = rankCitationsForQuery(
-            contextForHeaders.context.citations,
-            queryText,
-            { guidelinePriority }
-          )
-          let curatedHeaderSelection = filterLowRelevanceCitations(
-            rankedHeaderPool,
-            queryText,
-            benchStrictMode ? strictCitationFloor : 6
-          )
-          if (benchStrictMode) {
-            curatedHeaderSelection = ensureCitationFloor(
-              curatedHeaderSelection,
-              rankedHeaderPool,
-              strictCitationFloor
-            )
-          }
-          if (guidelinePriority) {
-            curatedHeaderSelection = ensureGuidelineCitations(
-              curatedHeaderSelection,
-              rankedHeaderPool,
-              STRICT_MIN_GUIDELINE_CITATIONS
-            )
-          }
-          const curatedHeaderCitations = dedupeAndReindexCitations(
-            curatedHeaderSelection
-          ).slice(0, 12)
-          evidenceCitationsForStream = curatedHeaderCitations
-          console.log(`📚 [STREAM] Adding ${curatedHeaderCitations.length} curated citations to stream body (production-safe)`)
-          const encodedHeader = encodeEvidenceCitationsHeader(
-            curatedHeaderCitations
-          )
-          if (encodedHeader) {
-            responseHeaders["X-Evidence-Citations"] = encodedHeader
-            console.log(
-              `📚 EVIDENCE MODE: Sending ${curatedHeaderCitations.length} citations (header + stream body)`
-            )
-          } else {
-            console.warn(
-              "📚 [HEADERS] Skipping X-Evidence-Citations: could not fit within safe header size"
-            )
-          }
-        } catch (e) {
-          console.error('Failed to encode evidence citations:', e)
+      const contextForStream = capturedEvidenceContext || evidenceContext
+      if (contextForStream?.context?.citations?.length) {
+        evidenceCitationsForStream = dedupeAndReindexCitations(
+          rankCitationsForQuery(contextForStream.context.citations, queryText)
+        ).slice(0, 12)
+
+        const encodedHeader = encodeEvidenceCitationsHeader(evidenceCitationsForStream)
+        if (encodedHeader) {
+          responseHeaders["Access-Control-Expose-Headers"] = "X-Evidence-Citations"
+          responseHeaders["X-Evidence-Citations"] = encodedHeader
         }
-      } else {
-        console.log(`📚 [HEADERS] No citations to add (contextForHeaders: ${!!contextForHeaders})`)
       }
-    } else {
-      console.log(`📚 [HEADERS] Evidence mode is OFF - not sending citations`)
     }
 
     return createDataStreamResponse({
       status: 200,
       headers: responseHeaders,
       execute: (writer) => {
+        if (topicContextForStream) {
+          writer.writeMessageAnnotation(
+            {
+              type: "topic-context",
+              topicContext: topicContextForStream,
+            } as unknown as Parameters<typeof writer.writeMessageAnnotation>[0]
+          )
+        }
         if (evidenceCitationsForStream.length > 0) {
           writer.writeMessageAnnotation(
-            { type: 'evidence-citations', citations: evidenceCitationsForStream } as unknown as Parameters<typeof writer.writeMessageAnnotation>[0]
+            {
+              type: "evidence-citations",
+              citations: evidenceCitationsForStream,
+            } as unknown as Parameters<typeof writer.writeMessageAnnotation>[0]
           )
         }
         result.mergeIntoDataStream(writer, {

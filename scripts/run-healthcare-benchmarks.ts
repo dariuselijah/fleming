@@ -1,4 +1,6 @@
 import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 function run(command: string) {
   console.log(`\n▶ ${command}`);
@@ -9,12 +11,30 @@ function run(command: string) {
 }
 
 async function main() {
-  const externalInput =
+  const configuredExternalInput =
     process.env.EXTERNAL_BENCH_INPUT ||
     "data/eval/external/normalized/healthcare_external_release.json";
+  const fallbackExternalInput =
+    "data/eval/external/normalized/sample_external_healthcare.json";
+  const resolvedConfiguredInput = path.resolve(process.cwd(), configuredExternalInput);
+  const externalInput = fs.existsSync(resolvedConfiguredInput)
+    ? configuredExternalInput
+    : fallbackExternalInput;
   const externalOutput = process.env.EXTERNAL_BENCH_OUTPUT || "data/eval/external_results.json";
   const externalThresholds =
     process.env.EXTERNAL_BENCH_THRESHOLDS || "data/eval/external_benchmark_thresholds.json";
+
+  if (!fs.existsSync(path.resolve(process.cwd(), externalInput))) {
+    throw new Error(
+      `External benchmark input not found: ${configuredExternalInput} (fallback also missing: ${fallbackExternalInput})`
+    );
+  }
+
+  if (externalInput !== configuredExternalInput) {
+    console.warn(
+      `[benchmark:healthcare] External benchmark input not found at "${configuredExternalInput}". Falling back to "${fallbackExternalInput}".`
+    );
+  }
 
   run("npm run benchmark:release:strict");
   run(

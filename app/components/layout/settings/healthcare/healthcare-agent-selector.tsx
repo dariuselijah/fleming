@@ -76,7 +76,7 @@ export function HealthcareAgentSelector() {
       case "medical_student":
         return "Medical Student Assistant"
       case "doctor":
-        return "Healthcare Professional Assistant"
+        return "Clinician Assistant"
       default:
         return "General Health Assistant"
     }
@@ -85,9 +85,9 @@ export function HealthcareAgentSelector() {
   const getRoleDescription = () => {
     switch (preferences.userRole) {
       case "medical_student":
-        return "Tailored for medical education with focus on learning, clinical reasoning, and exam preparation."
+        return "Tailored for med-school workflows: upload your materials, run simulations, and get cited explanations you can study from."
       case "doctor":
-        return "Specialized for healthcare professionals with evidence-based guidance and clinical decision support."
+        return "Built for clinicians with workflow-specific support for summary, interaction checks, stewardship, coding, and medication review."
       default:
         return "General health and wellness support for everyday health questions and concerns."
     }
@@ -121,8 +121,12 @@ export function HealthcareAgentSelector() {
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2">
                 <span className="font-medium">Role:</span>
-                <span className="text-muted-foreground capitalize">
-                  {preferences.userRole === "medical_student" ? "Medical Student" : preferences.userRole}
+                <span className="text-muted-foreground">
+                  {preferences.userRole === "doctor"
+                    ? "Clinician"
+                    : preferences.userRole === "medical_student"
+                      ? "Medical Student"
+                      : "General User"}
                 </span>
               </div>
               
@@ -149,12 +153,12 @@ export function HealthcareAgentSelector() {
                 </span>
                 {preferences.userRole === "doctor" && (
                   <span className="text-xs text-muted-foreground">
-                    • Clinical decision support
+                    • Clinician workflow modes (Open Search, Drug Interactions, Stewardship, ICD10, Med Review)
                   </span>
                 )}
                 {preferences.userRole === "medical_student" && (
                   <span className="text-xs text-muted-foreground">
-                    • Educational guidance
+                    • Upload-aware learning, YouTube-assisted explainers, and evidence-cited study outputs
                   </span>
                 )}
               </div>

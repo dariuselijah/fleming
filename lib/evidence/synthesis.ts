@@ -289,18 +289,7 @@ export function extractReferencedCitations(
     .map(index => citationMap.get(index))
     .filter((c): c is EvidenceCitation => c !== undefined);
 
-  const minimumCitationFloor = Math.min(3, allRetrievedCitations.length);
-  let fallbackAdded = 0;
-  if (referencedCitations.length < minimumCitationFloor) {
-    const referencedSet = new Set(referencedCitations.map(c => c.index));
-    const fallbackCandidates = allRetrievedCitations.filter(c => !referencedSet.has(c.index));
-    const needed = minimumCitationFloor - referencedCitations.length;
-    const fallbackToAdd = fallbackCandidates.slice(0, needed);
-    if (fallbackToAdd.length > 0) {
-      fallbackAdded = fallbackToAdd.length;
-      referencedCitations.push(...fallbackToAdd);
-    }
-  }
+  const fallbackAdded = 0;
 
   const finalIndices = referencedCitations
     .map(citation => citation.index)

@@ -17,6 +17,154 @@ interface CitationMarkdownProps {
   evidenceCitations?: EvidenceCitation[]
 }
 
+function resolveNamedMarkerIndices(
+  markerText: string,
+  citations: Map<number, CitationData>
+): number[] {
+  if (citations.size === 0) return []
+
+  const normalizedMarker = markerText.toLowerCase().trim()
+  if (!normalizedMarker) return []
+  const stopwords = new Set([
+    "for",
+    "and",
+    "the",
+    "with",
+    "from",
+    "this",
+    "that",
+    "are",
+    "drug",
+    "drugs",
+    "label",
+    "labels",
+    "data",
+  ])
+
+  const markerTokens = normalizedMarker
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+    .filter((token) => !stopwords.has(token))
+
+  const wantsOpenFda = normalizedMarker.includes("openfda") || normalizedMarker.includes("fda")
+
+  const scored = Array.from(citations.entries())
+    .map(([index, citation]) => {
+      const haystack = `${citation.title || ""} ${citation.journal || ""} ${citation.url || ""}`.toLowerCase()
+      let score = 0
+
+      for (const token of markerTokens) {
+        if (haystack.includes(token)) {
+          score += 1
+        }
+      }
+
+      if (wantsOpenFda) {
+        if (
+          haystack.includes("open.fda.gov") ||
+          haystack.includes("fda.gov") ||
+          haystack.includes("openfda")
+        ) {
+          score += 3
+        }
+      }
+
+      return { index, score }
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+
+  if (scored.length > 0) {
+    return scored.slice(0, 3).map((entry) => entry.index)
+  }
+
+  // For generic named references with exactly one source, map to that source.
+  if (citations.size === 1) {
+    const first = citations.keys().next()
+    if (!first.done) {
+      return [first.value]
+    }
+  }
+
+  return []
+}
+
+function collectNamedMarkers(
+  text: string,
+  existingMarkers: ReturnType<typeof parseCitationMarkers>,
+  citations: Map<number, CitationData>
+) {
+  const namedMarkers: ReturnType<typeof parseCitationMarkers> = []
+  let depth = 0
+  let startIndex = -1
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+    if (char === "[") {
+      if (depth === 0) {
+        startIndex = i
+      }
+      depth += 1
+      continue
+    }
+
+    if (char !== "]" || depth <= 0) {
+      continue
+    }
+
+    depth -= 1
+    if (depth !== 0 || startIndex < 0) {
+      continue
+    }
+
+    const endIndex = i + 1
+    const fullMatch = text.slice(startIndex, endIndex)
+    const overlapsExisting = existingMarkers.some(
+      (existing) => startIndex < existing.endIndex && endIndex > existing.startIndex
+    )
+    if (overlapsExisting) {
+      startIndex = -1
+      continue
+    }
+
+    const inner = fullMatch.slice(1, -1).trim()
+    if (!inner || !/[A-Za-z]/.test(inner)) {
+      startIndex = -1
+      continue
+    }
+    if (/^CITATION\s*:/i.test(inner) || /^PMID\s*:/i.test(inner)) {
+      startIndex = -1
+      continue
+    }
+
+    const normalizedInner = inner
+      .replace(/\[\d+(?:\s*(?:,|-)\s*\d+)*\]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+    if (!normalizedInner) {
+      startIndex = -1
+      continue
+    }
+
+    const indices = resolveNamedMarkerIndices(normalizedInner, citations)
+    if (indices.length > 0) {
+      namedMarkers.push({
+        type: "named",
+        indices,
+        startIndex,
+        endIndex,
+        fullMatch,
+        quoteText: normalizedInner,
+      })
+    }
+
+    startIndex = -1
+  }
+
+  return namedMarkers
+}
+
 /**
  * Markdown component that renders citations inline
  * When evidenceCitations are provided, uses EvidenceCitationPill (with favicon + journal name)
@@ -38,7 +186,8 @@ export function CitationMarkdown({
   
   // CRITICAL: If we have no evidence citations, don't render citation markers
   // This prevents broken citations from appearing when evidence mode is off
-  const shouldRenderCitations = evidenceCitations && evidenceCitations.length > 0
+  const shouldRenderCitations =
+    (evidenceCitations && evidenceCitations.length > 0) || citations.size > 0
   
   // Parse citation markers from text - handle both [CITATION:1] and [1] formats
   const markers = useMemo(() => {
@@ -85,9 +234,53 @@ export function CitationMarkdown({
         }
       }
     }
+
+    // Resolve PMID markers to evidence citation indices, e.g. [PMID: 37932704]
+    if (evidenceCitationMap && evidenceCitationMap.size > 0) {
+      const citationByPmid = new Map<string, number>()
+      evidenceCitationMap.forEach((citation) => {
+        const pmid = typeof citation.pmid === "string" ? citation.pmid.trim() : ""
+        if (pmid) {
+          citationByPmid.set(pmid, citation.index)
+        }
+      })
+
+      const pmidPattern = /\[PMID\s*:\s*(\d+)\]/gi
+      let pmidMatch: RegExpExecArray | null
+      while ((pmidMatch = pmidPattern.exec(children)) !== null) {
+        const pmid = pmidMatch[1]?.trim()
+        if (!pmid) continue
+        const resolvedIndex = citationByPmid.get(pmid)
+        if (typeof resolvedIndex !== "number") continue
+
+        const startIndex = pmidMatch.index
+        const endIndex = pmidMatch.index + pmidMatch[0].length
+        const overlaps = result.some(
+          (existing) => startIndex < existing.endIndex && endIndex > existing.startIndex
+        )
+        if (overlaps) continue
+
+        result.push({
+          type: "numbered",
+          indices: [resolvedIndex],
+          startIndex,
+          endIndex,
+          fullMatch: pmidMatch[0],
+        })
+      }
+    }
+
+    // Resolve named bracket citations for non-evidence mode, e.g.
+    // [OpenFDA drug labels for acetaminophen, dapagliflozin, and metformin]
+    if (!evidenceCitationMap && citations.size > 0) {
+      const namedMarkers = collectNamedMarkers(children, result, citations)
+      result.push(...namedMarkers)
+    }
+
+    result.sort((a, b) => a.startIndex - b.startIndex)
     
     return result
-  }, [children, shouldRenderCitations])
+  }, [children, citations, evidenceCitationMap, shouldRenderCitations])
   
   // Replace citation markers with unique placeholders BEFORE markdown processing
   // Use a format that react-markdown won't escape or treat specially
@@ -122,6 +315,24 @@ export function CitationMarkdown({
       // Process list items
       li: ({ children: nodeChildren, ...props }) => {
         return <li {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</li>
+      },
+      table: ({ children: nodeChildren, ...props }) => {
+        return <table {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</table>
+      },
+      thead: ({ children: nodeChildren, ...props }) => {
+        return <thead {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</thead>
+      },
+      tbody: ({ children: nodeChildren, ...props }) => {
+        return <tbody {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</tbody>
+      },
+      tr: ({ children: nodeChildren, ...props }) => {
+        return <tr {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</tr>
+      },
+      th: ({ children: nodeChildren, ...props }) => {
+        return <th {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</th>
+      },
+      td: ({ children: nodeChildren, ...props }) => {
+        return <td {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</td>
       },
       // Process ALL text nodes - this is critical for inline citations
       // react-markdown passes text as children to this component
@@ -227,6 +438,17 @@ function processText(
     if (marker) {
       // If we have evidence citations, render EvidenceCitationPill for each
       if (evidenceCitationMap && evidenceCitationMap.size > 0) {
+        const allIndicesResolvable = marker.indices.every((idx) =>
+          evidenceCitationMap.has(idx)
+        )
+        if (!allIndicesResolvable) {
+          // Keep bracketed numbers as plain text when they do not map to real citations.
+          // This prevents false pills for values like [2017] that are just years.
+          parts.push(marker.fullMatch)
+          lastIndex = matchIndex + matchLength
+          continue
+        }
+
         const evidencePills: React.ReactNode[] = []
         
         marker.indices.forEach((idx) => {
@@ -258,18 +480,51 @@ function processText(
             )
           }
         } else {
-          // Fallback if no evidence citation found for this index
-          const indices = marker.indices.join(',')
-          parts.push(
-            <span
-              key={`fallback-evidence-${matchIndex}`}
-              className="bg-zinc-700/80 text-zinc-100 inline-flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium mx-0.5"
-            >
-              [{indices}]
-            </span>
-          )
+          parts.push(marker.fullMatch)
         }
       } else {
+        if (marker.type === "named") {
+          const namedCitations = marker.indices
+            .map((idx) => citations.get(idx))
+            .filter((c): c is CitationData => c !== undefined)
+
+          if (namedCitations.length > 0) {
+            const journalGroups = new Map<string, CitationData[]>()
+            namedCitations.forEach((citation) => {
+              const journal = citation.journal || "Unknown"
+              if (!journalGroups.has(journal)) {
+                journalGroups.set(journal, [])
+              }
+              journalGroups.get(journal)!.push(citation)
+            })
+
+            const journalTags: React.ReactNode[] = []
+            journalGroups.forEach((groupCitations, journal) => {
+              journalTags.push(
+                <JournalCitationTag
+                  key={`named-journal-${journal}-${matchIndex}`}
+                  citations={groupCitations}
+                />
+              )
+            })
+
+            if (journalTags.length > 1) {
+              parts.push(
+                <span key={`named-citation-group-${matchIndex}`} className="inline-flex items-center gap-1">
+                  {journalTags}
+                </span>
+              )
+            } else {
+              parts.push(journalTags[0])
+            }
+          } else {
+            parts.push(marker.fullMatch)
+          }
+
+          lastIndex = matchIndex + matchLength
+          continue
+        }
+
         // Fall back to JournalCitationTag for web search results
         const markerCitations = marker.indices
           .map(idx => citations.get(idx))
@@ -321,6 +576,9 @@ function processText(
           )
         }
       }
+    } else {
+      // Safety fallback: if placeholder map is missing, avoid leaking raw placeholder token.
+      parts.push(`[${match[1]}]`)
     }
     
     lastIndex = matchIndex + matchLength

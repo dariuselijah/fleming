@@ -1,4 +1,5 @@
 import { toast } from "@/components/ui/toast"
+import type { EvidenceCitation, UploadVisualReference } from "@/lib/evidence/types"
 import * as fileType from "file-type"
 import { DAILY_FILE_UPLOAD_LIMIT } from "./config"
 import { isSupabaseEnabled } from "./supabase/config"
@@ -54,7 +55,11 @@ export function createAttachment(file: File, url: string, filePath?: string): At
 }
 
 // Function to generate a new signed URL for secure file access
-export async function getSignedUrl(filePath: string, expiresIn: number = 3600): Promise<string> {
+export async function getSignedUrl(
+  filePath: string,
+  expiresIn: number = 3600,
+  bucket: string = "chat-attachments"
+): Promise<string> {
   if (!isSupabaseEnabled) {
     throw new Error("Supabase not enabled")
   }
@@ -75,6 +80,7 @@ export async function getSignedUrl(filePath: string, expiresIn: number = 3600): 
       body: JSON.stringify({
         filePath,
         expiresIn,
+        bucket,
       }),
     })
 
@@ -99,7 +105,12 @@ export async function getSignedUrl(filePath: string, expiresIn: number = 3600): 
 }
 
 // Function to generate signed URL with retry for newly uploaded files
-export async function getSignedUrlWithRetry(filePath: string, expiresIn: number = 3600, maxRetries: number = 5): Promise<string> {
+export async function getSignedUrlWithRetry(
+  filePath: string,
+  expiresIn: number = 3600,
+  maxRetries: number = 5,
+  bucket: string = "chat-attachments"
+): Promise<string> {
   if (!isSupabaseEnabled) {
     throw new Error("Supabase not enabled")
   }
@@ -121,6 +132,7 @@ export async function getSignedUrlWithRetry(filePath: string, expiresIn: number 
         body: JSON.stringify({
           filePath,
           expiresIn,
+          bucket,
         }),
       })
 
@@ -341,6 +353,49 @@ export async function getAttachmentsFromDb(
     console.error("Error fetching attachments:", error)
     return []
   }
+}
+
+async function refreshVisualReference(
+  reference: UploadVisualReference
+): Promise<UploadVisualReference> {
+  if (!reference.filePath) {
+    return reference
+  }
+
+  const signedUrl = await getSignedUrlWithRetry(
+    reference.filePath,
+    3600,
+    5,
+    reference.storageBucket || "chat-attachments"
+  )
+
+  return {
+    ...reference,
+    signedUrl,
+    fullUrl: signedUrl,
+  }
+}
+
+export async function refreshEvidenceCitationsWithSignedUrls(
+  citations: EvidenceCitation[]
+): Promise<EvidenceCitation[]> {
+  return Promise.all(
+    citations.map(async (citation) => {
+      const previewReference = citation.previewReference
+        ? await refreshVisualReference(citation.previewReference)
+        : citation.previewReference
+
+      const figureReferences = citation.figureReferences
+        ? await Promise.all(citation.figureReferences.map((reference) => refreshVisualReference(reference)))
+        : citation.figureReferences
+
+      return {
+        ...citation,
+        previewReference,
+        figureReferences,
+      }
+    })
+  )
 }
 
 export class FileUploadLimitError extends Error {

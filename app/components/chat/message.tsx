@@ -18,6 +18,7 @@ type MessageProps = {
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
   evidenceCitations?: any[]
+  contextPrompt?: string
 }
 
 export function Message({
@@ -34,6 +35,7 @@ export function Message({
   status,
   className,
   evidenceCitations = [],
+  contextPrompt,
 }: MessageProps) {
   const [copied, setCopied] = useState(false)
   const clipboardText = useMemo(() => {
@@ -84,6 +86,7 @@ export function Message({
           status={status}
           className={className}
           evidenceCitations={evidenceCitations}
+          contextPrompt={contextPrompt}
         >
           {children}
         </MessageAssistant>
@@ -106,7 +109,8 @@ export function Message({
     isLast,
     parts,
     status,
-    evidenceCitations
+    evidenceCitations,
+    contextPrompt,
   ])
 
   return messageContent

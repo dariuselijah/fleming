@@ -46,6 +46,8 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "o4-mini": "openai",
   "o4-mini-2025-04-16": "openai",
   "gpt-5": "openai",
+  "gpt-5.2": "openai",
+  "gpt-5.4": "openai",
 
   // Mistral
   "ministral-3b-latest": "mistral",
@@ -78,7 +80,12 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "gemini-1.5-pro-latest": "google",
   "gemini-1.5-pro-001": "google",
   "gemini-1.5-pro-002": "google",
+  "gemini-2.5-flash": "google",
+  "gemini-2.5-pro": "google",
   "gemini-2.5-pro-exp-03-25": "google",
+  "gemini-3.1-pro-preview": "google",
+  "gemini-3-flash-preview": "google",
+  "gemini-3.1-flash-lite-preview": "google",
   "gemini-2.0-flash-lite-preview-02-05": "google",
   "gemini-2.0-pro-exp-02-05": "google",
   "gemini-2.0-flash-thinking-exp-01-21": "google",
@@ -89,6 +96,9 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
 
   // Anthropic
   "claude-3-7-sonnet-20250219": "anthropic",
+  "claude-sonnet-4-6": "anthropic",
+  "claude-opus-4-6": "anthropic",
+  "claude-haiku-4-5": "anthropic",
   "claude-3-5-sonnet-latest": "anthropic",
   "claude-3-5-sonnet-20241022": "anthropic",
   "claude-3-5-sonnet-20240620": "anthropic",
@@ -121,6 +131,7 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "grok-vision-beta": "xai",
   "grok-beta": "xai",
   "grok-4-fast-reasoning": "xai",
+  "grok-4-1-fast-reasoning": "xai",
 }
 
 // OLLAMA COMPLETELY REMOVED for instant streaming

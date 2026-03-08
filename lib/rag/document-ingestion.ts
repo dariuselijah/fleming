@@ -5,6 +5,8 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { generateEmbeddings } from './embeddings'
+import { UserUploadService } from '@/lib/uploads/server'
+import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 import type {
   CitationDocument,
   DocumentMetadata,
@@ -132,35 +134,47 @@ export class DocumentIngestionPipeline {
    * TODO: Implement with pdf-parse, pdf.js, or similar library
    */
   private async extractPDFWithPages(file: File | Buffer): Promise<PDFData> {
-    // For now, return a placeholder structure
-    // In production, you would use a PDF parsing library like:
-    // - pdf-parse (Node.js)
-    // - pdf.js (Browser/Node.js)
-    // - PyPDF2 (Python, via API)
-    // - pdf2json
+    const buffer = Buffer.isBuffer(file)
+      ? file
+      : Buffer.from(await file.arrayBuffer())
+    const parsed = await pdfParse(buffer)
+    const pageCandidates = parsed.text
+      .split(/\f+/)
+      .map((page: string) => page.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+    const pageCount = Math.max(parsed.numpages || 0, pageCandidates.length || 1)
+    const pages: PDFPageData[] = []
 
-    // Example implementation structure:
-    // const pdfData = await pdfParse(file)
-    // const pages = pdfData.pages.map((page, index) => ({
-    //   pageNumber: index + 1,
-    //   text: page.text,
-    //   chapter: this.detectChapter(page.text),
-    //   section: this.detectSection(page.text),
-    // }))
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+      const text =
+        pageCandidates[pageNumber - 1] ||
+        (pageNumber === 1 ? parsed.text.replace(/\s+/g, ' ').trim() : '')
 
-    // For MVP, return empty structure - this needs to be implemented
-    throw new Error(
-      'PDF extraction not yet implemented. Please use a PDF parsing library like pdf-parse or pdf.js'
-    )
+      pages.push({
+        pageNumber,
+        text,
+        chapter: this.detectChapter(text),
+        section: this.detectSection(text),
+      })
+    }
 
-    // Placeholder return (will never execute due to throw above)
     return {
-      pages: [],
+      pages,
       metadata: {
         title: '',
         document_type: 'textbook',
       },
     }
+  }
+
+  private detectChapter(text: string): string | undefined {
+    const match = text.match(/\bchapter\s+(\d+|[ivxlcdm]+)/i)
+    return match ? `Chapter ${match[1]}` : undefined
+  }
+
+  private detectSection(text: string): string | undefined {
+    const match = text.match(/\b(section|unit)\s+([a-z0-9.-]+)/i)
+    return match ? `${match[1]} ${match[2]}` : undefined
   }
 
   /**
@@ -380,6 +394,17 @@ export class DocumentIngestionPipeline {
         throw new Error(`Failed to store chunks: ${error.message}`)
       }
     }
+  }
+}
+
+export class UserUploadIngestionPipeline {
+  async ingestUserUpload(params: {
+    userId: string
+    file: File
+    title?: string
+  }) {
+    const service = new UserUploadService()
+    return service.createAndIngestUpload(params)
   }
 }
 

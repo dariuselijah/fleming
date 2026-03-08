@@ -426,16 +426,23 @@ export function resultsToCitations(results: MedicalEvidenceResult[]): EvidenceCi
  * Build context for LLM from evidence citations
  */
 export function buildEvidenceContext(citations: EvidenceCitation[]): EvidenceContext {
+  const hasUserUploads = citations.some((citation) => citation.sourceType === "user_upload")
   // Format citations for context
   const formattedContext = citations.map((c) => {
     const authorStr = c.authors.length > 0 
       ? c.authors.slice(0, 3).join(', ') + (c.authors.length > 3 ? ' et al.' : '')
       : 'Unknown authors';
+    const sourceLine = c.sourceType === "user_upload"
+      ? `Source: ${c.sourceLabel || c.journal}${c.pageLabel ? ` (${c.pageLabel})` : ''}`
+      : `Source: ${c.journal}${c.year ? ` (${c.year})` : ''}`
+    const evidenceLine = c.sourceType === "user_upload"
+      ? `Source Type: Private user upload`
+      : `Evidence Level: ${c.evidenceLevel} (${getEvidenceLevelLabel(c.evidenceLevel)})`
     
     return `[${c.index}] ${c.title}
-Source: ${c.journal}${c.year ? ` (${c.year})` : ''}
+${sourceLine}
 Authors: ${authorStr}
-Evidence Level: ${c.evidenceLevel} (${getEvidenceLevelLabel(c.evidenceLevel)})
+${evidenceLine}
 ${c.studyType ? `Study Type: ${c.studyType}` : ''}
 ${c.sampleSize ? `Sample Size: n=${c.sampleSize}` : ''}
 ${c.meshTerms.length > 0 ? `MeSH Terms: ${c.meshTerms.slice(0, 5).join(', ')}` : ''}
@@ -446,7 +453,7 @@ ${c.snippet}
   }).join('\n\n');
 
   // Build system prompt addition
-  const systemPromptAddition = buildEvidenceSystemPrompt(citations);
+  const systemPromptAddition = buildEvidenceSystemPrompt(citations, hasUserUploads);
 
   return {
     citations,
@@ -459,7 +466,7 @@ ${c.snippet}
  * Build system prompt for evidence-based responses
  * ENHANCED: More explicit citation requirements to ensure LLM generates citations
  */
-function buildEvidenceSystemPrompt(citations: EvidenceCitation[]): string {
+function buildEvidenceSystemPrompt(citations: EvidenceCitation[], hasUserUploads: boolean): string {
   if (citations.length === 0) {
     return '';
   }
@@ -467,7 +474,7 @@ function buildEvidenceSystemPrompt(citations: EvidenceCitation[]): string {
   return `
 ## ⚠️ CRITICAL: EVIDENCE-BASED RESPONSE REQUIREMENTS ⚠️
 
-You have access to ${citations.length} peer-reviewed medical evidence sources. You MUST follow these rules:
+You have access to ${citations.length} cited sources${hasUserUploads ? ", including private user uploads" : ""}. You MUST follow these rules:
 
 ### MANDATORY CITATION RULES:
 1. **EVERY factual medical claim MUST be followed by a citation in square brackets**
@@ -483,7 +490,7 @@ You have access to ${citations.length} peer-reviewed medical evidence sources. Y
    - ❌ WRONG: "ACE inhibitors reduce mortality. They are first-line therapy. [1,2]"
    - ❌ WRONG: "First-hour sepsis care includes blood cultures, lactate, broad-spectrum antibiotics, and fluids [1]" (multiple independent claims, only one citation)
 
-4. **PRIORITIZE HIGH EVIDENCE**: Weight meta-analyses (Level 1) and RCTs (Level 2) more heavily than lower-quality studies
+4. **PRIORITIZE HIGH EVIDENCE**: Weight meta-analyses (Level 1) and RCTs (Level 2) more heavily than lower-quality studies, but you may also cite private uploads when they directly support the answer
 
 5. **BE PRECISE**: Quote study findings accurately, including sample sizes when available
 
@@ -504,7 +511,12 @@ You have access to ${citations.length} peer-reviewed medical evidence sources. Y
 - **Level 5** (Expert Opinion/Review): Expert opinion - use for context only
 
 ### AVAILABLE EVIDENCE (YOU MUST USE THESE):
-${citations.map(c => `[${c.index}] ${c.title} (${c.journal}, ${c.year || 'n.d.'}) - Level ${c.evidenceLevel}${c.studyType ? ` (${c.studyType})` : ''}`).join('\n')}
+${citations.map(c => {
+  if (c.sourceType === "user_upload") {
+    return `[${c.index}] ${c.title} (${c.sourceLabel || "Private upload"})${c.studyType ? ` - ${c.studyType}` : ''}`
+  }
+  return `[${c.index}] ${c.title} (${c.journal}, ${c.year || 'n.d.'}) - Level ${c.evidenceLevel}${c.studyType ? ` (${c.studyType})` : ''}`
+}).join('\n')}
 
 ### REMINDER: 
 - Every medical fact needs a citation [X]

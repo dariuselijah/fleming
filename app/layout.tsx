@@ -120,8 +120,10 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({
   children,
+  modal,
 }: Readonly<{
   children: React.ReactNode
+  modal: React.ReactNode
 }>) {
   const isDev = process.env.NODE_ENV === "development"
   const isOfficialDeployment = process.env.FLEMING_OFFICIAL === "true"
@@ -215,6 +217,7 @@ export default async function RootLayout({
                         <SidebarProvider defaultOpen>
                           <Toaster position="top-center" />
                           {children}
+                          {modal}
                         </SidebarProvider>
                       </ThemeProvider>
                     </TooltipProvider>

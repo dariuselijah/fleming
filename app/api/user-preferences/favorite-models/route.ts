@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { DEFAULT_FAVORITE_MODELS } from "@/lib/config"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
@@ -42,11 +43,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const normalizedFavorites = Array.from(
+      new Set(
+        favorite_models
+          .map((model: string) => model.trim())
+          .filter((model: string) => model.length > 0)
+      )
+    )
+    const safeFavorites =
+      normalizedFavorites.length > 0
+        ? normalizedFavorites
+        : DEFAULT_FAVORITE_MODELS
+
     // Update the user's favorite models
     const { data, error } = await supabase
       .from("users")
       .update({
-        favorite_models,
+        favorite_models: safeFavorites,
       })
       .eq("id", user.id)
       .select("favorite_models")
@@ -117,8 +130,13 @@ export async function GET() {
     }
 
     console.log("Favorite models fetched successfully")
+    const safeFavorites = Array.isArray(data.favorite_models) &&
+      data.favorite_models.length > 0
+      ? data.favorite_models
+      : DEFAULT_FAVORITE_MODELS
+
     return NextResponse.json({
-      favorite_models: data.favorite_models || [],
+      favorite_models: safeFavorites,
     })
   } catch (error) {
     console.error("Error in favorite-models GET API:", error)

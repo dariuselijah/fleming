@@ -2,6 +2,7 @@ export const CLINICIAN_WORKFLOW_MODES = [
   "open_search",
   "clinical_summary",
   "drug_interactions",
+  "stewardship",
   "icd10_codes",
   "med_review",
 ] as const
@@ -25,6 +26,7 @@ export const CLINICIAN_MODE_LABELS: Record<ClinicianWorkflowMode, string> = {
   open_search: "Open Search",
   clinical_summary: "Clinical Summary",
   drug_interactions: "Drug Interactions",
+  stewardship: "Stewardship",
   icd10_codes: "ICD10 Codes",
   med_review: "Med Review",
 }
@@ -39,10 +41,59 @@ export const CLINICIAN_MODE_PLACEHOLDERS: Record<
     "Generate a concise clinical summary (e.g., problem list, active issues, and plan)...",
   drug_interactions:
     "Check interactions and safety (e.g., interactions between apixaban, amiodarone, and clarithromycin)...",
+  stewardship:
+    "Build an evidence-backed antimicrobial plan with empiric options, de-escalation triggers, and duration guidance...",
   icd10_codes:
     "Map assessment to ICD10 coding options (e.g., diabetes with CKD and hypertension)...",
   med_review:
     "Review medication regimen for risks and optimization opportunities...",
+}
+
+export const CLINICIAN_MODE_DESCRIPTIONS: Record<
+  ClinicianWorkflowMode,
+  {
+    tagline: string
+    trustClaim: string
+    benchmarkBacked: boolean
+    keyOutputs: string[]
+  }
+> = {
+  open_search: {
+    tagline: "Broad evidence pull for fast clinical reasoning.",
+    trustClaim: "Evidence-aware synthesis with practical next steps.",
+    benchmarkBacked: false,
+    keyOutputs: ["Focused differential", "Immediate next data points", "Guideline caveats"],
+  },
+  clinical_summary: {
+    tagline: "Turn messy context into a chart-ready summary.",
+    trustClaim: "Benchmark-backed for concise, scannable handoff-ready output.",
+    benchmarkBacked: true,
+    keyOutputs: ["One-liner", "Active problems", "Plan and watch items"],
+  },
+  drug_interactions: {
+    tagline: "Surface high-risk interactions before they hurt someone.",
+    trustClaim: "Benchmark-backed medication safety workflow with monitoring logic.",
+    benchmarkBacked: true,
+    keyOutputs: ["Severity ranking", "Mechanism", "Monitoring and safer options"],
+  },
+  stewardship: {
+    tagline: "Move from syndrome to antimicrobial plan fast.",
+    trustClaim: "Benchmark-backed antimicrobial workflow with de-escalation logic.",
+    benchmarkBacked: true,
+    keyOutputs: ["Empiric options", "De-escalation triggers", "Duration guidance"],
+  },
+  icd10_codes: {
+    tagline: "Map assessments to defensible coding options.",
+    trustClaim: "Documentation-aware coding support with specificity prompts.",
+    benchmarkBacked: false,
+    keyOutputs: ["Primary code candidates", "Specificity gaps", "Documentation prompts"],
+  },
+  med_review: {
+    tagline: "Audit polypharmacy for risk, duplication, and follow-up.",
+    trustClaim: "Benchmark-backed medication optimization review.",
+    benchmarkBacked: true,
+    keyOutputs: ["Highest-risk meds", "Deprescribing opportunities", "Monitoring plan"],
+  },
 }
 
 export function getClinicianModeSystemInstructions(
@@ -84,6 +135,17 @@ Prioritize medication safety analysis:
 - Identify interaction pairs, mechanism, and expected clinical impact.
 - Flag high-risk combinations and monitoring requirements.
 - Offer safer alternatives when appropriate.
+- ${commonGuardrail}
+- ${escalationGuardrail}
+`.trim()
+    case "stewardship":
+      return `
+CLINICIAN WORKFLOW MODE: STEWARDSHIP
+
+Prioritize antimicrobial stewardship:
+- Frame the likely syndrome and severity before recommending antibiotics.
+- Recommend empiric and targeted options, de-escalation triggers, likely duration, and culture follow-up.
+- Explicitly note allergy, renal function, resistance risk, and missing microbiology data.
 - ${commonGuardrail}
 - ${escalationGuardrail}
 `.trim()

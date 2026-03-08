@@ -12,11 +12,13 @@ import { ArrowClockwise, Check, Copy } from "@phosphor-icons/react"
 import { getSources } from "./get-sources"
 import { Reasoning } from "./reasoning"
 import { SearchImages } from "./search-images"
+import { YouTubeResults, type YouTubeResultItem } from "./youtube-results"
 import { SourcesList } from "./sources-list"
 import { ToolInvocation } from "./tool-invocation"
 import { CitationMarkdown } from "./citation-markdown"
 import { ReferencesSection } from "./references-section"
 import { EvidenceReferencesSection } from "./evidence-references-section"
+import { TrustSummaryCard } from "./trust-summary-card"
 import { extractCitationsFromSources, extractCitationsFromWebSearch, extractJournalFromUrl, extractYearFromUrl } from "./citation-utils"
 import type { CitationData } from "./citation-popup"
 import type { EvidenceCitation } from "@/lib/evidence/types"
@@ -37,6 +39,42 @@ type MessageAssistantProps = {
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
   evidenceCitations?: EvidenceCitation[]
+  contextPrompt?: string
+}
+
+function extractYouTubeVideoId(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase()
+
+    if (host === "youtu.be") {
+      const id = parsed.pathname.split("/").filter(Boolean)[0]
+      return id || null
+    }
+
+    if (host === "youtube.com" || host === "m.youtube.com") {
+      if (parsed.pathname === "/watch") {
+        return parsed.searchParams.get("v")
+      }
+      if (parsed.pathname.startsWith("/shorts/")) {
+        const id = parsed.pathname.split("/").filter(Boolean)[1]
+        return id || null
+      }
+      if (parsed.pathname.startsWith("/embed/")) {
+        const id = parsed.pathname.split("/").filter(Boolean)[1]
+        return id || null
+      }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function isLikelyYouTubeVideoId(value: string): boolean {
+  // Standard YouTube video IDs are 11 characters [A-Za-z0-9_-]
+  return /^[A-Za-z0-9_-]{11}$/.test(value)
 }
 
 export function MessageAssistant({
@@ -50,6 +88,7 @@ export function MessageAssistant({
   status,
   className,
   evidenceCitations = [],
+  contextPrompt,
 }: MessageAssistantProps) {
   const { preferences } = useUserPreferences()
   const { card: learningCard, cleanContent } = useMemo(
@@ -70,15 +109,41 @@ export function MessageAssistant({
   const contentNullOrEmpty = contentToRender === null || contentToRender === ""
   const isLastStreaming = status === "streaming" && isLast
   
-  // Track if we're using evidence citations (from medical_evidence database)
-  const hasEvidenceCitations = evidenceCitations.length > 0
+  // Track evidence citations attached to this message payload.
+  const hasAttachedEvidenceCitations = evidenceCitations.length > 0
+  const referencedEvidenceCitations = useMemo(() => {
+    if (!hasAttachedEvidenceCitations || !contentToRender) {
+      return []
+    }
+
+    const markers = parseCitationMarkers(contentToRender)
+    const referencedIndices = new Set(getUniqueCitationIndices(markers))
+    const referencedPmids = new Set<string>()
+    const pmidPattern = /\[PMID\s*:\s*(\d+)\]/gi
+    let pmidMatch: RegExpExecArray | null
+    while ((pmidMatch = pmidPattern.exec(contentToRender)) !== null) {
+      if (pmidMatch[1]) {
+        referencedPmids.add(pmidMatch[1])
+      }
+    }
+
+    if (referencedIndices.size === 0 && referencedPmids.size === 0) {
+      return []
+    }
+
+    return evidenceCitations.filter((citation) => {
+      const citationPmid = typeof citation.pmid === "string" ? citation.pmid.trim() : ""
+      return referencedIndices.has(citation.index) || (citationPmid.length > 0 && referencedPmids.has(citationPmid))
+    })
+  }, [contentToRender, evidenceCitations, hasAttachedEvidenceCitations])
+  const hasEvidenceCitations = referencedEvidenceCitations.length > 0
   
   // Convert evidence citations to CitationData format for rendering
   const evidenceCitationMap = useMemo(() => {
     if (!hasEvidenceCitations) return new Map<number, CitationData>()
     
     const map = new Map<number, CitationData>()
-    evidenceCitations.forEach((citation) => {
+    referencedEvidenceCitations.forEach((citation) => {
       map.set(citation.index, {
         index: citation.index,
         title: citation.title,
@@ -96,7 +161,7 @@ export function MessageAssistant({
       } as CitationData)
     })
     return map
-  }, [evidenceCitations, hasEvidenceCitations])
+  }, [hasEvidenceCitations, referencedEvidenceCitations])
   
   // Extract and fetch citations from sources (fallback when no evidence citations)
   const [citations, setCitations] = useState<Map<number, CitationData>>(new Map())
@@ -109,14 +174,14 @@ export function MessageAssistant({
     // If so, this is an evidence-backed response and we should NOT extract from web sources
     // even if evidenceCitations state is temporarily empty (e.g., during restore)
     const hasEvidenceMarkers =
-      contentToRender && /\[\d+\]/.test(contentToRender)
+      contentToRender && (/\[\d+\]/.test(contentToRender) || /\[PMID\s*:\s*\d+\]/i.test(contentToRender))
     const hasCITATIONMarkers =
       contentToRender && /\[CITATION:\d+/.test(contentToRender)
     
     // Skip source extraction if we have evidence citations OR evidence-style markers
     // Evidence markers indicate this response came from evidence mode, so we should wait
     // for evidence citations to be restored rather than extracting from web sources
-    if (evidenceCitations.length > 0) {
+    if (hasAttachedEvidenceCitations) {
       console.log('[MessageAssistant] Skipping source extraction - using evidence citations:', evidenceCitations.length)
       return
     }
@@ -278,10 +343,26 @@ export function MessageAssistant({
       }
     }
     // Include evidenceCitations to ensure we re-check when they arrive
-  }, [sources, contentToRender, evidenceCitations])
+  }, [contentToRender, evidenceCitations, hasAttachedEvidenceCitations, sources])
   
   // Use evidence citations if available, otherwise fall back to web search citations
   const activeCitations = hasEvidenceCitations ? evidenceCitationMap : citations
+
+  // Option 3: Hide dedicated References section when all fallback entries
+  // are placeholders like "Citation 1" with no real metadata.
+  const hasOnlyPlaceholderCitations = useMemo(() => {
+    if (hasEvidenceCitations || citations.size === 0) return false
+
+    return Array.from(citations.values()).every((citation) => {
+      const title = (citation.title || "").trim()
+      const journal = (citation.journal || "").trim()
+      const placeholderPattern = /^Citation\s+\d+$/i
+      return (
+        placeholderPattern.test(title) &&
+        placeholderPattern.test(journal)
+      )
+    })
+  }, [citations, hasEvidenceCitations])
   
   // Check if message has citations or sources
   const hasCitations = activeCitations.size > 0
@@ -289,10 +370,16 @@ export function MessageAssistant({
   // Check if text contains citation markers - now also check for [1], [2] pattern used by evidence mode
   const hasCitationMarkers =
     contentToRender &&
-    (/\[CITATION:\d+/.test(contentToRender) || /\[\d+\]/.test(contentToRender))
+    (/\[CITATION:\d+/.test(contentToRender) ||
+      /\[\d+\]/.test(contentToRender) ||
+      /\[PMID\s*:\s*\d+\]/i.test(contentToRender))
   // Show citations if we have them, have sources, or have citation markers in text
   const shouldShowCitations = hasCitations || hasSources || hasCitationMarkers
-  const showReferences = status === "ready" && hasCitations && !isLastStreaming
+  const showReferences =
+    status === "ready" &&
+    hasCitations &&
+    !isLastStreaming &&
+    !hasOnlyPlaceholderCitations
   // Show evidence references whenever evidence citations were attached to the answer.
   const showEvidenceReferences =
     status === "ready" &&
@@ -323,6 +410,103 @@ export function MessageAssistant({
         }
       }) ?? [], [parts]
   )
+
+  const youtubeResults = useMemo(
+    () =>
+      parts
+        ?.filter(
+          (part) =>
+            part.type === "tool-invocation" &&
+            part.toolInvocation?.state === "result" &&
+            part.toolInvocation?.toolName === "youtubeSearch"
+        )
+        .flatMap((part) => {
+          if (part.type !== "tool-invocation" || part.toolInvocation?.state !== "result") {
+            return []
+          }
+
+          const result = part.toolInvocation.result as
+            | { results?: unknown[] }
+            | unknown[]
+            | null
+            | undefined
+          const rawItems = Array.isArray(result)
+            ? result
+            : result && typeof result === "object" && Array.isArray(result.results)
+              ? result.results
+              : []
+          return rawItems.filter(
+            (item): item is YouTubeResultItem =>
+              Boolean(
+                item &&
+                  typeof item === "object" &&
+                  "videoId" in item &&
+                  "url" in item &&
+                  "title" in item &&
+                  "channelTitle" in item &&
+                  typeof (item as { videoId: unknown }).videoId === "string" &&
+                  isLikelyYouTubeVideoId((item as { videoId: string }).videoId) &&
+                  typeof (item as { url: unknown }).url === "string" &&
+                  /youtube\.com\/watch\?v=|youtu\.be\//i.test(
+                    (item as { url: string }).url
+                  )
+              )
+          )
+        }) ?? [],
+    [parts]
+  )
+
+  const youtubeResultsFromContent = useMemo(() => {
+    if (!contentToRender) return []
+
+    const markdownLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi
+    const bareUrlRegex = /https?:\/\/[^\s)\]]+/gi
+    const candidates: Array<{ title?: string; url: string }> = []
+
+    let markdownMatch: RegExpExecArray | null = markdownLinkRegex.exec(contentToRender)
+    while (markdownMatch) {
+      candidates.push({
+        title: markdownMatch[1],
+        url: markdownMatch[2],
+      })
+      markdownMatch = markdownLinkRegex.exec(contentToRender)
+    }
+
+    const bareMatches = contentToRender.match(bareUrlRegex) || []
+    for (const url of bareMatches) {
+      candidates.push({ url })
+    }
+
+    const dedupedByVideoId = new Map<string, YouTubeResultItem>()
+    for (const candidate of candidates) {
+      const videoId = extractYouTubeVideoId(candidate.url)
+      if (!videoId) continue
+      if (dedupedByVideoId.has(videoId)) continue
+
+      dedupedByVideoId.set(videoId, {
+        videoId,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        title: candidate.title?.trim() || "YouTube video",
+        description: "",
+        channelTitle: "youtube.com",
+        publishedAt: null,
+        thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+      })
+    }
+
+    return Array.from(dedupedByVideoId.values()).slice(0, 8)
+  }, [contentToRender])
+
+  const effectiveYoutubeResults =
+    (youtubeResults.length > 0 ? youtubeResults : youtubeResultsFromContent)
+      .filter((item, index, arr) => {
+        const firstIdx = arr.findIndex(
+          (candidate) =>
+            candidate.videoId === item.videoId && candidate.url === item.url
+        )
+        return firstIdx === index
+      })
+      .slice(0, 9)
 
   // Memoize handlers to prevent unnecessary re-renders
   const memoizedCopyToClipboard = useCallback(() => {
@@ -372,7 +556,7 @@ export function MessageAssistant({
               WEB_ROLE_MARKDOWN_CLASSNAME
             )}
             citations={activeCitations}
-            evidenceCitations={hasEvidenceCitations ? evidenceCitations : undefined}
+            evidenceCitations={hasEvidenceCitations ? referencedEvidenceCitations : undefined}
           >
             {contentToRender}
           </CitationMarkdown>
@@ -387,7 +571,18 @@ export function MessageAssistant({
           </MessageContent>
         )}
 
-        {showEvidenceReferences && <EvidenceReferencesSection citations={evidenceCitations} />}
+        {effectiveYoutubeResults.length > 0 && (
+          <YouTubeResults results={effectiveYoutubeResults} />
+        )}
+
+        {showEvidenceReferences && (
+          <TrustSummaryCard
+            content={contentToRender}
+            citations={referencedEvidenceCitations}
+            prompt={contextPrompt}
+          />
+        )}
+        {showEvidenceReferences && <EvidenceReferencesSection citations={referencedEvidenceCitations} />}
         {showReferences && !showEvidenceReferences && <ReferencesSection citations={citations} />}
 
         {sources && sources.length > 0 && <SourcesList sources={sources} />}
