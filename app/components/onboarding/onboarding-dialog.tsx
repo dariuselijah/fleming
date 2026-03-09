@@ -8,43 +8,58 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import { useUserPreferences } from "@/lib/user-preference-store/provider"
-import type { MedicalSpecialty, UserRole } from "@/lib/user-preference-store/utils"
-import { AnimatePresence, motion } from "motion/react"
-import { ArrowLeft, ArrowRight, CheckCircle, GraduationCap, Heart, Stethoscope, CaretDown } from "@phosphor-icons/react"
-import { useState, useCallback, useRef, useEffect } from "react"
-import { TRANSITION_SUGGESTIONS } from "@/lib/motion"
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import {
+  CLINICIAN_MODE_DESCRIPTIONS,
+  CLINICIAN_MODE_LABELS,
+  CLINICIAN_WORKFLOW_MODES,
+} from "@/lib/clinician-mode"
+import type {
+  MedicalSpecialty,
+  UserPreferences,
+  UserRole,
+} from "@/lib/user-preference-store/utils"
+import { TRANSITION_SUGGESTIONS } from "@/lib/motion"
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle,
+  GraduationCap,
+  Heart,
+  Stethoscope,
+} from "@phosphor-icons/react"
+import { AnimatePresence, motion } from "motion/react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
-type OnboardingStep = 
-  | "demographic"
-  | "personal-health-communication"
-  | "medical-student-use"
-  | "healthcare-professional-specialty"
-  | "healthcare-professional-use"
-  | "complete"
+type OnboardingStep = "role" | "details" | "walkthrough" | "complete"
 
-type DemographicOption = "general" | "medical_student" | "doctor"
+type WalkthroughSlide = {
+  id: string
+  kicker: string
+  title: string
+  description: string
+  bullets: string[]
+  highlight?: string
+}
 
 interface OnboardingDialogProps {
   open: boolean
   onComplete: () => void
 }
 
-const COMMON_SPECIALTIES: { value: MedicalSpecialty; label: string }[] = [
+const ALL_SPECIALTIES: { value: MedicalSpecialty; label: string }[] = [
   { value: "family-medicine", label: "Family Medicine" },
   { value: "internal-medicine", label: "Internal Medicine" },
   { value: "emergency-medicine", label: "Emergency Medicine" },
@@ -52,10 +67,6 @@ const COMMON_SPECIALTIES: { value: MedicalSpecialty; label: string }[] = [
   { value: "surgery", label: "Surgery" },
   { value: "cardiology", label: "Cardiology" },
   { value: "psychiatry", label: "Psychiatry" },
-]
-
-const ALL_SPECIALTIES: { value: MedicalSpecialty; label: string }[] = [
-  ...COMMON_SPECIALTIES,
   { value: "oncology", label: "Oncology" },
   { value: "neurology", label: "Neurology" },
   { value: "orthopedics", label: "Orthopedics" },
@@ -67,623 +78,703 @@ const ALL_SPECIALTIES: { value: MedicalSpecialty; label: string }[] = [
   { value: "general", label: "Other / General" },
 ]
 
+const STUDENT_YEAR_OPTIONS = [
+  "Year 1",
+  "Year 2",
+  "Year 3",
+  "Year 4",
+  "Intern",
+  "Resident",
+]
+
+const GENERAL_WALKTHROUGH: WalkthroughSlide[] = [
+  {
+    id: "general-capabilities",
+    kicker: "Personalized guidance",
+    title: "What you can use Fleming for",
+    description:
+      "Use Fleming for everyday health education, symptom context, and preparing for better conversations with your care team.",
+    bullets: [
+      "Get clear explanations in plain language.",
+      "Compare options and understand risks and benefits.",
+      "Bring your own questions and receive structured answers.",
+    ],
+    highlight:
+      "Fleming is educational support and does not replace in-person emergency care.",
+  },
+  {
+    id: "general-evidence",
+    kicker: "Evidence grounded",
+    title: "Understand where answers come from",
+    description:
+      "When medical evidence is available, Fleming can provide source-aware responses and make the rationale easier to follow.",
+    bullets: [
+      "Source-linked medical context where available.",
+      "Short, readable summaries with practical takeaways.",
+      "Follow-up prompts to clarify what matters most to you.",
+    ],
+  },
+]
+
+const STUDENT_WALKTHROUGH: WalkthroughSlide[] = [
+  {
+    id: "student-feature-map",
+    kicker: "Feature map",
+    title: "Your med-student workspace",
+    description:
+      "You will get a full learning cockpit with focused modes, transparent tool outputs, and citation-aware answers.",
+    bullets: [
+      "Switch quickly between learning modes.",
+      "See tool outputs for search and retrieval steps.",
+      "Keep every study thread structured and reproducible.",
+    ],
+  },
+  {
+    id: "student-uploads",
+    kicker: "Upload-first learning",
+    title: "Upload slides, notes, and textbooks",
+    description:
+      "Add your own lecture decks and documents, then ask grounded questions directly against your uploaded material.",
+    bullets: [
+      "Upload PDFs, slides, docs, and images.",
+      "Use your own notes as study context.",
+      "Receive evidence-based answers tied to your files.",
+    ],
+  },
+  {
+    id: "student-slash-reference",
+    kicker: "Fast referencing",
+    title: "Reference uploads with / in chat",
+    description:
+      "Type / in the composer to quickly find an upload and insert it into the question context without leaving chat.",
+    bullets: [
+      "Use slash search to pick uploads instantly.",
+      "Combine up to multiple references in one prompt.",
+      "Keep your prompts clean while keeping context rich.",
+    ],
+  },
+  {
+    id: "student-artifacts",
+    kicker: "Artifacts",
+    title: "Generate study documents and MCQ quizzes",
+    description:
+      "Ask Fleming to create polished summaries, revision notes, and interactive quiz sets from your selected uploads.",
+    bullets: [
+      "Generate structured study documents.",
+      "Create multiple-choice quizzes with explanations.",
+      "Export learning artifacts when needed.",
+    ],
+  },
+  {
+    id: "student-youtube-search",
+    kicker: "Multimodal learning",
+    title: "Search YouTube and blend with evidence",
+    description:
+      "Use web and video discovery to pull relevant educational videos, then cross-check key points against your uploaded sources.",
+    bullets: [
+      "Find high-yield videos from chat.",
+      "Pair video learning with textbook evidence.",
+      "Turn passive watching into active retrieval practice.",
+    ],
+  },
+]
+
+function parseCommaSeparatedItems(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+}
+
+function buildClinicianWalkthroughSlides(
+  specialtyLabel: string
+): WalkthroughSlide[] {
+  const intro: WalkthroughSlide = {
+    id: "clinician-intro",
+    kicker: specialtyLabel,
+    title: "Your clinician command center",
+    description:
+      "Each clinician tab is tuned for a specific workflow so you can move from question to action quickly and safely.",
+    bullets: [
+      "Structured, tab-specific workflow support.",
+      "Evidence-aware responses with practical outputs.",
+      "Clear handling of uncertainty and missing data.",
+    ],
+  }
+
+  const tabSlides = CLINICIAN_WORKFLOW_MODES.map((mode) => {
+    const details = CLINICIAN_MODE_DESCRIPTIONS[mode]
+    return {
+      id: `clinician-${mode}`,
+      kicker: "Clinician tabs",
+      title: CLINICIAN_MODE_LABELS[mode],
+      description: details.tagline,
+      bullets: [
+        ...details.keyOutputs.slice(0, 3),
+        details.trustClaim,
+      ],
+      highlight: details.benchmarkBacked
+        ? "Benchmark-backed workflow guidance is enabled for this tab."
+        : undefined,
+    } satisfies WalkthroughSlide
+  })
+
+  return [intro, ...tabSlides]
+}
+
 export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
-  const { preferences, updatePreferences } = useUserPreferences()
-  const [currentStep, setCurrentStep] = useState<OnboardingStep>("demographic")
-  const [selectedDemographic, setSelectedDemographic] = useState<DemographicOption | null>(null)
-  const [selectedCommunication, setSelectedCommunication] = useState<string | null>(null)
-  const [selectedStudentUse, setSelectedStudentUse] = useState<string | null>(null)
-  const [selectedSpecialty, setSelectedSpecialty] = useState<MedicalSpecialty | null>(null)
-  const [selectedProfessionalUse, setSelectedProfessionalUse] = useState<string | null>(null)
-  const [specialtyPopoverOpen, setSpecialtyPopoverOpen] = useState(false)
-  const [popoverWidth, setPopoverWidth] = useState<number | undefined>(undefined)
-  const specialtyTriggerRef = useRef<HTMLButtonElement>(null)
-  const stepHistory = useRef<OnboardingStep[]>(["demographic"])
+  const { updatePreferences } = useUserPreferences()
 
-  // Update popover width when trigger is available
+  const [currentStep, setCurrentStep] = useState<OnboardingStep>("role")
+  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null)
+  const [generalHealthContext, setGeneralHealthContext] = useState("")
+  const [generalHealthConditions, setGeneralHealthConditions] = useState("")
+  const [studentSchool, setStudentSchool] = useState("")
+  const [studentYear, setStudentYear] = useState("")
+  const [clinicianName, setClinicianName] = useState("")
+  const [selectedSpecialty, setSelectedSpecialty] =
+    useState<MedicalSpecialty | null>(null)
+  const [walkthroughIndex, setWalkthroughIndex] = useState(0)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const selectedSpecialtyLabel = useMemo(() => {
+    if (!selectedSpecialty) return "General practice"
+    return (
+      ALL_SPECIALTIES.find((specialty) => specialty.value === selectedSpecialty)
+        ?.label || "General practice"
+    )
+  }, [selectedSpecialty])
+
+  const walkthroughSlides = useMemo(() => {
+    if (selectedRole === "general") return GENERAL_WALKTHROUGH
+    if (selectedRole === "medical_student") return STUDENT_WALKTHROUGH
+    if (selectedRole === "doctor") {
+      return buildClinicianWalkthroughSlides(selectedSpecialtyLabel)
+    }
+    return []
+  }, [selectedRole, selectedSpecialtyLabel])
+
+  const activeSlide = walkthroughSlides[walkthroughIndex]
+
+  const resetState = useCallback(() => {
+    setCurrentStep("role")
+    setSelectedRole(null)
+    setGeneralHealthContext("")
+    setGeneralHealthConditions("")
+    setStudentSchool("")
+    setStudentYear("")
+    setClinicianName("")
+    setSelectedSpecialty(null)
+    setWalkthroughIndex(0)
+    setIsSaving(false)
+  }, [])
+
   useEffect(() => {
-    if (specialtyTriggerRef.current) {
-      setPopoverWidth(specialtyTriggerRef.current.offsetWidth)
+    if (!open) return
+    resetState()
+  }, [open, resetState])
+
+  const canProceed = useMemo(() => {
+    if (currentStep === "role") {
+      return selectedRole !== null
     }
-  }, [specialtyPopoverOpen])
-
-  const handleBack = useCallback(() => {
-    if (stepHistory.current.length > 1) {
-      stepHistory.current.pop() // Remove current step
-      const previousStep = stepHistory.current[stepHistory.current.length - 1]
-      setCurrentStep(previousStep)
-    }
-  }, [])
-
-  const navigateToStep = useCallback((step: OnboardingStep) => {
-    stepHistory.current.push(step)
-    setCurrentStep(step)
-  }, [])
-
-  const handleDemographicSelect = useCallback((demographic: DemographicOption) => {
-    setSelectedDemographic(demographic)
-    
-    // Set user role immediately
-    updatePreferences({ userRole: demographic })
-    
-    // Navigate to next step based on demographic
-    setTimeout(() => {
-      if (demographic === "general") {
-        navigateToStep("personal-health-communication")
-      } else if (demographic === "medical_student") {
-        navigateToStep("medical-student-use")
-      } else {
-        navigateToStep("healthcare-professional-specialty")
+    if (currentStep === "details") {
+      if (selectedRole === "general") {
+        return generalHealthContext.trim().length >= 10
       }
-    }, 300)
-  }, [updatePreferences, navigateToStep])
+      if (selectedRole === "medical_student") {
+        return studentSchool.trim().length > 1 && studentYear.length > 0
+      }
+      if (selectedRole === "doctor") {
+        return clinicianName.trim().length > 1 && selectedSpecialty !== null
+      }
+      return false
+    }
+    if (currentStep === "walkthrough") {
+      return walkthroughSlides.length > 0
+    }
+    return false
+  }, [
+    currentStep,
+    selectedRole,
+    generalHealthContext,
+    studentSchool,
+    studentYear,
+    clinicianName,
+    selectedSpecialty,
+    walkthroughSlides.length,
+  ])
 
-  const handleComplete = useCallback(async () => {
-    const updates: any = {
+  const progress = useMemo(() => {
+    if (currentStep === "role") return 20
+    if (currentStep === "details") return 48
+    if (currentStep === "walkthrough") {
+      if (!walkthroughSlides.length) return 60
+      return 48 + ((walkthroughIndex + 1) / walkthroughSlides.length) * 40
+    }
+    return 100
+  }, [currentStep, walkthroughIndex, walkthroughSlides.length])
+
+  const handleFinish = useCallback(() => {
+    if (!selectedRole || isSaving) return
+
+    const updates: Partial<UserPreferences> = {
+      userRole: selectedRole,
       onboardingCompleted: true,
     }
 
-    // Set role
-    if (selectedDemographic) {
-      updates.userRole = selectedDemographic
+    if (selectedRole === "general") {
+      updates.healthContext = generalHealthContext.trim()
+      updates.healthConditions = parseCommaSeparatedItems(generalHealthConditions)
+      updates.medicalSpecialty = "general"
+      updates.medicalLiteratureAccess = false
+      updates.clinicalDecisionSupport = false
+      updates.studentSchool = ""
+      updates.studentYear = ""
+      updates.clinicianName = ""
     }
 
-    // Set specialty for healthcare professionals
-    if (selectedDemographic === "doctor" && selectedSpecialty) {
-      updates.medicalSpecialty = selectedSpecialty
-    }
-
-    // Enable evidence features for medical students and healthcare professionals
-    if (selectedDemographic === "medical_student" || selectedDemographic === "doctor") {
+    if (selectedRole === "medical_student") {
+      updates.studentSchool = studentSchool.trim()
+      updates.studentYear = studentYear
       updates.medicalLiteratureAccess = true
-      updates.clinicalDecisionSupport = selectedDemographic === "doctor"
-    }
+      updates.clinicalDecisionSupport = false
+      updates.clinicianName = ""
 
-    // Always proceed to completion step immediately (don't wait for API)
-    navigateToStep("complete")
-
-    // Seed default learning mode for medical students.
-    if (typeof window !== "undefined" && selectedDemographic === "medical_student") {
-      const modeByUse: Record<string, "ask" | "simulate" | "guideline"> = {
-        studying: "ask",
-        clinical: "simulate",
-        research: "guideline",
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("medical-student-learning-mode", "ask")
       }
-      const seededMode = selectedStudentUse
-        ? modeByUse[selectedStudentUse] || "ask"
-        : "ask"
-      window.localStorage.setItem("medical-student-learning-mode", seededMode)
     }
-    
-    // Save preferences in background (non-blocking)
-    // The mutation already handles errors and falls back to localStorage
-    updatePreferences(updates).catch((error) => {
-      // Error is already handled by the mutation (falls back to localStorage)
-      console.error("Error updating preferences during onboarding completion:", error)
-    })
-    
-    // Always close dialog after showing completion animation
+
+    if (selectedRole === "doctor") {
+      updates.clinicianName = clinicianName.trim()
+      updates.medicalSpecialty = selectedSpecialty || "general"
+      updates.medicalLiteratureAccess = true
+      updates.clinicalDecisionSupport = true
+      updates.studentSchool = ""
+      updates.studentYear = ""
+    }
+
+    setCurrentStep("complete")
+    setIsSaving(true)
+
+    updatePreferences(updates)
+      .catch((error) => {
+        console.error("Error saving onboarding preferences:", error)
+      })
+      .finally(() => {
+        setIsSaving(false)
+      })
+
     setTimeout(() => {
       onComplete()
-    }, 1000)
-  }, [selectedDemographic, selectedSpecialty, selectedStudentUse, updatePreferences, onComplete, navigateToStep])
+    }, 1200)
+  }, [
+    selectedRole,
+    isSaving,
+    generalHealthContext,
+    generalHealthConditions,
+    studentSchool,
+    studentYear,
+    clinicianName,
+    selectedSpecialty,
+    updatePreferences,
+    onComplete,
+  ])
 
   const handleNext = useCallback(() => {
-    if (currentStep === "personal-health-communication" && selectedCommunication) {
-      handleComplete()
-    } else if (currentStep === "medical-student-use" && selectedStudentUse) {
-      handleComplete()
-    } else if (currentStep === "healthcare-professional-specialty" && selectedSpecialty) {
-      navigateToStep("healthcare-professional-use")
-    } else if (currentStep === "healthcare-professional-use" && selectedProfessionalUse) {
-      handleComplete()
+    if (!canProceed) return
+
+    if (currentStep === "role") {
+      setCurrentStep("details")
+      return
     }
-  }, [currentStep, selectedCommunication, selectedStudentUse, selectedSpecialty, selectedProfessionalUse, handleComplete, navigateToStep])
 
-  const canProceed = () => {
-    switch (currentStep) {
-      case "demographic":
-        return selectedDemographic !== null
-      case "personal-health-communication":
-        return selectedCommunication !== null
-      case "medical-student-use":
-        return selectedStudentUse !== null
-      case "healthcare-professional-specialty":
-        return selectedSpecialty !== null
-      case "healthcare-professional-use":
-        return selectedProfessionalUse !== null
-      default:
-        return false
+    if (currentStep === "details") {
+      setWalkthroughIndex(0)
+      setCurrentStep("walkthrough")
+      return
     }
-  }
 
-  const canGoBack = () => {
-    return stepHistory.current.length > 1
-  }
+    if (currentStep === "walkthrough") {
+      const isLastSlide = walkthroughIndex >= walkthroughSlides.length - 1
+      if (isLastSlide) {
+        handleFinish()
+        return
+      }
+      setWalkthroughIndex((prev) => prev + 1)
+    }
+  }, [
+    canProceed,
+    currentStep,
+    handleFinish,
+    walkthroughIndex,
+    walkthroughSlides.length,
+  ])
 
-  const stepVariants = {
-    initial: { opacity: 0, y: 20, scale: 0.96 },
-    animate: { opacity: 1, y: 0, scale: 1 },
-    exit: { opacity: 0, y: -20, scale: 0.96 },
-  }
+  const handleBack = useCallback(() => {
+    if (currentStep === "details") {
+      setCurrentStep("role")
+      return
+    }
 
-  const selectedSpecialtyLabel = selectedSpecialty 
-    ? (ALL_SPECIALTIES.find(opt => opt.value === selectedSpecialty)?.label || "Select specialty...")
-    : "Select specialty..."
+    if (currentStep === "walkthrough") {
+      if (walkthroughIndex > 0) {
+        setWalkthroughIndex((prev) => prev - 1)
+      } else {
+        setCurrentStep("details")
+      }
+    }
+  }, [currentStep, walkthroughIndex])
+
+  const nextLabel =
+    currentStep === "walkthrough" &&
+    walkthroughIndex === walkthroughSlides.length - 1
+      ? "Finish onboarding"
+      : "Continue"
+
+  const canGoBack = currentStep === "details" || currentStep === "walkthrough"
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent 
-        className="sm:max-w-2xl max-h-[90vh] overflow-y-auto p-0"
+      <DialogContent
         hasCloseButton={false}
+        className="sm:max-w-3xl max-h-[92vh] overflow-y-auto p-0 border-0"
       >
-        <div className="relative">
-          {/* Progress indicator */}
-          <div className="absolute top-0 left-0 right-0 h-1 bg-border">
+        <div className="relative rounded-2xl border border-border bg-gradient-to-b from-background via-background to-muted/20">
+          <div className="absolute left-0 right-0 top-0 h-1 bg-border">
             <motion.div
               className="h-full bg-[#0091FF]"
-              initial={{ width: "0%" }}
-              animate={{
-                width: currentStep === "demographic" ? "20%" :
-                       currentStep === "personal-health-communication" || currentStep === "medical-student-use" ? "50%" :
-                       currentStep === "healthcare-professional-specialty" ? "50%" :
-                       currentStep === "healthcare-professional-use" ? "80%" :
-                       "100%"
-              }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 0.32, ease: "easeOut" }}
             />
           </div>
 
-          <div className="p-8 pt-12">
+          <div className="p-5 pt-10 sm:p-8 sm:pt-12">
             <AnimatePresence mode="wait">
-              {currentStep === "demographic" && (
+              {currentStep === "role" && (
                 <motion.div
-                  key="demographic"
-                  variants={stepVariants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.3 }}
+                  key="role-step"
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -16, scale: 0.98 }}
+                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.28 }}
                 >
-                  <DialogHeader className="mb-8">
-                    <DialogTitle className="text-3xl font-semibold text-center bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                  <DialogHeader className="mb-7">
+                    <DialogTitle className="text-center text-3xl font-semibold tracking-tight">
                       Welcome to Fleming
                     </DialogTitle>
-                    <DialogDescription className="text-center text-base pt-3 text-muted-foreground">
-                      Let's personalize your experience
+                    <DialogDescription className="pt-2 text-center text-base">
+                      Choose your role so we can tailor an Apple-level experience
+                      from the first message.
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div className="space-y-4">
-                    <DemographicOption
+                  <div className="grid gap-3">
+                    <RoleCard
                       icon={Heart}
-                      title="For my personal health"
-                      description="Get health information tailored to your needs"
-                      selected={selectedDemographic === "general"}
-                      onClick={() => handleDemographicSelect("general")}
+                      title="General user"
+                      description="Personalized health guidance with clear explanations."
+                      selected={selectedRole === "general"}
+                      onClick={() => setSelectedRole("general")}
                     />
-                    <DemographicOption
+                    <RoleCard
                       icon={GraduationCap}
-                      title="As a medical student"
-                      description="Study support with evidence-based citations"
-                      selected={selectedDemographic === "medical_student"}
-                      onClick={() => handleDemographicSelect("medical_student")}
+                      title="Medical student"
+                      description="Animated feature walkthrough with uploads, tool calls, and evidence workflows."
+                      selected={selectedRole === "medical_student"}
+                      onClick={() => setSelectedRole("medical_student")}
                     />
-                    <DemographicOption
+                    <RoleCard
                       icon={Stethoscope}
-                      title="As a clinician"
-                      description="Clinical tools with medical literature access"
-                      selected={selectedDemographic === "doctor"}
-                      onClick={() => handleDemographicSelect("doctor")}
+                      title="Clinician"
+                      description="Tab-by-tab workflow onboarding for clinical use cases."
+                      selected={selectedRole === "doctor"}
+                      onClick={() => setSelectedRole("doctor")}
                     />
                   </div>
                 </motion.div>
               )}
 
-              {currentStep === "personal-health-communication" && (
+              {currentStep === "details" && (
                 <motion.div
-                  key="personal-health-communication"
-                  variants={stepVariants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.3 }}
+                  key="details-step"
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -16, scale: 0.98 }}
+                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.28 }}
+                  className="space-y-5"
                 >
-                  <DialogHeader className="mb-8">
-                    <DialogTitle className="text-2xl font-semibold text-center">
-                      How would you like information explained?
+                  <DialogHeader>
+                    <DialogTitle className="text-2xl font-semibold tracking-tight">
+                      {selectedRole === "general" && "Tell us your health context"}
+                      {selectedRole === "medical_student" &&
+                        "Tell us about your medical training"}
+                      {selectedRole === "doctor" &&
+                        "Tell us about your clinical profile"}
                     </DialogTitle>
-                    <DialogDescription className="text-center text-base pt-3 text-muted-foreground">
-                      We'll tailor our responses to your preference
+                    <DialogDescription className="pt-2 text-sm sm:text-base">
+                      We only collect what is needed to personalize your results.
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div className="space-y-3">
-                    <OptionButton
-                      title="Simple, everyday language"
-                      description="Easy to understand explanations"
-                      selected={selectedCommunication === "simple"}
-                      onClick={() => setSelectedCommunication("simple")}
-                    />
-                    <OptionButton
-                      title="Clear with some medical terms"
-                      description="Balanced explanations with context"
-                      selected={selectedCommunication === "balanced"}
-                      onClick={() => setSelectedCommunication("balanced")}
-                    />
-                    <OptionButton
-                      title="Detailed and technical"
-                      description="Comprehensive information when needed"
-                      selected={selectedCommunication === "detailed"}
-                      onClick={() => setSelectedCommunication("detailed")}
-                    />
-                  </div>
-
-                  <div className="mt-8 flex items-center justify-between">
-                    <Button
-                      variant="ghost"
-                      onClick={handleBack}
-                      disabled={!canGoBack()}
-                      className="gap-2"
-                    >
-                      <ArrowLeft className="size-4" />
-                      Back
-                    </Button>
-                    <Button
-                      onClick={handleNext}
-                      disabled={!canProceed()}
-                      size="lg"
-                      className="min-w-[120px] gap-2"
-                    >
-                      Complete
-                      <ArrowRight className="size-4" />
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-
-              {currentStep === "medical-student-use" && (
-                <motion.div
-                  key="medical-student-use"
-                  variants={stepVariants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.3 }}
-                >
-                  <DialogHeader className="mb-8">
-                    <DialogTitle className="text-2xl font-semibold text-center">
-                      What will you use Fleming for most?
-                    </DialogTitle>
-                    <DialogDescription className="text-center text-base pt-3 text-muted-foreground">
-                      All responses include evidence-based citations from medical literature
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  <div className="space-y-3">
-                    <OptionButton
-                      title="Studying and exam prep"
-                      description="With citations to support key concepts"
-                      selected={selectedStudentUse === "studying"}
-                      onClick={() => setSelectedStudentUse("studying")}
-                    />
-                    <OptionButton
-                      title="Clinical cases and rotations"
-                      description="Evidence-based case analysis with references"
-                      selected={selectedStudentUse === "clinical"}
-                      onClick={() => setSelectedStudentUse("clinical")}
-                    />
-                    <OptionButton
-                      title="Research and literature"
-                      description="Access to latest medical journals and studies"
-                      selected={selectedStudentUse === "research"}
-                      onClick={() => setSelectedStudentUse("research")}
-                    />
-                  </div>
-
-                  <div className="mt-8 flex items-center justify-between">
-                    <Button
-                      variant="ghost"
-                      onClick={handleBack}
-                      disabled={!canGoBack()}
-                      className="gap-2"
-                    >
-                      <ArrowLeft className="size-4" />
-                      Back
-                    </Button>
-                    <Button
-                      onClick={handleNext}
-                      disabled={!canProceed()}
-                      size="lg"
-                      className="min-w-[120px] gap-2"
-                    >
-                      Complete
-                      <ArrowRight className="size-4" />
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-
-              {currentStep === "healthcare-professional-specialty" && (
-                <motion.div
-                  key="healthcare-professional-specialty"
-                  variants={stepVariants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.3 }}
-                >
-                  <DialogHeader className="mb-8">
-                    <DialogTitle className="text-2xl font-semibold text-center">
-                      What is your specialty?
-                    </DialogTitle>
-                    <DialogDescription className="text-center text-base pt-3 text-muted-foreground">
-                      We'll tailor clinical information to your field
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  <div className="mt-6 space-y-6">
-                    {/* Common specialties as chips */}
-                    <div>
-                      <div className="text-sm font-medium text-muted-foreground mb-3 px-1">
-                        Common specialties
+                  {selectedRole === "general" && (
+                    <div className="grid gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="general-health-context">
+                          General health information (required)
+                        </Label>
+                        <Textarea
+                          id="general-health-context"
+                          value={generalHealthContext}
+                          onChange={(event) =>
+                            setGeneralHealthContext(event.target.value)
+                          }
+                          placeholder="Example: I want practical explanations about blood pressure, nutrition, sleep, and preventive care."
+                          className="min-h-28 resize-y"
+                        />
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {COMMON_SPECIALTIES.map((specialty) => {
-                          const isSelected = selectedSpecialty === specialty.value
-                          return (
-                            <motion.button
-                              key={specialty.value}
-                              onClick={() => setSelectedSpecialty(specialty.value)}
-                              className={cn(
-                                "px-4 py-2.5 rounded-full text-sm font-medium transition-all border-2 flex items-center gap-2 relative",
-                                isSelected
-                                  ? "border-[#0091FF] bg-[#0091FF]/10 dark:bg-[#0091FF]/20 text-[#0091FF] shadow-md shadow-[#0091FF]/10 dark:shadow-[#0091FF]/20"
-                                  : "border-border bg-background hover:bg-accent hover:border-accent-foreground/20"
-                              )}
-                              whileHover={{ scale: 1.05, y: -1 }}
-                              whileTap={{ scale: 0.95 }}
-                              transition={TRANSITION_SUGGESTIONS}
-                            >
-                              {isSelected && (
-                                <motion.div
-                                  initial={{ scale: 0, rotate: -90 }}
-                                  animate={{ scale: 1, rotate: 0 }}
-                                  transition={{ type: "spring", duration: 0.3, bounce: 0.4 }}
-                                >
-                                  <CheckCircle className="size-4 text-[#0091FF]" weight="fill" />
-                                </motion.div>
-                              )}
-                              {specialty.label}
-                            </motion.button>
-                          )
-                        })}
+                      <div className="space-y-2">
+                        <Label htmlFor="general-health-conditions">
+                          Health conditions (optional, comma-separated)
+                        </Label>
+                        <Input
+                          id="general-health-conditions"
+                          value={generalHealthConditions}
+                          onChange={(event) =>
+                            setGeneralHealthConditions(event.target.value)
+                          }
+                          placeholder="Example: hypertension, asthma"
+                        />
                       </div>
                     </div>
+                  )}
 
-                    {/* Searchable dropdown for other specialties */}
-                    <div>
-                      <div className="text-sm font-medium text-muted-foreground mb-3 px-1">
-                        Other specialties
+                  {selectedRole === "medical_student" && (
+                    <div className="grid gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="student-school">Medical school</Label>
+                        <Input
+                          id="student-school"
+                          value={studentSchool}
+                          onChange={(event) => setStudentSchool(event.target.value)}
+                          placeholder="Enter your school"
+                        />
                       </div>
-                      <Popover open={specialtyPopoverOpen} onOpenChange={setSpecialtyPopoverOpen}>
-                        <PopoverTrigger asChild>
-                          <motion.div
-                            whileHover={{ scale: 1.01 }}
-                            whileTap={{ scale: 0.99 }}
-                            transition={TRANSITION_SUGGESTIONS}
-                          >
-                            <Button
-                              ref={specialtyTriggerRef}
-                              variant="outline"
-                              role="combobox"
-                              className={cn(
-                                "w-full justify-between h-14 text-base font-normal transition-all",
-                                !selectedSpecialty && "text-muted-foreground",
-                                specialtyPopoverOpen && "border-[#0091FF] ring-2 ring-[#0091FF]/20 dark:ring-[#0091FF]/30",
-                                selectedSpecialty && !COMMON_SPECIALTIES.some(s => s.value === selectedSpecialty) && "border-[#0091FF] bg-[#0091FF]/10 dark:bg-[#0091FF]/20"
-                              )}
-                            >
-                              <span className="truncate text-left flex-1">
-                                {selectedSpecialtyLabel}
-                              </span>
-                              <motion.div
-                                animate={{ rotate: specialtyPopoverOpen ? 180 : 0 }}
-                                transition={{ duration: 0.2 }}
+                      <div className="space-y-2">
+                        <Label>Current year</Label>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                          {STUDENT_YEAR_OPTIONS.map((year) => {
+                            const active = studentYear === year
+                            return (
+                              <button
+                                key={year}
+                                type="button"
+                                onClick={() => setStudentYear(year)}
+                                className={cn(
+                                  "rounded-xl border px-3 py-2 text-sm text-left transition",
+                                  active
+                                    ? "border-[#0091FF] bg-[#0091FF]/10 text-[#0091FF]"
+                                    : "border-border bg-background hover:bg-accent"
+                                )}
                               >
-                                <CaretDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                              </motion.div>
-                            </Button>
-                          </motion.div>
-                        </PopoverTrigger>
-                        <PopoverContent 
-                          className="p-0 shadow-xl border-2 rounded-xl overflow-hidden flex flex-col" 
-                          align="start" 
-                          sideOffset={8}
-                          side="bottom"
-                          style={{ 
-                            width: popoverWidth ? `${Math.min(popoverWidth, 600)}px` : undefined,
-                            maxWidth: 'min(600px, calc(100vw - 2rem))',
-                            maxHeight: 'calc(100vh - 200px)'
-                          }}
-                          onOpenAutoFocus={(e) => e.preventDefault()}
-                        >
-                          <Command className="rounded-lg">
-                            <div className="border-b bg-muted/30">
-                              <CommandInput 
-                                placeholder="Search specialties..." 
-                                className="h-16 text-lg border-0 focus:ring-0 bg-transparent px-4"
-                                autoFocus
-                              />
-                            </div>
-                            <CommandList className="max-h-[280px] sm:max-h-[360px] overflow-y-scroll">
-                              <CommandEmpty className="py-10 text-center">
-                                <div className="text-sm text-muted-foreground mb-1">No specialty found</div>
-                                <div className="text-xs text-muted-foreground/70">Try a different search term</div>
-                              </CommandEmpty>
-                              <CommandGroup className="p-1">
-                                {ALL_SPECIALTIES.map((specialty) => {
-                                  const isSelected = selectedSpecialty === specialty.value
-                                  return (
-                                    <CommandItem
-                                      key={specialty.value}
-                                      value={specialty.label}
-                                      onSelect={() => {
-                                        setSelectedSpecialty(specialty.value)
-                                        setSpecialtyPopoverOpen(false)
-                                      }}
-                                      className={cn(
-                                        "cursor-pointer py-3.5 px-4 text-base rounded-lg transition-all relative",
-                                        "hover:bg-accent hover:text-accent-foreground",
-                                        "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
-                                        isSelected && "bg-[#0091FF]/10 dark:bg-[#0091FF]/20 text-[#0091FF] font-medium hover:bg-[#0091FF]/10 dark:hover:bg-[#0091FF]/20"
-                                      )}
-                                    >
-                                      <div className="flex items-center w-full gap-3">
-                                        <motion.div
-                                          initial={false}
-                                          animate={{
-                                            scale: isSelected ? 1 : 0,
-                                            opacity: isSelected ? 1 : 0,
-                                          }}
-                                          transition={{ type: "spring", duration: 0.3, bounce: 0.2 }}
-                                          className="shrink-0"
-                                        >
-                                          <CheckCircle
-                                            className="h-5 w-5 text-[#0091FF]"
-                                            weight="fill"
-                                          />
-                                        </motion.div>
-                                        <span className="flex-1 truncate">{specialty.label}</span>
-                                      </div>
-                                    </CommandItem>
-                                  )
-                                })}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
+                                {year}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  <div className="mt-8 flex items-center justify-between">
-                    <Button
-                      variant="ghost"
-                      onClick={handleBack}
-                      disabled={!canGoBack()}
-                      className="gap-2"
-                    >
-                      <ArrowLeft className="size-4" />
-                      Back
-                    </Button>
-                    <Button
-                      onClick={handleNext}
-                      disabled={!canProceed()}
-                      size="lg"
-                      className="min-w-[120px] gap-2"
-                    >
-                      Next
-                      <ArrowRight className="size-4" />
-                    </Button>
-                  </div>
+                  {selectedRole === "doctor" && (
+                    <div className="grid gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="clinician-name">
+                          Clinician name (required)
+                        </Label>
+                        <Input
+                          id="clinician-name"
+                          value={clinicianName}
+                          onChange={(event) => setClinicianName(event.target.value)}
+                          placeholder="Enter your name"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Specialty (required)</Label>
+                        <Select
+                          value={selectedSpecialty || undefined}
+                          onValueChange={(value) =>
+                            setSelectedSpecialty(value as MedicalSpecialty)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select your specialty" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ALL_SPECIALTIES.map((specialty) => (
+                              <SelectItem
+                                key={specialty.value}
+                                value={specialty.value}
+                              >
+                                {specialty.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
                 </motion.div>
               )}
 
-              {currentStep === "healthcare-professional-use" && (
+              {currentStep === "walkthrough" && activeSlide && (
                 <motion.div
-                  key="healthcare-professional-use"
-                  variants={stepVariants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.3 }}
+                  key="walkthrough-step"
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -16, scale: 0.98 }}
+                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.28 }}
+                  className="space-y-5"
                 >
-                  <DialogHeader className="mb-8">
-                    <DialogTitle className="text-2xl font-semibold text-center">
-                      How will you use Fleming?
+                  <DialogHeader className="space-y-2">
+                    <DialogTitle className="text-2xl font-semibold tracking-tight">
+                      {selectedRole === "general" && "Your personalized experience"}
+                      {selectedRole === "medical_student" &&
+                        "The super cool features for med students"}
+                      {selectedRole === "doctor" &&
+                        "Clinician features, tab by tab"}
                     </DialogTitle>
-                    <DialogDescription className="text-center text-base pt-3 text-muted-foreground">
-                      All responses include evidence-based citations and access to medical literature
+                    <DialogDescription className="text-sm sm:text-base">
+                      Slide {walkthroughIndex + 1} of {walkthroughSlides.length}
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div className="space-y-3">
-                    <OptionButton
-                      title="Clinical decision support"
-                      description="Evidence-based recommendations with citations"
-                      selected={selectedProfessionalUse === "clinical"}
-                      onClick={() => setSelectedProfessionalUse("clinical")}
-                    />
-                    <OptionButton
-                      title="Patient education"
-                      description="Create clear explanations with source references"
-                      selected={selectedProfessionalUse === "patient"}
-                      onClick={() => setSelectedProfessionalUse("patient")}
-                    />
-                    <OptionButton
-                      title="Research and staying current"
-                      description="Access latest medical journals and studies"
-                      selected={selectedProfessionalUse === "research"}
-                      onClick={() => setSelectedProfessionalUse("research")}
-                    />
-                    <OptionButton
-                      title="All of the above"
-                      description="I'll use Fleming for multiple purposes"
-                      selected={selectedProfessionalUse === "all"}
-                      onClick={() => setSelectedProfessionalUse("all")}
-                    />
-                  </div>
+                  {selectedRole === "doctor" && (
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-background to-transparent sm:hidden" />
+                      <div className="pointer-events-none absolute inset-y-0 right-0 w-5 bg-gradient-to-l from-background to-transparent sm:hidden" />
+                      <div className="overflow-x-auto pb-1 px-1 sm:px-0">
+                        <div className="inline-flex min-w-max gap-1.5 sm:gap-2 lg:min-w-0 lg:flex-wrap">
+                        {walkthroughSlides.map((slide, index) => (
+                          <button
+                            key={slide.id}
+                            type="button"
+                            onClick={() => setWalkthroughIndex(index)}
+                            className={cn(
+                              "rounded-full border px-2.5 py-1.5 text-[11px] sm:px-3 sm:text-xs transition whitespace-nowrap",
+                              walkthroughIndex === index
+                                ? "border-[#0091FF] bg-[#0091FF]/12 text-[#0091FF] shadow-sm"
+                                : "border-border/80 bg-background text-muted-foreground hover:bg-accent"
+                            )}
+                          >
+                            {index === 0
+                              ? "Overview"
+                              : slide.title}
+                          </button>
+                        ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-                  <div className="mt-8 flex items-center justify-between">
-                    <Button
-                      variant="ghost"
-                      onClick={handleBack}
-                      disabled={!canGoBack()}
-                      className="gap-2"
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={activeSlide.id}
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.24 }}
+                      className="rounded-2xl border border-border bg-background/80 p-4 sm:p-6"
                     >
-                      <ArrowLeft className="size-4" />
-                      Back
-                    </Button>
-                    <Button
-                      onClick={handleNext}
-                      disabled={!canProceed()}
-                      size="lg"
-                      className="min-w-[120px] gap-2"
-                    >
-                      Complete
-                      <ArrowRight className="size-4" />
-                    </Button>
-                  </div>
+                      <Badge variant="outline" className="mb-3">
+                        {activeSlide.kicker}
+                      </Badge>
+                      <h3 className="text-xl font-semibold tracking-tight">
+                        {activeSlide.title}
+                      </h3>
+                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
+                        {activeSlide.description}
+                      </p>
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                        {activeSlide.bullets.map((bullet) => (
+                          <div
+                            key={bullet}
+                            className="flex items-start gap-2 rounded-xl border border-border/60 bg-muted/25 px-3 py-2"
+                          >
+                            <CheckCircle
+                              className="mt-0.5 size-4 shrink-0 text-[#0091FF]"
+                              weight="fill"
+                            />
+                            <span className="text-sm leading-relaxed">{bullet}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {activeSlide.highlight ? (
+                        <div className="mt-4 rounded-xl border border-[#0091FF]/30 bg-[#0091FF]/10 px-3 py-2 text-sm text-[#0074CC] dark:text-[#66B8FF]">
+                          {activeSlide.highlight}
+                        </div>
+                      ) : null}
+                    </motion.div>
+                  </AnimatePresence>
                 </motion.div>
               )}
 
               {currentStep === "complete" && (
                 <motion.div
-                  key="complete"
-                  variants={stepVariants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.3 }}
-                  className="text-center py-12"
+                  key="complete-step"
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -16, scale: 0.98 }}
+                  transition={{ ...TRANSITION_SUGGESTIONS, duration: 0.28 }}
+                  className="py-10 text-center"
                 >
                   <motion.div
-                    initial={{ scale: 0, rotate: -180 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    transition={{ type: "spring", duration: 0.6, bounce: 0.3 }}
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", duration: 0.5, bounce: 0.3 }}
                   >
-                    <CheckCircle className="mx-auto size-20 text-[#0091FF] mb-6" weight="fill" />
+                    <CheckCircle
+                      className="mx-auto mb-5 size-20 text-[#0091FF]"
+                      weight="fill"
+                    />
                   </motion.div>
-                  <DialogTitle className="text-3xl font-semibold mb-3">
-                    You're all set!
+                  <DialogTitle className="text-3xl font-semibold tracking-tight">
+                    You are all set
                   </DialogTitle>
-                  <DialogDescription className="text-base text-lg">
-                    Fleming is now personalized for you
+                  <DialogDescription className="mt-2 text-base">
+                    Fleming is now tailored to your role and workflow.
                   </DialogDescription>
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    {isSaving ? "Saving your preferences..." : "Launching your workspace..."}
+                  </p>
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {currentStep !== "complete" && (
+              <div className="mt-7 flex items-center justify-between">
+                <Button
+                  variant="ghost"
+                  onClick={handleBack}
+                  disabled={!canGoBack || isSaving}
+                  className="gap-2"
+                >
+                  <ArrowLeft className="size-4" />
+                  Back
+                </Button>
+                <Button
+                  onClick={handleNext}
+                  disabled={!canProceed || isSaving}
+                  size="lg"
+                  className="min-w-[150px] gap-2"
+                >
+                  {nextLabel}
+                  <ArrowRight className="size-4" />
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </DialogContent>
@@ -691,118 +782,56 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   )
 }
 
-interface DemographicOptionProps {
-  icon: React.ComponentType<{ className?: string; weight?: "fill" | "regular" | "bold" | "duotone" | "light" }>
+interface RoleCardProps {
+  icon: React.ComponentType<{
+    className?: string
+    weight?: "fill" | "regular" | "bold" | "duotone" | "light"
+  }>
   title: string
   description: string
   selected: boolean
   onClick: () => void
 }
 
-function DemographicOption({ icon: Icon, title, description, selected, onClick }: DemographicOptionProps) {
+function RoleCard({
+  icon: Icon,
+  title,
+  description,
+  selected,
+  onClick,
+}: RoleCardProps) {
   return (
     <motion.button
+      type="button"
       onClick={onClick}
-      className={cn(
-        "w-full p-5 rounded-2xl border-2 text-left transition-all relative overflow-hidden",
-        selected 
-          ? "border-[#0091FF] bg-[#0091FF]/10 dark:bg-[#0091FF]/20 text-[#0091FF] shadow-lg shadow-[#0091FF]/10 dark:shadow-[#0091FF]/20" 
-          : "border-border bg-background hover:bg-accent hover:border-accent-foreground/20"
-      )}
-      whileHover={{ scale: 1.02, y: -2 }}
-      whileTap={{ scale: 0.98 }}
-      transition={TRANSITION_SUGGESTIONS}
-    >
-      {selected && (
-        <motion.div
-          className="absolute inset-0 bg-gradient-to-br from-[#0091FF]/5 dark:from-[#0091FF]/10 to-transparent"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3 }}
-        />
-      )}
-      <div className="flex items-start gap-4 relative z-10">
-        <div className={cn(
-          "p-3 rounded-xl transition-all",
-          selected ? "bg-[#0091FF]/10 dark:bg-[#0091FF]/20" : "bg-muted"
-        )}>
-          <Icon className={cn("size-6", selected ? "text-[#0091FF]" : "")} weight={selected ? "fill" : "regular"} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="font-semibold text-lg mb-1">{title}</div>
-          <div className={cn(
-            "text-sm leading-relaxed",
-            selected ? "text-[#0091FF] dark:text-[#0091FF]" : "text-muted-foreground"
-          )}>
-            {description}
-          </div>
-        </div>
-        {selected && (
-          <motion.div
-            initial={{ scale: 0, rotate: -90 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: "spring", duration: 0.4, bounce: 0.4 }}
-            className="shrink-0"
-          >
-            <CheckCircle className="size-6 text-[#0091FF]" weight="fill" />
-          </motion.div>
-        )}
-      </div>
-    </motion.button>
-  )
-}
-
-interface OptionButtonProps {
-  title: string
-  description?: string
-  selected: boolean
-  onClick: () => void
-}
-
-function OptionButton({ title, description, selected, onClick }: OptionButtonProps) {
-  return (
-    <motion.button
-      onClick={onClick}
-      className={cn(
-        "w-full p-4 rounded-xl border-2 text-left transition-all relative overflow-hidden",
-        selected 
-          ? "border-[#0091FF] bg-[#0091FF]/10 dark:bg-[#0091FF]/20 text-[#0091FF] shadow-md shadow-[#0091FF]/5 dark:shadow-[#0091FF]/10" 
-          : "border-border bg-background hover:bg-accent hover:border-accent-foreground/20"
-      )}
       whileHover={{ scale: 1.01, y: -1 }}
       whileTap={{ scale: 0.99 }}
       transition={TRANSITION_SUGGESTIONS}
-    >
-      {selected && (
-        <motion.div
-          className="absolute inset-0 bg-gradient-to-r from-[#0091FF]/5 dark:from-[#0091FF]/10 to-transparent"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.2 }}
-        />
+      className={cn(
+        "w-full rounded-2xl border-2 p-4 text-left transition sm:p-5",
+        selected
+          ? "border-[#0091FF] bg-[#0091FF]/10 text-[#0074CC] shadow-md shadow-[#0091FF]/20 dark:text-[#66B8FF]"
+          : "border-border bg-background hover:bg-accent"
       )}
-      <div className="flex items-center justify-between relative z-10">
-        <div className="flex-1 min-w-0">
-          <div className="font-medium text-base">{title}</div>
-          {description && (
-            <div className={cn(
-              "text-sm mt-1 leading-relaxed",
-              selected ? "text-[#0091FF] dark:text-[#0091FF]" : "text-muted-foreground"
-            )}>
-              {description}
-            </div>
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={cn(
+            "rounded-xl p-2.5",
+            selected ? "bg-[#0091FF]/15" : "bg-muted"
           )}
+        >
+          <Icon
+            className={cn("size-5", selected ? "text-[#0091FF]" : "text-foreground")}
+            weight={selected ? "fill" : "regular"}
+          />
         </div>
-        {selected && (
-          <motion.div
-            initial={{ scale: 0, rotate: -90 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: "spring", duration: 0.3, bounce: 0.4 }}
-            className="shrink-0 ml-4"
-          >
-            <CheckCircle className="size-5 text-[#0091FF]" weight="fill" />
-          </motion.div>
-        )}
+        <div className="min-w-0 flex-1">
+          <div className="text-base font-semibold sm:text-lg">{title}</div>
+          <div className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {description}
+          </div>
+        </div>
       </div>
     </motion.button>
   )

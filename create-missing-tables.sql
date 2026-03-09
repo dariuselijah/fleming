@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   allergies TEXT[],
   family_history TEXT,
   lifestyle_factors TEXT,
+  student_school TEXT,
+  student_year TEXT,
+  clinician_name TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -109,8 +112,18 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 
 -- Add foreign key constraints
-ALTER TABLE chats ADD CONSTRAINT IF NOT EXISTS chats_project_id_fkey 
-  FOREIGN KEY (project_id) REFERENCES projects(id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'chats_project_id_fkey'
+  ) THEN
+    ALTER TABLE chats
+      ADD CONSTRAINT chats_project_id_fkey
+      FOREIGN KEY (project_id) REFERENCES projects(id);
+  END IF;
+END $$;
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);

@@ -10,6 +10,7 @@ import {
   reprocessKnowledgeFile,
   uploadKnowledgeFile,
 } from "@/lib/uploads/api"
+import { buildUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
 import type { UploadProgressStage, UserUploadListItem } from "@/lib/uploads/types"
 import {
   ArrowClockwise,
@@ -387,6 +388,31 @@ export function UploadsWorkspace() {
     [router]
   )
 
+  const openInChatWithArtifact = useCallback(
+    (upload: UserUploadListItem, intent: "document" | "quiz") => {
+      const tokenString = buildUploadReferenceTokens([upload.id])
+      const basePrompt =
+        intent === "document"
+          ? `Generate a polished document artifact from this upload. Use Harvard references and include a structured bibliography.`
+          : `Generate an interactive multiple-choice quiz from this upload with answer explanations.`
+      const composedPrompt = `${basePrompt}\n\nSelected uploads: ${upload.title || upload.fileName}\n\n${tokenString}`
+      const params = new URLSearchParams({
+        prompt: composedPrompt,
+        artifactIntent: intent,
+      })
+      if (intent === "document") {
+        params.set("citationStyle", "harvard")
+      }
+      router.push(`/?${params.toString()}`)
+      toast({
+        title: intent === "document" ? "Document generation primed" : "Quiz generation primed",
+        description: "Review the prompt in chat and press send.",
+        status: "info",
+      })
+    },
+    [router]
+  )
+
   return (
     <div className="mx-auto mt-16 w-full max-w-7xl px-4 pb-8 sm:px-6">
       <div className="rounded-3xl border border-border/60 bg-background p-6 shadow-xs sm:p-8">
@@ -540,6 +566,24 @@ export function UploadsWorkspace() {
                     ) : null}
 
                     <div className="mt-3 flex items-center justify-end gap-1">
+                      {upload.status === "completed" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="inline-flex h-8 items-center justify-center rounded-full border border-border px-2.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                            onClick={() => openInChatWithArtifact(upload, "document")}
+                          >
+                            Generate Doc
+                          </button>
+                          <button
+                            type="button"
+                            className="inline-flex h-8 items-center justify-center rounded-full border border-border px-2.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                            onClick={() => openInChatWithArtifact(upload, "quiz")}
+                          >
+                            Generate Quiz
+                          </button>
+                        </>
+                      ) : null}
                       {isFailed ? (
                         <button
                           type="button"

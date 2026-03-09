@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS public.user_preferences (
   allergies TEXT[],
   family_history TEXT,
   lifestyle_factors TEXT,
+  student_school TEXT,
+  student_year TEXT,
+  clinician_name TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

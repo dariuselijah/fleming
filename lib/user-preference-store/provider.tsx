@@ -56,16 +56,14 @@ async function fetchUserPreferences(): Promise<UserPreferences> {
 }
 
 async function updateUserPreferences(
-  update: Partial<UserPreferences>,
-  existing: UserPreferences
+  update: Partial<UserPreferences>
 ): Promise<UserPreferences> {
-  const merged = { ...existing, ...update }
   const response = await fetch("/api/user-preferences", {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(convertToApiFormat(merged)),
+    body: JSON.stringify(convertToApiFormat(update)),
   })
 
   if (!response.ok) {
@@ -195,7 +193,7 @@ export function UserPreferencesProvider({
       }
 
       try {
-        return await updateUserPreferences(update, preferences)
+        return await updateUserPreferences(update)
       } catch (error) {
         console.error(
           "Failed to update user preferences in database, falling back to localStorage:",

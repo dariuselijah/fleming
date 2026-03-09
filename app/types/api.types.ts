@@ -2,6 +2,8 @@ import type { Database, Json } from "@/app/types/database.types"
 import type { Attachment } from "@ai-sdk/ui-utils"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { SupportedModel } from "@/lib/openproviders/types"
+import type { DocumentArtifact, QuizArtifact } from "@/lib/uploads/artifacts"
+import type { CitationStyle } from "@/lib/citations/formatters"
 
 export type SupabaseClientType = SupabaseClient<Database>
 
@@ -11,6 +13,10 @@ export interface TopicContext {
   recentPages?: number[]
   recentEvidenceIds?: string[]
   followUpType?: "clarify" | "next_page" | "previous_page" | "drill_down" | "switch_topic" | "unknown"
+  pendingQuizTopicSelection?: boolean
+  pendingQuizTopicOptions?: string[]
+  pendingQuizOriginalQuery?: string | null
+  pendingQuizRequestedAt?: string | null
 }
 
 export interface ContentPart {
@@ -33,6 +39,9 @@ export interface ContentPart {
   metadata?: {
     evidenceCitations?: unknown[]
     topicContext?: TopicContext
+    documentArtifacts?: DocumentArtifact[]
+    quizArtifacts?: QuizArtifact[]
+    citationStyle?: CitationStyle
   }
 }
 
@@ -67,6 +76,7 @@ export interface StoreAssistantMessageParams {
   message_group_id?: string
   model?: SupportedModel
   topicContext?: TopicContext
+  allowMultipleArtifacts?: boolean
 }
 
 export interface ApiErrorResponse {

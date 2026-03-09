@@ -1,4 +1,5 @@
 import { decryptMessage, isEncryptionEnabled } from "../../encryption"
+import { stripUploadReferenceTokens } from "../../uploads/reference-tokens"
 
 type StoredMessageRow = {
   id: string | number
@@ -44,24 +45,24 @@ function normalizeDisplayContent(row: StoredMessageRow): string {
 
   if (contentIv) {
     if (!isEncryptionEnabled()) {
-      return fallbackFromParts
+      return stripUploadReferenceTokens(fallbackFromParts)
     }
     try {
       const decrypted = decryptMessage(rawContent, contentIv)
       if (typeof decrypted === "string" && decrypted.trim().length > 0) {
-        return decrypted
+        return stripUploadReferenceTokens(decrypted)
       }
     } catch {
-      return fallbackFromParts
+      return stripUploadReferenceTokens(fallbackFromParts)
     }
-    return fallbackFromParts
+    return stripUploadReferenceTokens(fallbackFromParts)
   }
 
   if (rawContent.trim().length > 0 && !isLikelyCiphertext(rawContent)) {
-    return rawContent
+    return stripUploadReferenceTokens(rawContent)
   }
 
-  return fallbackFromParts
+  return stripUploadReferenceTokens(fallbackFromParts)
 }
 
 export function normalizeStoredMessageRow(

@@ -1,4 +1,10 @@
 import { createClient } from "@/lib/supabase/server"
+import {
+  formatBibliography,
+  formatInlineCitation,
+  normalizeCitationStyle,
+  type CitationStyle,
+} from "@/lib/citations/formatters"
 import type { EvidenceCitation, UploadVisualReference } from "@/lib/evidence/types"
 import {
   type OCRStatus,
@@ -9,6 +15,7 @@ import {
 } from "@/lib/rag/types"
 import { cosineSimilarity, generateEmbedding, generateEmbeddings } from "@/lib/rag/embeddings"
 import type { UserUploadDetail, UserUploadListItem } from "./types"
+import type { DocumentArtifact, QuizArtifact, QuizArtifactQuestion } from "./artifacts"
 import JSZip from "jszip"
 import mammoth from "mammoth"
 import { imageSize } from "image-size"
@@ -118,6 +125,147 @@ type UploadChunkRow = {
   source_offset_end: number | null
   metadata: Record<string, unknown> | null
   embedding: number[] | null
+}
+
+export type GenerateDocumentFromUploadInput = {
+  userId: string
+  query: string
+  uploadId?: string
+  citationStyle?: CitationStyle
+  includeReferences?: boolean
+  apiKey?: string
+  maxSources?: number
+}
+
+export type GenerateQuizFromUploadInput = {
+  userId: string
+  query: string
+  uploadId?: string
+  apiKey?: string
+  questionCount?: number
+}
+
+function sanitizeArtifactText(value: string): string {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\{[^{}]*\}/g, " ")
+    .replace(/\[[^\]]*?\]\([^)]+\)/g, " ")
+    .replace(/[_*`#~|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function clipTextAtBoundary(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value
+  const window = value.slice(0, maxLength)
+  const sentenceBreaks = Array.from(window.matchAll(/[.!?]\s+/g))
+  const lastSentenceBreak = sentenceBreaks.at(-1)
+  if (lastSentenceBreak && typeof lastSentenceBreak.index === "number" && lastSentenceBreak.index > 48) {
+    return window.slice(0, lastSentenceBreak.index + 1).trim()
+  }
+  const wordBreak = window.lastIndexOf(" ")
+  if (wordBreak > 48) {
+    return `${window.slice(0, wordBreak).trim()}...`
+  }
+  return `${window.trim()}...`
+}
+
+function cleanSnippetForArtifact(value: string, maxLength = 220): string {
+  const normalized = sanitizeArtifactText(value)
+  if (!normalized) return ""
+  if (normalized.length <= maxLength) return normalized
+  return clipTextAtBoundary(normalized, maxLength)
+}
+
+function looksLikeExtractionNoise(value: string): boolean {
+  const lowered = value.toLowerCase()
+  if (!lowered) return true
+  if (/<[a-z]+:[^>]+>/.test(lowered)) return true
+  if (/(^|[\s>])a:(tc|txbody|bodypr|lststyle|ppr|rpr|t)\b/.test(lowered)) return true
+  if (/(xmlns|schema|pptx|docx|xml|utf-8|w:|r:|a:|p:)/.test(lowered)) return true
+  if (/([a-z]{1,2}\d{2,}|[^\w\s]{5,})/.test(value)) return true
+  const digitRatio = ((value.match(/\d/g) || []).length / Math.max(value.length, 1))
+  if (digitRatio > 0.24 && !/\b(page|slide|chapter)\b/i.test(value)) return true
+  const symbolCount = (value.match(/[<>/=]/g) || []).length
+  return symbolCount > Math.max(16, Math.floor(value.length * 0.12))
+}
+
+function shouldIncludeReferencesForQuery(query: string): boolean {
+  const normalized = query.toLowerCase()
+  return /\b(reference|references|citation|citations|bibliography|harvard|apa|vancouver)\b/.test(
+    normalized
+  )
+}
+
+function inferCitationStyleFromQuery(
+  query: string,
+  fallback: CitationStyle
+): CitationStyle {
+  const normalized = query.toLowerCase()
+  if (/\bvancouver\b/.test(normalized)) return "vancouver"
+  if (/\bapa\b/.test(normalized)) return "apa"
+  if (/\bharvard\b/.test(normalized)) return "harvard"
+  return fallback
+}
+
+type DocumentShape = "study-plan" | "study-notes" | "summary" | "review"
+
+function inferDocumentShape(query: string): DocumentShape {
+  const normalized = query.toLowerCase()
+  if (/\bstudy\s+plan\b|\brevision\s+plan\b/.test(normalized)) return "study-plan"
+  if (/\bnotes?\b/.test(normalized)) return "study-notes"
+  if (/\bsummary|summarise|summarize\b/.test(normalized)) return "summary"
+  return "review"
+}
+
+function extractQuizSentences(value: string): string[] {
+  const normalized = sanitizeArtifactText(value)
+  if (!normalized) return []
+  return normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 28)
+    .filter((sentence) => !looksLikeExtractionNoise(sentence))
+}
+
+function buildQuizStatementFromCitation(citation: EvidenceCitation): string {
+  const snippet = citation.snippet || citation.title || ""
+  const sentence = extractQuizSentences(snippet)[0] || cleanSnippetForArtifact(snippet, 160)
+  const fallback = cleanSnippetForArtifact(citation.title || "Key concept from the uploaded material", 140)
+  const base = sentence || fallback
+  if (!base) return "The uploaded material emphasizes a key concept in this topic."
+  return /[.!?]$/.test(base) ? base : `${base}.`
+}
+
+function normalizeQuizOptionText(value: string, maxLength = 260): string {
+  const normalized = sanitizeArtifactText(value)
+  if (!normalized) return ""
+  if (normalized.length <= maxLength) {
+    return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`
+  }
+
+  const window = normalized.slice(0, maxLength)
+  const sentenceMatches = Array.from(window.matchAll(/[.!?]\s+/g))
+  const sentenceMatch = sentenceMatches.at(-1)
+  if (sentenceMatch && typeof sentenceMatch.index === "number") {
+    const clipped = window.slice(0, sentenceMatch.index + 1).trim()
+    return clipped.length > 0 ? clipped : `${window.trim()}.`
+  }
+
+  const wordBreak = window.lastIndexOf(" ")
+  const clipped = (wordBreak > 40 ? window.slice(0, wordBreak) : window).trim()
+  return clipped.length > 0
+    ? `${clipped}.`
+    : `${normalized.slice(0, maxLength).trim()}.`
+}
+
+function buildQuizPromptFromCitation(
+  citation: EvidenceCitation,
+  query: string,
+  statement: string
+): string {
+  const topicSeed = cleanSnippetForArtifact(citation.title || query || statement, 70)
+  return `Which statement best matches the uploaded material about "${topicSeed}"?`
 }
 
 function sanitizeFileName(value: string): string {
@@ -1848,6 +1996,373 @@ export class UserUploadService {
       mode: "auto",
     })
     return result.citations.slice(0, maxResults)
+  }
+
+  async generateDocumentFromUpload(
+    input: GenerateDocumentFromUploadInput
+  ): Promise<DocumentArtifact> {
+    const requestedStyle = normalizeCitationStyle(input.citationStyle)
+    const citationStyle = inferCitationStyleFromQuery(input.query, requestedStyle)
+    const includeReferences =
+      input.includeReferences ?? shouldIncludeReferencesForQuery(input.query)
+    const documentShape = inferDocumentShape(input.query)
+    const maxSources = clamp(input.maxSources ?? 8, 3, 16)
+    const search = await this.uploadContextSearch({
+      userId: input.userId,
+      query: input.query,
+      uploadId: input.uploadId,
+      apiKey: input.apiKey,
+      mode: "hybrid",
+      topK: maxSources,
+      includeNeighborPages: 1,
+      maxDurationMs: 2600,
+    })
+
+    const preparedCitations = search.citations
+      .slice(0, maxSources + 4)
+      .map((citation) => {
+        const raw = citation.snippet || citation.title || ""
+        const cleanedSnippet = cleanSnippetForArtifact(raw, 340)
+        return {
+          ...citation,
+          snippet: cleanedSnippet || cleanSnippetForArtifact(citation.title || "", 220),
+        }
+      })
+      .filter((citation) => {
+        const candidate = citation.snippet || citation.title || ""
+        return candidate.length > 24 && !looksLikeExtractionNoise(candidate)
+      })
+
+    const fallbackCitations = search.citations
+      .slice(0, maxSources)
+      .filter((citation) => !looksLikeExtractionNoise(citation.snippet || citation.title || ""))
+    const citationPool =
+      preparedCitations.length > 0
+        ? preparedCitations.slice(0, maxSources)
+        : fallbackCitations
+    const seenSourceUnits = new Set<string>()
+    const diversifiedCitations: typeof citationPool = []
+    for (const citation of citationPool) {
+      const unitKey =
+        citation.sourceUnitId ||
+        (citation.sourceUnitType && citation.sourceUnitNumber
+          ? `${citation.sourceUnitType}:${citation.sourceUnitNumber}`
+          : "")
+      if (unitKey && seenSourceUnits.has(unitKey)) continue
+      if (unitKey) seenSourceUnits.add(unitKey)
+      diversifiedCitations.push(citation)
+      if (diversifiedCitations.length >= maxSources) break
+    }
+    for (const citation of citationPool) {
+      if (diversifiedCitations.length >= maxSources) break
+      if (!diversifiedCitations.includes(citation)) {
+        diversifiedCitations.push(citation)
+      }
+    }
+    const citations = diversifiedCitations.slice(0, maxSources)
+    const orderedCitations = [...citations].sort((a, b) => {
+      const left = typeof a.sourceUnitNumber === "number" ? a.sourceUnitNumber : Number.MAX_SAFE_INTEGER
+      const right = typeof b.sourceUnitNumber === "number" ? b.sourceUnitNumber : Number.MAX_SAFE_INTEGER
+      return left - right
+    })
+
+    const bibliography = includeReferences
+      ? formatBibliography(citations, citationStyle).map((entry) => ({
+          index: entry.index,
+          entry: entry.entry,
+        }))
+      : []
+    const uploadId = citations[0]?.uploadId ?? input.uploadId ?? null
+    const uploadTitle =
+      citations[0]?.uploadFileName ||
+      citations[0]?.sourceLabel ||
+      (uploadId ? (await this.getUploadListItem(input.userId, uploadId))?.title : null) ||
+      null
+    const maxObservedPage = Math.max(
+      0,
+      ...orderedCitations
+        .map((citation) =>
+          typeof citation.sourceUnitNumber === "number" ? citation.sourceUnitNumber : 0
+        )
+    )
+    const isTextbookScale =
+      /\b(textbook|chapter|book|manual|handbook)\b/i.test(input.query) ||
+      maxObservedPage >= 80 ||
+      orderedCitations.length >= 8
+    const keyPointLimit = isTextbookScale ? 6 : 7
+    const studyStepLimit = isTextbookScale ? 6 : 5
+    const recallLimit = isTextbookScale ? 5 : 4
+    const evidenceLimit = isTextbookScale ? 8 : 6
+
+    const summaryParagraph =
+      citations.length > 0
+        ? `This ${documentShape.replace("-", " ")} synthesizes "${input.query}" using ${citations.length} high-signal excerpts from your uploaded material.`
+        : `No high-confidence excerpts were found for "${input.query}". Upload a more relevant document or refine your query for better coverage.`
+
+    const executiveSnapshot =
+      orderedCitations.length > 0
+        ? orderedCitations
+            .slice(0, Math.min(4, orderedCitations.length))
+            .map((citation) => {
+              const snippet = cleanSnippetForArtifact(citation.snippet || citation.title || "", 160)
+              if (!snippet) return null
+              const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+              const cite = includeReferences
+                ? ` ${formatInlineCitation(citation, citationStyle)}`
+                : ""
+              return `- ${snippet}${location}${cite}`
+            })
+            .filter((line): line is string => Boolean(line))
+            .join("\n")
+        : "- No concise highlights were extracted from the current material."
+
+    const keyPoints =
+      citations.length > 0
+        ? orderedCitations
+            .slice(0, keyPointLimit)
+            .map((citation) => {
+              const snippet = cleanSnippetForArtifact(
+                citation.snippet || citation.title || "",
+                200
+              )
+              if (!snippet) return null
+              const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+              const cite = includeReferences
+                ? ` ${formatInlineCitation(citation, citationStyle)}`
+                : ""
+              return `- ${snippet}${location}${cite}`
+            })
+            .filter((line): line is string => Boolean(line))
+            .join("\n")
+        : "- No directly relevant excerpt was extracted from the selected upload."
+
+    const studyPlanSection =
+      citations.length > 0
+        ? orderedCitations
+            .slice(0, studyStepLimit)
+            .map((citation, index) => {
+              const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+              const cite = includeReferences
+                ? ` ${formatInlineCitation(citation, citationStyle)}`
+                : ""
+              return `${index + 1}. Review ${citation.title || "core concept"}${location}; capture 3 takeaways and one clinical pearl.${cite}`
+            })
+            .join("\n")
+        : "1. Review the uploaded material once for broad orientation.\n2. Build concise notes by theme.\n3. Re-test yourself with short recall prompts."
+
+    const recallPrompts =
+      citations.length > 0
+        ? orderedCitations
+            .slice(0, recallLimit)
+            .map((citation, index) => {
+              const seed = cleanSnippetForArtifact(
+                citation.snippet || citation.title || "",
+                120
+              )
+              return `- Q${index + 1}: Explain this concept in your own words -> ${seed}`
+            })
+            .join("\n")
+        : "- Define the key syndrome patterns from this topic.\n- List first-line management options and contraindications."
+
+    const evidenceReview =
+      citations.length > 0
+        ? orderedCitations
+            .slice(0, evidenceLimit)
+            .map((citation, idx) => {
+              const heading = `### Source ${idx + 1}: ${citation.title || "Untitled source"}`
+              const body =
+                cleanSnippetForArtifact(citation.snippet || citation.title || "", 300) ||
+                "No snippet available."
+              const location = citation.pageLabel ? `\n- Location: ${citation.pageLabel}` : ""
+              const marker = includeReferences
+                ? `\n- Citation: ${formatInlineCitation(citation, citationStyle)}`
+                : ""
+              return `${heading}\n- Summary: ${body}${location}${marker}`
+            })
+            .join("\n\n")
+        : "No evidence excerpts were available to build this section."
+
+    const referencesHeading = includeReferences
+      ? `References (${citationStyle.toUpperCase()})`
+      : "Source Traceability"
+    const referenceSection =
+      bibliography.length > 0
+        ? bibliography.map((entry) => `${entry.index}. ${entry.entry}`).join("\n")
+        : citations.length > 0
+          ? citations
+              .slice(0, 10)
+              .map((citation, index) => {
+                const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+                return `${index + 1}. ${citation.title || "Uploaded source"}${location}`
+              })
+              .join("\n")
+          : "No references available."
+
+    const titleSuffix =
+      documentShape === "study-plan"
+        ? "Study Plan"
+        : documentShape === "study-notes"
+          ? "Study Notes"
+          : documentShape === "summary"
+            ? "Summary"
+            : "Review"
+    const title = uploadTitle
+      ? `${uploadTitle} - ${titleSuffix}`
+      : `${titleSuffix} - ${input.query.slice(0, 72)}`
+
+    const shapeSpecificSections: DocumentArtifact["sections"] =
+      documentShape === "study-plan"
+        ? [
+            { heading: "Executive Snapshot", content: executiveSnapshot },
+            { heading: "Learning Goal", content: summaryParagraph },
+            { heading: "Priority Topics", content: keyPoints },
+            { heading: "Step-by-Step Study Plan", content: studyPlanSection },
+            { heading: "Active Recall Prompts", content: recallPrompts },
+          ]
+        : documentShape === "study-notes"
+          ? [
+              { heading: "Executive Snapshot", content: executiveSnapshot },
+              { heading: "Topic Overview", content: summaryParagraph },
+              { heading: "High-Yield Notes", content: keyPoints },
+              { heading: "Source Highlights", content: evidenceReview },
+            ]
+          : documentShape === "summary"
+            ? [
+                { heading: "Executive Snapshot", content: executiveSnapshot },
+                { heading: "Summary", content: summaryParagraph },
+                { heading: "Key Takeaways", content: keyPoints },
+                { heading: "Source Highlights", content: evidenceReview },
+              ]
+            : [
+                { heading: "Executive Snapshot", content: executiveSnapshot },
+                { heading: "Executive Summary", content: summaryParagraph },
+                { heading: "Key Points", content: keyPoints },
+                { heading: "Evidence Review", content: evidenceReview },
+              ]
+
+    const sections = [
+      ...shapeSpecificSections,
+      { heading: referencesHeading, content: referenceSection },
+    ]
+
+    const markdownBody = sections
+      .map((section) => `## ${section.heading}\n${section.content}`)
+      .join("\n\n")
+    const markdown = `# ${title}\n\n${markdownBody}\n`
+
+    return {
+      artifactType: "document",
+      artifactId: crypto.randomUUID(),
+      title,
+      query: input.query,
+      citationStyle,
+      includeReferences,
+      markdown,
+      sections,
+      bibliography,
+      citations,
+      warnings: search.warnings,
+      uploadId,
+      uploadTitle,
+      generatedAt: new Date().toISOString(),
+    }
+  }
+
+  async generateQuizFromUpload(input: GenerateQuizFromUploadInput): Promise<QuizArtifact> {
+    const questionCount = clamp(input.questionCount ?? 5, 3, 10)
+    const search = await this.uploadContextSearch({
+      userId: input.userId,
+      query: input.query,
+      uploadId: input.uploadId,
+      apiKey: input.apiKey,
+      mode: "hybrid",
+      topK: Math.max(questionCount + 3, 8),
+      includeNeighborPages: 1,
+      maxDurationMs: 2600,
+    })
+
+    const citations = search.citations.slice(0, Math.max(questionCount + 2, 6))
+    const statementPool = citations
+      .map((citation) => {
+        const statement = buildQuizStatementFromCitation(citation)
+        return {
+          citation,
+          statement: normalizeQuizOptionText(statement, 260),
+        }
+      })
+      .filter((item) => item.statement.length > 24)
+
+    const fallbackOptions = [
+      `The uploaded material states that ${input.query} has no clinical relevance.`,
+      `The uploaded material claims there are no phases or progression patterns in ${input.query}.`,
+      `The uploaded material indicates management decisions are random and not evidence-informed.`,
+      `The uploaded material says symptoms are never linked to neurological mechanisms.`,
+    ]
+
+    const questionSource =
+      statementPool.length > 0
+        ? statementPool.slice(0, questionCount)
+        : citations.slice(0, questionCount).map((citation) => ({
+            citation,
+            statement: normalizeQuizOptionText(
+              citation.snippet || citation.title || "Core concept from the uploaded material.",
+              260
+            ),
+          }))
+
+    const questions: QuizArtifactQuestion[] = questionSource.map((item, index) => {
+      const citation = item.citation
+      const correct = item.statement
+      const distractors = statementPool
+        .map((candidate) => candidate.statement)
+        .filter((candidate) => candidate !== correct)
+        .slice(0, 8)
+      const optionCandidates = [correct, ...distractors, ...fallbackOptions]
+      const uniqueOptions = Array.from(new Set(optionCandidates)).slice(0, 4)
+      while (uniqueOptions.length < 4) {
+        uniqueOptions.push(
+          `Alternative interpretation ${uniqueOptions.length + 1} from the topic.`
+        )
+      }
+
+      const rotation = index % uniqueOptions.length
+      const rotatedOptions = uniqueOptions.slice(rotation).concat(uniqueOptions.slice(0, rotation))
+      const correctOptionIndex = rotatedOptions.findIndex((value) => value === correct)
+      const explanationSnippet = cleanSnippetForArtifact(citation.snippet || citation.title || "", 220)
+      const inline = formatInlineCitation(citation, "vancouver")
+      const explanation = explanationSnippet
+        ? `Supported by uploaded material: "${explanationSnippet}" ${inline} Other options represent different or unsupported interpretations.`
+        : `This choice directly reflects the cited uploaded excerpt ${inline}.`
+
+      return {
+        id: `quiz-q-${index + 1}`,
+        prompt: buildQuizPromptFromCitation(citation, input.query, correct),
+        options: rotatedOptions,
+        correctOptionIndex: correctOptionIndex >= 0 ? correctOptionIndex : 0,
+        explanation,
+        citationIndices: [citation.index],
+      }
+    })
+
+    const uploadId = citations[0]?.uploadId ?? input.uploadId ?? null
+    const uploadTitle =
+      citations[0]?.uploadFileName ||
+      citations[0]?.sourceLabel ||
+      (uploadId ? (await this.getUploadListItem(input.userId, uploadId))?.title : null) ||
+      null
+
+    return {
+      artifactType: "quiz",
+      artifactId: crypto.randomUUID(),
+      title: uploadTitle ? `${uploadTitle} - Quiz` : `Quiz - ${input.query.slice(0, 72)}`,
+      query: input.query,
+      questions,
+      citations,
+      warnings: search.warnings,
+      uploadId,
+      uploadTitle,
+      generatedAt: new Date().toISOString(),
+    }
   }
 
   private async buildUploadListItem(upload: UploadRow): Promise<UserUploadListItem> {

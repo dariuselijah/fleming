@@ -1,10 +1,12 @@
-import { createClient } from "@/lib/supabase/server"
 import { validateUserIdentity } from "@/lib/server/api"
+import {
+  CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES,
+  getChatAttachmentSizeLimitLabel,
+} from "@/lib/chat-attachments/constants"
 import { NextRequest, NextResponse } from "next/server"
 
 // CACHE for signed URLs to avoid regeneration
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>()
-const CACHE_DURATION = 3000000 // 50 minutes (signed URLs last 1 hour)
 
 export async function POST(request: NextRequest) {
   try {
@@ -127,12 +129,12 @@ export async function POST(request: NextRequest) {
 }
 
 async function validateFile(file: File): Promise<{ isValid: boolean; error?: string }> {
-  const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+  const MAX_FILE_SIZE = CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES
 
   if (file.size > MAX_FILE_SIZE) {
     return {
       isValid: false,
-      error: `File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`,
+      error: `File size exceeds ${getChatAttachmentSizeLimitLabel()} limit`,
     }
   }
 

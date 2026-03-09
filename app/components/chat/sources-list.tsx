@@ -85,13 +85,17 @@ export function SourcesList({ sources, className }: SourcesListProps) {
               className="overflow-hidden"
             >
               <ul className="space-y-2 px-3 pt-3 pb-3">
-                {sources.map((source) => {
+                {sources.map((source, index) => {
                   const faviconUrl = getFavicon(source.url)
                   const showFallback =
                     !faviconUrl || failedFavicons.has(source.url)
+                  const sourceKey =
+                    typeof source.id === "string" && source.id.trim().length > 0
+                      ? `${source.id}-${index}`
+                      : `${source.url}-${index}`
 
                   return (
-                    <li key={source.id} className="flex items-center text-sm">
+                    <li key={sourceKey} className="flex items-center text-sm">
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <a
                           href={addUTM(source.url)}

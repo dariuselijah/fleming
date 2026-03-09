@@ -1,8 +1,11 @@
 import { AnimatePresence, motion } from "motion/react"
+import { getChatAttachmentFileId } from "@/lib/chat-attachments/constants"
+import type { FileUploadStatus } from "@/app/components/chat/use-file-upload"
 import { FileItem } from "./file-items"
 
 type FileListProps = {
   files: File[]
+  getFileStatus?: (file: File) => FileUploadStatus | undefined
   onFileRemove: (file: File) => void
 }
 
@@ -12,7 +15,7 @@ const TRANSITION = {
   bounce: 0,
 }
 
-export function FileList({ files, onFileRemove }: FileListProps) {
+export function FileList({ files, getFileStatus, onFileRemove }: FileListProps) {
   return (
     <AnimatePresence initial={false}>
       {files.length > 0 && (
@@ -28,7 +31,7 @@ export function FileList({ files, onFileRemove }: FileListProps) {
             <AnimatePresence initial={false}>
               {files.map((file) => (
                 <motion.div
-                  key={file.name}
+                  key={getChatAttachmentFileId(file)}
                   initial={{ width: 0 }}
                   animate={{ width: 180 }}
                   exit={{ width: 0 }}
@@ -36,8 +39,8 @@ export function FileList({ files, onFileRemove }: FileListProps) {
                   className="relative shrink-0 overflow-hidden pt-2"
                 >
                   <FileItem
-                    key={file.name}
                     file={file}
+                    status={getFileStatus?.(file)}
                     onRemove={onFileRemove}
                   />
                 </motion.div>

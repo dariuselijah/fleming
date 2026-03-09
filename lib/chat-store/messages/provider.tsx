@@ -42,7 +42,6 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
   const messagesRef = useRef(messages)
   const activeLoadTokenRef = useRef(0)
   const activeChatIdRef = useRef<string | null>(chatId)
-  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   
   useEffect(() => {
     messagesRef.current = messages
@@ -51,15 +50,6 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     activeChatIdRef.current = chatId
   }, [chatId])
-
-  useEffect(() => {
-    return () => {
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current)
-        retryTimeoutRef.current = null
-      }
-    }
-  }, [])
 
   useEffect(() => {
     if (chatId === null) {
@@ -86,10 +76,6 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!chatId) {
       activeLoadTokenRef.current += 1
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current)
-        retryTimeoutRef.current = null
-      }
       setMessages([])
       setIsLoading(false)
       return
@@ -121,10 +107,9 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
 
     const load = async () => {
       setIsLoadingIfActive(true)
-      
-      // CRITICAL: Check sessionStorage first for messages migrated during redirect
+
       let sessionMessages: MessageAISDK[] = []
-      if (typeof window !== 'undefined') {
+      if (typeof window !== "undefined") {
         const resolved = resolveScopedSessionMessages({
           chatId,
           pendingRaw:
@@ -139,118 +124,65 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (!isActive()) return
-      
-      // Load cached messages first (fast, synchronous)
+
       let cached: MessageAISDK[] = []
       try {
         cached = await getCachedMessages(chatId)
         if (!isActive()) return
-        
-        // Show cached messages immediately if available (don't wait for DB)
-        if (cached.length > 0 && sessionMessages.length === 0) {
-          setMessagesIfActive(cached)
-          setIsLoadingIfActive(false) // Set loading to false immediately
-        }
       } catch (error) {
-        console.error('[MessagesProvider] Failed to load cached messages:', error)
+        console.error("[MessagesProvider] Failed to load cached messages:", error)
       }
       if (!isActive()) return
-      
-      // CRITICAL: Always fetch from database in parallel (even if we have cached)
-      // This ensures we get the latest data when navigating to existing chats
-      // CRITICAL: Wait longer for messages if we don't have any cached (might be streaming)
-      const shouldWaitForMessages = cached.length === 0 && sessionMessages.length === 0
-      const timeout = shouldWaitForMessages ? 10000 : 5000 // Wait 10s if no cached messages
-      
+
+      // Hydration order is deterministic to avoid blank overwrites:
+      // session-scoped snapshot -> indexed cache -> database refresh.
+      if (sessionMessages.length > 0) {
+        setMessagesIfActive(sessionMessages)
+        setIsLoadingIfActive(false)
+        cacheMessages(chatId, sessionMessages).catch((error) => {
+          console.error("[MessagesProvider] Failed to cache session messages:", error)
+        })
+      } else if (cached.length > 0) {
+        setMessagesIfActive(cached)
+        setIsLoadingIfActive(false)
+      }
+
       try {
         const fresh = await Promise.race([
           getMessagesFromDb(chatId),
-          new Promise<MessageAISDK[]>((resolve) => 
+          new Promise<MessageAISDK[]>((resolve) =>
             setTimeout(() => {
               resolve([])
-            }, timeout)
+            }, 8000)
           )
         ]).catch((error) => {
-          console.error('[MessagesProvider] Database fetch failed:', error)
-          return [] // Return empty array on error, will use cache
+          console.error("[MessagesProvider] Database fetch failed:", error)
+          return []
         })
         if (!isActive()) return
-        
-        // Priority: sessionStorage > fresh from DB > cached
-        if (sessionMessages.length > 0) {
-          setMessagesIfActive(sessionMessages)
-          setIsLoadingIfActive(false)
-          // Cache them for future use
-          cacheMessages(chatId, sessionMessages)
-        } else if (fresh.length > 0) {
-          // Fresh data from database - use it (even if we already showed cached)
+
+        if (fresh.length > 0) {
           setMessagesIfActive(fresh)
           setIsLoadingIfActive(false)
-          cacheMessages(chatId, fresh)
+          cacheMessages(chatId, fresh).catch((error) => {
+            console.error("[MessagesProvider] Failed to cache fresh messages:", error)
+          })
         } else if (cached.length > 0) {
-          // Fallback to cached messages (already shown above, but ensure state is set)
-          // Only update if we didn't already set it above (when sessionMessages was empty)
-          if (sessionMessages.length === 0) {
-            // Already set above, but ensure isLoading is false
-            setIsLoadingIfActive(false)
-          } else {
-            // We had sessionMessages but they're empty, use cached
-            setMessagesIfActive(cached)
-            setIsLoadingIfActive(false)
-          }
-          
-          // Try to refresh in background if we didn't get fresh data
-          if (fresh.length === 0) {
-            Promise.resolve().then(async () => {
-              try {
-                const refreshed = await getMessagesFromDb(chatId)
-                if (isActive() && refreshed.length > 0) {
-                  setMessagesIfActive(refreshed)
-                  cacheMessages(chatId, refreshed)
-                }
-              } catch (error) {
-                console.error('[MessagesProvider] Background refresh failed:', error)
-              }
-            })
-          }
+          setIsLoadingIfActive(false)
+        } else if (sessionMessages.length > 0) {
+          setIsLoadingIfActive(false)
         } else {
-          // No messages found - but if we're waiting for streaming, keep trying
-          if (shouldWaitForMessages) {
-            // Try one more time after a delay (messages might still be saving)
-            if (retryTimeoutRef.current) {
-              clearTimeout(retryTimeoutRef.current)
-            }
-            retryTimeoutRef.current = setTimeout(async () => {
-              try {
-                const retryMessages = await getMessagesFromDb(chatId)
-                if (!isActive()) return
-                if (retryMessages.length > 0) {
-                  setMessagesIfActive(retryMessages)
-                  cacheMessages(chatId, retryMessages)
-                  setIsLoadingIfActive(false)
-                  return
-                }
-              } catch (error) {
-                console.error('[MessagesProvider] Retry fetch failed:', error)
-              }
-              // Still no messages - empty chat
-              setMessagesIfActive([])
-              setIsLoadingIfActive(false)
-              retryTimeoutRef.current = null
-            }, 2000)
-          } else {
-            // No messages found anywhere - empty chat
-            setMessagesIfActive([])
-            setIsLoadingIfActive(false)
-          }
+          setMessagesIfActive([])
+          setIsLoadingIfActive(false)
         }
       } catch (error) {
         console.error("[MessagesProvider] Failed to load messages:", error)
         if (!isActive()) return
-        // On error, try to use cached or sessionStorage messages
         if (sessionMessages.length > 0) {
           setMessagesIfActive(sessionMessages)
-          cacheMessages(chatId, sessionMessages)
+          cacheMessages(chatId, sessionMessages).catch((cacheError) => {
+            console.error("[MessagesProvider] Failed to cache session fallback:", cacheError)
+          })
         } else if (cached.length > 0) {
           setMessagesIfActive(cached)
         } else {
@@ -263,10 +195,6 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     load()
     return () => {
       cancelled = true
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current)
-        retryTimeoutRef.current = null
-      }
     }
   }, [chatId]) // CRITICAL: Only depend on chatId - this ensures we reload when navigating to different chat
 

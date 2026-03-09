@@ -1,6 +1,7 @@
 "use client"
 
 import { useKeyShortcut } from "@/app/hooks/use-key-shortcut"
+import { resetChatClientState } from "@/lib/chat-store/new-chat"
 import {
   Tooltip,
   TooltipContent,
@@ -16,39 +17,13 @@ export function ButtonNewChat() {
   useKeyShortcut(
     (e) => (e.key === "u" || e.key === "U") && e.metaKey && e.shiftKey,
     () => {
-      // Clear any local state before navigating
-      if (typeof window !== 'undefined') {
-        // Clear any cached messages or drafts
-        localStorage.removeItem('chatDraft')
-        // Dispatch event to reset chat state
-        window.dispatchEvent(new CustomEvent('resetChatState'))
-      }
+      resetChatClientState(pathname)
       router.push("/")
     }
   )
 
   const handleNewChat = () => {
-    // Clear any local state before navigating
-    if (typeof window !== 'undefined') {
-      // Clear any cached messages or drafts
-      localStorage.removeItem('chatDraft')
-      
-      // CRITICAL: Clear all sessionStorage flags related to chats
-      const keys = Object.keys(sessionStorage)
-      keys.forEach(key => {
-        if (key.startsWith('hasSentMessage:') || key.startsWith('messages:')) {
-          sessionStorage.removeItem(key)
-        }
-      })
-      
-      // Clear any global chat creation state
-      if ((window as any).__lastMessagesForMigration) {
-        delete (window as any).__lastMessagesForMigration
-      }
-      
-      // Dispatch event to reset chat state
-      window.dispatchEvent(new CustomEvent('resetChatState'))
-    }
+    resetChatClientState(pathname)
     router.push("/")
   }
 

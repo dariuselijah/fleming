@@ -67,16 +67,19 @@ export async function getMessagesFromDb(
             }
           }
           const normalizedContent =
-            typeof message.content === "string"
+            typeof message.content === "string" &&
+            message.content.trim().length > 0 &&
+            !looksLikeCiphertext(message.content)
               ? message.content
-              : message.content == null
-                ? ""
-                : ""
+              : textFromParts(message.parts)
 
           // Extract evidence citations from parts if available
           const parts = ((message as any)?.parts as MessageAISDK["parts"]) || undefined
           let evidenceCitations: any[] | undefined = undefined
           let topicContext: any | undefined = undefined
+          let documentArtifacts: any[] | undefined = undefined
+          let quizArtifacts: any[] | undefined = undefined
+          let citationStyle: string | undefined = undefined
           
           if (parts && Array.isArray(parts)) {
             const metadataPart = parts.find((p: any) => p.type === "metadata" && (p as any).metadata)
@@ -93,6 +96,15 @@ export async function getMessagesFromDb(
             if (metadataPart && (metadataPart as any).metadata?.topicContext) {
               topicContext = (metadataPart as any).metadata.topicContext
             }
+            if (metadataPart && Array.isArray((metadataPart as any).metadata?.documentArtifacts)) {
+              documentArtifacts = (metadataPart as any).metadata.documentArtifacts
+            }
+            if (metadataPart && Array.isArray((metadataPart as any).metadata?.quizArtifacts)) {
+              quizArtifacts = (metadataPart as any).metadata.quizArtifacts
+            }
+            if (metadataPart && typeof (metadataPart as any).metadata?.citationStyle === "string") {
+              citationStyle = (metadataPart as any).metadata.citationStyle
+            }
           }
 
           const messageAny = message as any
@@ -108,6 +120,9 @@ export async function getMessagesFromDb(
             // Store evidence citations in a custom field for easy access
             evidenceCitations: evidenceCitations,
             topicContext,
+            documentArtifacts,
+            quizArtifacts,
+            citationStyle,
           } as MessageAISDK & { evidenceCitations?: any[] }
         })
       )
@@ -250,18 +265,6 @@ export async function saveMessageIncremental(
     return
   }
 
-  // CRITICAL: Check if message already exists to prevent duplicates
-  try {
-    const current = await getCachedMessages(chatId)
-    const messageExists = current.some(m => m.id === message.id)
-    if (messageExists) {
-      console.log('[saveMessageIncremental] Message already exists, skipping:', message.id)
-      return
-    }
-  } catch (error) {
-    console.error("[saveMessageIncremental] Failed to check cached messages:", error)
-  }
-
   // CRITICAL: Add evidence citations to message parts before saving
   const messageWithCitations = addEvidenceCitationsToMessage(message, evidenceCitations)
   if (evidenceCitations && evidenceCitations.length > 0) {
@@ -271,7 +274,33 @@ export async function saveMessageIncremental(
   // Save to IndexedDB immediately (fast)
   try {
     const current = await getCachedMessages(chatId)
-    const updated = [...current, messageWithCitations]
+    const existingIdx = current.findIndex((cached) => cached.id === messageWithCitations.id)
+    let updated = current
+
+    if (existingIdx >= 0) {
+      const existing = current[existingIdx]
+      const existingSnapshot = JSON.stringify({
+        content: existing.content,
+        parts: existing.parts,
+      })
+      const incomingSnapshot = JSON.stringify({
+        content: messageWithCitations.content,
+        parts: messageWithCitations.parts,
+      })
+
+      if (existingSnapshot === incomingSnapshot) {
+        return
+      }
+
+      updated = [...current]
+      updated[existingIdx] = {
+        ...existing,
+        ...messageWithCitations,
+      }
+    } else {
+      updated = [...current, messageWithCitations]
+    }
+
     await writeToIndexedDB("messages", { id: chatId, messages: updated })
   } catch (error) {
     console.error("[saveMessageIncremental] Failed to cache message:", error)

@@ -1,23 +1,14 @@
 import { toast } from "@/components/ui/toast"
 import type { EvidenceCitation, UploadVisualReference } from "@/lib/evidence/types"
-import * as fileType from "file-type"
+import {
+  CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES,
+  getChatAttachmentFileId,
+  getChatAttachmentSizeLimitLabel,
+} from "@/lib/chat-attachments/constants"
 import { DAILY_FILE_UPLOAD_LIMIT } from "./config"
 import { isSupabaseEnabled } from "./supabase/config"
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
-
-const ALLOWED_FILE_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "application/pdf",
-  "text/plain",
-  "text/markdown",
-  "application/json",
-  "text/csv",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-]
+const MAX_FILE_SIZE = CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES
 
 export type Attachment = {
   name: string
@@ -26,9 +17,13 @@ export type Attachment = {
   filePath?: string // Store file path for secure access
 }
 
+export type ProcessFilesResult = {
+  attachments: Attachment[]
+  failedFileIds: string[]
+}
+
 // CACHE for signed URLs to avoid regeneration
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>()
-const CACHE_DURATION = 3000000 // 50 minutes (signed URLs last 1 hour)
 
 export async function validateFile(
   file: File
@@ -36,7 +31,7 @@ export async function validateFile(
   if (file.size > MAX_FILE_SIZE) {
     return {
       isValid: false,
-      error: `File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`,
+      error: `File size exceeds ${getChatAttachmentSizeLimitLabel()} limit`,
     }
   }
 
@@ -174,8 +169,10 @@ export async function processFiles(
   chatId: string,
   userId: string,
   isAuthenticated: boolean = false
-): Promise<Attachment[]> {
-  if (files.length === 0) return []
+): Promise<ProcessFilesResult> {
+  if (files.length === 0) {
+    return { attachments: [], failedFileIds: [] }
+  }
 
   // Process all files in parallel instead of sequentially
   const processFilePromises = files.map(async (file) => {
@@ -243,6 +240,7 @@ export async function processFiles(
   
   // Filter out failed files and collect successful ones
   const attachments: Attachment[] = []
+  const failedFileIds: string[] = []
   const failedFiles: string[] = []
   
   results.forEach((result, index) => {
@@ -250,6 +248,7 @@ export async function processFiles(
       attachments.push(result.value)
     } else {
       failedFiles.push(files[index].name)
+      failedFileIds.push(getChatAttachmentFileId(files[index]))
     }
   })
 
@@ -274,7 +273,10 @@ export async function processFiles(
     }
   }
 
-  return attachments
+  return {
+    attachments,
+    failedFileIds,
+  }
 }
 
 // Function to load existing attachments with fresh signed URLs

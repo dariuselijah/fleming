@@ -15,6 +15,7 @@ type ConversationProps = {
   onEdit: (id: string, newText: string) => void
   onReload: () => void
   evidenceCitations?: any[]
+  streamIntroPreview?: string | null
 }
 
 export function Conversation({
@@ -24,6 +25,7 @@ export function Conversation({
   onEdit,
   onReload,
   evidenceCitations = [],
+  streamIntroPreview = null,
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
 
@@ -86,6 +88,11 @@ export function Conversation({
           status={status}
           evidenceCitations={messageEvidenceCitations}
           contextPrompt={previousUserMessage?.content}
+          streamIntroPreview={
+            message.role === "assistant" && isLast && status === "streaming"
+              ? streamIntroPreview
+              : undefined
+          }
         >
           {message.content}
         </Message>
@@ -123,7 +130,13 @@ export function Conversation({
             hasMessages &&
             messages[messages.length - 1].role === "user" && (
               <div className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
-                <ProcessingLoader />
+                {streamIntroPreview ? (
+                  <div className="text-muted-foreground text-sm leading-6">
+                    {streamIntroPreview}
+                  </div>
+                ) : (
+                  <ProcessingLoader />
+                )}
               </div>
             )}
           <div className="absolute bottom-0 flex w-full max-w-3xl flex-1 items-end justify-end gap-4 px-6 pb-2">

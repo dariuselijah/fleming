@@ -51,38 +51,32 @@ export function ProModelDialog({
 
   const renderContent = () => (
     <div className="flex max-h-[70vh] flex-col" key={currentModel}>
-      <div className="relative">
+      <div className="relative overflow-hidden">
         <Image
           src="/banner_ocean.jpg"
-          alt={`calm paint generate by ${APP_NAME}`}
+          alt={`${APP_NAME} model availability`}
           width={400}
           height={128}
           className="h-32 w-full object-cover"
         />
+        <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/20 to-transparent" />
+        <Badge className="absolute top-3 left-3 border border-white/30 bg-black/30 text-white backdrop-blur">
+          Locked for now
+        </Badge>
       </div>
 
-      <div className="px-6 pt-4 text-center text-lg leading-tight font-medium">
-        This model is locked
+      <div className="px-6 pt-4 text-center text-xl leading-tight font-semibold tracking-tight">
+        These models are locked for now
       </div>
 
       <div className="flex-grow overflow-y-auto">
         <div className="px-6 py-4">
-          <p className="text-muted-foreground">
-            To use it, connect your own API key. Fleming supports BYOK via{" "}
-            <span className="text-primary inline-flex font-medium">
-              OpenRouter
-            </span>
-            .
+          <p className="text-muted-foreground text-center leading-relaxed">
+            <span className="text-foreground font-medium">{currentModel}</span> is
+            temporarily unavailable in your workspace.
           </p>
-          <p className="text-muted-foreground mt-1">
-            Go to{" "}
-            <span className="text-primary inline-flex font-medium">
-              Settings → API Keys
-            </span>{" "}
-            to add your key securely.
-          </p>
-          <p className="text-muted-foreground mt-5">
-            We don&apos;t support this model yet?
+          <p className="text-muted-foreground mt-2 text-center leading-relaxed">
+            They should be available soon.
           </p>
           {mutation.isSuccess ? (
             <div className="mt-5 flex justify-center gap-3">
@@ -93,12 +87,12 @@ export function ProModelDialog({
           ) : (
             <div className="mt-5 flex justify-center gap-3">
               <Button
-                className="w-full"
+                className="w-full rounded-full"
                 onClick={() => mutation.mutate()}
                 size="sm"
                 disabled={mutation.isPending}
               >
-                {mutation.isPending ? "Sending..." : "Ask for access"}
+                {mutation.isPending ? "Sending..." : "Notify me when available"}
               </Button>
             </div>
           )}

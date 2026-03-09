@@ -10,16 +10,24 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { X } from "@phosphor-icons/react"
+import type { FileUploadStatus } from "@/app/components/chat/use-file-upload"
+import { CheckCircle, SpinnerGap, WarningCircle, X } from "@phosphor-icons/react"
 import Image from "next/image"
 import { useState, useEffect } from "react"
 
 type FileItemProps = {
   file: File
+  status?: FileUploadStatus
   onRemove: (file: File) => void
 }
 
-export function FileItem({ file, onRemove }: FileItemProps) {
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function FileItem({ file, status, onRemove }: FileItemProps) {
   const [isRemoving, setIsRemoving] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
@@ -53,6 +61,38 @@ export function FileItem({ file, onRemove }: FileItemProps) {
     onRemove(file)
   }
 
+  const statusChip =
+    status?.state === "validating" ? (
+      <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+        <SpinnerGap className="size-2.5 animate-spin" />
+        Validating
+      </span>
+    ) : status?.state === "uploading" ? (
+      <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-700 dark:text-blue-300">
+        <SpinnerGap className="size-2.5 animate-spin" />
+        Uploading
+      </span>
+    ) : status?.state === "ready" ? (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">
+        <CheckCircle className="size-2.5" weight="fill" />
+        Ready
+      </span>
+    ) : status?.state === "failed" ? (
+      <span className="inline-flex items-center gap-1 rounded-full border border-red-500/20 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-700 dark:text-red-300">
+        <WarningCircle className="size-2.5" weight="fill" />
+        Failed
+      </span>
+    ) : null
+
+  const statusContainerClasses =
+    status?.state === "failed"
+      ? "border-red-500/35 bg-red-500/5"
+      : status?.state === "uploading" || status?.state === "validating"
+        ? "border-blue-500/30 bg-blue-500/5"
+        : status?.state === "ready"
+          ? "border-emerald-500/30 bg-emerald-500/5"
+          : "border-input"
+
   return (
     <div className="relative mr-2 mb-0 flex items-center">
       <HoverCard
@@ -60,7 +100,9 @@ export function FileItem({ file, onRemove }: FileItemProps) {
         onOpenChange={setIsOpen}
       >
         <HoverCardTrigger className="w-full">
-          <div className="bg-background hover:bg-accent border-input flex w-full items-center gap-3 rounded-2xl border p-2 pr-3 transition-colors">
+          <div
+            className={`bg-background hover:bg-accent flex w-full items-center gap-3 rounded-2xl border p-2 pr-3 transition-colors ${statusContainerClasses}`}
+          >
             <div className="bg-accent-foreground flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-md">
               {imageUrl ? (
                 <Image
@@ -79,9 +121,15 @@ export function FileItem({ file, onRemove }: FileItemProps) {
             </div>
             <div className="flex flex-col overflow-hidden">
               <span className="truncate text-xs font-medium">{file.name}</span>
-              <span className="text-xs text-gray-500">
-                {(file.size / 1024).toFixed(2)}kB
-              </span>
+              <div className="mt-0.5 flex items-center gap-1.5">
+                <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
+                {statusChip}
+              </div>
+              {status?.state === "failed" && status.message ? (
+                <span className="mt-1 line-clamp-1 text-[10px] text-red-600 dark:text-red-300">
+                  {status.message}
+                </span>
+              ) : null}
             </div>
           </div>
         </HoverCardTrigger>

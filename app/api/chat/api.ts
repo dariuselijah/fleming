@@ -126,7 +126,9 @@ export async function logUserMessage({
       console.error("Error checking for existing user message:", checkError)
       // Continue anyway - better to have duplicate than lose message
     } else if (existingMessages && existingMessages.length > 0) {
-      console.log("User message already exists for message_group_id:", message_group_id, "- skipping save")
+      console.warn(
+        `[logUserMessage] Skipping duplicate user message save (chatId=${chatId}, userId=${userId}, message_group_id=${message_group_id})`
+      )
       return
     }
   }
@@ -167,6 +169,7 @@ export async function storeAssistantMessage({
   model,
   evidenceCitations,
   topicContext,
+  allowMultipleArtifacts,
 }: StoreAssistantMessageParams & { evidenceCitations?: any[] }): Promise<void> {
   if (!supabase) return
   const ownsChat = await assertChatWriteOwnership(supabase, chatId, userId)
@@ -181,7 +184,8 @@ export async function storeAssistantMessage({
       message_group_id,
       model,
       evidenceCitations,
-      topicContext
+      topicContext,
+      allowMultipleArtifacts
     )
   } catch (err) {
     console.error("Failed to save assistant messages:", err)

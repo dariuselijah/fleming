@@ -19,6 +19,7 @@ interface ToolInvocationProps {
   toolInvocations: ToolInvocationUIPart[]
   className?: string
   defaultOpen?: boolean
+  inline?: boolean
 }
 
 type YouTubeToolResultItem = {
@@ -30,6 +31,269 @@ type YouTubeToolResultItem = {
   thumbnailUrl?: string | null
 }
 
+type DocumentArtifactSection = {
+  heading: string
+  content: string
+}
+
+type DocumentArtifactResult = {
+  artifactType: "document"
+  artifactId: string
+  title: string
+  query: string
+  citationStyle: "harvard" | "apa" | "vancouver"
+  includeReferences?: boolean
+  markdown: string
+  sections: DocumentArtifactSection[]
+  bibliography: Array<{ index: number; entry: string }>
+  citations: Array<{ index: number; title?: string; url?: string | null }>
+  warnings: string[]
+  uploadTitle?: string | null
+  generatedAt: string
+}
+
+type QuizArtifactQuestion = {
+  id: string
+  prompt: string
+  options: string[]
+  correctOptionIndex: number
+  explanation: string
+  citationIndices: number[]
+}
+
+type QuizArtifactResult = {
+  artifactType: "quiz"
+  artifactId: string
+  title: string
+  query: string
+  questions: QuizArtifactQuestion[]
+  citations: Array<{ index: number; title?: string; url?: string | null }>
+  warnings: string[]
+  uploadTitle?: string | null
+  generatedAt: string
+}
+
+function isDocumentArtifactResult(value: unknown): value is DocumentArtifactResult {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as DocumentArtifactResult).artifactType === "document" &&
+      typeof (value as DocumentArtifactResult).title === "string" &&
+      Array.isArray((value as DocumentArtifactResult).sections)
+  )
+}
+
+function isQuizArtifactResult(value: unknown): value is QuizArtifactResult {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as QuizArtifactResult).artifactType === "quiz" &&
+      typeof (value as QuizArtifactResult).title === "string" &&
+      Array.isArray((value as QuizArtifactResult).questions)
+  )
+}
+
+function parseFilenameFromDisposition(value: string | null): string | null {
+  if (!value) return null
+  const match = value.match(/filename="?([^"]+)"?/i)
+  return match?.[1] || null
+}
+
+function DocumentArtifactCard({ artifact }: { artifact: DocumentArtifactResult }) {
+  const [isExporting, setIsExporting] = useState<"pdf" | "docx" | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  const handleExport = async (format: "pdf" | "docx") => {
+    setIsExporting(format)
+    setExportError(null)
+    try {
+      const response = await fetch("/api/documents/export", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          format,
+          artifact,
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        throw new Error(payload?.error || "Failed to export artifact")
+      }
+
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const fallbackName = `${artifact.title || "document-artifact"}.${format}`
+      const filename =
+        parseFilenameFromDisposition(response.headers.get("Content-Disposition")) ||
+        fallbackName
+      link.href = blobUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(blobUrl)
+    } catch (error) {
+      setExportError(
+        error instanceof Error ? error.message : "Failed to export artifact"
+      )
+    } finally {
+      setIsExporting(null)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-border/80 bg-muted/20 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold">{artifact.title}</p>
+            <p className="text-muted-foreground text-xs">
+              {artifact.uploadTitle ? `${artifact.uploadTitle} • ` : ""}
+              {artifact.includeReferences
+                ? `Style: ${artifact.citationStyle.toUpperCase()}`
+                : "Reference style: not forced"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleExport("pdf")}
+              disabled={Boolean(isExporting)}
+              className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
+            >
+              {isExporting === "pdf" ? "Exporting..." : "Export PDF"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport("docx")}
+              disabled={Boolean(isExporting)}
+              className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
+            >
+              {isExporting === "docx" ? "Exporting..." : "Export DOCX"}
+            </button>
+          </div>
+        </div>
+        <div className="mt-3 space-y-2">
+          {artifact.sections.slice(0, 3).map((section) => (
+            <div key={section.heading}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {section.heading}
+              </p>
+              <p className="line-clamp-3 whitespace-pre-wrap text-sm">
+                {section.content}
+              </p>
+            </div>
+          ))}
+        </div>
+        {exportError ? (
+          <p className="mt-2 text-xs text-red-500">{exportError}</p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function QuizArtifactCard({ artifact }: { artifact: QuizArtifactResult }) {
+  const [answers, setAnswers] = useState<Record<string, number>>({})
+  const [submitted, setSubmitted] = useState(false)
+
+  const total = artifact.questions.length
+  const score = artifact.questions.reduce((acc, question) => {
+    if (answers[question.id] === question.correctOptionIndex) {
+      return acc + 1
+    }
+    return acc
+  }, 0)
+
+  return (
+    <div className="space-y-3 rounded-md border border-border/80 bg-muted/20 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">{artifact.title}</p>
+          <p className="text-muted-foreground text-xs">
+            {total} questions • interactive MCQ
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setAnswers({})
+            setSubmitted(false)
+          }}
+          className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-accent"
+        >
+          Reset
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {artifact.questions.map((question, idx) => (
+          <div key={question.id} className="rounded-md border border-border bg-background p-2.5">
+            <p className="text-sm font-medium">
+              {idx + 1}. {question.prompt}
+            </p>
+            <div className="mt-2 space-y-1.5">
+              {question.options.map((option, optionIndex) => {
+                const selected = answers[question.id] === optionIndex
+                const isCorrect = question.correctOptionIndex === optionIndex
+                const revealCorrect = submitted && isCorrect
+                const revealWrong = submitted && selected && !isCorrect
+                return (
+                  <button
+                    key={`${question.id}-${optionIndex}`}
+                    type="button"
+                    onClick={() =>
+                      setAnswers((prev) => ({
+                        ...prev,
+                        [question.id]: optionIndex,
+                      }))
+                    }
+                    className={cn(
+                      "w-full rounded-md border px-2 py-1.5 text-left text-sm transition",
+                      selected ? "border-primary/60 bg-primary/10" : "border-border hover:bg-accent/40",
+                      revealCorrect && "border-green-500/50 bg-green-500/10",
+                      revealWrong && "border-red-500/40 bg-red-500/10"
+                    )}
+                  >
+                    {option}
+                  </button>
+                )
+              })}
+            </div>
+            {submitted ? (
+              <p className="mt-2 text-xs text-muted-foreground">{question.explanation}</p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setSubmitted(true)}
+          disabled={Object.keys(answers).length < total}
+          className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
+        >
+          Submit Quiz
+        </button>
+        {submitted ? (
+          <p className="text-xs font-medium">
+            Score: {score}/{total}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Answer all questions to score
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const TRANSITION = {
   type: "spring",
   duration: 0.2,
@@ -38,13 +302,32 @@ const TRANSITION = {
 
 export function ToolInvocation({
   toolInvocations,
+  className,
   defaultOpen = false,
+  inline = false,
 }: ToolInvocationProps) {
   const [isExpanded, setIsExpanded] = useState(defaultOpen)
 
   const toolInvocationsData = Array.isArray(toolInvocations)
     ? toolInvocations
     : [toolInvocations]
+
+  if (inline) {
+    return (
+      <div className={cn("mb-2", className)}>
+        <div className="space-y-2">
+          {toolInvocationsData.map((invocation, index) => (
+            <SingleToolCard
+              key={`${invocation.toolInvocation.toolCallId}-${index}-${invocation.toolInvocation.state}`}
+              toolData={invocation}
+              defaultOpen={defaultOpen}
+              compact
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   // Group tool invocations by toolCallId
   const groupedTools = toolInvocationsData.reduce(
@@ -211,10 +494,12 @@ function SingleToolCard({
   toolData,
   defaultOpen = false,
   className,
+  compact = false,
 }: {
   toolData: ToolInvocationUIPart
   defaultOpen?: boolean
   className?: string
+  compact?: boolean
 }) {
   const [isExpanded, setIsExpanded] = useState(defaultOpen)
   const { toolInvocation } = toolData
@@ -280,6 +565,13 @@ function SingleToolCard({
   // Render generic results based on their structure
   const renderResults = () => {
     if (!parsedResult) return "No result data available"
+
+    if (isDocumentArtifactResult(parsedResult)) {
+      return <DocumentArtifactCard artifact={parsedResult} />
+    }
+    if (isQuizArtifactResult(parsedResult)) {
+      return <QuizArtifactCard artifact={parsedResult} />
+    }
 
     const renderYouTubeResultItems = (items: YouTubeToolResultItem[]) => (
       <div className="space-y-2">
@@ -453,6 +745,7 @@ function SingleToolCard({
     <div
       className={cn(
         "border-border flex flex-col gap-0 overflow-hidden rounded-md border",
+        compact && "rounded-sm",
         className
       )}
     >

@@ -7,6 +7,18 @@ import {
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 
+const ALWAYS_UNLOCKED_PROVIDERS = new Set(["openai", "xai"])
+
+function withUnlockedOpenAIAndXAI<T extends { providerId?: string; accessible?: boolean }>(
+  models: T[]
+): T[] {
+  return models.map((model) => ({
+    ...model,
+    accessible:
+      model.accessible || ALWAYS_UNLOCKED_PROVIDERS.has(model.providerId || ""),
+  }))
+}
+
 export async function GET() {
   try {
     const supabase = await createClient()
@@ -28,7 +40,7 @@ export async function GET() {
     const { data: authData } = await supabase.auth.getUser()
 
     if (!authData?.user?.id) {
-      const models = await getModelsWithAccessFlags()
+      const models = withUnlockedOpenAIAndXAI(await getModelsWithAccessFlags())
       return new Response(JSON.stringify({ models }), {
         status: 200,
         headers: {
@@ -44,7 +56,7 @@ export async function GET() {
 
     if (error) {
       console.error("Error fetching user keys:", error)
-      const models = await getModelsWithAccessFlags()
+      const models = withUnlockedOpenAIAndXAI(await getModelsWithAccessFlags())
       return new Response(JSON.stringify({ models }), {
         status: 200,
         headers: {
@@ -69,7 +81,9 @@ export async function GET() {
         accessible: model.accessible || userProviderModelIds.has(model.id)
       }))
       
-      return new Response(JSON.stringify({ models }), {
+      return new Response(
+        JSON.stringify({ models: withUnlockedOpenAIAndXAI(models) }),
+        {
         status: 200,
         headers: {
           "Content-Type": "application/json",
@@ -78,7 +92,9 @@ export async function GET() {
     }
 
     // If no user keys, return all models with access flags
-    return new Response(JSON.stringify({ models: allModels }), {
+    return new Response(
+      JSON.stringify({ models: withUnlockedOpenAIAndXAI(allModels) }),
+      {
       status: 200,
       headers: {
         "Content-Type": "application/json",

@@ -12,6 +12,7 @@ import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
 import { normalizeMedicalStudentLearningMode } from "@/lib/medical-student-learning"
+import type { CitationStyle } from "@/lib/citations/formatters"
 import {
   normalizeClinicianWorkflowMode,
   type ClinicianWorkflowMode,
@@ -23,7 +24,6 @@ import {
 import { toast } from "@/components/ui/toast"
 import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
-import { redirect } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
@@ -61,7 +61,11 @@ export function Chat() {
     [chatId, getChatById]
   )
 
-  const { messages: initialMessages, cacheAndAddMessage } = useMessages()
+  const {
+    messages: initialMessages,
+    isLoading: isMessagesLoading,
+    cacheAndAddMessage,
+  } = useMessages()
   const { user } = useUser()
   const { preferences } = useUserPreferences()
   const { draftValue, clearDraft } = useChatDraft(chatId)
@@ -77,18 +81,22 @@ export function Chat() {
     enableEvidence: boolean
     learningMode: "ask" | "simulate" | "guideline"
     clinicianMode: ClinicianWorkflowMode
+    artifactIntent?: "none" | "document" | "quiz"
+    citationStyle?: CitationStyle
   } | null>(null)
 
   // File upload functionality
   const {
     files,
     setFiles,
+    fileUploadSummary,
     handleFileUploads,
     createOptimisticAttachments,
     cleanupOptimisticAttachments,
     convertBlobUrlsToDataUrls,
     handleFileUpload,
     handleFileRemove,
+    getFileStatus,
   } = useFileUpload()
 
   // Model selection
@@ -106,42 +114,15 @@ export function Chat() {
   const [rateLimitType, setRateLimitType] = useState<"hourly" | "daily">("hourly")
   const [showOnboardingDialog, setShowOnboardingDialog] = useState(false)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
-  const onboardingShownRef = useRef(false)
-  const lastUserIdRef = useRef<string | undefined>(user?.id)
   
-  // Reset onboarding shown ref when user changes
+  // Show onboarding only when it has not been completed yet.
   useEffect(() => {
-    if (lastUserIdRef.current !== user?.id) {
-      onboardingShownRef.current = false
-      lastUserIdRef.current = user?.id
-    }
-  }, [user?.id])
-  
-  // Check if onboarding dialog should be shown (only once per user)
-  useEffect(() => {
-    // If already completed, don't show
-    if (preferences?.onboardingCompleted) {
-      setShowOnboardingDialog(false)
-      onboardingShownRef.current = true // Mark as shown to prevent future attempts
+    if (!preferences) {
       return
     }
-    
-    // If already shown in this session for this user, don't show again
-    if (onboardingShownRef.current) {
-      return
-    }
-    
-    // Show only if authenticated, preferences are loaded, and not completed
-    if (isAuthenticated && preferences && !preferences.onboardingCompleted) {
-      // Mark as shown to prevent showing again
-      onboardingShownRef.current = true
-      // Small delay to ensure UI is ready
-      const timer = setTimeout(() => {
-        setShowOnboardingDialog(true)
-      }, 500)
-      return () => clearTimeout(timer)
-    }
-  }, [isAuthenticated, preferences])
+
+    setShowOnboardingDialog(!preferences.onboardingCompleted)
+  }, [preferences])
   const systemPrompt = useMemo(
     () => getSystemPromptByRole(preferences?.userRole || "general", user?.system_prompt || undefined),
     [user?.system_prompt, preferences?.userRole]
@@ -171,6 +152,7 @@ export function Chat() {
     input,
     status,
     stop,
+    streamIntroPreview,
     hasSentFirstMessageRef,
     isSubmitting,
     enableSearch,
@@ -181,6 +163,10 @@ export function Chat() {
     setLearningMode,
     clinicianMode,
     setClinicianMode,
+    artifactIntent,
+    citationStyle,
+    setArtifactIntent,
+    setCitationStyle,
     evidenceCitations,
     submit,
     handleSuggestion,
@@ -232,6 +218,16 @@ export function Chat() {
         clinicianMode: normalizeClinicianWorkflowMode(
           pendingMessage.clinicianMode
         ),
+        artifactIntent:
+          pendingMessage.artifactIntent === "document" ||
+          pendingMessage.artifactIntent === "quiz"
+            ? pendingMessage.artifactIntent
+            : "none",
+        citationStyle:
+          pendingMessage.citationStyle === "apa" ||
+          pendingMessage.citationStyle === "vancouver"
+            ? pendingMessage.citationStyle
+            : "harvard",
       }
       
       // Set input from pending message
@@ -253,6 +249,16 @@ export function Chat() {
         setClinicianMode(
           normalizeClinicianWorkflowMode(pendingMessage.clinicianMode)
         )
+      }
+      if (pendingMessage.artifactIntent === "document" || pendingMessage.artifactIntent === "quiz") {
+        setArtifactIntent(pendingMessage.artifactIntent)
+      }
+      if (
+        pendingMessage.citationStyle === "harvard" ||
+        pendingMessage.citationStyle === "apa" ||
+        pendingMessage.citationStyle === "vancouver"
+      ) {
+        setCitationStyle(pendingMessage.citationStyle)
       }
       
       // Show notification if files were attached but can't be restored
@@ -289,6 +295,8 @@ export function Chat() {
     setEnableEvidence,
     setLearningMode,
     setClinicianMode,
+    setArtifactIntent,
+    setCitationStyle,
     setHasDialogAuth,
     selectedModel,
     enableSearch,
@@ -368,8 +376,9 @@ export function Chat() {
       onEdit: handleEdit,
       onReload: handleReload,
       evidenceCitations,
+      streamIntroPreview,
     }),
-    [messages, status, handleDelete, handleEdit, handleReload, evidenceCitations]
+    [messages, status, handleDelete, handleEdit, handleReload, evidenceCitations, streamIntroPreview]
   )
 
   // Memoize the chat input props
@@ -389,6 +398,8 @@ export function Chat() {
         onSend: submit,
         isSubmitting,
         files,
+        fileUploadSummary,
+        getFileStatus,
         onFileUpload: handleFileUpload,
         onFileRemove: handleFileRemove,
         hasSuggestions,
@@ -406,6 +417,10 @@ export function Chat() {
         onLearningModeChange: setLearningMode,
         clinicianMode,
         onClinicianModeChange: setClinicianMode,
+        artifactIntent,
+        citationStyle,
+        onArtifactIntentChange: setArtifactIntent,
+        onCitationStyleChange: setCitationStyle,
       }
     },
     [
@@ -415,6 +430,8 @@ export function Chat() {
       submit,
       isSubmitting,
       files,
+      fileUploadSummary,
+      getFileStatus,
       handleFileUpload,
       handleFileRemove,
       preferences.promptSuggestions,
@@ -434,12 +451,14 @@ export function Chat() {
       setLearningMode,
       clinicianMode,
       setClinicianMode,
+      artifactIntent,
+      citationStyle,
+      setArtifactIntent,
+      setCitationStyle,
     ]
   )
 
-  // Handle redirect for invalid chatId - only redirect if we're certain the chat doesn't exist
-  // and we're not in a transient state during chat creation
-  // Track when we should prevent redirect due to recent chat creation
+  // Track when we should prevent transient route changes due to recent chat creation
   const preventRedirectRef = useRef(false)
   const [chatIdChangedTime, setChatIdChangedTime] = useState<number | null>(null)
   
@@ -481,40 +500,8 @@ export function Chat() {
     )
   }, [chatId])
   
-  // Only redirect in very specific circumstances - avoid redirecting after sending a message or recent navigation
-  const shouldRedirect = 
-    chatId &&
-    !isChatsLoading &&
-    !currentChat &&
-    !isSubmitting &&
-    status === "ready" &&
-    !hasMessages &&
-    !hasSentFirstMessageRef?.current &&
-    !hasSentMessageInStorage &&
-    !isTemporaryChat &&
-    !isStreaming &&
-    !preventRedirectRef.current &&
-    !recentlyNavigated && // CRITICAL: Don't redirect if we just navigated to this chat
-    !hasMigratedMessages // CRITICAL: Don't redirect if messages are being migrated
-  
-  if (shouldRedirect) {
-    console.log("[REDIRECT] Redirecting because:", {
-      chatId,
-      isChatsLoading,
-      currentChat: !!currentChat,
-      isSubmitting,
-      status,
-      hasMessages,
-      hasSentFirstMessage: hasSentFirstMessageRef?.current,
-      hasSentMessageInStorage,
-      isTemporaryChat,
-      isStreaming,
-      recentlyNavigated,
-      hasMigratedMessages,
-      timeSinceChatIdChange: timeSinceChatIdChange.toFixed(0) + 'ms'
-    })
-    return redirect("/")
-  }
+  // IMPORTANT: do not auto-redirect from an existing chat route.
+  // Older chats may not be present in the in-memory chat list yet while message hydration is in-flight.
 
   // CRITICAL: Prevent hydration mismatch
   // Server always renders with messages.length === 0 (no sessionStorage access)
@@ -591,8 +578,6 @@ export function Chat() {
         open={showOnboardingDialog} 
         onComplete={() => {
           setShowOnboardingDialog(false)
-          // Mark as shown to prevent showing again
-          onboardingShownRef.current = true
         }}
       />
 

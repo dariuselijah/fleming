@@ -43,6 +43,11 @@ export type UserPreferences = {
   allergies?: string[]
   familyHistory?: string
   lifestyleFactors?: string
+
+  // Role profile details for onboarding
+  studentSchool?: string
+  studentYear?: string
+  clinicianName?: string
   
   // Onboarding
   onboardingCompleted?: boolean
@@ -71,6 +76,9 @@ export const defaultPreferences: UserPreferences = {
   allergies: [],
   familyHistory: "",
   lifestyleFactors: "",
+  studentSchool: "",
+  studentYear: "",
+  clinicianName: "",
   
   // Onboarding
   onboardingCompleted: false,
@@ -102,6 +110,9 @@ export function convertFromApiFormat(apiData: any): UserPreferences {
     allergies: apiData.allergies || [],
     familyHistory: apiData.family_history || "",
     lifestyleFactors: apiData.lifestyle_factors || "",
+    studentSchool: apiData.student_school || "",
+    studentYear: apiData.student_year || "",
+    clinicianName: apiData.clinician_name || "",
     
     // Onboarding
     onboardingCompleted: apiData.onboarding_completed ?? false,
@@ -151,6 +162,12 @@ export function convertToApiFormat(preferences: Partial<UserPreferences>) {
     apiData.family_history = preferences.familyHistory
   if (preferences.lifestyleFactors !== undefined)
     apiData.lifestyle_factors = preferences.lifestyleFactors
+  if (preferences.studentSchool !== undefined)
+    apiData.student_school = preferences.studentSchool
+  if (preferences.studentYear !== undefined)
+    apiData.student_year = preferences.studentYear
+  if (preferences.clinicianName !== undefined)
+    apiData.clinician_name = preferences.clinicianName
   if (preferences.onboardingCompleted !== undefined)
     apiData.onboarding_completed = preferences.onboardingCompleted
   

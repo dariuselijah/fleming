@@ -17,6 +17,15 @@ interface CitationMarkdownProps {
   evidenceCitations?: EvidenceCitation[]
 }
 
+function stripInternalCitationTokens(value: string): string {
+  if (!value) return value
+  return value
+    .replace(/\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/gi, "")
+    .replace(/\[tool\s+[^\]]+\]/gi, "")
+    .replace(/\[source\s+[^\]]+\]/gi, "")
+    .replace(/\[doc\s+[^\]]+\]/gi, "")
+}
+
 function resolveNamedMarkerIndices(
   markerText: string,
   citations: Map<number, CitationData>
@@ -178,8 +187,7 @@ export function CitationMarkdown({
 }: CitationMarkdownProps) {
   const sanitizedChildren = useMemo(
     () =>
-      String(children || "")
-        .replace(/\[CITE_PLACEHOLDER_\d+\]/g, "")
+      stripInternalCitationTokens(String(children || ""))
         .replace(/\n{3,}/g, "\n\n"),
     [children]
   )
@@ -424,20 +432,21 @@ function processText(
   markerMap: Map<string, ReturnType<typeof parseCitationMarkers>[0]>,
   evidenceCitationMap: Map<number, EvidenceCitation> | null
 ): React.ReactNode {
+  const sanitizedText = stripInternalCitationTokens(text)
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   // Match the placeholder format [CITE_PLACEHOLDER_0]
   const placeholderRegex = /\[CITE_PLACEHOLDER_(\d+)\]/g
   let match: RegExpExecArray | null
   
-  while ((match = placeholderRegex.exec(text)) !== null) {
+  while ((match = placeholderRegex.exec(sanitizedText)) !== null) {
     // Capture match values before callbacks
     const matchIndex = match.index
     const matchLength = match[0].length
     
     // Add text before placeholder
     if (matchIndex > lastIndex) {
-      parts.push(text.substring(lastIndex, matchIndex))
+      parts.push(sanitizedText.substring(lastIndex, matchIndex))
     }
     
     // Add citation component
@@ -571,17 +580,9 @@ function processText(
             parts.push(journalTags[0])
           }
         } else {
-          // If no citations found, show a fallback pill with just the numbers
-          // This ensures citations always render, even if data isn't loaded yet
-          const indices = marker.indices.join(',')
-          parts.push(
-            <span
-              key={`fallback-citation-${matchIndex}`}
-              className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-300 dark:border-green-700 inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-all relative z-10 shadow-sm hover:bg-green-200 dark:hover:bg-green-900/50"
-            >
-              [{indices}]
-            </span>
-          )
+          // Safety-first: keep unresolved marker as plain text instead of
+          // rendering a citation pill that could imply incorrect mapping.
+          parts.push(marker.fullMatch)
         }
       }
     } else {
@@ -593,9 +594,9 @@ function processText(
   }
   
   // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex))
+  if (lastIndex < sanitizedText.length) {
+    parts.push(sanitizedText.substring(lastIndex))
   }
   
-  return parts.length > 0 ? parts : text
+  return parts.length > 0 ? parts : sanitizedText
 }

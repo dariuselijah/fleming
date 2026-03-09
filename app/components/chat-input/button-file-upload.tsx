@@ -17,6 +17,7 @@ import {
 import { getModelInfo } from "@/lib/models"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { cn } from "@/lib/utils"
+import { getChatAttachmentSizeLimitLabel } from "@/lib/chat-attachments/constants"
 import { FileArrowUp, Paperclip } from "@phosphor-icons/react"
 import React from "react"
 import { PopoverContentAuth } from "./popover-content-auth"
@@ -124,7 +125,7 @@ export function ButtonFileUpload({
           <FileArrowUp className="text-muted-foreground size-8" />
           <span className="mt-4 mb-1 text-lg font-medium">Drop files here</span>
           <span className="text-muted-foreground text-sm">
-            Drop images or documents here to add them to the conversation
+            Drop images or documents here (up to {getChatAttachmentSizeLimitLabel()} each)
           </span>
         </div>
       </FileUploadContent>

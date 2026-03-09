@@ -19,6 +19,7 @@ type MessageProps = {
   className?: string
   evidenceCitations?: any[]
   contextPrompt?: string
+  streamIntroPreview?: string | null
 }
 
 export function Message({
@@ -36,6 +37,7 @@ export function Message({
   className,
   evidenceCitations = [],
   contextPrompt,
+  streamIntroPreview,
 }: MessageProps) {
   const [copied, setCopied] = useState(false)
   const clipboardText = useMemo(() => {
@@ -87,6 +89,7 @@ export function Message({
           className={className}
           evidenceCitations={evidenceCitations}
           contextPrompt={contextPrompt}
+          streamIntroPreview={streamIntroPreview}
         >
           {children}
         </MessageAssistant>

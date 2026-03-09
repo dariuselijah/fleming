@@ -720,6 +720,9 @@ export type Database = {
           allergies: string[] | null
           family_history: string | null
           lifestyle_factors: string | null
+          student_school: string | null
+          student_year: string | null
+          clinician_name: string | null
           onboarding_completed: boolean | null
           created_at: string | null
           updated_at: string | null
@@ -743,6 +746,9 @@ export type Database = {
           allergies?: string[] | null
           family_history?: string | null
           lifestyle_factors?: string | null
+          student_school?: string | null
+          student_year?: string | null
+          clinician_name?: string | null
           onboarding_completed?: boolean | null
           created_at?: string | null
           updated_at?: string | null
@@ -766,6 +772,9 @@ export type Database = {
           allergies?: string[] | null
           family_history?: string | null
           lifestyle_factors?: string | null
+          student_school?: string | null
+          student_year?: string | null
+          clinician_name?: string | null
           onboarding_completed?: boolean | null
           created_at?: string | null
           updated_at?: string | null

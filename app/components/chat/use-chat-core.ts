@@ -14,6 +14,7 @@ import {
   normalizeClinicianWorkflowMode,
   type ClinicianWorkflowMode,
 } from "@/lib/clinician-mode"
+import { normalizeCitationStyle, type CitationStyle } from "@/lib/citations/formatters"
 import { resolveScopedSessionMessages } from "@/lib/chat-store/messages/session-restore"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import type { UserProfile } from "@/lib/user/types"
@@ -21,6 +22,56 @@ import type { Message } from "@ai-sdk/react"
 import { useChat } from "@ai-sdk/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
+
+const SESSION_SNAPSHOT_MAX_MESSAGES = 30
+const SESSION_SNAPSHOT_MAX_CONTENT_CHARS = 6000
+const SESSION_SNAPSHOT_FALLBACK_MAX_MESSAGES = 12
+const SESSION_SNAPSHOT_FALLBACK_MAX_CONTENT_CHARS = 1800
+const SESSION_SNAPSHOT_LATEST_MAX_MESSAGES = 8
+
+function extractSessionSafeMessageContent(message: Message): string {
+  if (typeof message.content === "string") {
+    return message.content
+  }
+
+  if (!Array.isArray(message.parts)) {
+    return ""
+  }
+
+  const textChunks: string[] = []
+  for (const part of message.parts) {
+    const candidate = part as { type?: string; text?: unknown }
+    if (candidate?.type === "text" && typeof candidate.text === "string") {
+      const trimmed = candidate.text.trim()
+      if (trimmed) {
+        textChunks.push(trimmed)
+      }
+    }
+  }
+
+  return textChunks.join("\n\n")
+}
+
+function buildSessionMessageSnapshot(
+  messages: Message[],
+  maxMessages: number,
+  maxContentChars: number
+): Message[] {
+  const recentMessages = messages.slice(-maxMessages)
+  return recentMessages.map((message) => ({
+    id: message.id,
+    role: message.role,
+    content: extractSessionSafeMessageContent(message).slice(0, maxContentChars),
+  }))
+}
+
+function isQuotaExceeded(error: unknown): boolean {
+  if (!(error instanceof DOMException)) return false
+  return (
+    error.name === "QuotaExceededError" ||
+    error.name === "NS_ERROR_DOM_QUOTA_REACHED"
+  )
+}
 
 type UseChatCoreProps = {
   initialMessages: Message[]
@@ -35,7 +86,11 @@ type UseChatCoreProps = {
   setFiles: (files: File[]) => void
   checkLimitsAndNotify: (uid: string) => Promise<boolean>
   cleanupOptimisticAttachments: (attachments?: Array<{ url?: string }>) => void
-  ensureChatExists: (uid: string, input: string) => Promise<string | null>
+  ensureChatExists: (
+    uid: string,
+    input: string,
+    options?: { navigate?: boolean }
+  ) => Promise<string | null>
   handleFileUploads: (
     uid: string,
     chatId: string,
@@ -90,12 +145,35 @@ export function useChatCore({
     )
   const [clinicianMode, setClinicianModeState] =
     useState<ClinicianWorkflowMode>(DEFAULT_CLINICIAN_WORKFLOW_MODE)
+  const [artifactIntent, setArtifactIntent] = useState<"none" | "document" | "quiz">("none")
+  const [citationStyle, setCitationStyleState] = useState<CitationStyle>("harvard")
   
   // Evidence citations from server - indexed by message ID or last response
   // Use ref to persist across hook reinitializations (e.g., URL changes)
   const evidenceCitationsRef = useRef<any[]>([])
   const [evidenceCitations, setEvidenceCitationsState] = useState<any[]>([])
   const topicContextRef = useRef<any | null>(null)
+  const [streamIntroPreview, setStreamIntroPreview] = useState<string | null>(null)
+
+  const hasRenderableAssistantPayload = useCallback((message: Message) => {
+    if (typeof message.content === "string" && message.content.trim().length > 0) {
+      return true
+    }
+    if (!Array.isArray(message.parts)) return false
+    return message.parts.some((part: any) => {
+      if (!part || typeof part !== "object") return false
+      if (part.type === "text") {
+        return typeof part.text === "string" && part.text.trim().length > 0
+      }
+      return (
+        part.type === "tool-invocation" ||
+        part.type === "reasoning" ||
+        part.type === "source" ||
+        part.type === "step-start" ||
+        part.type === "metadata"
+      )
+    })
+  }, [])
   
   // Wrapper to update both state, ref, and sessionStorage
   const setEvidenceCitations = useCallback((citations: any[]) => {
@@ -364,6 +442,10 @@ export function useChatCore({
     setClinicianModeState(normalized)
   }, [])
 
+  const setCitationStyle = useCallback((style: CitationStyle) => {
+    setCitationStyleState(normalizeCitationStyle(style))
+  }, [])
+
   // Refs and derived state
   const hasSentFirstMessageRef = useRef(false)
   // CRITICAL: Initialize to null, not chatId, so we can detect transitions properly
@@ -403,12 +485,25 @@ export function useChatCore({
   // Search params handling
   const searchParams = useSearchParams()
   const prompt = searchParams.get("prompt")
+  const artifactIntentParam = searchParams.get("artifactIntent")
+  const citationStyleParam = searchParams.get("citationStyle")
 
   // Handle errors directly in onError callback
   const handleError = useCallback((error: Error) => {
     console.error("Chat error:", error)
     console.error("Error message:", error.message)
     let errorMsg = error.message || "Something went wrong."
+
+    if (typeof errorMsg === "string" && errorMsg.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(errorMsg) as { error?: string }
+        if (parsed?.error) {
+          errorMsg = parsed.error
+        }
+      } catch {
+        // Keep raw string when parsing fails.
+      }
+    }
 
     // Check if this is a rate limit error with wait time
     // The error might have waitTimeSeconds attached if it came from our API
@@ -513,10 +608,12 @@ export function useChatCore({
     onError: (error) => {
       // CRITICAL: Reset submitting state on error
       setIsSubmitting(false)
+      setStreamIntroPreview(null)
       handleError(error)
     },
     // Optimize for streaming performance
     onFinish: async (message) => {
+      setStreamIntroPreview(null)
       // CRITICAL: Restore evidence citations from stream body when headers were stripped (e.g. in production)
       const annotations = (
         message as {
@@ -592,12 +689,14 @@ export function useChatCore({
         }
       }
       
-      // CRITICAL: Update URL after message is fully sent and saved
-      // This prevents useChat from resetting during message submission
+      // Navigate only after stream completion to avoid aborting in-flight requests.
       if (realChatId && !realChatId.startsWith('temp-chat-') && typeof window !== 'undefined') {
         const currentPath = window.location.pathname
         const expectedPath = `/c/${realChatId}`
-        if (currentPath !== expectedPath) {
+        const isOnHomeOrChatRoute =
+          currentPath === "/" || currentPath.startsWith("/c/")
+        // Never force navigation when user moved to another workspace route.
+        if (isOnHomeOrChatRoute && currentPath !== expectedPath) {
           // Use a small delay to ensure all state updates are complete
           setTimeout(() => {
             startTransition(() => {
@@ -617,6 +716,17 @@ export function useChatCore({
       console.log('📚 [EVIDENCE] Available headers:', [...response.headers.keys()])
       
       try {
+        const introHeader = response.headers.get("X-Stream-Intro")
+        if (introHeader) {
+          try {
+            setStreamIntroPreview(atob(introHeader))
+          } catch {
+            setStreamIntroPreview(null)
+          }
+        } else {
+          setStreamIntroPreview(null)
+        }
+
         const evidenceHeader = response.headers.get('X-Evidence-Citations')
         console.log('📚 [EVIDENCE] X-Evidence-Citations header:', evidenceHeader ? `${evidenceHeader.substring(0, 50)}...` : 'NOT FOUND')
         
@@ -649,7 +759,7 @@ export function useChatCore({
     if (messages.length > lastSavedMessageCountRef.current && (status === 'streaming' || status === 'ready')) {
       const newMessages = messages.slice(lastSavedMessageCountRef.current)
       const assistantMessagesToSave = newMessages.filter(
-        m => m.role === 'assistant' && m.content && (typeof m.content === 'string' ? m.content.length > 0 : true)
+        (m) => m.role === "assistant" && hasRenderableAssistantPayload(m)
       )
       
       if (assistantMessagesToSave.length === 0) {
@@ -707,7 +817,7 @@ export function useChatCore({
         }
       })
     }
-  }, [messages, chatId, status])
+  }, [messages, chatId, status, hasRenderableAssistantPayload])
   
   // CRITICAL: Track if we're streaming and preserve messages during navigation
   useEffect(() => {
@@ -735,8 +845,48 @@ export function useChatCore({
       // Only store if messages actually changed
       if (messagesKey !== lastStoredMessagesRef.current) {
         const key = chatId || 'pending'
-        sessionStorage.setItem(`pendingMessages:${key}`, JSON.stringify(messages))
-        sessionStorage.setItem('pendingMessages:latest', JSON.stringify({ chatId: key, messages, timestamp: Date.now() }))
+        const primarySnapshot = buildSessionMessageSnapshot(
+          messages,
+          SESSION_SNAPSHOT_MAX_MESSAGES,
+          SESSION_SNAPSHOT_MAX_CONTENT_CHARS
+        )
+        const fallbackSnapshot = buildSessionMessageSnapshot(
+          messages,
+          SESSION_SNAPSHOT_FALLBACK_MAX_MESSAGES,
+          SESSION_SNAPSHOT_FALLBACK_MAX_CONTENT_CHARS
+        )
+
+        const writeSnapshot = (snapshot: Message[]) => {
+          sessionStorage.setItem(`pendingMessages:${key}`, JSON.stringify(snapshot))
+          sessionStorage.setItem(
+            'pendingMessages:latest',
+            JSON.stringify({
+              chatId: key,
+              messages: snapshot.slice(-SESSION_SNAPSHOT_LATEST_MAX_MESSAGES),
+              timestamp: Date.now(),
+            })
+          )
+        }
+
+        try {
+          writeSnapshot(primarySnapshot)
+        } catch (error) {
+          if (isQuotaExceeded(error)) {
+            console.warn(
+              "[🐛 STORE] Session storage quota reached, retrying with compact snapshot"
+            )
+            try {
+              writeSnapshot(fallbackSnapshot)
+            } catch (fallbackError) {
+              console.warn("[🐛 STORE] Failed to persist pending messages:", fallbackError)
+              sessionStorage.removeItem(`pendingMessages:${key}`)
+              sessionStorage.removeItem("pendingMessages:latest")
+            }
+          } else {
+            console.warn("[🐛 STORE] Failed to persist pending messages:", error)
+          }
+        }
+
         messagesBeforeNavigationRef.current = [...messages]
         lastStoredMessagesRef.current = messagesKey
         console.log('[🐛 STORE] Stored', messages.length, 'messages to sessionStorage with key:', key)
@@ -775,6 +925,11 @@ export function useChatCore({
   // CRITICAL: Clear sessionStorage and reset state when navigating to home page
   useEffect(() => {
     if (typeof window !== 'undefined' && !chatId) {
+      const isActiveSubmission =
+        isSubmitting || status === "submitted" || status === "streaming"
+      if (isActiveSubmission || messages.length > 0) {
+        return
+      }
       // Clear all pending messages when on home page
       sessionStorage.removeItem('pendingMessages:latest')
       const keys = Object.keys(sessionStorage)
@@ -796,8 +951,8 @@ export function useChatCore({
         }
       }
     }
-  }, [chatId, status, messages.length])
-  
+  }, [chatId, status, messages.length, isSubmitting])
+
   // CRITICAL: Update currentChatIdForSavingRef when chatId changes from temp to real
   useEffect(() => {
     if (chatId && !chatId.startsWith('temp-chat-')) {
@@ -867,10 +1022,14 @@ export function useChatCore({
     // This handles the case where useChat reset cleared messages
     if (messages.length === 0 && typeof window !== 'undefined') {
       const pendingKey = chatId ? `pendingMessages:${chatId}` : null
+      const latestRawForRestore =
+        !chatId && isStreamingOrSubmitting
+          ? sessionStorage.getItem("pendingMessages:latest")
+          : null
       const restoredMessages = resolveScopedSessionMessages({
         chatId,
         pendingRaw: pendingKey ? sessionStorage.getItem(pendingKey) : null,
-        latestRaw: sessionStorage.getItem("pendingMessages:latest"),
+        latestRaw: latestRawForRestore,
       })
 
       if (Array.isArray(restoredMessages) && restoredMessages.length > 0) {
@@ -1223,9 +1382,21 @@ export function useChatCore({
     }
   }, [prompt, setInput])
 
+  useEffect(() => {
+    if (artifactIntentParam === "document" || artifactIntentParam === "quiz") {
+      setArtifactIntent(artifactIntentParam)
+    }
+  }, [artifactIntentParam, setArtifactIntent])
+
+  useEffect(() => {
+    if (!citationStyleParam) return
+    setCitationStyleState(normalizeCitationStyle(citationStyleParam))
+  }, [citationStyleParam, setCitationStyleState])
+
   // Submit action - optimized for immediate response
-  const submit = useCallback(async () => {
-    if (!input.trim() && files.length === 0) return
+  const submit = useCallback(async (overrideInput?: string) => {
+    const resolvedInput = typeof overrideInput === "string" ? overrideInput : input
+    if (!resolvedInput.trim() && files.length === 0) return
    
     // CRITICAL: Check authentication FIRST before doing anything
     const isAuthenticated = !!user?.id
@@ -1240,7 +1411,7 @@ export function useChatCore({
       }))
       
       const pendingMessage = {
-        content: input.trim(),
+        content: resolvedInput.trim(),
         files: fileMetadata, // Store metadata only
         hasFiles: files.length > 0,
         selectedModel,
@@ -1248,6 +1419,8 @@ export function useChatCore({
         enableEvidence,
         learningMode,
         clinicianMode,
+        artifactIntent,
+        citationStyle,
         timestamp: Date.now(),
       }
       
@@ -1267,25 +1440,54 @@ export function useChatCore({
 
     // Set submitting state immediately for optimistic UI
     setIsSubmitting(true)
+    setStreamIntroPreview(null)
     clearEvidenceCitations()
 
     // Store input and files for async processing
-    const currentInput = input
+    const currentInput = resolvedInput
     const currentFiles = [...files]
     
-    // Clear input and files immediately for better UX
-    setInput("")
-    setFiles([])
-    clearDraft()
-    // Reset clinician mode so tabs stay hidden and placeholder is generic
-    setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
+    const restoreComposerState = () => {
+      setInput(currentInput)
+      setFiles(currentFiles)
+    }
 
-    // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
-    const isOnChatRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/c/')
-    const chatIdFromUrl = isOnChatRoute ? window.location.pathname.split('/c/')[1] : null
-    
-    // Quick synchronous chatId resolution (priority: URL > prop > ref > temp)
-    let optimisticChatId = chatIdFromUrl || (chatId && !chatId.startsWith("temp-chat-") ? chatId : null) || "temp"
+    const isPersistentChatId = (value: string | null | undefined) =>
+      Boolean(value && value !== "temp" && !value.startsWith("temp-chat-"))
+
+    const isOnChatRoute =
+      typeof window !== "undefined" && window.location.pathname.startsWith("/c/")
+    const chatIdFromUrl = isOnChatRoute
+      ? window.location.pathname.split("/c/")[1]
+      : null
+
+    // Resolve canonical chat id before submit so authenticated first sends never stream on temp ids.
+    let optimisticChatId =
+      chatIdFromUrl ||
+      (chatId && !chatId.startsWith("temp-chat-") ? chatId : null) ||
+      currentChatIdForSavingRef.current ||
+      null
+
+    if (isAuthenticated && !isPersistentChatId(optimisticChatId)) {
+      const ensuredChatId = await ensureChatExists(user.id, currentInput, {
+        navigate: false,
+      })
+      if (!isPersistentChatId(ensuredChatId)) {
+        setIsSubmitting(false)
+        restoreComposerState()
+        toast({
+          title: "Couldn't start a new chat. Please try again.",
+          status: "error",
+        })
+        return
+      }
+      optimisticChatId = ensuredChatId
+      currentChatIdForSavingRef.current = ensuredChatId
+    }
+
+    if (!optimisticChatId) {
+      optimisticChatId = "temp"
+    }
     
     // Create optimistic attachments immediately (no upload yet)
     let optimisticAttachments: Attachment[] | undefined = undefined
@@ -1315,6 +1517,8 @@ export function useChatCore({
         medicalLiteratureAccess: userPreferences.preferences.medicalLiteratureAccess,
         medicalComplianceMode: userPreferences.preferences.medicalComplianceMode,
         topicContext: topicContextRef.current || undefined,
+        artifactIntent,
+        citationStyle,
       },
     }
 
@@ -1323,6 +1527,13 @@ export function useChatCore({
       content: currentInput,
       experimental_attachments: optimisticAttachments,
     }, optimisticOptions)
+    // Clear input and files only after append has been queued.
+    setInput("")
+    setFiles([])
+    clearDraft()
+    // Reset clinician mode so tabs stay hidden and placeholder is generic
+    setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
+    setArtifactIntent("none")
 
     // Mark that we've sent the first message to prevent redirect
     hasSentFirstMessageRef.current = true
@@ -1342,36 +1553,17 @@ export function useChatCore({
       if (!uid) {
         setIsSubmitting(false)
         setHasDialogAuth(true)
+        restoreComposerState()
         return
       }
 
       if (!allowed) {
         setIsSubmitting(false)
+        restoreComposerState()
         return
       }
 
-      // Determine real chatId (use cached values to avoid DB call when possible)
-      const isOnHomePage = typeof window !== 'undefined' && window.location.pathname === "/"
-      const hasExistingMessages = messages.length > 0
-      
       let currentChatId = optimisticChatId
-      
-      // Only call ensureChatExists if we truly don't have a valid chatId
-      if ((!currentChatId || currentChatId === "temp" || currentChatId.startsWith('temp-chat-')) && 
-          isAuthenticated && isOnHomePage && !hasExistingMessages) {
-        try {
-          const chatIdFromEnsure = await ensureChatExists(uid, currentInput)
-          if (chatIdFromEnsure && !chatIdFromEnsure.toString().startsWith('temp')) {
-            currentChatId = chatIdFromEnsure.toString()
-            if (currentChatId !== chatId) {
-              bumpChat(currentChatId)
-            }
-          }
-        } catch (error) {
-          console.error('[🐛 SUBMIT] Chat creation failed:', error)
-          // Continue with optimistic chatId
-        }
-      }
 
       // Update chatId ref for next message
       if (currentChatId && !currentChatId.startsWith('temp-chat-')) {
@@ -1412,6 +1604,7 @@ export function useChatCore({
 
     } catch (error) {
       console.error("Error in submit:", error)
+      restoreComposerState()
       toast({
         title: "An error occurred while sending your message.",
         status: "error",
@@ -1436,6 +1629,8 @@ export function useChatCore({
     enableEvidence,
     learningMode,
     clinicianMode,
+    artifactIntent,
+    citationStyle,
     clearEvidenceCitations,
     bumpChat,
     clearDraft,
@@ -1448,6 +1643,7 @@ export function useChatCore({
     setHasRateLimitPaywall,
     setRateLimitWaitTime,
     setRateLimitType,
+    setArtifactIntent,
   ]);
 
   // Handle suggestion - optimized for immediate response
@@ -1467,6 +1663,8 @@ export function useChatCore({
           enableEvidence,
           learningMode,
           clinicianMode,
+          artifactIntent,
+          citationStyle,
           timestamp: Date.now(),
         }
         
@@ -1480,12 +1678,43 @@ export function useChatCore({
       }
 
       setIsSubmitting(true)
+      setStreamIntroPreview(null)
       clearEvidenceCitations()
       // Reset clinician mode so tabs stay hidden after sending from workflow panel
       setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
 
-      // CRITICAL: Determine optimistic chatId synchronously (from cache/refs) - NO async calls
-      const optimisticChatId = (chatId && !chatId.startsWith("temp-chat-") ? chatId : null) || "temp"
+      const isPersistentChatId = (value: string | null | undefined) =>
+        Boolean(value && value !== "temp" && !value.startsWith("temp-chat-"))
+      const chatIdFromUrl =
+        typeof window !== "undefined" && window.location.pathname.startsWith("/c/")
+          ? window.location.pathname.split("/c/")[1]
+          : null
+
+      let optimisticChatId =
+        chatIdFromUrl ||
+        (chatId && !chatId.startsWith("temp-chat-") ? chatId : null) ||
+        currentChatIdForSavingRef.current ||
+        null
+
+      if (isAuthenticated && !isPersistentChatId(optimisticChatId)) {
+        const ensuredChatId = await ensureChatExists(user.id, suggestion, {
+          navigate: false,
+        })
+        if (!isPersistentChatId(ensuredChatId)) {
+          setIsSubmitting(false)
+          toast({
+            title: "Couldn't start a new chat. Please try again.",
+            status: "error",
+          })
+          return
+        }
+        optimisticChatId = ensuredChatId
+        currentChatIdForSavingRef.current = ensuredChatId
+      }
+
+      if (!optimisticChatId) {
+        optimisticChatId = "temp"
+      }
 
       // CRITICAL: Append message IMMEDIATELY with optimistic values - message appears instantly
       const optimisticOptions = {
@@ -1500,6 +1729,8 @@ export function useChatCore({
           learningMode,
           clinicianMode: DEFAULT_CLINICIAN_WORKFLOW_MODE,
           topicContext: topicContextRef.current || undefined,
+          artifactIntent,
+          citationStyle,
         },
       }
 
@@ -1507,6 +1738,7 @@ export function useChatCore({
         role: "user",
         content: suggestion,
       }, optimisticOptions)
+      setArtifactIntent("none")
 
       // Mark that we've sent the first message to prevent redirect
       hasSentFirstMessageRef.current = true
@@ -1533,25 +1765,9 @@ export function useChatCore({
           return
         }
 
-        // Determine real chatId (use cached values to avoid DB call when possible)
-        const isOnHomePage = typeof window !== 'undefined' && window.location.pathname === "/"
         let currentChatId = optimisticChatId
 
-        // Only call ensureChatExists if we truly don't have a valid chatId
-        if (isAuthenticated && isOnHomePage && (!currentChatId || currentChatId.startsWith('temp'))) {
-          try {
-            const quickChatId = await ensureChatExists(uid, suggestion)
-            if (quickChatId && !quickChatId.toString().startsWith('temp')) {
-              currentChatId = quickChatId.toString()
-              if (currentChatId !== chatId) {
-                bumpChat(currentChatId)
-              }
-            }
-          } catch (error) {
-            console.error('[🐛 SUGGESTION] Chat creation failed:', error)
-            // Continue with optimistic chatId
-          }
-        } else if (chatId && !chatId.startsWith('temp')) {
+        if (chatId && !chatId.startsWith("temp")) {
           currentChatId = chatId
         }
 
@@ -1580,7 +1796,10 @@ export function useChatCore({
       enableEvidence,
       learningMode,
       clinicianMode,
+      artifactIntent,
+      citationStyle,
       clearEvidenceCitations,
+      setArtifactIntent,
     ]
   )
 
@@ -1605,6 +1824,8 @@ export function useChatCore({
         learningMode,
         clinicianMode,
         topicContext: topicContextRef.current || undefined,
+        artifactIntent,
+        citationStyle,
       },
     }
 
@@ -1619,6 +1840,8 @@ export function useChatCore({
     enableEvidence,
     learningMode,
     clinicianMode,
+    artifactIntent,
+    citationStyle,
     clearEvidenceCitations,
     reload,
   ])
@@ -1640,6 +1863,7 @@ export function useChatCore({
     handleSubmit,
     status,
     error,
+    streamIntroPreview,
     reload,
     stop,
     setMessages,
@@ -1656,10 +1880,14 @@ export function useChatCore({
     enableEvidence,
     learningMode,
     clinicianMode,
+    artifactIntent,
+    citationStyle,
     setEnableEvidence,
     setEnableSearch,
     setLearningMode,
     setClinicianMode,
+    setArtifactIntent,
+    setCitationStyle,
     
     // Evidence citations from medical evidence database
     evidenceCitations,

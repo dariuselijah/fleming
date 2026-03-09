@@ -69,7 +69,15 @@ import {
 import { UserUploadService } from "@/lib/uploads/server"
 import pdfParse from "pdf-parse/lib/pdf-parse.js"
 import type { UploadContextSearchMode, UploadTopicContext } from "@/lib/uploads/server"
+import {
+  extractUploadReferenceIds,
+  stripUploadReferenceTokens,
+} from "@/lib/uploads/reference-tokens"
 import type { TopicContext } from "@/app/types/api.types"
+import {
+  normalizeCitationStyle,
+  type CitationStyle,
+} from "@/lib/citations/formatters"
 
 export const maxDuration = 60
 const BENCH_STRICT_MODE = process.env.BENCH_STRICT_MODE === "true"
@@ -163,6 +171,91 @@ function stripCitationMarkers(text: string): string {
   return cleaned.trim()
 }
 
+function stripInternalArtifactTokens(text: string): string {
+  if (!text) return text
+  return text
+    .replace(/\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/gi, "")
+    .replace(/\[tool\s+[^\]]+\]/gi, "")
+    .replace(/\[source\s+[^\]]+\]/gi, "")
+    .replace(/\[doc\s+[^\]]+\]/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+}
+
+function detectExplicitMultiArtifactRequest(query: string): boolean {
+  if (!query || typeof query !== "string") return false
+  const normalized = query.toLowerCase()
+  if (
+    /\b(?:make|create|generate|produce)\s+\d+\s+(?:documents?|quizzes?|artifacts?)\b/.test(normalized)
+  ) {
+    return true
+  }
+  if (
+    /\b(?:two|three|four|multiple|several|pair|double)\s+(?:documents?|quizzes?|artifacts?)\b/.test(
+      normalized
+    )
+  ) {
+    return true
+  }
+  return /\b(?:more than one|multiple versions|separate quizzes|separate documents)\b/.test(normalized)
+}
+
+function sanitizeAssistantMessagesForStorage(messages: any[]): any[] {
+  if (!Array.isArray(messages)) return []
+  return messages.map((message) => {
+    if (!message || typeof message !== "object") {
+      return message
+    }
+
+    const sanitizedMessage: any = { ...message }
+
+    if (typeof sanitizedMessage.content === "string") {
+      sanitizedMessage.content = stripInternalArtifactTokens(sanitizedMessage.content)
+    } else if (Array.isArray(sanitizedMessage.content)) {
+      sanitizedMessage.content = sanitizedMessage.content.map((item: any) => {
+        if (
+          item &&
+          typeof item === "object" &&
+          item.type === "text" &&
+          typeof item.text === "string"
+        ) {
+          return {
+            ...item,
+            text: stripInternalArtifactTokens(item.text),
+          }
+        }
+        return item
+      })
+    }
+
+    if (Array.isArray(sanitizedMessage.parts)) {
+      sanitizedMessage.parts = sanitizedMessage.parts.map((part: any) => {
+        if (!part || typeof part !== "object") {
+          return part
+        }
+        if (part.type === "text" && typeof part.text === "string") {
+          return {
+            ...part,
+            text: stripInternalArtifactTokens(part.text),
+          }
+        }
+        return part
+      })
+    }
+
+    return sanitizedMessage
+  })
+}
+
+function buildSafeIntroPreview(query: string): string {
+  const normalized = query.replace(/\s+/g, " ").trim()
+  if (!normalized) {
+    return "I am preparing a grounded response and will stream results as tools complete."
+  }
+  const snippet = normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized
+  return `I am preparing a grounded response for "${snippet}" and will stream tool activity inline.`
+}
+
 async function runWithTimeBudget<T>(
   label: string,
   run: () => Promise<T>,
@@ -205,14 +298,32 @@ type ChatAttachment = {
   url?: string
 }
 
+const MAX_INLINE_ATTACHMENT_DATA_URL_CHARS = 16 * 1024 * 1024
+const MAX_INLINE_ATTACHMENT_BUFFER_BYTES = 12 * 1024 * 1024
+
 function decodeDataUrl(dataUrl: string): { mimeType: string; buffer: Buffer } | null {
-  const match = dataUrl.match(/^data:([^;,]+)?;base64,(.+)$/)
-  if (!match?.[2]) return null
-  const mimeType = match[1] || "application/octet-stream"
+  if (!dataUrl.startsWith("data:")) return null
+  if (dataUrl.length > MAX_INLINE_ATTACHMENT_DATA_URL_CHARS) return null
+
+  const commaIndex = dataUrl.indexOf(",")
+  if (commaIndex <= 5) return null
+
+  const metadata = dataUrl.slice(5, commaIndex)
+  if (!metadata.toLowerCase().includes(";base64")) return null
+
+  const mimeType = metadata.split(";")[0]?.trim() || "application/octet-stream"
+  const base64Payload = dataUrl.slice(commaIndex + 1)
+  if (!base64Payload) return null
+
+  const estimatedBytes = Math.floor((base64Payload.length * 3) / 4)
+  if (estimatedBytes > MAX_INLINE_ATTACHMENT_BUFFER_BYTES) {
+    return null
+  }
+
   try {
     return {
       mimeType,
-      buffer: Buffer.from(match[2], "base64"),
+      buffer: Buffer.from(base64Payload, "base64"),
     }
   } catch {
     return null
@@ -711,15 +822,18 @@ function buildBenchStrictPrompt(params: {
   citationCount: number
   requiresEscalation: boolean
   requiresGuideline: boolean
+  allowBibliography?: boolean
 }): string {
-  const { citationCount, requiresEscalation, requiresGuideline } = params
+  const { citationCount, requiresEscalation, requiresGuideline, allowBibliography = false } = params
   const citationRange = citationCount > 0 ? `1-${citationCount}` : "1"
   return [
     "BENCH STRONG-ENFORCEMENT MODE:",
     "- Keep the answer concise and factual (no filler, no marketing tone).",
     "- Every factual sentence must end with citation markers using only bracket indices.",
     `- Use citation indices strictly within [${citationRange}] and never use PMID/DOI numbers as bracket citations.`,
-    "- Do NOT include a trailing references bibliography, 'tool-derived evidence', or any manual citation list.",
+    allowBibliography
+      ? "- Include a structured references section at the end of generated document artifacts."
+      : "- Do NOT include a trailing references bibliography, 'tool-derived evidence', or any manual citation list.",
     "- If you cannot support a claim with available evidence indices, rewrite the claim conservatively instead of inventing citations.",
     "- Avoid long introductory framing; start directly with clinical guidance.",
     requiresEscalation
@@ -811,6 +925,12 @@ function normalizeTopicContext(input: unknown): TopicContext | undefined {
         .filter(Boolean)
         .slice(0, 10)
     : []
+  const pendingQuizTopicOptions = Array.isArray(candidate.pendingQuizTopicOptions)
+    ? candidate.pendingQuizTopicOptions
+        .map((value) => String(value).trim())
+        .filter((value) => value.length > 0)
+        .slice(0, 6)
+    : []
 
   return {
     activeTopic:
@@ -827,6 +947,17 @@ function normalizeTopicContext(input: unknown): TopicContext | undefined {
       typeof candidate.followUpType === "string"
         ? (candidate.followUpType as TopicContext["followUpType"])
         : "unknown",
+    pendingQuizTopicSelection: candidate.pendingQuizTopicSelection === true,
+    pendingQuizTopicOptions,
+    pendingQuizOriginalQuery:
+      typeof candidate.pendingQuizOriginalQuery === "string"
+        ? candidate.pendingQuizOriginalQuery.trim().slice(0, 240)
+        : null,
+    pendingQuizRequestedAt:
+      typeof candidate.pendingQuizRequestedAt === "string" &&
+      candidate.pendingQuizRequestedAt.trim().length > 0
+        ? candidate.pendingQuizRequestedAt.trim()
+        : null,
   }
 }
 
@@ -883,7 +1014,163 @@ function mergeTopicContexts(
         ? overrideContext.recentEvidenceIds
         : baseContext?.recentEvidenceIds ?? [],
     followUpType: overrideContext?.followUpType ?? baseContext?.followUpType ?? "unknown",
+    pendingQuizTopicSelection:
+      overrideContext?.pendingQuizTopicSelection ??
+      baseContext?.pendingQuizTopicSelection ??
+      false,
+    pendingQuizTopicOptions:
+      overrideContext?.pendingQuizTopicOptions &&
+      overrideContext.pendingQuizTopicOptions.length > 0
+        ? overrideContext.pendingQuizTopicOptions
+        : baseContext?.pendingQuizTopicOptions ?? [],
+    pendingQuizOriginalQuery:
+      overrideContext?.pendingQuizOriginalQuery ??
+      baseContext?.pendingQuizOriginalQuery ??
+      null,
+    pendingQuizRequestedAt:
+      overrideContext?.pendingQuizRequestedAt ??
+      baseContext?.pendingQuizRequestedAt ??
+      null,
   }
+}
+
+function isGenericQuizRequest(query: string): boolean {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return true
+  if (/\ball topics?\b/.test(normalized)) return false
+  const hasQuizCue = /\b(quiz|mcq|multiple choice|questions?)\b/.test(normalized)
+  if (!hasQuizCue) return false
+  const hasTopicSpecificCue =
+    /\b(on|about|covering|focus(?:ed)?\s+on|topic|chapter|section|regarding|from)\b/.test(normalized) ||
+    /"[^"]{3,}"/.test(query)
+  if (hasTopicSpecificCue) return false
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length
+  return wordCount <= 10
+}
+
+function sanitizeTopicOption(value: string): string {
+  return value
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/[#*_`>]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[\-\d\.\)\s]+/, "")
+    .slice(0, 96)
+}
+
+function buildTopicOptionsFromUploadCitations(
+  citations: Array<{
+    title?: string | null
+    snippet?: string | null
+    sourceUnitId?: string | null
+    sourceUnitType?: string | null
+    sourceUnitNumber?: number | null
+  }>,
+  maxOptions = 4
+): string[] {
+  const options: string[] = []
+  const seen = new Set<string>()
+  const pushOption = (candidate: string | undefined | null) => {
+    if (!candidate) return
+    const normalized = sanitizeTopicOption(candidate)
+    if (normalized.length < 12) return
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    options.push(normalized)
+  }
+
+  for (const citation of citations) {
+    if (options.length >= maxOptions) break
+    const title = typeof citation.title === "string" ? citation.title : ""
+    if (title && !/\.(pdf|pptx?|docx?)$/i.test(title)) {
+      pushOption(title)
+    }
+    const snippet = typeof citation.snippet === "string" ? citation.snippet : ""
+    if (snippet) {
+      const sentence = snippet.split(/[.!?]\s/)[0] || snippet
+      pushOption(sentence)
+    }
+  }
+
+  return options.slice(0, maxOptions)
+}
+
+function analyzeUploadTopicBreadth(
+  citations: Array<{
+    title?: string | null
+    snippet?: string | null
+    sourceUnitId?: string | null
+    sourceUnitType?: string | null
+    sourceUnitNumber?: number | null
+  }>
+): {
+  isBroad: boolean
+  topicOptions: string[]
+} {
+  if (citations.length === 0) {
+    return { isBroad: false, topicOptions: [] }
+  }
+
+  const unitKeys = new Set<string>()
+  const pages: number[] = []
+  const titles = new Set<string>()
+  for (const citation of citations) {
+    const unitId =
+      typeof citation.sourceUnitId === "string" && citation.sourceUnitId.trim().length > 0
+        ? citation.sourceUnitId.trim()
+        : null
+    const unitType =
+      typeof citation.sourceUnitType === "string" && citation.sourceUnitType.trim().length > 0
+        ? citation.sourceUnitType.trim()
+        : "unit"
+    const unitNumber =
+      typeof citation.sourceUnitNumber === "number" && Number.isFinite(citation.sourceUnitNumber)
+        ? citation.sourceUnitNumber
+        : null
+    if (unitId) {
+      unitKeys.add(unitId)
+    } else if (unitNumber !== null) {
+      unitKeys.add(`${unitType}:${unitNumber}`)
+      pages.push(unitNumber)
+    }
+    if (typeof citation.title === "string" && citation.title.trim().length > 0) {
+      titles.add(citation.title.trim().toLowerCase())
+    }
+  }
+
+  const pageSpread =
+    pages.length >= 4 ? Math.max(...pages) - Math.min(...pages) : 0
+  const isBroad =
+    citations.length >= 6 &&
+    (unitKeys.size >= 5 || titles.size >= 2 || pageSpread >= 10)
+
+  return {
+    isBroad,
+    topicOptions: buildTopicOptionsFromUploadCitations(citations),
+  }
+}
+
+function resolveQuizTopicReply(query: string, options: string[]): {
+  resolvedTopic: string | null
+  wantsAllTopics: boolean
+} {
+  const normalized = query.trim()
+  if (!normalized) {
+    return { resolvedTopic: null, wantsAllTopics: false }
+  }
+  if (/\b(all topics?|everything|whole (?:file|document|book)|mixed)\b/i.test(normalized)) {
+    return { resolvedTopic: null, wantsAllTopics: true }
+  }
+  for (const option of options) {
+    if (normalized.toLowerCase().includes(option.toLowerCase())) {
+      return { resolvedTopic: option, wantsAllTopics: false }
+    }
+  }
+  if (isGenericQuizRequest(normalized)) {
+    return { resolvedTopic: null, wantsAllTopics: false }
+  }
+  return { resolvedTopic: normalized.slice(0, 120), wantsAllTopics: false }
 }
 
 function extractTopicContextFromMessages(messages: MessageAISDK[]): TopicContext | undefined {
@@ -943,6 +1230,10 @@ function deriveTopicContextFromCitations(
         ? recentEvidenceIds
         : baseContext?.recentEvidenceIds ?? [],
     followUpType: baseContext?.followUpType ?? "unknown",
+    pendingQuizTopicSelection: baseContext?.pendingQuizTopicSelection ?? false,
+    pendingQuizTopicOptions: baseContext?.pendingQuizTopicOptions ?? [],
+    pendingQuizOriginalQuery: baseContext?.pendingQuizOriginalQuery ?? null,
+    pendingQuizRequestedAt: baseContext?.pendingQuizRequestedAt ?? null,
   }
 }
 
@@ -965,6 +1256,9 @@ type ChatRequest = {
   clinicianMode?: ClinicianWorkflowMode
   benchmarkStrictMode?: boolean
   topicContext?: TopicContext
+  artifactIntent?: "none" | "document" | "quiz"
+  citationStyle?: CitationStyle
+  allowMultipleArtifacts?: boolean
 }
 
 export async function POST(req: Request) {
@@ -988,6 +1282,9 @@ export async function POST(req: Request) {
       clinicianMode,
       benchmarkStrictMode,
       topicContext: topicContextFromRequest,
+      artifactIntent: artifactIntentFromRequest,
+      citationStyle: citationStyleFromRequest,
+      allowMultipleArtifacts: allowMultipleArtifactsFromRequest,
     } = (await req.json()) as ChatRequest
 
     if (!messages || !chatId || !userId) {
@@ -1004,20 +1301,62 @@ export async function POST(req: Request) {
       )
     }
 
+    let effectiveChatId = chatId
+
     // CRITICAL: Check rate limits FIRST - fail fast before any other work
     let validatedSupabase: Awaited<ReturnType<typeof validateAndTrackUsage>> = null
-    if (userId !== "temp" && !isEphemeralChatId(chatId)) {
+    if (userId !== "temp") {
       try {
         validatedSupabase = await validateAndTrackUsage({
           userId,
           model,
           isAuthenticated,
         })
-        await assertChatOwnership({
-          supabase: validatedSupabase,
-          chatId,
-          userId,
-        })
+        if (!validatedSupabase) {
+          return new Response(
+            JSON.stringify({ error: "Unable to validate user identity" }),
+            { status: 401 }
+          )
+        }
+
+        // If a client still submits an ephemeral id, immediately materialize a real chat.
+        if (isAuthenticated && isEphemeralChatId(effectiveChatId)) {
+          const lastMessageContent =
+            typeof messages[messages.length - 1]?.content === "string"
+              ? (messages[messages.length - 1]?.content as string)
+              : ""
+          const fallbackTitle = lastMessageContent.trim().slice(0, 120) || "New Chat"
+          const { data: createdChat, error: createChatError } = await validatedSupabase
+            .from("chats")
+            .insert({
+              user_id: userId,
+              title: fallbackTitle,
+              model,
+            })
+            .select("id")
+            .single()
+
+          if (createChatError || !createdChat?.id) {
+            console.error("[/api/chat] Failed to materialize chat for ephemeral id:", createChatError)
+            return new Response(
+              JSON.stringify({ error: "Failed to initialize chat session" }),
+              { status: 500 }
+            )
+          }
+
+          effectiveChatId = createdChat.id
+          console.warn(
+            `[/api/chat] Materialized chat ${effectiveChatId} from ephemeral request id ${chatId}`
+          )
+        }
+
+        if (!isEphemeralChatId(effectiveChatId)) {
+          await assertChatOwnership({
+            supabase: validatedSupabase,
+            chatId: effectiveChatId,
+            userId,
+          })
+        }
       } catch (error: any) {
         if (error.code === "DAILY_LIMIT_REACHED" || error.limitType === "hourly") {
           return new Response(
@@ -1035,17 +1374,36 @@ export async function POST(req: Request) {
     }
 
     const lastUserMessage = messages.filter(m => m.role === "user").pop()
-    const queryText = typeof lastUserMessage?.content === "string"
-      ? lastUserMessage.content
-      : ""
-    const attachmentContext = await buildAttachmentContext(lastUserMessage)
+    const rawQueryText =
+      typeof lastUserMessage?.content === "string" ? lastUserMessage.content : ""
+    const selectedUploadIds = extractUploadReferenceIds(rawQueryText)
+    const selectedUploadIdHint = selectedUploadIds[0]
+    const queryText = stripUploadReferenceTokens(rawQueryText)
+    const attachmentContextPromise = buildAttachmentContext(lastUserMessage)
     const persistedTopicContext = extractTopicContextFromMessages(messages)
+    const selectedUploadTopicContext = selectedUploadIdHint
+      ? normalizeTopicContext({
+          lastUploadId: selectedUploadIdHint,
+          followUpType: "drill_down",
+        })
+      : undefined
     const effectiveTopicContext = mergeTopicContexts(
       persistedTopicContext,
-      normalizeTopicContext(topicContextFromRequest)
+      mergeTopicContexts(
+        normalizeTopicContext(topicContextFromRequest),
+        selectedUploadTopicContext
+      )
     )
     const effectiveLearningMode = normalizeMedicalStudentLearningMode(learningMode)
     const effectiveClinicianMode = normalizeClinicianWorkflowMode(clinicianMode)
+    const artifactIntent =
+      artifactIntentFromRequest === "document" || artifactIntentFromRequest === "quiz"
+        ? artifactIntentFromRequest
+        : "none"
+    const allowMultipleArtifacts =
+      allowMultipleArtifactsFromRequest === true || detectExplicitMultiArtifactRequest(queryText)
+    const resolvedCitationStyle = normalizeCitationStyle(citationStyleFromRequest)
+    const allowBibliographyInOutput = artifactIntent === "document"
     const emergencyEscalationIntent = detectEmergencyEscalationNeed(queryText)
     const youtubeIntentDecision = detectYouTubeIntent(queryText, {
       emergencyEscalation: emergencyEscalationIntent.shouldEscalate,
@@ -1102,6 +1460,13 @@ export async function POST(req: Request) {
       effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
     const finalEnableEvidence =
       enableEvidenceFromClient === true || clinicianRoleFromResolvedRole
+    const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
+    const finalEnableSearch =
+      ENABLE_WEB_SEARCH_TOOL &&
+      enableSearchFromClient === true &&
+      hasWebSearchSupport
+    const shouldRunWebSearchPreflight = finalEnableSearch && queryText.length > 0
+    const streamIntroPreview = buildSafeIntroPreview(queryText)
     const minEvidenceLevelForQuery = clinicianRoleFromResolvedRole ? 3 : 5
 
     const uploadService = new UserUploadService()
@@ -1115,8 +1480,22 @@ export async function POST(req: Request) {
       isAuthenticated &&
       userId !== "temp" &&
       queryText.length > 0
+    const webSearchPreflightPromise = shouldRunWebSearchPreflight
+      ? runWithTimeBudget<Awaited<ReturnType<typeof searchWeb>> | null>(
+          "WEB_SEARCH_PREFLIGHT",
+          async () =>
+            searchWeb(queryText, {
+              maxResults: 4,
+              timeoutMs: 1200,
+              retries: 1,
+              medicalOnly: clinicianRoleFromResolvedRole,
+            }),
+          1400,
+          null
+        )
+      : Promise.resolve(null)
 
-    const [evidenceContextResult, uploadContextResult] = await Promise.all([
+    const [evidenceContextResult, uploadContextResult, webSearchPreflight] = await Promise.all([
       shouldRunEvidenceSynthesis
         ? runWithTimeBudget(
             "EVIDENCE_SYNTHESIS",
@@ -1147,6 +1526,7 @@ export async function POST(req: Request) {
                   userId,
                   query: queryText,
                   apiKey,
+                  uploadId: selectedUploadIdHint,
                   mode: uploadSearchMode,
                   topK: 6,
                   includeNeighborPages: 1,
@@ -1162,6 +1542,7 @@ export async function POST(req: Request) {
             null
           )
         : Promise.resolve(null),
+      webSearchPreflightPromise,
     ])
 
     const uploadEvidenceCitations =
@@ -1193,10 +1574,84 @@ export async function POST(req: Request) {
       )
     }
 
-    const resolvedTopicContext = mergeTopicContexts(
+    let resolvedTopicContext = mergeTopicContexts(
       effectiveTopicContext,
       normalizeTopicContext(uploadContextResult?.topicContext)
     )
+    const uploadCitationsForBreadth = Array.isArray(uploadContextResult?.citations)
+      ? uploadContextResult.citations
+      : []
+    const topicBreadth = analyzeUploadTopicBreadth(uploadCitationsForBreadth)
+    const pendingQuizTopicSelection = resolvedTopicContext?.pendingQuizTopicSelection === true
+    const pendingQuizOptions = Array.isArray(resolvedTopicContext?.pendingQuizTopicOptions)
+      ? resolvedTopicContext.pendingQuizTopicOptions
+      : []
+    const quizTopicReplyResolution =
+      artifactIntent === "quiz" && pendingQuizTopicSelection
+        ? resolveQuizTopicReply(queryText, pendingQuizOptions)
+        : { resolvedTopic: null, wantsAllTopics: false }
+    const shouldAskQuizTopicFollowup =
+      artifactIntent === "quiz" &&
+      !pendingQuizTopicSelection &&
+      isGenericQuizRequest(queryText) &&
+      topicBreadth.isBroad
+    let quizQueryOverride: string | undefined = undefined
+    let quizLeadInSentence = "Here is your generated quiz."
+
+    if (artifactIntent === "quiz" && pendingQuizTopicSelection) {
+      if (quizTopicReplyResolution.wantsAllTopics) {
+        quizQueryOverride =
+          "Generate a balanced mixed-topic quiz that covers all major themes from the uploaded material."
+        quizLeadInSentence = "Here is your generated quiz across all topics."
+        resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
+          pendingQuizTopicSelection: false,
+          pendingQuizTopicOptions: [],
+          pendingQuizOriginalQuery: null,
+          pendingQuizRequestedAt: null,
+          followUpType: "drill_down",
+        })
+      } else if (quizTopicReplyResolution.resolvedTopic) {
+        const resolvedTopic = quizTopicReplyResolution.resolvedTopic
+        quizQueryOverride = `Generate a focused quiz on this topic from the uploaded material: ${resolvedTopic}`
+        quizLeadInSentence = `Here is your generated quiz on ${resolvedTopic}.`
+        resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
+          activeTopic: resolvedTopic,
+          pendingQuizTopicSelection: false,
+          pendingQuizTopicOptions: [],
+          pendingQuizOriginalQuery: null,
+          pendingQuizRequestedAt: null,
+          followUpType: "drill_down",
+        })
+      } else {
+        // If follow-up was asked but reply is still ambiguous, continue gracefully with mixed-topic coverage.
+        quizQueryOverride =
+          "Generate a mixed-topic quiz across key concepts in the uploaded material."
+        quizLeadInSentence =
+          "I could not determine a single topic from your reply, so here is a mixed-topic quiz."
+        resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
+          pendingQuizTopicSelection: false,
+          pendingQuizTopicOptions: [],
+          pendingQuizOriginalQuery: null,
+          pendingQuizRequestedAt: null,
+          followUpType: "drill_down",
+        })
+      }
+    } else if (shouldAskQuizTopicFollowup) {
+      const fallbackOptions = [
+        "Core definitions and foundational concepts",
+        "High-yield mechanisms and processes",
+        "Clinical/application-style scenarios",
+      ]
+      const followupOptions =
+        topicBreadth.topicOptions.length > 0 ? topicBreadth.topicOptions : fallbackOptions
+      resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
+        pendingQuizTopicSelection: true,
+        pendingQuizTopicOptions: followupOptions,
+        pendingQuizOriginalQuery: queryText,
+        pendingQuizRequestedAt: new Date().toISOString(),
+        followUpType: "clarify",
+      })
+    }
 
     let evidenceContext = evidenceContextResult
     if (finalEnableEvidence && queryText.length > 0) {
@@ -1287,6 +1742,7 @@ export async function POST(req: Request) {
       effectiveSystemPrompt = buildEvidenceSystemPrompt(effectiveSystemPrompt, evidenceContext.context)
     }
 
+    const attachmentContext = await attachmentContextPromise
     if (attachmentContext) {
       effectiveSystemPrompt += `\n\nUSER ATTACHMENT CONTEXT (from uploaded document content):\n${attachmentContext}\n\nUse this attachment content directly when answering the user's question. If the user asks whether you can see/read the file, explicitly confirm and reference the attachment by name.`
     }
@@ -1296,29 +1752,9 @@ export async function POST(req: Request) {
         citationCount: evidenceContext?.context?.citations?.length ?? 0,
         requiresEscalation: emergencyEscalationIntent.shouldEscalate,
         requiresGuideline: hasGuidelineIntent(queryText),
+        allowBibliography: allowBibliographyInOutput,
       })}`
     }
-
-    const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
-    const finalEnableSearch =
-      ENABLE_WEB_SEARCH_TOOL &&
-      enableSearchFromClient === true &&
-      hasWebSearchSupport
-    const shouldRunWebSearchPreflight = finalEnableSearch && queryText.length > 0
-    const webSearchPreflight = shouldRunWebSearchPreflight
-      ? await runWithTimeBudget<Awaited<ReturnType<typeof searchWeb>> | null>(
-          "WEB_SEARCH_PREFLIGHT",
-          async () =>
-            searchWeb(queryText, {
-              maxResults: 4,
-              timeoutMs: 1200,
-              retries: 1,
-              medicalOnly: clinicianRoleFromResolvedRole,
-            }),
-          1400,
-          null
-        )
-      : null
 
     if (webSearchPreflight?.results?.length) {
       const serializedResults = webSearchPreflight.results
@@ -1338,10 +1774,25 @@ export async function POST(req: Request) {
       effectiveSystemPrompt = removeCitationInstructions(effectiveSystemPrompt)
       effectiveSystemPrompt += `\n\n**IMPORTANT: Do NOT include citations, citation markers, or reference numbers in your response. Respond naturally without any [CITATION:X] or [X] markers. Do not include a "Citations" section at the end.`
     }
+    effectiveSystemPrompt += `\n\nFORMATTING GUARDRAILS:
+- Never output internal tool/source tags such as [tool ...], [tool slide ...], [source ...], or [doc ...].
+- Never output placeholder tokens such as [CITE_PLACEHOLDER_0] or similar.
+- If you mention uploaded slide locations, write them as plain text (e.g., "slide 14"), not bracketed pseudo-citations.
+- When evidence citations are enabled, only use bracketed numeric citation indices like [1], [1,2], or [1-3].`
+
+    const messagesSansUploadReferenceTokens = messages.map((message) => {
+      if (message.role !== "user" || typeof message.content !== "string") {
+        return message
+      }
+      return {
+        ...message,
+        content: stripUploadReferenceTokens(message.content),
+      }
+    })
 
     // Filter attachments (sync)
     // Vision models can process both data URLs (base64) and blob URLs directly
-    const filteredMessages = messages.map(message => {
+    const filteredMessages = messagesSansUploadReferenceTokens.map(message => {
       if (message.experimental_attachments) {
         // Keep only provider-safe visual attachments in model messages.
         // Non-image docs (e.g. PDF) are handled via upload ingestion + retrieval citations.
@@ -1427,6 +1878,12 @@ export async function POST(req: Request) {
         (capturedEvidenceContext?.context?.citations?.length ?? 0) < 4
       )
     const shouldEnableEvidenceTools = finalEnableEvidence && supportsTools && queryText.length > 0
+    const shouldEnableArtifactTools =
+      shouldEnableEvidenceTools &&
+      ENABLE_UPLOAD_CONTEXT_SEARCH &&
+      isAuthenticated &&
+      userId !== "temp" &&
+      !shouldAskQuizTopicFollowup
     const shouldEnableYoutubeTool =
       ENABLE_YOUTUBE_TOOL &&
       supportsTools &&
@@ -1434,6 +1891,10 @@ export async function POST(req: Request) {
       youtubeIntentDecision.shouldUse
     let webSearchCallCount = 0
     let youtubeSearchCallCount = 0
+    let documentArtifactCallCount = 0
+    let quizArtifactCallCount = 0
+    let cachedDocumentArtifact: Record<string, unknown> | null = null
+    let cachedQuizArtifact: Record<string, unknown> | null = null
 
     if (ENABLE_YOUTUBE_TOOL && supportsTools && queryText.length > 0) {
       console.log("[YOUTUBE INTENT]", {
@@ -1548,6 +2009,105 @@ export async function POST(req: Request) {
               }
             },
           }) }
+            : {}),
+          ...(shouldEnableArtifactTools
+            ? {
+                generateDocumentFromUpload: tool({
+                  description:
+                    "Create a polished study document artifact from user-uploaded content, with optional references when requested.",
+                  parameters: z.object({
+                    query: z
+                      .string()
+                      .min(1)
+                      .describe("Document request focus or title prompt"),
+                    uploadId: z
+                      .string()
+                      .min(1)
+                      .optional()
+                      .describe("Optional upload UUID to scope generation"),
+                    citationStyle: z
+                      .enum(["harvard", "apa", "vancouver"])
+                      .optional(),
+                    includeReferences: z
+                      .boolean()
+                      .optional()
+                      .describe(
+                        "Whether to force a references section. Leave undefined to infer from the user's request."
+                      ),
+                    maxSources: z.number().int().min(3).max(16).default(8),
+                  }),
+                  execute: async ({
+                    query,
+                    uploadId,
+                    citationStyle,
+                    includeReferences,
+                    maxSources,
+                  }) => {
+                    documentArtifactCallCount += 1
+                    if (!allowMultipleArtifacts && documentArtifactCallCount > 1 && cachedDocumentArtifact) {
+                      return cachedDocumentArtifact
+                    }
+                    const normalizedUploadId =
+                      typeof uploadId === "string" && isUuidLike(uploadId) ? uploadId : undefined
+                    const artifact = await uploadService.generateDocumentFromUpload({
+                      userId,
+                      query,
+                      uploadId:
+                        normalizedUploadId ||
+                        (selectedUploadIdHint && isUuidLike(selectedUploadIdHint)
+                          ? selectedUploadIdHint
+                          : undefined),
+                      citationStyle: normalizeCitationStyle(citationStyle || resolvedCitationStyle),
+                      includeReferences,
+                      apiKey,
+                      maxSources,
+                    })
+                    if (!allowMultipleArtifacts) {
+                      cachedDocumentArtifact = artifact as Record<string, unknown>
+                    }
+                    return artifact
+                  },
+                }),
+                generateQuizFromUpload: tool({
+                  description:
+                    "Generate a multiple-choice quiz from user-uploaded content.",
+                  parameters: z.object({
+                    query: z
+                      .string()
+                      .min(1)
+                      .describe("Topic to quiz from uploaded context"),
+                    uploadId: z
+                      .string()
+                      .min(1)
+                      .optional()
+                      .describe("Optional upload UUID to scope generation"),
+                    questionCount: z.number().int().min(3).max(10).default(5),
+                  }),
+                  execute: async ({ query, uploadId, questionCount }) => {
+                    quizArtifactCallCount += 1
+                    if (!allowMultipleArtifacts && quizArtifactCallCount > 1 && cachedQuizArtifact) {
+                      return cachedQuizArtifact
+                    }
+                    const normalizedUploadId =
+                      typeof uploadId === "string" && isUuidLike(uploadId) ? uploadId : undefined
+                    const artifact = await uploadService.generateQuizFromUpload({
+                      userId,
+                      query: quizQueryOverride || query,
+                      uploadId:
+                        normalizedUploadId ||
+                        (selectedUploadIdHint && isUuidLike(selectedUploadIdHint)
+                          ? selectedUploadIdHint
+                          : undefined),
+                      apiKey,
+                      questionCount,
+                    })
+                    if (!allowMultipleArtifacts) {
+                      cachedQuizArtifact = artifact as Record<string, unknown>
+                    }
+                    return artifact
+                  },
+                }),
+              }
             : {}),
           pubmedSearch: tool({
             description: "Search PubMed for recent or guideline-related medical literature.",
@@ -1802,6 +2362,8 @@ export async function POST(req: Request) {
     if (shouldEnableEvidenceTools) {
       effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:
 ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded documents, especially page-specific prompts (e.g., \"page 50\") and follow-up continuity (\"next page\", \"expand this section\")." : ""}
+- ${shouldEnableArtifactTools ? "Use generateDocumentFromUpload when the user asks for a formal write-up/report/document artifact." : "Document artifact generation is unavailable unless upload tools are enabled."}
+- ${shouldEnableArtifactTools ? "Use generateQuizFromUpload when the user asks for quiz/MCQ generation from uploaded files." : "Quiz artifact generation is unavailable unless upload tools are enabled."}
 - Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.
 - Use guidelineSearch for formal recommendations and regional guidance.
 - Use clinicalTrialsSearch for ongoing/new evidence.
@@ -1809,16 +2371,45 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - Use evidenceConflictCheck when sources disagree.
 - IMPORTANT: Keep tool queries tightly aligned to the user question (specific condition/drug terms, not broad generic terms).
 - IMPORTANT: If a tool returns irrelevant records, explicitly discard them and retry with a narrower query before citing evidence.
-- IMPORTANT: Do not append manual references/bibliography sections; keep citations inline in the answer body only.
+- IMPORTANT: ${allowBibliographyInOutput ? "For document artifacts, include references only when explicitly requested (e.g., Harvard/APA/Vancouver/citation/ref/bibliography wording)." : "Do not append manual references/bibliography sections; keep citations inline in the answer body only."}
 - CITATION DENSITY: For medical content, place citations after each factual sentence whenever evidence exists; avoid bundling multiple distinct claims under one citation.`
       if (benchStrictMode) {
         effectiveSystemPrompt += `\n- BENCH STRICT: If guideline evidence is requested or clinically relevant, run guidelineSearch before finalizing your answer.
 - BENCH STRICT: If a tool returns weakly relevant results, rerun once with a narrower query and cite only the focused result set.
 - BENCH STRICT: Do not emit bracketed PMID/DOI values as citations; use only [index] citations from provided evidence.
-- BENCH STRICT: Do not append manual references sections; keep citations inline only.`
+- BENCH STRICT: ${allowBibliographyInOutput ? "For document artifacts, include a references section only when user intent explicitly requires it." : "Do not append manual references sections; keep citations inline only."}`
       }
     } else if (shouldEnablePubMedTools) {
       effectiveSystemPrompt += `\n\nYou may use PubMed tools when the question requests latest evidence, guideline updates, or when provided evidence is sparse. Prefer retrieved PubMed records for recency-sensitive claims and cite them explicitly.`
+    }
+
+    if (shouldEnableArtifactTools && artifactIntent === "document") {
+      effectiveSystemPrompt += `\n\nDOCUMENT ARTIFACT MODE:
+- You MUST call generateDocumentFromUpload exactly once before finalizing the answer.
+- If the request asks for Harvard/APA/Vancouver/references, pass that style and includeReferences=true.
+- If the request is a study plan/notes/summary without explicit citation intent, do not force a references section.
+- Return one concise lead-in sentence only; use exactly: "Here is your generated document."
+- Do not paste the full artifact body in plain chat text.`
+    } else if (artifactIntent === "quiz" && shouldAskQuizTopicFollowup) {
+      const followupOptions = (resolvedTopicContext?.pendingQuizTopicOptions ?? []).slice(0, 4)
+      const formattedOptions =
+        followupOptions.length > 0
+          ? followupOptions.map((option, index) => `${index + 1}. ${option}`).join("\n")
+          : "1. Core concepts\n2. Key mechanisms\n3. Applied scenarios"
+      effectiveSystemPrompt += `\n\nQUIZ TOPIC CLARIFICATION MODE:
+- Do NOT call quiz/document generation tools in this turn.
+- Ask exactly one concise follow-up question to choose a quiz topic before generating the quiz.
+- Offer these topic options:
+${formattedOptions}
+- Include this fallback in your question: reply "all topics" for a mixed-topic quiz.
+- Keep the response brief (2-4 lines).`
+    } else if (shouldEnableArtifactTools && artifactIntent === "quiz") {
+      effectiveSystemPrompt += `\n\nQUIZ ARTIFACT MODE:
+- You MUST call generateQuizFromUpload exactly once before finalizing the answer.
+- Generate an interactive MCQ-ready quiz payload from uploaded material.
+- Keep the textual reply to one short sentence indicating the quiz card is ready.
+- Use this exact lead-in sentence: "${quizLeadInSentence}"
+- Do NOT paste quiz questions, answer keys, or explanations into plain chat text.`
     }
 
     if (shouldEnableYoutubeTool) {
@@ -1850,23 +2441,39 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - If webSearch returns no relevant results, continue with internal reasoning and state that no strong fresh sources were found.`
     }
 
+    const artifactToolChoice =
+      shouldEnableArtifactTools && artifactIntent === "document"
+        ? ({ type: "tool", toolName: "generateDocumentFromUpload" } as const)
+        : shouldEnableArtifactTools && artifactIntent === "quiz"
+          ? ({ type: "tool", toolName: "generateQuizFromUpload" } as const)
+          : undefined
+
     const result = streamText({
       model: modelWithSearch,
       system: effectiveSystemPrompt,
       messages: coreMessages,
       tools: runtimeTools,
-      maxSteps: shouldEnableYoutubeTool ? 4 : 10,
+      ...(artifactToolChoice ? ({ toolChoice: artifactToolChoice } as any) : {}),
+      maxSteps:
+        artifactIntent === "document" || artifactIntent === "quiz"
+          ? 2
+          : shouldEnableYoutubeTool
+            ? 4
+            : 10,
       onError: (err: unknown) => {
         console.error("Streaming error occurred:", err)
       },
       onFinish: async ({ response }) => {
+        const sanitizedResponseMessages = sanitizeAssistantMessagesForStorage(
+          (response.messages || []) as any[]
+        )
         // Extract citations from xAI response if available
         const xaiCitations = (response as any).experimental_providerMetadata?.citations || 
                             (response as any).citations || 
                             []
         
         // Check if sources are in message parts
-        const allParts = (response as any).messages?.flatMap((m: any) => m.parts || []) || []
+        const allParts = sanitizedResponseMessages.flatMap((m: any) => m.parts || [])
         const sourceParts = allParts.filter((p: any) => p.type === 'source')
         const toolInvocationParts = allParts.filter((p: any) => p.type === 'tool-invocation')
         
@@ -1899,7 +2506,8 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
         }
         
         // Check message content for URLs
-        const lastMessage = (response as any).messages?.[(response as any).messages.length - 1]
+        const lastMessage =
+          sanitizedResponseMessages[sanitizedResponseMessages.length - 1]
         if (lastMessage?.content) {
           const content = typeof lastMessage.content === 'string' ? lastMessage.content : JSON.stringify(lastMessage.content)
           const urlMatches = content.match(/https?:\/\/[^\s\)\]\[]+/g) || []
@@ -1916,16 +2524,14 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             // Only process completion if we have a real userId and chatId
             // CRITICAL: Still extract citations even for temp chats, but don't save to DB
             // This ensures citations are available in the UI even during streaming
-            const isTempChat = userId === "temp" || 
-                              chatId === "temp" || 
-                              chatId.startsWith("temp-chat-")
+            const isTempChat = userId === "temp" || isEphemeralChatId(effectiveChatId)
             
             if (isTempChat) {
               console.log("📚 [CITATION] Temp chat detected - extracting citations but skipping DB save")
             }
 
             let supabase = validatedSupabase
-            if (!supabase && !isTempChat && !isEphemeralChatId(chatId)) {
+            if (!supabase && !isTempChat && !isEphemeralChatId(effectiveChatId)) {
               supabase = await validateAndTrackUsage({
                 userId,
                 model: effectiveModel,
@@ -1936,7 +2542,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             if (!isTempChat) {
               await assertChatOwnership({
                 supabase,
-                chatId,
+                chatId: effectiveChatId,
                 userId,
               })
             }
@@ -1944,14 +2550,17 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             if (supabase) {
               // Save user message first (if not already saved)
               // Use original (non-anonymized) message for storage - it will be encrypted
-              const userMessage = messages[messages.length - 1]
+              const userMessage = messagesSansUploadReferenceTokens[messagesSansUploadReferenceTokens.length - 1]
               if (!isTempChat && userMessage?.role === "user") {
                 try {
                   await logUserMessage({
                     supabase,
                     userId,
-                    chatId,
-                    content: userMessage.content,
+                    chatId: effectiveChatId,
+                    content:
+                      typeof userMessage.content === "string"
+                        ? stripUploadReferenceTokens(userMessage.content)
+                        : "",
                     attachments: userMessage.experimental_attachments as Attachment[],
                     model: effectiveModel,
                     isAuthenticated,
@@ -1965,7 +2574,8 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 
               // CRITICAL: Extract citations from response (even for temp chats)
               // This ensures citations are available in the UI
-              const assistantMessage = response.messages[response.messages.length - 1]
+              const assistantMessage =
+                sanitizedResponseMessages[sanitizedResponseMessages.length - 1]
               
               // Extract text content from message (handles both string and array formats)
               let responseText = ''
@@ -2037,13 +2647,14 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                   await storeAssistantMessage({
                     supabase,
                     userId,
-                    chatId,
+                    chatId: effectiveChatId,
                     messages:
-                      response.messages as unknown as import("@/app/types/api.types").Message[],
+                      sanitizedResponseMessages as unknown as import("@/app/types/api.types").Message[],
                     message_group_id,
                     model: effectiveModel,
                     evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
                     topicContext: topicContextForSave,
+                    allowMultipleArtifacts,
                   })
                   if (citationsToSave.length > 0) {
                     console.log(`📚 [CITATION SAVE] ✅ Saved ${citationsToSave.length} citations to database`)
@@ -2056,13 +2667,14 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                     await storeAssistantMessage({
                       supabase,
                       userId,
-                      chatId,
+                      chatId: effectiveChatId,
                       messages:
-                        response.messages as unknown as import("@/app/types/api.types").Message[],
+                        sanitizedResponseMessages as unknown as import("@/app/types/api.types").Message[],
                       message_group_id,
                       model: effectiveModel,
                       evidenceCitations: citationsToSave.length > 0 ? citationsToSave : undefined,
                       topicContext: topicContextForSave,
+                      allowMultipleArtifacts,
                     })
                   } catch (retryError) {
                     console.error("Retry also failed to save assistant message:", retryError)
@@ -2156,11 +2768,14 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
       'Connection': 'keep-alive',
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
+      'Access-Control-Expose-Headers': 'X-Stream-Intro',
+      'X-Stream-Intro': Buffer.from(streamIntroPreview, "utf-8").toString("base64"),
     }
     let evidenceCitationsForStream: EvidenceCitation[] = []
-    const topicContextForStream =
-      normalizeTopicContext(uploadContextResult?.topicContext) ??
+    const topicContextForStream = mergeTopicContexts(
+      normalizeTopicContext(uploadContextResult?.topicContext),
       normalizeTopicContext(resolvedTopicContext)
+    )
     if (finalEnableEvidence) {
       const contextForStream = capturedEvidenceContext || evidenceContext
       if (contextForStream?.context?.citations?.length) {
@@ -2170,7 +2785,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 
         const encodedHeader = encodeEvidenceCitationsHeader(evidenceCitationsForStream)
         if (encodedHeader) {
-          responseHeaders["Access-Control-Expose-Headers"] = "X-Evidence-Citations"
+          responseHeaders["Access-Control-Expose-Headers"] = "X-Evidence-Citations, X-Stream-Intro"
           responseHeaders["X-Evidence-Citations"] = encodedHeader
         }
       }

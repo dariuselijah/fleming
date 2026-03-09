@@ -3,6 +3,31 @@ import { NextRequest, NextResponse } from "next/server"
 import { convertFromApiFormat, convertToApiFormat, defaultPreferences } from "@/lib/user-preference-store/utils"
 import { encryptHealthData, decryptHealthData, isEncryptionEnabled } from "@/lib/encryption"
 
+const OPTIONAL_ONBOARDING_COLUMNS = [
+  "student_school",
+  "student_year",
+  "clinician_name",
+] as const
+
+function stripOptionalOnboardingColumns(payload: Record<string, unknown>) {
+  const nextPayload = { ...payload }
+  let removed = false
+
+  for (const column of OPTIONAL_ONBOARDING_COLUMNS) {
+    if (column in nextPayload) {
+      delete nextPayload[column]
+      removed = true
+    }
+  }
+
+  return { payload: nextPayload, removed }
+}
+
+function hasMissingOptionalColumnError(error: unknown): boolean {
+  const message = String((error as { message?: string } | undefined)?.message || "")
+  return OPTIONAL_ONBOARDING_COLUMNS.some((column) => message.includes(column))
+}
+
 export async function GET(request: NextRequest) {
   console.log("GET /api/user-preferences called")
   
@@ -211,7 +236,30 @@ export async function PUT(request: NextRequest) {
       console.log("Update result:", { data, error })
 
       if (error) {
-        console.error("Error updating user preferences:", error)
+        const stripped = stripOptionalOnboardingColumns(apiData as Record<string, unknown>)
+        if (stripped.removed && hasMissingOptionalColumnError(error)) {
+          console.warn(
+            "Retrying user preferences update without optional onboarding columns"
+          )
+          const retry = await supabase
+            .from("user_preferences")
+            .update({
+              ...stripped.payload,
+              updated_at: new Date().toISOString()
+            })
+            .eq("user_id", user.id)
+            .select()
+            .single()
+
+          if (!retry.error) {
+            console.log("Updated user preferences response after retry:", retry.data)
+            return NextResponse.json(retry.data)
+          }
+          console.error("Retry error updating user preferences:", retry.error)
+        } else {
+          console.error("Error updating user preferences:", error)
+        }
+
         return NextResponse.json(
           { error: "Failed to update user preferences" },
           { status: 500 }
@@ -237,7 +285,31 @@ export async function PUT(request: NextRequest) {
       console.log("Create result:", { data, error })
 
       if (error) {
-        console.error("Error creating user preferences:", error)
+        const stripped = stripOptionalOnboardingColumns(apiData as Record<string, unknown>)
+        if (stripped.removed && hasMissingOptionalColumnError(error)) {
+          console.warn(
+            "Retrying user preferences create without optional onboarding columns"
+          )
+          const retry = await supabase
+            .from("user_preferences")
+            .insert({
+              user_id: user.id,
+              ...stripped.payload,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .select()
+            .single()
+
+          if (!retry.error) {
+            console.log("Created user preferences response after retry:", retry.data)
+            return NextResponse.json(retry.data)
+          }
+          console.error("Retry error creating user preferences:", retry.error)
+        } else {
+          console.error("Error creating user preferences:", error)
+        }
+
         return NextResponse.json(
           { error: "Failed to create user preferences" },
           { status: 500 }

@@ -38,11 +38,14 @@ export function getSources(parts: MessageAISDK["parts"]) {
             return result.sources
           }
           if (result.citations && Array.isArray(result.citations)) {
-            // xAI returns citations as array of URLs - convert to source objects
-            return result.citations.map((url: string) => ({
-              url: url,
-              title: extractTitleFromUrl(url),
-            }))
+            // xAI/tool results can return citations in mixed shapes. Normalize defensively.
+            return result.citations
+              .map((citation: unknown) => normalizeSourceUrl(citation))
+              .filter((url: string | null): url is string => Boolean(url))
+              .map((url: string) => ({
+                url,
+                title: extractTitleFromUrl(url),
+              }))
           }
           // Return the result itself if it looks like a source
           if (result.url) {
@@ -65,7 +68,12 @@ export function getSources(parts: MessageAISDK["parts"]) {
         if (typeof source === "string") {
           return source.startsWith("http")
         }
-        return source && typeof source === "object" && source.url && source.url !== ""
+        return (
+          source &&
+          typeof source === "object" &&
+          typeof (source as { url?: unknown }).url === "string" &&
+          (source as { url: string }).url !== ""
+        )
       }
     )
     .map((source) => {
@@ -82,9 +90,32 @@ export function getSources(parts: MessageAISDK["parts"]) {
   return validSources
 }
 
-function extractTitleFromUrl(url: string): string {
+function normalizeSourceUrl(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value
+  }
+  if (value && typeof value === "object") {
+    const candidate = (value as { url?: unknown; href?: unknown }).url
+    if (typeof candidate === "string") {
+      return candidate
+    }
+    const href = (value as { href?: unknown }).href
+    if (typeof href === "string") {
+      return href
+    }
+  }
+  return null
+}
+
+function extractTitleFromUrl(url: unknown): string {
+  const safeUrl =
+    typeof url === "string" ? url : normalizeSourceUrl(url) || String(url ?? "")
+  if (!safeUrl) {
+    return "Source"
+  }
+
   try {
-    const urlObj = new URL(url)
+    const urlObj = new URL(safeUrl)
     const hostname = urlObj.hostname
     
     // Extract meaningful title from URL
@@ -106,6 +137,6 @@ function extractTitleFromUrl(url: string): string {
     
     return hostname.replace(/^www\./, '')
   } catch {
-    return url.substring(0, 50)
+    return safeUrl.substring(0, 50)
   }
 }

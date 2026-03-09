@@ -15,11 +15,12 @@ import {
   MessageContent,
 } from "@/components/prompt-kit/message"
 import { Button } from "@/components/ui/button"
+import { stripUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
 import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"
 import { Check, Copy, Trash } from "@phosphor-icons/react"
 import Image from "next/image"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 const getTextFromDataUrl = (dataUrl: string) => {
   const base64 = dataUrl.split(",")[1]
@@ -51,13 +52,20 @@ export function MessageUser({
   id,
   className,
 }: MessageUserProps) {
-  const [editInput, setEditInput] = useState(children)
+  const displayChildren = stripUploadReferenceTokens(children)
+  const [editInput, setEditInput] = useState(displayChildren)
   const [isEditing, setIsEditing] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => {
+    if (!isEditing) {
+      setEditInput(displayChildren)
+    }
+  }, [displayChildren, isEditing])
+
   const handleEditCancel = () => {
     setIsEditing(false)
-    setEditInput(children)
+    setEditInput(displayChildren)
   }
 
   const handleSave = () => {
@@ -209,7 +217,7 @@ export function MessageUser({
             ol: ({ children }) => <>{children}</>,
           }}
         >
-          {children}
+          {displayChildren}
         </MessageContent>
       )}
       <MessageActions className="flex gap-0 opacity-0 transition-opacity duration-0 group-hover:opacity-100">

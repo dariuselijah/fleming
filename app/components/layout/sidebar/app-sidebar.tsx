@@ -3,6 +3,7 @@
 import { groupChatsByDate } from "@/app/components/history/utils"
 import { useBreakpoint } from "@/app/hooks/use-breakpoint"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { resetChatClientState } from "@/lib/chat-store/new-chat"
 import {
   Sidebar,
   SidebarContent,
@@ -65,11 +66,7 @@ export function AppSidebar() {
               className="hover:bg-accent/80 hover:text-foreground text-primary group/new-chat relative inline-flex w-full items-center rounded-md bg-transparent px-2 py-2 text-sm transition-colors"
               type="button"
               onClick={() => {
-                // Clear any local state before navigating
-                if (typeof window !== 'undefined') {
-                  localStorage.removeItem('chatDraft')
-                  window.dispatchEvent(new CustomEvent('resetChatState'))
-                }
+                resetChatClientState(pathname)
                 router.push("/")
               }}
             >
@@ -97,6 +94,13 @@ export function AppSidebar() {
             />
             <Link
               href="/uploads"
+              prefetch
+              onMouseEnter={() => {
+                router.prefetch("/uploads")
+              }}
+              onFocus={() => {
+                router.prefetch("/uploads")
+              }}
               className={`relative inline-flex w-full items-center rounded-md px-2 py-2 text-sm transition-colors ${
                 pathname === "/uploads"
                   ? "bg-accent text-foreground"

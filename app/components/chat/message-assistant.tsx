@@ -2,20 +2,15 @@ import {
   Message,
   MessageAction,
   MessageActions,
-  MessageContent,
 } from "@/components/prompt-kit/message"
 import { ProcessingLoader } from "@/components/prompt-kit/processing-loader"
-import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
 import { ArrowClockwise, Check, Copy } from "@phosphor-icons/react"
+import { AssistantInlineParts } from "./assistant-inline-parts"
 import { getSources } from "./get-sources"
-import { Reasoning } from "./reasoning"
 import { SearchImages } from "./search-images"
 import { YouTubeResults, type YouTubeResultItem } from "./youtube-results"
-import { SourcesList } from "./sources-list"
-import { ToolInvocation } from "./tool-invocation"
-import { CitationMarkdown } from "./citation-markdown"
 import { ReferencesSection } from "./references-section"
 import { EvidenceReferencesSection } from "./evidence-references-section"
 import { TrustSummaryCard } from "./trust-summary-card"
@@ -24,9 +19,51 @@ import type { CitationData } from "./citation-popup"
 import type { EvidenceCitation } from "@/lib/evidence/types"
 import { parseCitationMarkers, getUniqueCitationIndices } from "@/lib/citations/parser"
 import { useMemo, useCallback, useEffect, useState, useRef } from "react"
-import { WEB_ROLE_MARKDOWN_CLASSNAME } from "./markdown-styles"
 import { parseLearningCard } from "@/lib/medical-student-learning"
 import { LearningCard } from "./learning-card"
+import type { DocumentArtifact, QuizArtifact } from "@/lib/uploads/artifacts"
+import {
+  DocumentArtifactCard,
+  InteractiveQuizArtifactCard,
+} from "./generated-artifact-cards"
+
+function parseArtifactFromToolResult(
+  result: unknown
+): DocumentArtifact | QuizArtifact | null {
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const candidate = result as { artifactType?: string }
+    if (candidate.artifactType === "document" || candidate.artifactType === "quiz") {
+      return result as DocumentArtifact | QuizArtifact
+    }
+  }
+  return null
+}
+
+function isDocumentArtifact(value: unknown): value is DocumentArtifact {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as DocumentArtifact).artifactType === "document" &&
+      typeof (value as DocumentArtifact).artifactId === "string" &&
+      Array.isArray((value as DocumentArtifact).sections)
+  )
+}
+
+function isQuizArtifact(value: unknown): value is QuizArtifact {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as QuizArtifact).artifactType === "quiz" &&
+      typeof (value as QuizArtifact).artifactId === "string" &&
+      Array.isArray((value as QuizArtifact).questions)
+  )
+}
+
+function parseFilenameFromContentDisposition(value: string | null): string | null {
+  if (!value) return null
+  const match = value.match(/filename="?([^"]+)"?/i)
+  return match?.[1] || null
+}
 
 type MessageAssistantProps = {
   children: string
@@ -40,6 +77,7 @@ type MessageAssistantProps = {
   className?: string
   evidenceCitations?: EvidenceCitation[]
   contextPrompt?: string
+  streamIntroPreview?: string | null
 }
 
 function extractYouTubeVideoId(url: string): string | null {
@@ -77,6 +115,17 @@ function isLikelyYouTubeVideoId(value: string): boolean {
   return /^[A-Za-z0-9_-]{11}$/.test(value)
 }
 
+function stripToolCitationArtifacts(text: string): string {
+  if (!text) return ""
+  return text
+    .replace(/\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/gi, "")
+    .replace(/\[tool\s+slide\s+([^\]]+)\]/gi, " (slide $1)")
+    .replace(/\[tool\s+([^\]]+)\]/gi, " ($1)")
+    .replace(/\[source\s+([^\]]+)\]/gi, " ($1)")
+    .replace(/\[doc\s+([^\]]+)\]/gi, " ($1)")
+    .replace(/[ \t]{2,}/g, " ")
+}
+
 export function MessageAssistant({
   children,
   isLast,
@@ -89,28 +138,36 @@ export function MessageAssistant({
   className,
   evidenceCitations = [],
   contextPrompt,
+  streamIntroPreview,
 }: MessageAssistantProps) {
-  const { preferences } = useUserPreferences()
   const { card: learningCard, cleanContent } = useMemo(
     () => parseLearningCard(children || ""),
     [children]
   )
   const contentToRender = useMemo(
-    () => (cleanContent || "").replace(/\[CITE_PLACEHOLDER_\d+\]/g, ""),
+    () =>
+      stripToolCitationArtifacts(
+        (cleanContent || "").replace(/\[CITE_PLACEHOLDER_\d+\]/g, "")
+      ),
     [cleanContent]
   )
   
   // Memoize derived data to prevent unnecessary recalculations during streaming
   const sources = useMemo(() => getSources(parts), [parts])
-  const toolInvocationParts = useMemo(() => 
-    parts?.filter((part) => part.type === "tool-invocation"), [parts]
-  )
-  const reasoningParts = useMemo(() => 
-    parts?.find((part) => part.type === "reasoning"), [parts]
-  )
   
   const contentNullOrEmpty = contentToRender === null || contentToRender === ""
   const isLastStreaming = status === "streaming" && isLast
+  const hasRenderableTimelineParts = useMemo(
+    () =>
+      Array.isArray(parts) &&
+      parts.some(
+        (part) =>
+          part.type === "text" ||
+          part.type === "tool-invocation" ||
+          part.type === "reasoning"
+      ),
+    [parts]
+  )
   
   // Track evidence citations attached to this message payload.
   const hasAttachedEvidenceCitations = evidenceCitations.length > 0
@@ -186,6 +243,13 @@ export function MessageAssistant({
     // for evidence citations to be restored rather than extracting from web sources
     if (hasAttachedEvidenceCitations) {
       console.log('[MessageAssistant] Skipping source extraction - using evidence citations:', evidenceCitations.length)
+      return
+    }
+
+    // Do not synthesize placeholder citations for evidence-style markers.
+    // If evidence metadata is missing temporarily, keeping plain markers is safer
+    // than rendering potentially incorrect "Citation X" pills.
+    if (hasEvidenceMarkers) {
       return
     }
     
@@ -372,7 +436,7 @@ export function MessageAssistant({
   const hasSources = sources.length > 0
   // Check if text contains citation markers - now also check for [1], [2] pattern used by evidence mode
   const hasCitationMarkers =
-    contentToRender &&
+    Boolean(contentToRender) &&
     (/\[CITATION:\d+/.test(contentToRender) ||
       /\[\d+\]/.test(contentToRender) ||
       /\[PMID\s*:\s*\d+\]/i.test(contentToRender))
@@ -511,6 +575,104 @@ export function MessageAssistant({
       })
       .slice(0, 9)
 
+  const artifactPayloads = useMemo(() => {
+    if (!parts || !Array.isArray(parts)) return []
+    const artifacts: Array<DocumentArtifact | QuizArtifact> = []
+    for (const part of parts as any[]) {
+      if (part?.type === "tool-invocation" && part?.toolInvocation?.state === "result") {
+        const artifact = parseArtifactFromToolResult(part?.toolInvocation?.result)
+        if (artifact) {
+          artifacts.push(artifact)
+        }
+      }
+      if (part?.type === "metadata" && part?.metadata) {
+        const metadata = part.metadata as {
+          documentArtifacts?: unknown[]
+          quizArtifacts?: unknown[]
+        }
+        if (Array.isArray(metadata.documentArtifacts)) {
+          artifacts.push(...metadata.documentArtifacts.filter(isDocumentArtifact))
+        }
+        if (Array.isArray(metadata.quizArtifacts)) {
+          artifacts.push(...metadata.quizArtifacts.filter(isQuizArtifact))
+        }
+      }
+    }
+    const deduped = new Map<string, DocumentArtifact | QuizArtifact>()
+    for (const artifact of artifacts) {
+      const key = `${artifact.artifactType}:${artifact.artifactId}`
+      if (!deduped.has(key)) {
+        deduped.set(key, artifact)
+      }
+    }
+    return Array.from(deduped.values())
+  }, [parts])
+
+  const documentArtifacts = artifactPayloads.filter(
+    (artifact): artifact is DocumentArtifact => artifact.artifactType === "document"
+  )
+  const quizArtifacts = artifactPayloads.filter(
+    (artifact): artifact is QuizArtifact => artifact.artifactType === "quiz"
+  )
+  const inlineFallbackText = useMemo(() => {
+    if (!contentToRender) return contentToRender
+    if (artifactPayloads.length === 0) return contentToRender
+    const headingCount = (contentToRender.match(/^##\s+/gm) || []).length
+    const looksLikeVerboseArtifactDump =
+      (contentToRender.length > 700 &&
+        /(##\s+executive summary|##\s+key points|##\s+references|###\s+source\s+\d+|(^|\n)\s*(#{2,3}\s*)?question\s*\d+|<details>|answer\s*&\s*explanation|quick review questions|how did you do\?|references\s*\(from slides\))/i.test(
+          contentToRender
+        )) ||
+      (contentToRender.length > 900 &&
+        (headingCount >= 2 || /\n-\s+/.test(contentToRender)))
+    if (!looksLikeVerboseArtifactDump) return contentToRender
+    if (documentArtifacts.length > 0 && quizArtifacts.length === 0) {
+      return "Here is your generated document."
+    }
+    if (quizArtifacts.length > 0 && documentArtifacts.length === 0) {
+      return "Here is your generated quiz."
+    }
+    return "Your generated artifacts are ready below."
+  }, [artifactPayloads.length, contentToRender, documentArtifacts.length, quizArtifacts.length])
+  const [exportingArtifactId, setExportingArtifactId] = useState<string | null>(null)
+
+  const handleDocumentExport = useCallback(async (artifact: DocumentArtifact, format: "pdf" | "docx") => {
+    setExportingArtifactId(`${artifact.artifactId}:${format}`)
+    try {
+      const response = await fetch("/api/documents/export", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          format,
+          artifact,
+        }),
+      })
+      if (!response.ok) {
+        throw new Error("Failed to export document")
+      }
+
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement("a")
+      anchor.href = blobUrl
+      anchor.download =
+        parseFilenameFromContentDisposition(
+          response.headers.get("Content-Disposition")
+        ) || `${artifact.title || "document-artifact"}.${format}`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(blobUrl)
+    } catch (error) {
+      console.error("[Artifact Export] Failed:", error)
+    } finally {
+      setExportingArtifactId(null)
+    }
+  }, [])
+
   // Memoize handlers to prevent unnecessary re-renders
   const memoizedCopyToClipboard = useCallback(() => {
     if (copyToClipboard) copyToClipboard()
@@ -529,49 +691,57 @@ export function MessageAssistant({
       )}
     >
       <div className={cn("flex min-w-full flex-col gap-2", isLast && "pb-8")}>
-        {reasoningParts && reasoningParts.reasoning && (
-          <Reasoning
-            reasoning={reasoningParts.reasoning}
-            isStreaming={status === "streaming"}
-          />
-        )}
-
-        {toolInvocationParts &&
-          toolInvocationParts.length > 0 &&
-          (preferences.showToolInvocations ?? true) && (
-            <ToolInvocation toolInvocations={toolInvocationParts} />
-          )}
-
         {searchImageResults.length > 0 && (
           <SearchImages results={searchImageResults} />
         )}
 
         {learningCard && <LearningCard card={learningCard} />}
 
-        {contentNullOrEmpty ? (
+        {contentNullOrEmpty && !hasRenderableTimelineParts ? (
         isLastStreaming ? <div
             className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
-              <ProcessingLoader />
+              {streamIntroPreview ? (
+                <div className="text-muted-foreground text-sm leading-6">
+                  {streamIntroPreview}
+                </div>
+              ) : (
+                <ProcessingLoader />
+              )}
             </div> : null
-        ) : shouldShowCitations ? (
-          <CitationMarkdown
-            className={cn(
-              WEB_ROLE_MARKDOWN_CLASSNAME
-            )}
+        ) : (
+          <AssistantInlineParts
+            parts={parts}
+            fallbackText={inlineFallbackText}
+            status={status}
+            shouldShowCitations={shouldShowCitations}
             citations={activeCitations}
             evidenceCitations={hasEvidenceCitations ? referencedEvidenceCitations : undefined}
-          >
-            {contentToRender}
-          </CitationMarkdown>
-        ) : (
-          <MessageContent
-            className={cn(
-              WEB_ROLE_MARKDOWN_CLASSNAME
-            )}
-            markdown={true}
-          >
-            {contentToRender}
-          </MessageContent>
+            streamIntroPreview={streamIntroPreview}
+          />
+        )}
+
+        {(documentArtifacts.length > 0 || quizArtifacts.length > 0) && (
+          <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Generated Artifacts
+            </p>
+            <div className="mt-2 space-y-2">
+              {documentArtifacts.map((artifact) => (
+                <DocumentArtifactCard
+                  key={artifact.artifactId}
+                  artifact={artifact}
+                  onExport={handleDocumentExport}
+                  exportingArtifactId={exportingArtifactId}
+                />
+              ))}
+              {quizArtifacts.map((artifact) => (
+                <InteractiveQuizArtifactCard
+                  key={artifact.artifactId}
+                  artifact={artifact}
+                />
+              ))}
+            </div>
+          </div>
         )}
 
         {effectiveYoutubeResults.length > 0 && (
@@ -587,8 +757,6 @@ export function MessageAssistant({
         )}
         {showEvidenceReferences && <EvidenceReferencesSection citations={referencedEvidenceCitations} />}
         {showReferences && !showEvidenceReferences && <ReferencesSection citations={citations} />}
-
-        {sources && sources.length > 0 && <SourcesList sources={sources} />}
 
         {Boolean(isLastStreaming || contentNullOrEmpty) ? null : (
           <MessageActions
