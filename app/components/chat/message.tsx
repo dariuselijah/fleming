@@ -13,8 +13,11 @@ type MessageProps = {
   onDelete: (id: string) => void
   onEdit: (id: string, newText: string) => void
   onReload: () => void
+  onSuggestion?: (suggestion: string) => void
+  onWorkflowSuggestion?: (suggestion: string) => void
   hasScrollAnchor?: boolean
   parts?: MessageType["parts"]
+  annotations?: Array<{ type?: string; refinement?: unknown }>
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
   evidenceCitations?: any[]
@@ -31,8 +34,11 @@ export function Message({
   onDelete,
   onEdit,
   onReload,
+  onSuggestion,
+  onWorkflowSuggestion,
   hasScrollAnchor,
   parts,
+  annotations,
   status,
   className,
   evidenceCitations = [],
@@ -82,9 +88,12 @@ export function Message({
           copied={copied}
           copyToClipboard={copyToClipboard}
           onReload={memoizedOnReload}
+          onSuggestion={onSuggestion}
+          onWorkflowSuggestion={onWorkflowSuggestion}
           isLast={isLast}
           hasScrollAnchor={hasScrollAnchor}
           parts={parts}
+          annotations={annotations}
           status={status}
           className={className}
           evidenceCitations={evidenceCitations}
@@ -104,6 +113,8 @@ export function Message({
     memoizedOnReload,
     memoizedOnEdit,
     memoizedOnDelete,
+    onSuggestion,
+    onWorkflowSuggestion,
     id,
     hasScrollAnchor,
     attachments,
@@ -111,9 +122,11 @@ export function Message({
     children,
     isLast,
     parts,
+    annotations,
     status,
     evidenceCitations,
     contextPrompt,
+    streamIntroPreview,
   ])
 
   return messageContent

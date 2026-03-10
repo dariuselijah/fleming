@@ -8,6 +8,27 @@ const EMBEDDING_DIMENSION = 1536
 const MAX_EMBEDDING_TOKENS_PER_REQUEST = 240000
 const APPROX_CHARS_PER_TOKEN = 4
 
+function isLikelyOpenAIApiKey(value: string): boolean {
+  const token = value.trim()
+  if (!token) return false
+  if (/^sk-ant-/i.test(token)) return false
+  if (/^sk-or-/i.test(token)) return false
+  if (/^xai-/i.test(token)) return false
+  if (/^AIza/i.test(token)) return false
+  return /^sk-(proj-)?/i.test(token)
+}
+
+function resolveEmbeddingApiKey(explicitKey?: string): string {
+  const key = explicitKey || process.env.OPENAI_API_KEY
+  if (!key) {
+    throw new Error("OpenAI API key is required for embedding generation")
+  }
+  if (!isLikelyOpenAIApiKey(key)) {
+    throw new Error("Embedding provider mismatch: non-OpenAI API key cannot be used for OpenAI embeddings")
+  }
+  return key
+}
+
 export interface EmbeddingOptions {
   model?: string
   dimension?: number
@@ -25,11 +46,7 @@ export async function generateEmbedding(
 ): Promise<number[]> {
   const model = options?.model || EMBEDDING_MODEL
   const dimension = options?.dimension || EMBEDDING_DIMENSION
-  const key = apiKey || process.env.OPENAI_API_KEY
-
-  if (!key) {
-    throw new Error('OpenAI API key is required for embedding generation')
-  }
+  const key = resolveEmbeddingApiKey(apiKey)
 
   const response = await fetch('https://api.openai.com/v1/embeddings', {
     method: 'POST',
@@ -211,11 +228,7 @@ export async function generateEmbeddings(
   const results: number[][] = []
   const model = options?.model || EMBEDDING_MODEL
   const dimension = options?.dimension || EMBEDDING_DIMENSION
-  const key = apiKey || process.env.OPENAI_API_KEY
-
-  if (!key) {
-    throw new Error('OpenAI API key is required for embedding generation')
-  }
+  const key = resolveEmbeddingApiKey(apiKey)
 
   const safeBatches: string[][] = []
   let cursor = 0

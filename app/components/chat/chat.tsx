@@ -81,7 +81,7 @@ export function Chat() {
     enableEvidence: boolean
     learningMode: "ask" | "simulate" | "guideline"
     clinicianMode: ClinicianWorkflowMode
-    artifactIntent?: "none" | "document" | "quiz"
+    artifactIntent?: "none" | "quiz"
     citationStyle?: CitationStyle
   } | null>(null)
 
@@ -170,6 +170,7 @@ export function Chat() {
     evidenceCitations,
     submit,
     handleSuggestion,
+    handleWorkflowSuggestion,
     handleReload,
     handleInputChange,
   } = useChatCore({
@@ -218,11 +219,7 @@ export function Chat() {
         clinicianMode: normalizeClinicianWorkflowMode(
           pendingMessage.clinicianMode
         ),
-        artifactIntent:
-          pendingMessage.artifactIntent === "document" ||
-          pendingMessage.artifactIntent === "quiz"
-            ? pendingMessage.artifactIntent
-            : "none",
+        artifactIntent: pendingMessage.artifactIntent === "quiz" ? "quiz" : "none",
         citationStyle:
           pendingMessage.citationStyle === "apa" ||
           pendingMessage.citationStyle === "vancouver"
@@ -250,7 +247,7 @@ export function Chat() {
           normalizeClinicianWorkflowMode(pendingMessage.clinicianMode)
         )
       }
-      if (pendingMessage.artifactIntent === "document" || pendingMessage.artifactIntent === "quiz") {
+      if (pendingMessage.artifactIntent === "quiz") {
         setArtifactIntent(pendingMessage.artifactIntent)
       }
       if (
@@ -375,10 +372,22 @@ export function Chat() {
       onDelete: handleDelete,
       onEdit: handleEdit,
       onReload: handleReload,
+      onSuggestion: handleSuggestion,
+      onWorkflowSuggestion: handleWorkflowSuggestion,
       evidenceCitations,
       streamIntroPreview,
     }),
-    [messages, status, handleDelete, handleEdit, handleReload, evidenceCitations, streamIntroPreview]
+    [
+      messages,
+      status,
+      handleDelete,
+      handleEdit,
+      handleReload,
+      handleSuggestion,
+      handleWorkflowSuggestion,
+      evidenceCitations,
+      streamIntroPreview,
+    ]
   )
 
   // Memoize the chat input props

@@ -46,6 +46,50 @@ import type { FileUploadSummary, FileUploadStatus } from "../chat/use-file-uploa
 
 // Fleming 3.5 has been removed - only Fleming 4 is available
 
+const UPLOADS_CACHE_KEY = "fleming:uploads:list:v1"
+const UPLOADS_CACHE_MAX_AGE_MS = 10 * 60 * 1000
+
+type UploadsCachePayload = {
+  savedAt: number
+  uploads: UserUploadListItem[]
+}
+
+function readCachedUploads(): UploadsCachePayload | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(UPLOADS_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as UploadsCachePayload
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.savedAt !== "number" ||
+      !Array.isArray(parsed.uploads)
+    ) {
+      return null
+    }
+    if (Date.now() - parsed.savedAt > UPLOADS_CACHE_MAX_AGE_MS) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeCachedUploads(uploads: UserUploadListItem[]) {
+  if (typeof window === "undefined") return
+  try {
+    const payload: UploadsCachePayload = {
+      savedAt: Date.now(),
+      uploads: uploads.slice(0, 80),
+    }
+    window.localStorage.setItem(UPLOADS_CACHE_KEY, JSON.stringify(payload))
+  } catch {
+    // Cache failures should never block chat input behavior.
+  }
+}
+
 type ChatInputProps = {
   value: string
   onValueChange: (value: string) => void
@@ -72,9 +116,9 @@ type ChatInputProps = {
   onLearningModeChange: (mode: MedicalStudentLearningMode) => void
   clinicianMode?: ClinicianWorkflowMode
   onClinicianModeChange?: (mode: ClinicianWorkflowMode) => void
-  artifactIntent?: "none" | "document" | "quiz"
+  artifactIntent?: "none" | "quiz"
   citationStyle?: CitationStyle
-  onArtifactIntentChange?: (intent: "none" | "document" | "quiz") => void
+  onArtifactIntentChange?: (intent: "none" | "quiz") => void
   onCitationStyleChange?: (style: CitationStyle) => void
 }
 
@@ -193,9 +237,6 @@ export function ChatInput({
   }, [])
 
   const artifactInstruction = useMemo(() => {
-    if (artifactIntent === "document") {
-      return "Generate a polished study document from my selected uploads."
-    }
     if (artifactIntent === "quiz") {
       return "Generate an interactive multiple-choice quiz from my selected uploads."
     }
@@ -210,17 +251,9 @@ export function ChatInput({
     }
     const quizPattern =
       /\b(generate|create|make|build|draft|prepare)?\s*(a\s+)?(quiz|mcq|multiple[-\s]?choice)\b/
-    const documentPattern =
-      /\b(generate|create|make|build|draft|prepare|write)\s+(a\s+)?(study\s+plan|study\s+document|document|notes|summary|review)\b/
-    const freeformDocumentPattern =
-      /\b(study\s+plan|study\s+document|study\s+notes|revision\s+notes|summary\s+notes)\b/
 
     if (quizPattern.test(normalized)) {
       onArtifactIntentChange?.("quiz")
-      return
-    }
-    if (documentPattern.test(normalized) || freeformDocumentPattern.test(normalized)) {
-      onArtifactIntentChange?.("document")
       return
     }
     onArtifactIntentChange?.("none")
@@ -420,6 +453,15 @@ export function ChatInput({
 
   useEffect(() => {
     if (!isUserAuthenticated) return
+    if (uploadResults.length > 0) return
+    const cached = readCachedUploads()
+    if (!cached || cached.uploads.length === 0) return
+    setUploadResults(cached.uploads)
+    setUploadsLoadedAt(cached.savedAt)
+  }, [isUserAuthenticated, uploadResults.length])
+
+  useEffect(() => {
+    if (!isUserAuthenticated) return
     if (uploadResults.length > 0 && Date.now() - uploadsLoadedAt < 60_000) return
 
     let active = true
@@ -428,6 +470,7 @@ export function ChatInput({
         if (!active) return
         setUploadResults(uploads)
         setUploadsLoadedAt(Date.now())
+        writeCachedUploads(uploads)
       })
       .catch(() => {
         if (!active) return
@@ -450,10 +493,11 @@ export function ChatInput({
         if (!active) return
         setUploadResults(uploads)
         setUploadsLoadedAt(Date.now())
+        writeCachedUploads(uploads)
       })
       .catch(() => {
         if (!active) return
-        setUploadResults([])
+        // Keep any cached/previous results if refresh fails.
       })
       .finally(() => {
         if (!active) return

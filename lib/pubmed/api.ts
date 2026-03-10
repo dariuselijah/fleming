@@ -22,6 +22,20 @@ export interface PubMedSearchResult {
   totalResults: number
 }
 
+async function safeFetch(url: string, timeoutMs = 4500): Promise<Response | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok) return null
+    return response
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
  * Search PubMed by query string
  */
@@ -33,7 +47,10 @@ export async function searchPubMed(
     // Step 1: Search for article IDs
     const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json&sort=relevance`
     
-    const searchResponse = await fetch(searchUrl)
+    const searchResponse = await safeFetch(searchUrl)
+    if (!searchResponse) {
+      return { articles: [], totalResults: 0 }
+    }
     const searchData = await searchResponse.json()
     
     const pmids = searchData.esearchresult?.idlist || []
@@ -49,8 +66,7 @@ export async function searchPubMed(
       articles,
       totalResults: parseInt(searchData.esearchresult?.count || '0', 10)
     }
-  } catch (error) {
-    console.error('PubMed search error:', error)
+  } catch {
     return { articles: [], totalResults: 0 }
   }
 }
@@ -71,14 +87,15 @@ async function fetchPubMedArticles(pmids: string[]): Promise<PubMedArticle[]> {
   
   try {
     const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${pmids.join(',')}&retmode=xml`
-    
-    const response = await fetch(fetchUrl)
+    const response = await safeFetch(fetchUrl)
+    if (!response) {
+      return []
+    }
     const xmlText = await response.text()
     
     // Parse XML (simplified parser - in production, use a proper XML parser)
     return parsePubMedXML(xmlText)
-  } catch (error) {
-    console.error('PubMed fetch error:', error)
+  } catch {
     return []
   }
 }

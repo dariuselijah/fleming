@@ -3,6 +3,7 @@ import { toast } from "@/components/ui/toast"
 import { toast as sonnerToast } from "sonner"
 import { getOrCreateGuestUserId } from "@/lib/api"
 import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
+import { encodeArtifactWorkflowInput } from "@/lib/chat/artifact-workflow"
 import { Attachment } from "@/lib/file-handling"
 import {
   DEFAULT_MEDICAL_STUDENT_LEARNING_MODE,
@@ -28,6 +29,133 @@ const SESSION_SNAPSHOT_MAX_CONTENT_CHARS = 6000
 const SESSION_SNAPSHOT_FALLBACK_MAX_MESSAGES = 12
 const SESSION_SNAPSHOT_FALLBACK_MAX_CONTENT_CHARS = 1800
 const SESSION_SNAPSHOT_LATEST_MAX_MESSAGES = 8
+const SESSION_SNAPSHOT_PART_TEXT_MAX_CHARS = 800
+
+function truncateSnapshotString(value: string, maxChars: number): string {
+  return value.length > maxChars ? `${value.slice(0, maxChars - 3)}...` : value
+}
+
+function compactSnapshotValue(value: unknown, depth = 0): unknown {
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return value
+  }
+  if (typeof value === "string") {
+    return truncateSnapshotString(value, SESSION_SNAPSHOT_PART_TEXT_MAX_CHARS)
+  }
+  if (depth > 3) {
+    return typeof value === "object" ? "[truncated]" : value
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 8).map((item) => compactSnapshotValue(item, depth + 1))
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).slice(0, 12)
+    return Object.fromEntries(
+      entries.map(([key, nested]) => [key, compactSnapshotValue(nested, depth + 1)])
+    )
+  }
+  return String(value)
+}
+
+function extractSessionSafeMessageParts(message: Message): unknown[] | undefined {
+  if (!Array.isArray(message.parts)) return undefined
+  const refinedParts = message.parts
+    .map((part) => {
+      const candidate = part as any
+      if (candidate?.type === "text" && typeof candidate.text === "string") {
+        const trimmed = candidate.text.trim()
+        if (!trimmed) return null
+        return {
+          type: "text",
+          text: truncateSnapshotString(trimmed, SESSION_SNAPSHOT_PART_TEXT_MAX_CHARS),
+        }
+      }
+      if (candidate?.type === "reasoning" && typeof candidate.text === "string") {
+        const trimmed = candidate.text.trim()
+        if (!trimmed) return null
+        return {
+          type: "reasoning",
+          text: truncateSnapshotString(trimmed, SESSION_SNAPSHOT_PART_TEXT_MAX_CHARS),
+        }
+      }
+      if (candidate?.type === "tool-invocation") {
+        const invocation = candidate.toolInvocation as
+          | {
+              toolName?: unknown
+              toolCallId?: unknown
+              state?: unknown
+              args?: unknown
+              result?: unknown
+              step?: unknown
+            }
+          | undefined
+        const toolName = String(invocation?.toolName || "")
+        if (!/refine.*requirements/i.test(toolName)) return null
+        return {
+          type: "tool-invocation",
+          toolInvocation: {
+            toolName,
+            toolCallId: String(invocation?.toolCallId || "refinement"),
+            state:
+              invocation?.state === "call" ||
+              invocation?.state === "partial-call" ||
+              invocation?.state === "result"
+                ? invocation.state
+                : "result",
+            step:
+              typeof invocation?.step === "number" ? invocation.step : undefined,
+            args: compactSnapshotValue(invocation?.args),
+            result: compactSnapshotValue(invocation?.result),
+          },
+        }
+      }
+      if (candidate?.type === "metadata" && candidate?.metadata?.topicContext) {
+        return {
+          type: "metadata",
+          metadata: {
+            topicContext: compactSnapshotValue(candidate.metadata.topicContext),
+          },
+        }
+      }
+      return null
+    })
+    .filter(Boolean)
+    .slice(0, 8)
+  return refinedParts.length > 0 ? refinedParts : undefined
+}
+
+function extractSessionSafeAnnotations(message: Message): unknown[] | undefined {
+  const annotations = (message as any)?.annotations
+  if (!Array.isArray(annotations)) return undefined
+  const refinedAnnotations = annotations
+    .map((annotation) => {
+      if (!annotation || typeof annotation !== "object") return null
+      const candidate = annotation as Record<string, unknown>
+      const type = String(candidate.type || "")
+      if (type === "artifact-refinement") {
+        return {
+          type,
+          refinement: compactSnapshotValue(candidate.refinement),
+        }
+      }
+      if (type === "topic-context") {
+        return {
+          type,
+          topicContext: compactSnapshotValue(candidate.topicContext),
+        }
+      }
+      if (type === "artifact-runtime-warnings") {
+        return {
+          type,
+          warnings: compactSnapshotValue(candidate.warnings),
+        }
+      }
+      return null
+    })
+    .filter(Boolean)
+    .slice(0, 4)
+  return refinedAnnotations.length > 0 ? refinedAnnotations : undefined
+}
 
 function extractSessionSafeMessageContent(message: Message): string {
   if (typeof message.content === "string") {
@@ -58,11 +186,17 @@ function buildSessionMessageSnapshot(
   maxContentChars: number
 ): Message[] {
   const recentMessages = messages.slice(-maxMessages)
-  return recentMessages.map((message) => ({
-    id: message.id,
-    role: message.role,
-    content: extractSessionSafeMessageContent(message).slice(0, maxContentChars),
-  }))
+  return recentMessages.map((message) => {
+    const safeParts = extractSessionSafeMessageParts(message)
+    const safeAnnotations = extractSessionSafeAnnotations(message)
+    return {
+      id: message.id,
+      role: message.role,
+      content: extractSessionSafeMessageContent(message).slice(0, maxContentChars),
+      ...(safeParts ? { parts: safeParts as any } : {}),
+      ...(safeAnnotations ? { annotations: safeAnnotations as any } : {}),
+    } as Message
+  })
 }
 
 function isQuotaExceeded(error: unknown): boolean {
@@ -145,7 +279,7 @@ export function useChatCore({
     )
   const [clinicianMode, setClinicianModeState] =
     useState<ClinicianWorkflowMode>(DEFAULT_CLINICIAN_WORKFLOW_MODE)
-  const [artifactIntent, setArtifactIntent] = useState<"none" | "document" | "quiz">("none")
+  const [artifactIntent, setArtifactIntent] = useState<"none" | "quiz">("none")
   const [citationStyle, setCitationStyleState] = useState<CitationStyle>("harvard")
   
   // Evidence citations from server - indexed by message ID or last response
@@ -1383,7 +1517,7 @@ export function useChatCore({
   }, [prompt, setInput])
 
   useEffect(() => {
-    if (artifactIntentParam === "document" || artifactIntentParam === "quiz") {
+    if (artifactIntentParam === "quiz") {
       setArtifactIntent(artifactIntentParam)
     }
   }, [artifactIntentParam, setArtifactIntent])
@@ -1803,6 +1937,15 @@ export function useChatCore({
     ]
   )
 
+  const handleWorkflowSuggestion = useCallback(
+    async (suggestion: string) => {
+      const encoded = encodeArtifactWorkflowInput(suggestion)
+      if (!encoded) return
+      await submit(encoded)
+    },
+    [submit]
+  )
+
   // Handle reload
   const handleReload = useCallback(async () => {
     const uid = await getOrCreateGuestUserId(user)
@@ -1895,6 +2038,7 @@ export function useChatCore({
     // Actions
     submit,
     handleSuggestion,
+    handleWorkflowSuggestion,
     handleReload,
     handleInputChange,
   }

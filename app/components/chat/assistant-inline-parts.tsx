@@ -34,6 +34,8 @@ type AssistantInlinePartsProps = {
   parts?: MessageAISDK["parts"]
   fallbackText: string
   status?: "streaming" | "ready" | "submitted" | "error"
+  onSuggestion?: (suggestion: string) => void
+  onWorkflowSuggestion?: (suggestion: string) => void
   shouldShowCitations: boolean
   citations: Map<number, CitationData>
   evidenceCitations?: unknown[]
@@ -49,45 +51,6 @@ function sanitizeInlineAssistantText(text: string): string {
     .replace(/\[source\s+([^\]]+)\]/gi, " ($1)")
     .replace(/\[doc\s+([^\]]+)\]/gi, " ($1)")
     .replace(/[ \t]{2,}/g, " ")
-}
-
-function looksLikeVerboseDocumentDump(text: string): boolean {
-  if (!text || text.length < 500) return false
-  return /(##\s+executive summary|##\s+key points|##\s+references|###\s+source\s+\d+)/i.test(
-    text
-  )
-}
-
-function looksLikeVerboseQuizDump(text: string): boolean {
-  if (!text || text.length < 350) return false
-  return /(^|\n)\s*(#{2,3}\s*)?question\s*\d+|<details>|answer\s*&\s*explanation|correct:\s*[a-d]/i.test(
-    text
-  )
-}
-
-function shouldReplaceArtifactNarrative(
-  text: string,
-  hasDocumentArtifactResult: boolean,
-  hasQuizArtifactResult: boolean,
-  hasArtifactMetadata: boolean
-): boolean {
-  if (!text) return false
-  const headingCount = (text.match(/^##\s+/gm) || []).length
-  const hasArtifactDumpMarkers =
-    looksLikeVerboseDocumentDump(text) ||
-    looksLikeVerboseQuizDump(text) ||
-    /(^|\n)\s*(great request|how did you do\?|quick review questions|references\s*\(from slides\))/i.test(
-      text
-    )
-
-  const likelyLongArtifactNarrative =
-    text.length > 900 &&
-    (headingCount >= 2 || /\n-\s+/.test(text) || /\[\d+\]/.test(text))
-
-  return (
-    (hasDocumentArtifactResult || hasQuizArtifactResult || hasArtifactMetadata) &&
-    (hasArtifactDumpMarkers || likelyLongArtifactNarrative)
-  )
 }
 
 function parseArtifactTypeFromToolPart(part: any): "document" | "quiz" | null {
@@ -126,6 +89,11 @@ function isArtifactMetadataPart(part: any): boolean {
   )
 }
 
+function isRefinementToolName(toolName: unknown): boolean {
+  if (typeof toolName !== "string") return false
+  return /refine.*requirements/i.test(toolName)
+}
+
 function buildTimelineSegments(
   parts: MessageAISDK["parts"],
   fallbackText: string
@@ -147,7 +115,8 @@ function buildTimelineSegments(
     (part) => parseArtifactTypeFromToolPart(part) === "quiz"
   )
   const hasArtifactMetadata = parts.some((part) => isArtifactMetadataPart(part))
-  const hasArtifactResult = hasDocumentArtifactResult || hasQuizArtifactResult || hasArtifactMetadata
+  const hasArtifactResult =
+    hasDocumentArtifactResult || hasQuizArtifactResult || hasArtifactMetadata
 
   const flushText = () => {
     if (!textBuffer) return
@@ -165,22 +134,7 @@ function buildTimelineSegments(
 
     if (part.type === "text" && typeof part.text === "string") {
       const sanitizedText = sanitizeInlineAssistantText(part.text)
-      if (
-        shouldReplaceArtifactNarrative(
-          sanitizedText,
-          hasDocumentArtifactResult,
-          hasQuizArtifactResult,
-          hasArtifactMetadata
-        )
-      ) {
-        textBuffer += hasQuizArtifactResult
-          ? "Here is your generated quiz."
-          : hasDocumentArtifactResult
-            ? "Here is your generated document."
-            : "Your generated artifact is ready below."
-      } else {
-        textBuffer += sanitizedText
-      }
+      textBuffer += sanitizedText
       continue
     }
 
@@ -195,6 +149,15 @@ function buildTimelineSegments(
     }
 
     if (part.type === "tool-invocation" && part.toolInvocation) {
+      if (isRefinementToolName(part.toolInvocation.toolName)) {
+        flushText()
+        segments.push({
+          type: "tool",
+          key: `tool-${part.toolInvocation.toolCallId || idx}`,
+          part: part as ToolInvocationUIPart,
+        })
+        continue
+      }
       const artifactType = parseArtifactTypeFromToolPart(part)
       if (artifactType) {
         // Avoid rendering duplicate artifact tool cards; dedicated artifact cards are rendered below.
@@ -212,20 +175,14 @@ function buildTimelineSegments(
   flushText()
 
   const sanitizedFallback = sanitizeInlineAssistantText(fallbackText)
-  const shouldSuppressFallbackDump =
-    shouldReplaceArtifactNarrative(
-      sanitizedFallback,
-      hasDocumentArtifactResult,
-      hasQuizArtifactResult,
-      hasArtifactMetadata
-    )
-  const finalFallback = shouldSuppressFallbackDump
-    ? hasQuizArtifactResult
-      ? "Here is your generated quiz."
-      : hasDocumentArtifactResult
-        ? "Here is your generated document."
-        : "Your generated artifact is ready below."
-    : sanitizedFallback
+  const defaultArtifactLeadIn = hasQuizArtifactResult
+    ? "Here is your generated quiz."
+    : hasDocumentArtifactResult
+      ? "Here is your generated document."
+      : hasArtifactResult
+        ? "Your generated artifact is ready below."
+        : ""
+  const finalFallback = sanitizedFallback || defaultArtifactLeadIn
   if (!segments.some((segment) => segment.type === "text") && finalFallback) {
     segments.unshift({
       type: "text",
@@ -241,6 +198,8 @@ export function AssistantInlineParts({
   parts,
   fallbackText,
   status,
+  onSuggestion,
+  onWorkflowSuggestion,
   shouldShowCitations,
   citations,
   evidenceCitations,
@@ -276,6 +235,16 @@ export function AssistantInlineParts({
             <ToolInvocation
               key={segment.key}
               toolInvocations={[segment.part]}
+              onSuggestion={onSuggestion}
+              onWorkflowSuggestion={onWorkflowSuggestion}
+              defaultOpen={
+                segment.part.toolInvocation.toolName ===
+                  "refineArtifactRequirements" ||
+                segment.part.toolInvocation.toolName ===
+                  "refineDocumentRequirements" ||
+                segment.part.toolInvocation.toolName ===
+                  "refineQuizRequirements"
+              }
               inline
             />
           )

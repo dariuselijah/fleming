@@ -300,18 +300,32 @@ export function InteractiveQuizArtifactCard({ artifact }: { artifact: QuizArtifa
                     }
                     className={cn(
                       "w-full rounded-md border px-3 py-3 text-left text-sm transition",
-                      selected ? "border-primary/60 bg-primary/10" : "border-border hover:bg-accent/40",
+                      selected
+                        ? "border-primary bg-primary/15 ring-2 ring-primary/35 shadow-sm"
+                        : "border-border hover:bg-accent/40",
                       revealCorrect && "border-green-500/50 bg-green-500/10",
                       revealWrong && "border-red-500/40 bg-red-500/10"
                     )}
                   >
                     <span className="flex items-start gap-2.5">
-                      <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-[11px] font-semibold">
+                      <span
+                        className={cn(
+                          "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold",
+                          selected
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border"
+                        )}
+                      >
                         {optionLabel}
                       </span>
-                      <span className="min-w-0 break-words text-sm leading-6 text-foreground">
+                      <span className="min-w-0 flex-1 break-words text-sm leading-6 text-foreground">
                         {option}
                       </span>
+                      {selected ? (
+                        <span className="shrink-0 rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                          Selected
+                        </span>
+                      ) : null}
                     </span>
                   </button>
                 )

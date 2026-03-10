@@ -12,7 +12,28 @@ export interface TopicContext {
   lastUploadId?: string | null
   recentPages?: number[]
   recentEvidenceIds?: string[]
+  lastRetrievalConfidence?: "high" | "medium" | "low"
+  lastRetrievalFallbackReason?: string | null
+  lastRetrievalWarnings?: string[]
+  pendingArtifactStage?: "inspect" | "refine" | "generate" | null
+  pendingArtifactStructureInspected?: boolean
+  pendingArtifactStructureConfidence?: "high" | "medium" | "low" | null
+  pendingArtifactStructureTopics?: string[]
   followUpType?: "clarify" | "next_page" | "previous_page" | "drill_down" | "switch_topic" | "unknown"
+  pendingArtifactRefinement?: boolean
+  pendingArtifactRefinementChoices?: Array<{
+    id: string
+    label: string
+    submitText: string
+    requiresCustomInput?: boolean
+  }>
+  pendingArtifactRequiredFields?: string[]
+  pendingArtifactCustomInputPlaceholder?: string | null
+  pendingArtifactTopicSelection?: boolean
+  pendingArtifactTopicOptions?: string[]
+  pendingArtifactIntent?: "quiz" | null
+  pendingArtifactOriginalQuery?: string | null
+  pendingArtifactRequestedAt?: string | null
   pendingQuizTopicSelection?: boolean
   pendingQuizTopicOptions?: string[]
   pendingQuizOriginalQuery?: string | null

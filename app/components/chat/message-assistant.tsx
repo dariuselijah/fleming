@@ -72,12 +72,84 @@ type MessageAssistantProps = {
   copied?: boolean
   copyToClipboard?: () => void
   onReload?: () => void
+  onSuggestion?: (suggestion: string) => void
+  onWorkflowSuggestion?: (suggestion: string) => void
   parts?: MessageAISDK["parts"]
+  annotations?: Array<{ type?: string; refinement?: unknown; warnings?: unknown }>
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
   evidenceCitations?: EvidenceCitation[]
   contextPrompt?: string
   streamIntroPreview?: string | null
+}
+
+type ArtifactRefinementChoice = {
+  id: string
+  label: string
+  submitText: string
+  requiresCustomInput?: boolean
+}
+
+type ArtifactRefinementPayload = {
+  title?: string
+  question?: string
+  helperText?: string
+  choices?: ArtifactRefinementChoice[]
+  requiredFields?: string[]
+  customInputPlaceholder?: string
+}
+
+function parseArtifactRefinementPayload(
+  annotations: Array<{ type?: string; refinement?: unknown; warnings?: unknown }> | undefined
+): ArtifactRefinementPayload | null {
+  if (!Array.isArray(annotations) || annotations.length === 0) return null
+  const part = annotations.find((item) => item?.type === "artifact-refinement")
+  const payload = part?.refinement
+  if (!payload || typeof payload !== "object") return null
+  const candidate = payload as ArtifactRefinementPayload
+  if (!Array.isArray(candidate.choices) || candidate.choices.length === 0) return null
+  return {
+    title: typeof candidate.title === "string" ? candidate.title : "Refine Generation",
+    question:
+      typeof candidate.question === "string"
+        ? candidate.question
+        : "Choose one option to continue.",
+    helperText:
+      typeof candidate.helperText === "string" ? candidate.helperText : undefined,
+    customInputPlaceholder:
+      typeof candidate.customInputPlaceholder === "string"
+        ? candidate.customInputPlaceholder
+        : undefined,
+    requiredFields: Array.isArray(candidate.requiredFields)
+      ? candidate.requiredFields.map((value) => String(value)).slice(0, 6)
+      : [],
+    choices: candidate.choices
+      .filter(
+        (choice): choice is ArtifactRefinementChoice =>
+          Boolean(
+            choice &&
+              typeof choice === "object" &&
+              typeof choice.id === "string" &&
+              typeof choice.label === "string" &&
+              typeof choice.submitText === "string"
+          )
+      )
+      .slice(0, 5),
+  }
+}
+
+function parseArtifactRuntimeWarnings(
+  annotations: Array<{ type?: string; refinement?: unknown; warnings?: unknown }> | undefined
+): string[] {
+  if (!Array.isArray(annotations) || annotations.length === 0) return []
+  const warningAnnotation = annotations.find(
+    (item) => item?.type === "artifact-runtime-warnings"
+  )
+  if (!warningAnnotation || !Array.isArray(warningAnnotation.warnings)) return []
+  return warningAnnotation.warnings
+    .map((warning) => String(warning).trim())
+    .filter((warning) => warning.length > 0)
+    .slice(0, 6)
 }
 
 function extractYouTubeVideoId(url: string): string | null {
@@ -133,7 +205,10 @@ export function MessageAssistant({
   copied,
   copyToClipboard,
   onReload,
+  onSuggestion,
+  onWorkflowSuggestion,
   parts,
+  annotations,
   status,
   className,
   evidenceCitations = [],
@@ -197,6 +272,32 @@ export function MessageAssistant({
     })
   }, [contentToRender, evidenceCitations, hasAttachedEvidenceCitations])
   const hasEvidenceCitations = referencedEvidenceCitations.length > 0
+  const artifactRefinement = useMemo(
+    () => parseArtifactRefinementPayload(annotations),
+    [annotations]
+  )
+  const artifactRuntimeWarnings = useMemo(
+    () => parseArtifactRuntimeWarnings(annotations),
+    [annotations]
+  )
+  const hasRefinementToolResult = useMemo(
+    () =>
+      Array.isArray(parts) &&
+      parts.some((part: any) => {
+        if (part?.type !== "tool-invocation") return false
+        const toolName = String(part?.toolInvocation?.toolName || "")
+        if (!/refine.*requirements/i.test(toolName)) return false
+        return (
+          part?.toolInvocation?.state === "result" ||
+          typeof part?.toolInvocation?.result !== "undefined"
+        )
+      }),
+    [parts]
+  )
+  const shouldRenderAnnotationRefinementFallback = Boolean(
+    artifactRefinement && onSuggestion && !hasRefinementToolResult
+  )
+  const [customRefinementInput, setCustomRefinementInput] = useState("")
   
   // Convert evidence citations to CitationData format for rendering
   const evidenceCitationMap = useMemo(() => {
@@ -615,17 +716,10 @@ export function MessageAssistant({
     (artifact): artifact is QuizArtifact => artifact.artifactType === "quiz"
   )
   const inlineFallbackText = useMemo(() => {
-    if (!contentToRender) return contentToRender
+    if (contentToRender && contentToRender.trim().length > 0) {
+      return contentToRender
+    }
     if (artifactPayloads.length === 0) return contentToRender
-    const headingCount = (contentToRender.match(/^##\s+/gm) || []).length
-    const looksLikeVerboseArtifactDump =
-      (contentToRender.length > 700 &&
-        /(##\s+executive summary|##\s+key points|##\s+references|###\s+source\s+\d+|(^|\n)\s*(#{2,3}\s*)?question\s*\d+|<details>|answer\s*&\s*explanation|quick review questions|how did you do\?|references\s*\(from slides\))/i.test(
-          contentToRender
-        )) ||
-      (contentToRender.length > 900 &&
-        (headingCount >= 2 || /\n-\s+/.test(contentToRender)))
-    if (!looksLikeVerboseArtifactDump) return contentToRender
     if (documentArtifacts.length > 0 && quizArtifacts.length === 0) {
       return "Here is your generated document."
     }
@@ -713,12 +807,116 @@ export function MessageAssistant({
             parts={parts}
             fallbackText={inlineFallbackText}
             status={status}
+            onSuggestion={onSuggestion}
+            onWorkflowSuggestion={onWorkflowSuggestion}
             shouldShowCitations={shouldShowCitations}
             citations={activeCitations}
             evidenceCitations={hasEvidenceCitations ? referencedEvidenceCitations : undefined}
             streamIntroPreview={streamIntroPreview}
           />
         )}
+
+        {artifactRuntimeWarnings.length > 0 ? (
+          <div className="rounded-lg border border-amber-300/70 bg-amber-50/60 p-3 text-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/80">
+              Retrieval Warnings
+            </p>
+            <ul className="mt-2 space-y-1 text-amber-950/90">
+              {artifactRuntimeWarnings.map((warning, index) => (
+                <li key={`${warning}-${index}`}>- {warning}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {artifactRefinement && shouldRenderAnnotationRefinementFallback ? (
+          <div className="rounded-2xl bg-gradient-to-r from-violet-200/50 via-fuchsia-200/45 to-purple-200/55 p-[1px]">
+            <div className="space-y-3 rounded-[15px] border border-violet-200/60 bg-background/98 p-3.5 shadow-sm">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-violet-700/80">
+                  Refine Generation
+                </p>
+                <p className="mt-1 text-sm font-semibold">
+                  {artifactRefinement.title || "Refine Generation"}
+                </p>
+                <p className="mt-1 text-sm">
+                  {artifactRefinement.question || "Choose one option to continue."}
+                </p>
+                {artifactRefinement.helperText ? (
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    {artifactRefinement.helperText}
+                  </p>
+                ) : null}
+              </div>
+
+              {artifactRefinement.requiredFields &&
+              artifactRefinement.requiredFields.length > 0 ? (
+                <div className="rounded-md border border-violet-200/70 bg-background p-2">
+                  <p className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wide">
+                    Required Details
+                  </p>
+                  <p className="mt-1 text-xs">
+                    {artifactRefinement.requiredFields.join(" • ")}
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="space-y-2">
+                {(artifactRefinement.choices || [])
+                  .filter((choice) => !choice.requiresCustomInput)
+                  .map((choice) => (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      onClick={() =>
+                        (onWorkflowSuggestion || onSuggestion)?.(choice.submitText)
+                      }
+                      className="hover:bg-violet-50/70 flex w-full items-start gap-2 rounded-lg border border-violet-200/70 bg-background px-2.5 py-2 text-left text-sm transition"
+                    >
+                      <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-violet-200/80 text-[11px] font-semibold text-violet-700/90">
+                        {choice.id}
+                      </span>
+                      <span>{choice.label}</span>
+                    </button>
+                  ))}
+              </div>
+
+              {(artifactRefinement.choices || []).some(
+                (choice) => choice.requiresCustomInput
+              ) ? (
+                <div className="rounded-md border border-border bg-background p-2.5">
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    E. Custom requirements (blank)
+                  </p>
+                  <textarea
+                    value={customRefinementInput}
+                    onChange={(event) => setCustomRefinementInput(event.target.value)}
+                    placeholder={
+                      artifactRefinement.customInputPlaceholder ||
+                      "Type your custom requirements here"
+                    }
+                    className="mt-2 min-h-[78px] w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const value = customRefinementInput.trim()
+                        if (!value) return
+                        ;(onWorkflowSuggestion || onSuggestion)?.(value)
+                        setCustomRefinementInput("")
+                      }}
+                      disabled={customRefinementInput.trim().length === 0}
+                      className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
+                    >
+                      Submit custom requirements
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {(documentArtifacts.length > 0 || quizArtifacts.length > 0) && (
           <div className="rounded-xl border border-border/70 bg-muted/20 p-3">

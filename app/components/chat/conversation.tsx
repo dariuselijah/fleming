@@ -4,6 +4,7 @@ import {
 } from "@/components/prompt-kit/chat-container"
 import { ProcessingLoader } from "@/components/prompt-kit/processing-loader"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
+import { isArtifactWorkflowInput } from "@/lib/chat/artifact-workflow"
 import { Message as MessageType } from "@ai-sdk/react"
 import { useRef, useMemo, useCallback } from "react"
 import { Message } from "./message"
@@ -14,6 +15,8 @@ type ConversationProps = {
   onDelete: (id: string) => void
   onEdit: (id: string, newText: string) => void
   onReload: () => void
+  onSuggestion?: (suggestion: string) => void
+  onWorkflowSuggestion?: (suggestion: string) => void
   evidenceCitations?: any[]
   streamIntroPreview?: string | null
 }
@@ -24,6 +27,8 @@ export function Conversation({
   onDelete,
   onEdit,
   onReload,
+  onSuggestion,
+  onWorkflowSuggestion,
   evidenceCitations = [],
   streamIntroPreview = null,
 }: ConversationProps) {
@@ -36,8 +41,13 @@ export function Conversation({
       return null
     }
     
+    const visibleMessages = messages.filter((message) => {
+      if (message.role !== "user" || typeof message.content !== "string") return true
+      return !isArtifactWorkflowInput(message.content)
+    })
+
     // Filter out duplicate messages by ID to prevent React key conflicts
-    const uniqueMessages = messages.filter((message, index, self) => 
+    const uniqueMessages = visibleMessages.filter((message, index, self) => 
       index === self.findIndex(m => m.id === message.id)
     )
     
@@ -83,8 +93,11 @@ export function Conversation({
           onDelete={onDelete}
           onEdit={onEdit}
           onReload={onReload}
+          onSuggestion={onSuggestion}
+          onWorkflowSuggestion={onWorkflowSuggestion}
           hasScrollAnchor={hasScrollAnchor}
           parts={message.parts}
+          annotations={(message as any).annotations}
           status={status}
           evidenceCitations={messageEvidenceCitations}
           contextPrompt={previousUserMessage?.content}
@@ -98,7 +111,16 @@ export function Conversation({
         </Message>
       )
     })
-  }, [messages, status, onDelete, onEdit, onReload, evidenceCitations])
+  }, [
+    messages,
+    status,
+    onDelete,
+    onEdit,
+    onReload,
+    onSuggestion,
+    onWorkflowSuggestion,
+    evidenceCitations,
+  ])
 
   // Memoize handlers to prevent unnecessary re-renders
   const memoizedOnDelete = useCallback(onDelete, [onDelete])

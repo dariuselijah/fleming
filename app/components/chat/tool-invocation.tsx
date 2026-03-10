@@ -13,13 +13,15 @@ import {
 } from "@phosphor-icons/react"
 import { AnimatePresence, motion } from "framer-motion"
 import Image from "next/image"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 interface ToolInvocationProps {
   toolInvocations: ToolInvocationUIPart[]
   className?: string
   defaultOpen?: boolean
   inline?: boolean
+  onSuggestion?: (suggestion: string) => void
+  onWorkflowSuggestion?: (suggestion: string) => void
 }
 
 type YouTubeToolResultItem = {
@@ -73,6 +75,24 @@ type QuizArtifactResult = {
   generatedAt: string
 }
 
+type ArtifactRefinementChoice = {
+  id: string
+  label: string
+  submitText: string
+  requiresCustomInput?: boolean
+}
+
+type ArtifactRefinementResult = {
+  kind: "artifact-refinement"
+  intent: "document" | "quiz"
+  title: string
+  question: string
+  helperText?: string
+  requiredFields?: string[]
+  customInputPlaceholder?: string
+  choices: ArtifactRefinementChoice[]
+}
+
 function isDocumentArtifactResult(value: unknown): value is DocumentArtifactResult {
   return Boolean(
     value &&
@@ -91,6 +111,87 @@ function isQuizArtifactResult(value: unknown): value is QuizArtifactResult {
       typeof (value as QuizArtifactResult).title === "string" &&
       Array.isArray((value as QuizArtifactResult).questions)
   )
+}
+
+function isArtifactRefinementResult(
+  value: unknown
+): value is ArtifactRefinementResult {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as ArtifactRefinementResult).kind === "artifact-refinement" &&
+      ((value as ArtifactRefinementResult).intent === "document" ||
+        (value as ArtifactRefinementResult).intent === "quiz") &&
+      Array.isArray((value as ArtifactRefinementResult).choices)
+  )
+}
+
+function extractArtifactRefinementResult(
+  value: unknown,
+  depth = 0
+): ArtifactRefinementResult | null {
+  if (depth > 6) return null
+  if (isArtifactRefinementResult(value)) return value
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value)
+      return extractArtifactRefinementResult(parsed, depth + 1)
+    } catch {
+      return null
+    }
+  }
+  if (!value || typeof value !== "object") return null
+  const candidate = value as Record<string, unknown>
+  const directWrapperKeys = [
+    "refinement",
+    "result",
+    "data",
+    "payload",
+    "value",
+    "output",
+    "response",
+    "json",
+  ] as const
+  for (const key of directWrapperKeys) {
+    const nested = candidate[key]
+    const resolved = extractArtifactRefinementResult(nested, depth + 1)
+    if (resolved) return resolved
+  }
+  const invocationResult = (candidate.toolInvocation as Record<string, unknown> | undefined)?.result
+  const resolvedFromInvocation = extractArtifactRefinementResult(
+    invocationResult,
+    depth + 1
+  )
+  if (resolvedFromInvocation) return resolvedFromInvocation
+  const contentEntries = Array.isArray(candidate.content) ? candidate.content : []
+  for (const entry of contentEntries) {
+    const resolved = extractArtifactRefinementResult(entry, depth + 1)
+    if (resolved) return resolved
+    if (entry && typeof entry === "object") {
+      const entryObj = entry as Record<string, unknown>
+      const fromJson = extractArtifactRefinementResult(entryObj.json, depth + 1)
+      if (fromJson) return fromJson
+      const fromPayload = extractArtifactRefinementResult(entryObj.payload, depth + 1)
+      if (fromPayload) return fromPayload
+      const fromData = extractArtifactRefinementResult(entryObj.data, depth + 1)
+      if (fromData) return fromData
+      if (typeof entryObj.text === "string") {
+        const fromText = extractArtifactRefinementResult(entryObj.text, depth + 1)
+        if (fromText) return fromText
+      }
+    }
+  }
+  if (typeof candidate.text === "string") {
+    const fromText = extractArtifactRefinementResult(candidate.text, depth + 1)
+    if (fromText) return fromText
+  }
+  if (Array.isArray(candidate.parts)) {
+    for (const part of candidate.parts) {
+      const resolved = extractArtifactRefinementResult(part, depth + 1)
+      if (resolved) return resolved
+    }
+  }
+  return null
 }
 
 function parseFilenameFromDisposition(value: string | null): string | null {
@@ -189,6 +290,16 @@ function DocumentArtifactCard({ artifact }: { artifact: DocumentArtifactResult }
             </div>
           ))}
         </div>
+        {Array.isArray(artifact.warnings) && artifact.warnings.length > 0 ? (
+          <div className="mt-3 rounded-md border border-amber-300/70 bg-amber-50/70 p-2 text-xs">
+            <p className="font-semibold uppercase tracking-wide text-amber-900/80">
+              Retrieval Warnings
+            </p>
+            <p className="mt-1 text-amber-950/90">
+              {artifact.warnings.slice(0, 2).join(" | ")}
+            </p>
+          </div>
+        ) : null}
         {exportError ? (
           <p className="mt-2 text-xs text-red-500">{exportError}</p>
         ) : null}
@@ -294,6 +405,192 @@ function QuizArtifactCard({ artifact }: { artifact: QuizArtifactResult }) {
   )
 }
 
+function ArtifactRefinementCard({
+  refinement,
+  onSuggestion,
+}: {
+  refinement: ArtifactRefinementResult
+  onSuggestion?: (suggestion: string) => void
+}) {
+  const [customInput, setCustomInput] = useState("")
+  const customChoice =
+    refinement.choices.find((choice) => choice.requiresCustomInput) || null
+
+  return (
+    <div className="rounded-2xl bg-gradient-to-r from-violet-200/50 via-fuchsia-200/45 to-purple-200/55 p-[1px]">
+      <div className="space-y-3 rounded-[15px] border border-violet-200/60 bg-background/98 p-3.5 shadow-sm">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-violet-700/80">
+          Refine Generation
+        </p>
+        <p className="mt-1 text-sm font-semibold">{refinement.title}</p>
+        <p className="mt-1 text-sm">{refinement.question}</p>
+        {refinement.helperText ? (
+          <p className="text-muted-foreground mt-1 text-xs">
+            {refinement.helperText}
+          </p>
+        ) : null}
+      </div>
+
+      {Array.isArray(refinement.requiredFields) &&
+      refinement.requiredFields.length > 0 ? (
+        <div className="rounded-md border border-border/70 bg-background p-2">
+          <p className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wide">
+            Required Details
+          </p>
+          <p className="mt-1 text-xs">
+            {refinement.requiredFields.join(" • ")}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="space-y-2">
+        {refinement.choices
+          .filter((choice) => !choice.requiresCustomInput)
+          .map((choice) => (
+            <button
+              key={choice.id}
+              type="button"
+              onClick={() => onSuggestion?.(choice.submitText)}
+              disabled={!onSuggestion}
+              className="hover:bg-violet-50/70 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-violet-200/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed"
+            >
+              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-violet-200/80 text-[11px] font-semibold text-violet-700/90">
+                {choice.id}
+              </span>
+              <span>{choice.label}</span>
+            </button>
+          ))}
+      </div>
+
+      {customChoice ? (
+        <div className="rounded-md border border-border bg-background p-2.5">
+          <p className="text-xs font-semibold text-muted-foreground">
+            {customChoice.id}. {customChoice.label}
+          </p>
+          <textarea
+            value={customInput}
+            onChange={(event) => setCustomInput(event.target.value)}
+            placeholder={
+              refinement.customInputPlaceholder ||
+              "Type your custom requirements here"
+            }
+            className="mt-2 min-h-[78px] w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+          />
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                const value = customInput.trim()
+                if (!value) return
+                onSuggestion?.(value)
+                setCustomInput("")
+              }}
+              disabled={!onSuggestion || customInput.trim().length === 0}
+              className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
+            >
+              Submit custom requirements
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+    </div>
+  )
+}
+
+function ArtifactRefinementFallbackCard({
+  intent,
+  onSuggestion,
+}: {
+  intent: "document" | "quiz"
+  onSuggestion?: (suggestion: string) => void
+}) {
+  const [customInput, setCustomInput] = useState("")
+  const suggestions = [
+    {
+      id: "A",
+      label: "Focus on one core topic from the upload",
+      submitText: `Generate a focused ${intent} on one core topic from this upload.`,
+    },
+    {
+      id: "B",
+      label: "Use a specific page range (for example pages 10-25)",
+      submitText: `Generate this ${intent} using a specific page range from the upload.`,
+    },
+    {
+      id: "C",
+      label: "Cover all major topics with balanced depth",
+      submitText: `Generate a balanced mixed-topic ${intent} across major sections.`,
+    },
+    {
+      id: "D",
+      label: "Match my level and exam style",
+      submitText: `Generate this ${intent} at my level with exam-style structure.`,
+    },
+  ]
+
+  return (
+    <div className="rounded-2xl bg-gradient-to-r from-violet-200/50 via-fuchsia-200/45 to-purple-200/55 p-[1px]">
+      <div className="space-y-3 rounded-[15px] border border-violet-200/60 bg-background/98 p-3.5 shadow-sm">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-violet-700/80">
+            Refine Generation
+          </p>
+          <p className="mt-1 text-sm font-semibold">
+            Pick a scope to continue
+          </p>
+          <p className="mt-1 text-sm">
+            I am ready to generate your {intent}. Choose A-D or type custom requirements in E.
+          </p>
+        </div>
+        <div className="space-y-2">
+          {suggestions.map((choice) => (
+            <button
+              key={choice.id}
+              type="button"
+              onClick={() => onSuggestion?.(choice.submitText)}
+              disabled={!onSuggestion}
+              className="hover:bg-violet-50/70 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-violet-200/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed"
+            >
+              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-violet-200/80 text-[11px] font-semibold text-violet-700/90">
+                {choice.id}
+              </span>
+              <span>{choice.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="rounded-md border border-border bg-background p-2.5">
+          <p className="text-xs font-semibold text-muted-foreground">
+            E. Custom requirements (blank)
+          </p>
+          <textarea
+            value={customInput}
+            onChange={(event) => setCustomInput(event.target.value)}
+            placeholder={`Type custom ${intent} requirements here`}
+            className="mt-2 min-h-[78px] w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+          />
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                const value = customInput.trim()
+                if (!value) return
+                onSuggestion?.(value)
+                setCustomInput("")
+              }}
+              disabled={!onSuggestion || customInput.trim().length === 0}
+              className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
+            >
+              Submit custom requirements
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const TRANSITION = {
   type: "spring",
   duration: 0.2,
@@ -305,6 +602,8 @@ export function ToolInvocation({
   className,
   defaultOpen = false,
   inline = false,
+  onSuggestion,
+  onWorkflowSuggestion,
 }: ToolInvocationProps) {
   const [isExpanded, setIsExpanded] = useState(defaultOpen)
 
@@ -322,6 +621,8 @@ export function ToolInvocation({
               toolData={invocation}
               defaultOpen={defaultOpen}
               compact
+              onSuggestion={onSuggestion}
+              onWorkflowSuggestion={onWorkflowSuggestion}
             />
           ))}
         </div>
@@ -351,6 +652,8 @@ export function ToolInvocation({
         toolInvocations={toolInvocationsData}
         defaultOpen={defaultOpen}
         className="mb-10"
+        onSuggestion={onSuggestion}
+        onWorkflowSuggestion={onWorkflowSuggestion}
       />
     )
   }
@@ -404,6 +707,8 @@ export function ToolInvocation({
                       >
                         <SingleToolView
                           toolInvocations={toolInvocationsForId}
+                          onSuggestion={onSuggestion}
+                          onWorkflowSuggestion={onWorkflowSuggestion}
                         />
                       </div>
                     )
@@ -422,12 +727,16 @@ type SingleToolViewProps = {
   toolInvocations: ToolInvocationUIPart[]
   defaultOpen?: boolean
   className?: string
+  onSuggestion?: (suggestion: string) => void
+  onWorkflowSuggestion?: (suggestion: string) => void
 }
 
 function SingleToolView({
   toolInvocations,
   defaultOpen = false,
   className,
+  onSuggestion,
+  onWorkflowSuggestion,
 }: SingleToolViewProps) {
   // Group by toolCallId and pick the most informative state
   const groupedTools = toolInvocations.reduce(
@@ -469,6 +778,8 @@ function SingleToolView({
         toolData={toolsToDisplay[0]}
         defaultOpen={defaultOpen}
         className={className}
+        onSuggestion={onSuggestion}
+        onWorkflowSuggestion={onWorkflowSuggestion}
       />
     )
   }
@@ -482,6 +793,8 @@ function SingleToolView({
             key={tool.toolInvocation.toolCallId}
             toolData={tool}
             defaultOpen={defaultOpen}
+            onSuggestion={onSuggestion}
+            onWorkflowSuggestion={onWorkflowSuggestion}
           />
         ))}
       </div>
@@ -495,18 +808,31 @@ function SingleToolCard({
   defaultOpen = false,
   className,
   compact = false,
+  onSuggestion,
+  onWorkflowSuggestion,
 }: {
   toolData: ToolInvocationUIPart
   defaultOpen?: boolean
   className?: string
   compact?: boolean
+  onSuggestion?: (suggestion: string) => void
+  onWorkflowSuggestion?: (suggestion: string) => void
 }) {
-  const [isExpanded, setIsExpanded] = useState(defaultOpen)
   const { toolInvocation } = toolData
   const { state, toolName, toolCallId, args } = toolInvocation
+  const isRefinementToolName = /refine.*requirements/i.test(toolName || "")
+  const [isExpanded, setIsExpanded] = useState(
+    defaultOpen || isRefinementToolName
+  )
   const isLoading = state === "call"
   const isCompleted = state === "result"
   const result = isCompleted ? toolInvocation.result : undefined
+
+  useEffect(() => {
+    if (isRefinementToolName) {
+      setIsExpanded(true)
+    }
+  }, [isRefinementToolName])
 
   // Parse the result JSON if available
   const { parsedResult, parseError } = useMemo(() => {
@@ -524,7 +850,11 @@ function SingleToolCard({
         const textContent = result.content?.find(
           (item: { type: string }) => item.type === "text"
         )
-        if (!textContent?.text) return { parsedResult: null, parseError: null }
+        if (!textContent?.text) {
+          // Some providers return structured tool results with non-text content.
+          // Fall back to the raw object so custom renderers can still detect it.
+          return { parsedResult: result, parseError: null }
+        }
 
         try {
           return {
@@ -541,6 +871,11 @@ function SingleToolCard({
       return { parsedResult: null, parseError: "Failed to parse result" }
     }
   }, [isCompleted, result])
+  const refinementResult = extractArtifactRefinementResult(parsedResult)
+  const isRefinementResult = Boolean(refinementResult)
+  const refinementIntentFromToolName: "document" | "quiz" =
+    String(toolName || "").toLowerCase().includes("quiz") ? "quiz" : "document"
+  const showExpanded = isRefinementToolName || isExpanded
 
   // Format the arguments for display
   const formattedArgs = args
@@ -564,6 +899,21 @@ function SingleToolCard({
 
   // Render generic results based on their structure
   const renderResults = () => {
+    if (isRefinementToolName && !refinementResult) {
+      return (
+        <div className="space-y-2">
+          {parseError ? (
+            <p className="text-xs text-muted-foreground">
+              Refinement payload was sparse, showing fallback options.
+            </p>
+          ) : null}
+          <ArtifactRefinementFallbackCard
+            intent={refinementIntentFromToolName}
+            onSuggestion={onWorkflowSuggestion || onSuggestion}
+          />
+        </div>
+      )
+    }
     if (!parsedResult) return "No result data available"
 
     if (isDocumentArtifactResult(parsedResult)) {
@@ -571,6 +921,14 @@ function SingleToolCard({
     }
     if (isQuizArtifactResult(parsedResult)) {
       return <QuizArtifactCard artifact={parsedResult} />
+    }
+    if (refinementResult) {
+      return (
+        <ArtifactRefinementCard
+          refinement={refinementResult}
+          onSuggestion={onWorkflowSuggestion || onSuggestion}
+        />
+      )
     }
 
     const renderYouTubeResultItems = (items: YouTubeToolResultItem[]) => (
@@ -742,6 +1100,19 @@ function SingleToolCard({
   }
 
   return (
+    compact && isRefinementToolName ? (
+      refinementResult ? (
+        <ArtifactRefinementCard
+          refinement={refinementResult as ArtifactRefinementResult}
+          onSuggestion={onWorkflowSuggestion || onSuggestion}
+        />
+      ) : (
+        <ArtifactRefinementFallbackCard
+          intent={refinementIntentFromToolName}
+          onSuggestion={onWorkflowSuggestion || onSuggestion}
+        />
+      )
+    ) : (
     <div
       className={cn(
         "border-border flex flex-col gap-0 overflow-hidden rounded-md border",
@@ -752,6 +1123,7 @@ function SingleToolCard({
       <button
         onClick={(e) => {
           e.preventDefault()
+          if (isRefinementToolName) return
           setIsExpanded(!isExpanded)
         }}
         type="button"
@@ -793,13 +1165,13 @@ function SingleToolCard({
         <CaretDown
           className={cn(
             "h-4 w-4 transition-transform",
-            isExpanded ? "rotate-180 transform" : ""
+            showExpanded ? "rotate-180 transform" : ""
           )}
         />
       </button>
 
       <AnimatePresence initial={false}>
-        {isExpanded && (
+        {showExpanded && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
@@ -826,7 +1198,12 @@ function SingleToolCard({
                   <div className="text-muted-foreground mb-1 text-xs font-medium">
                     Result
                   </div>
-                  <div className="bg-background max-h-60 overflow-auto rounded border p-2 text-sm">
+                  <div
+                    className={cn(
+                      "bg-background rounded border p-2 text-sm",
+                      !isRefinementResult && "max-h-60 overflow-auto"
+                    )}
+                  >
                     {parseError ? (
                       <div className="text-red-500">{parseError}</div>
                     ) : (
@@ -849,5 +1226,6 @@ function SingleToolCard({
         )}
       </AnimatePresence>
     </div>
+    )
   )
 }

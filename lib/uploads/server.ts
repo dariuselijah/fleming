@@ -83,6 +83,7 @@ export type UploadContextSearchInput = {
   userId: string
   query: string
   apiKey?: string
+  embeddingApiKey?: string
   uploadId?: string
   mode?: UploadContextSearchMode
   page?: number
@@ -105,7 +106,54 @@ export type UploadContextSearchResult = {
     candidateCount: number
     elapsedMs: number
     fallbackUsed: boolean
+    fallbackReason:
+      | "none"
+      | "embedding_timeout"
+      | "embedding_auth_error"
+      | "embedding_rate_limit"
+      | "embedding_provider_mismatch"
+      | "embedding_network_error"
+      | "embedding_unknown_error"
+      | "lexical_only"
+    retrievalConfidence: "high" | "medium" | "low"
+    sourceUnitCount: number
+    maxUnitNumber: number
+    textbookScale: boolean
   }
+}
+
+export type UploadStructureTopic = {
+  label: string
+  page: number | null
+  sourcePageStart?: number | null
+  sourcePageEnd?: number | null
+  documentPart?:
+    | "toc"
+    | "front_matter"
+    | "chapter_open"
+    | "body"
+    | "index"
+    | "bibliography"
+    | "appendix"
+    | "unknown"
+  mappedBy?: "direct" | "offset" | "heuristic" | "unknown"
+}
+
+export type UploadStructureInspection = {
+  uploadId: string | null
+  uploadTitle: string | null
+  sourceUnitCount: number
+  maxUnitNumber: number
+  probableTocPages: number[]
+  pageOffsetEstimate: number | null
+  partDistribution: Record<string, number>
+  headingCandidates: string[]
+  topicMap: UploadStructureTopic[]
+  extractionCoverage: number
+  confidence: "high" | "medium" | "low"
+  textbookScale: boolean
+  warnings: string[]
+  inspectedAt: string
 }
 
 const DEFAULT_UPLOAD_CONTEXT_TOP_K = 12
@@ -134,7 +182,10 @@ export type GenerateDocumentFromUploadInput = {
   citationStyle?: CitationStyle
   includeReferences?: boolean
   apiKey?: string
+  embeddingApiKey?: string
   maxSources?: number
+  structureHint?: UploadStructureInspection | null
+  enableArtifactV2?: boolean
 }
 
 export type GenerateQuizFromUploadInput = {
@@ -142,6 +193,8 @@ export type GenerateQuizFromUploadInput = {
   query: string
   uploadId?: string
   apiKey?: string
+  embeddingApiKey?: string
+  topicContext?: UploadTopicContext
   questionCount?: number
 }
 
@@ -218,6 +271,383 @@ function inferDocumentShape(query: string): DocumentShape {
   return "review"
 }
 
+function isLikelyOpenAIEmbeddingKey(value?: string | null): boolean {
+  if (!value) return false
+  const token = value.trim()
+  if (!token) return false
+  if (/^sk-ant-/i.test(token)) return false
+  if (/^sk-or-/i.test(token)) return false
+  if (/^xai-/i.test(token)) return false
+  if (/^AIza/i.test(token)) return false
+  return /^sk-(proj-)?/i.test(token)
+}
+
+function classifyEmbeddingFallbackReason(
+  error: unknown
+):
+  | "embedding_timeout"
+  | "embedding_auth_error"
+  | "embedding_rate_limit"
+  | "embedding_provider_mismatch"
+  | "embedding_network_error"
+  | "embedding_unknown_error" {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error || "").toLowerCase()
+  if (message.includes("timed out") || message.includes("timeout")) {
+    return "embedding_timeout"
+  }
+  if (
+    message.includes("incorrect api key") ||
+    message.includes("invalid_api_key") ||
+    message.includes("unauthorized") ||
+    message.includes("authentication")
+  ) {
+    return "embedding_auth_error"
+  }
+  if (message.includes("rate limit") || message.includes("429")) {
+    return "embedding_rate_limit"
+  }
+  if (
+    message.includes("provider") ||
+    message.includes("not valid for this endpoint") ||
+    message.includes("organization")
+  ) {
+    return "embedding_provider_mismatch"
+  }
+  if (
+    message.includes("fetch failed") ||
+    message.includes("econn") ||
+    message.includes("socket") ||
+    message.includes("network")
+  ) {
+    return "embedding_network_error"
+  }
+  return "embedding_unknown_error"
+}
+
+function isLikelyBibliographyNoise(value: string): boolean {
+  const normalized = sanitizeArtifactText(value)
+  if (!normalized) return true
+  const lower = normalized.toLowerCase()
+  const hasReferenceSignal =
+    /\b(references?|bibliography|further reading|citation|citations|doi|pmid)\b/.test(lower) ||
+    /\bet al\b/.test(lower)
+  const hasJournalStyleSignal =
+    /\b\d{4}\s*;?\s*\d{1,3}\s*(?:\(|:)\s*\d{1,4}/.test(lower) ||
+    /\bvol(?:ume)?\b/.test(lower)
+  const hasLinkSignal = /(https?:\/\/|www\.)/.test(lower)
+  const hasDenseIndexing = ((normalized.match(/\d+/g) || []).length / Math.max(1, normalized.length)) > 0.12
+  return (
+    (hasReferenceSignal && (hasJournalStyleSignal || hasLinkSignal)) ||
+    (hasReferenceSignal && hasDenseIndexing) ||
+    /\bchapter\s+\d+\b.*\bpage\s+\d+\b/i.test(normalized)
+  )
+}
+
+function normalizeHeadingCandidate(value: string): string {
+  return value
+    .replace(/[^\w\s:/(),.'-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 96)
+}
+
+function looksLikeHeadingLine(value: string): boolean {
+  const line = normalizeHeadingCandidate(value)
+  if (line.length < 6 || line.length > 96) return false
+  if (/^\d+$/.test(line)) return false
+  if (/^(references?|index|appendix)$/i.test(line)) return false
+  if (/^(page|p)\s*\d+$/i.test(line)) return false
+  const allCapsRatio = (line.match(/[A-Z]/g) || []).length / Math.max(1, (line.match(/[A-Za-z]/g) || []).length)
+  return (
+    /^\d+(\.\d+){0,3}\s+[A-Za-z]/.test(line) ||
+    /^chapter\s+\d+/i.test(line) ||
+    /^section\s+\d+/i.test(line) ||
+    allCapsRatio > 0.72
+  )
+}
+
+function extractTopicRowsFromTocText(text: string): UploadStructureTopic[] {
+  const rows: UploadStructureTopic[] = []
+  const seen = new Set<string>()
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean)
+  for (const line of lines) {
+    const dotted = line.match(/^(.{4,90}?)\s*\.{2,}\s*(\d{1,4})$/)
+    const plain = line.match(/^(.{4,90}?)\s+(\d{1,4})$/)
+    const match = dotted || plain
+    if (!match) continue
+    const label = normalizeHeadingCandidate(match[1])
+    const page = Number.parseInt(match[2], 10)
+    if (!label || !Number.isFinite(page) || page <= 0) continue
+    const key = `${label.toLowerCase()}:${page}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    rows.push({ label, page, mappedBy: "unknown", documentPart: "toc" })
+    if (rows.length >= 24) break
+  }
+  return rows
+}
+
+function classifyDocumentPart(
+  text: string,
+  unitNumber: number,
+  maxUnitNumber: number
+):
+  | "toc"
+  | "front_matter"
+  | "chapter_open"
+  | "body"
+  | "index"
+  | "bibliography"
+  | "appendix"
+  | "unknown" {
+  const excerpt = sanitizeArtifactText(text).slice(0, 2200).toLowerCase()
+  if (!excerpt) return "unknown"
+  const earlyPages = unitNumber <= Math.max(10, Math.floor(maxUnitNumber * 0.08))
+  if (
+    /\b(table of contents|contents)\b/.test(excerpt) ||
+    (excerpt.match(/\.{2,}\s*\d{1,4}/g) || []).length >= 4
+  ) {
+    return "toc"
+  }
+  if (
+    /\b(first published|edition|isbn|copyright|oxford university press|preface|foreword)\b/.test(
+      excerpt
+    ) &&
+    earlyPages
+  ) {
+    return "front_matter"
+  }
+  if (/\b(references|bibliography|further reading)\b/.test(excerpt)) {
+    return "bibliography"
+  }
+  if (
+    /\b(index)\b/.test(excerpt) &&
+    ((excerpt.match(/\b[a-z][a-z-]{2,}\s+\d{1,4}\b/g) || []).length >= 5 || unitNumber > maxUnitNumber - 30)
+  ) {
+    return "index"
+  }
+  if (/\bappendix\b/.test(excerpt)) {
+    return "appendix"
+  }
+  if (/^(chapter|part|section)\s+\d+/im.test(excerpt)) {
+    return "chapter_open"
+  }
+  return "body"
+}
+
+function lineToSearchToken(value: string): string {
+  return sanitizeArtifactText(value).toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim()
+}
+
+function mapTopicsToSourceRanges(
+  topics: UploadStructureTopic[],
+  sourceUnits: Array<{ unit_number: number; extracted_text: string | null }>,
+  maxTopics: number
+): { mappedTopics: UploadStructureTopic[]; pageOffsetEstimate: number | null } {
+  if (topics.length === 0 || sourceUnits.length === 0) {
+    return { mappedTopics: topics.slice(0, maxTopics), pageOffsetEstimate: null }
+  }
+  const searchableUnits = sourceUnits.map((unit) => ({
+    unitNumber: unit.unit_number,
+    token: lineToSearchToken(String(unit.extracted_text || "").slice(0, 1800)),
+  }))
+  const offsets: number[] = []
+  const mapped: UploadStructureTopic[] = topics.slice(0, maxTopics).map((topic) => {
+    const printedPage = typeof topic.page === "number" ? topic.page : null
+    const topicToken = lineToSearchToken(topic.label)
+    let directMatch: number | null = null
+    if (topicToken.length >= 6) {
+      const matched = searchableUnits.find((unit) => unit.token.includes(topicToken))
+      if (matched) {
+        directMatch = matched.unitNumber
+      }
+    }
+    if (directMatch && printedPage && printedPage > 0) {
+      offsets.push(directMatch - printedPage)
+    }
+    return {
+      ...topic,
+      sourcePageStart: directMatch ?? null,
+      sourcePageEnd: null,
+      mappedBy: directMatch ? ("direct" as const) : ("unknown" as const),
+      documentPart: topic.documentPart || ("body" as const),
+    }
+  })
+
+  const sortedOffsets = offsets.sort((a, b) => a - b)
+  const pageOffsetEstimate =
+    sortedOffsets.length > 0
+      ? sortedOffsets[Math.floor(sortedOffsets.length / 2)]
+      : null
+
+  for (const topic of mapped) {
+    if (topic.sourcePageStart || !pageOffsetEstimate || !topic.page || topic.page <= 0) continue
+    const estimated = topic.page + pageOffsetEstimate
+    if (estimated > 0) {
+      topic.sourcePageStart = estimated
+      topic.mappedBy = "offset"
+    }
+  }
+
+  const mappedBySource = mapped
+    .filter((topic) => typeof topic.sourcePageStart === "number")
+    .sort((a, b) => (a.sourcePageStart || 0) - (b.sourcePageStart || 0))
+  for (let index = 0; index < mappedBySource.length; index += 1) {
+    const current = mappedBySource[index]
+    const next = mappedBySource[index + 1]
+    if (!current.sourcePageStart) continue
+    const start = Math.max(1, current.sourcePageStart)
+    const end = next?.sourcePageStart
+      ? Math.max(start, next.sourcePageStart - 1)
+      : Math.max(start, start + 8)
+    current.sourcePageStart = start
+    current.sourcePageEnd = end
+  }
+
+  return {
+    mappedTopics: mapped.slice(0, maxTopics),
+    pageOffsetEstimate,
+  }
+}
+
+function isLikelyNonBodySnippet(value: string): boolean {
+  const cleaned = sanitizeArtifactText(value).toLowerCase()
+  if (!cleaned) return true
+  if (isLikelyBibliographyNoise(cleaned)) return true
+  if (looksLikeExtractionNoise(cleaned)) return true
+  if (
+    /\b(table of contents|first published|edition|copyright|isbn|index|appendix|references?)\b/.test(
+      cleaned
+    )
+  ) {
+    return true
+  }
+  if ((cleaned.match(/\d{1,4}\s*[,;]\s*\d{1,4}/g) || []).length >= 2) return true
+  return false
+}
+
+function inferSectionPlanFromTopics(
+  query: string,
+  topics: UploadStructureTopic[],
+  headingCandidates: string[]
+): UploadStructureTopic[] {
+  const normalizedQuery = query.toLowerCase()
+  const queryTerms = buildQueryTerms(query)
+  const filteredTopics = topics.filter((topic) => {
+    const labelLower = topic.label.toLowerCase()
+    if (!labelLower) return false
+    if (/\b(reference|references|index|appendix|edition|copyright)\b/.test(labelLower)) return false
+    if (
+      topic.documentPart === "toc" ||
+      topic.documentPart === "front_matter" ||
+      topic.documentPart === "index" ||
+      topic.documentPart === "bibliography"
+    ) {
+      return false
+    }
+    if (normalizedQuery.length < 6) return true
+    if (queryTerms.length === 0) return true
+    return queryTerms.some((term) => labelLower.includes(term))
+  })
+  if (filteredTopics.length >= 3) {
+    const scored = filteredTopics
+      .map((topic) => {
+        const labelLower = topic.label.toLowerCase()
+        const queryOverlap = queryTerms.filter((term) => labelLower.includes(term)).length
+        const hasMappedRange =
+          typeof topic.sourcePageStart === "number" && typeof topic.sourcePageEnd === "number"
+        const hasMappedStart = typeof topic.sourcePageStart === "number"
+        const score =
+          queryOverlap * 3 +
+          (hasMappedRange ? 3 : 0) +
+          (hasMappedStart ? 1 : 0) +
+          (topic.mappedBy === "direct" ? 2 : topic.mappedBy === "offset" ? 1 : 0)
+        return { topic, score }
+      })
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.topic)
+    return scored.slice(0, 8)
+  }
+  const fallback = headingCandidates
+    .filter((value) => !/\b(reference|references|index|appendix)\b/i.test(value))
+    .slice(0, 8)
+    .map((label) => ({
+      label,
+      page: null,
+      mappedBy: "heuristic" as const,
+      documentPart: "body" as const,
+    }))
+  return fallback.length > 0
+    ? fallback
+    : [
+        { label: "Core concepts and definitions", page: null },
+        { label: "Clinical interpretation and key mechanisms", page: null },
+        { label: "Applied scenarios and exam-relevant points", page: null },
+      ]
+}
+
+function synthesizeSectionHighlights(
+  sectionLabel: string,
+  sectionCitations: EvidenceCitation[],
+  includeReferences: boolean,
+  citationStyle: CitationStyle,
+  maxLines = 3
+): string {
+  if (sectionCitations.length === 0) {
+    return `- ${sectionLabel}: No strong excerpt matched this section in the current retrieval window.`
+  }
+  const lines = sectionCitations
+    .slice(0, maxLines)
+    .map((citation) => {
+      const snippet = cleanSnippetForArtifact(citation.snippet || citation.title || "", 180)
+      if (!snippet) return null
+      const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+      const cite = includeReferences ? ` ${formatInlineCitation(citation, citationStyle)}` : ""
+      return `- ${snippet}${location}${cite}`
+    })
+    .filter((line): line is string => Boolean(line))
+  return lines.length > 0
+    ? lines.join("\n")
+    : `- ${sectionLabel}: No strong excerpt matched this section in the current retrieval window.`
+}
+
+function buildSectionPriorityList(
+  sectionPlan: UploadStructureTopic[],
+  includeReferences: boolean,
+  sectionCitations: Map<string, EvidenceCitation[]>,
+  citationStyle: CitationStyle,
+  maxLines = 6
+): string {
+  const lines: string[] = []
+  for (const section of sectionPlan.slice(0, maxLines)) {
+    const sectionLabel = cleanSnippetForArtifact(section.label, 90) || "Core section"
+    const location =
+      typeof section.sourcePageStart === "number" && typeof section.sourcePageEnd === "number"
+        ? ` (Pages ${section.sourcePageStart}-${section.sourcePageEnd})`
+        : typeof section.sourcePageStart === "number"
+          ? ` (Page ${section.sourcePageStart})`
+          : typeof section.page === "number" && section.page > 0
+            ? ` (Printed page ${section.page})`
+            : ""
+    const firstCitation = (sectionCitations.get(section.label) || [])[0]
+    const cite = includeReferences && firstCitation ? ` ${formatInlineCitation(firstCitation, citationStyle)}` : ""
+    lines.push(`- ${sectionLabel}${location}${cite}`)
+  }
+  return lines.length > 0 ? lines.join("\n") : "- No section priorities were detected."
+}
+
+function filterArtifactSectionContent(content: string): string {
+  const lines = content
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => {
+      if (!line.trim()) return false
+      const normalized = line.replace(/^[-\d\.\sQ:]+/, "").trim()
+      return !isLikelyNonBodySnippet(normalized)
+    })
+  return lines.join("\n")
+}
+
 function extractQuizSentences(value: string): string[] {
   const normalized = sanitizeArtifactText(value)
   if (!normalized) return []
@@ -230,11 +660,72 @@ function extractQuizSentences(value: string): string[] {
 
 function buildQuizStatementFromCitation(citation: EvidenceCitation): string {
   const snippet = citation.snippet || citation.title || ""
-  const sentence = extractQuizSentences(snippet)[0] || cleanSnippetForArtifact(snippet, 160)
+  const candidateSentences = extractQuizSentences(snippet)
+    .map((sentence) => normalizeQuizOptionText(sentence, 220))
+    .filter((sentence) => !isWeakQuizStatement(sentence))
+  const sentence = candidateSentences[0] || cleanSnippetForArtifact(snippet, 160)
   const fallback = cleanSnippetForArtifact(citation.title || "Key concept from the uploaded material", 140)
   const base = sentence || fallback
   if (!base) return "The uploaded material emphasizes a key concept in this topic."
   return /[.!?]$/.test(base) ? base : `${base}.`
+}
+
+function isWeakQuizStatement(value: string): boolean {
+  const normalized = sanitizeArtifactText(value).toLowerCase()
+  if (!normalized || normalized.length < 40) return true
+  if (
+    /\b(edition|copyright|first published|table of contents|index|references?|department|part ii)\b/.test(
+      normalized
+    )
+  ) {
+    return true
+  }
+  if (/^\w+\s+\w+\s+\w+\s+\w+\.?$/.test(normalized) && normalized.length < 60) {
+    return true
+  }
+  return false
+}
+
+function normalizeQuizTopicKey(value: string): string {
+  const tokens = sanitizeArtifactText(value)
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length > 2)
+    .slice(0, 6)
+  return tokens.join(" ")
+}
+
+function extractQuizFocusFromQuery(query: string): string {
+  const lines = query
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const explicitTopicLine = lines.find((line) => /^topic\s*:/i.test(line))
+  if (explicitTopicLine) {
+    const topic = explicitTopicLine.replace(/^topic\s*:/i, "").trim()
+    if (topic.length > 0) return cleanSnippetForArtifact(topic, 90)
+  }
+  const explicitPages = lines.find((line) => /^pages?\s*:/i.test(line))
+  if (explicitPages) {
+    return cleanSnippetForArtifact(explicitPages, 90)
+  }
+  const firstRichLine =
+    lines.find(
+      (line) =>
+        line.length >= 18 &&
+        !/^selected uploads\s*:/i.test(line) &&
+        !/^depth\s*:/i.test(line) &&
+        !/^format\s*:/i.test(line) &&
+        !/^length\s*:/i.test(line) &&
+        !/^question count\s*:/i.test(line) &&
+        !/^difficulty\s*:/i.test(line) &&
+        !/^question style\s*:/i.test(line)
+    ) || ""
+  if (firstRichLine.length > 0) {
+    return cleanSnippetForArtifact(firstRichLine, 90)
+  }
+  return cleanSnippetForArtifact(query, 90)
 }
 
 function normalizeQuizOptionText(value: string, maxLength = 260): string {
@@ -261,11 +752,54 @@ function normalizeQuizOptionText(value: string, maxLength = 260): string {
 
 function buildQuizPromptFromCitation(
   citation: EvidenceCitation,
-  query: string,
+  quizFocus: string,
   statement: string
 ): string {
-  const topicSeed = cleanSnippetForArtifact(citation.title || query || statement, 70)
-  return `Which statement best matches the uploaded material about "${topicSeed}"?`
+  const statementSeed = cleanSnippetForArtifact(statement, 110)
+  const concept = statementSeed.split(/[.:;!?]/)[0]?.trim() || statementSeed
+  const topicSeed = cleanSnippetForArtifact(concept || quizFocus || citation.title || "", 80)
+  const pageHint = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+  return `Based on the uploaded material${pageHint}, which statement is best supported about "${topicSeed}"?`
+}
+
+function createPlausibleDistractor(
+  correctStatement: string,
+  quizFocus: string,
+  relatedTopic: string
+): string {
+  const replacements: Array<[RegExp, string]> = [
+    [/\b(increase|increases|increased|elevated|higher)\b/i, "decreased"],
+    [/\b(decrease|decreases|decreased|lower|reduced)\b/i, "increased"],
+    [/\b(first-line|first line)\b/i, "second-line"],
+    [/\b(primary|main)\b/i, "secondary"],
+    [/\b(associated with|linked to)\b/i, "unrelated to"],
+  ]
+  let mutated = correctStatement
+  for (const [pattern, replacement] of replacements) {
+    if (pattern.test(mutated)) {
+      mutated = mutated.replace(pattern, replacement)
+      break
+    }
+  }
+  if (mutated !== correctStatement) {
+    return normalizeQuizOptionText(mutated, 220)
+  }
+  const seed = cleanSnippetForArtifact(relatedTopic || quizFocus || "this topic", 70)
+  return normalizeQuizOptionText(
+    `The uploaded material primarily attributes ${seed} to an alternative mechanism not described in the cited excerpt.`,
+    220
+  )
+}
+
+function extractQuizFactsFromCitation(citation: EvidenceCitation, maxFacts = 2): string[] {
+  const source = sanitizeArtifactText(`${citation.snippet || ""} ${citation.title || ""}`)
+  if (!source) return []
+  const candidates = extractQuizSentences(source)
+    .map((sentence) => normalizeQuizOptionText(sentence, 220))
+    .filter((sentence) => sentence.length > 40)
+    .filter((sentence) => !isWeakQuizStatement(sentence))
+  const unique = Array.from(new Set(candidates))
+  return unique.slice(0, Math.max(1, maxFacts))
 }
 
 function sanitizeFileName(value: string): string {
@@ -1640,6 +2174,7 @@ export class UserUploadService {
     )
     const maxDurationMs = clamp(input.maxDurationMs ?? DEFAULT_UPLOAD_CONTEXT_BUDGET_MS, 600, 8000)
     const warnings: string[] = []
+    const supabase = await this.getSupabase()
 
     const uploadIds = await this.resolveSearchUploadIds({
       userId: input.userId,
@@ -1658,9 +2193,31 @@ export class UserUploadService {
           candidateCount: 0,
           elapsedMs: Date.now() - startedAt,
           fallbackUsed: false,
+          fallbackReason: "none",
+          retrievalConfidence: "low",
+          sourceUnitCount: 0,
+          maxUnitNumber: 0,
+          textbookScale: false,
         },
       }
     }
+
+    const scopeUploadId = uploadIds[0]
+    const sourceUnitScopeQuery = await (supabase as any)
+      .from("user_upload_source_units")
+      .select("unit_number", { count: "exact" })
+      .eq("user_id", input.userId)
+      .eq("upload_id", scopeUploadId)
+      .order("unit_number", { ascending: false })
+      .limit(1)
+    const sourceUnitCount =
+      typeof sourceUnitScopeQuery.count === "number" ? sourceUnitScopeQuery.count : 0
+    const maxUnitNumber =
+      Array.isArray(sourceUnitScopeQuery.data) &&
+      typeof sourceUnitScopeQuery.data[0]?.unit_number === "number"
+        ? sourceUnitScopeQuery.data[0].unit_number
+        : 0
+    const textbookScale = sourceUnitCount >= 80 || maxUnitNumber >= 80
 
     const candidateCap = adaptiveCandidateCap(intent.modeResolved, topK)
     let candidateRows: UploadChunkRow[] = []
@@ -1735,24 +2292,45 @@ export class UserUploadService {
           candidateCount: 0,
           elapsedMs: Date.now() - startedAt,
           fallbackUsed: false,
+          fallbackReason: "none",
+          retrievalConfidence: "low",
+          sourceUnitCount,
+          maxUnitNumber,
+          textbookScale,
         },
       }
     }
 
     const queryTerms = buildQueryTerms(input.query, topicContext.activeTopic)
     let fallbackUsed = false
+    let fallbackReason: UploadContextSearchResult["metrics"]["fallbackReason"] = "none"
     let queryEmbedding: number[] | null = null
+    const candidateEmbeddingKey = input.embeddingApiKey || input.apiKey
+    const providerMismatchSignal =
+      Boolean(candidateEmbeddingKey) && !isLikelyOpenAIEmbeddingKey(candidateEmbeddingKey)
+    const embeddingApiKey = isLikelyOpenAIEmbeddingKey(candidateEmbeddingKey)
+      ? candidateEmbeddingKey
+      : undefined
     try {
       queryEmbedding = await withTimeout(
-        generateEmbedding(input.query, input.apiKey),
+        generateEmbedding(input.query, embeddingApiKey),
         Math.min(QUERY_EMBEDDING_TIMEOUT_MS, Math.floor(maxDurationMs * 0.55))
       )
-    } catch {
+    } catch (error) {
       queryEmbedding = null
+      fallbackUsed = true
+      fallbackReason = classifyEmbeddingFallbackReason(error)
     }
     if (!queryEmbedding) {
       fallbackUsed = true
-      warnings.push("Embedding timeout reached; using lexical fallback.")
+      if (fallbackReason === "none") {
+        fallbackReason = providerMismatchSignal
+          ? "embedding_provider_mismatch"
+          : "embedding_timeout"
+      }
+      if (fallbackReason !== "embedding_provider_mismatch") {
+        warnings.push(`Embedding unavailable (${fallbackReason}); using lexical fallback.`)
+      }
     }
 
     const activeTopicTerms = buildQueryTerms(topicContext.activeTopic || "", "")
@@ -1763,6 +2341,7 @@ export class UserUploadService {
         const text = String(row.chunk_text ?? "")
         const lexicalScore = computeLexicalOverlap(queryTerms, text)
         const qualityScore = getChunkQualityScore(row)
+        const bibliographyPenalty = isLikelyBibliographyNoise(text) ? 0.24 : 0
         const pageNumber = chunkSourceUnitNumber(row)
         const embeddingScore =
           queryEmbedding && Array.isArray(row.embedding)
@@ -1810,22 +2389,30 @@ export class UserUploadService {
               pageIntentBoost +
               topicBoost +
               continuityBoost +
-              evidenceBoost
+              evidenceBoost -
+              bibliographyPenalty
             : lexicalScore * 0.68 +
               qualityScore * 0.32 +
               pageIntentBoost +
               topicBoost +
               continuityBoost +
-              evidenceBoost
+              evidenceBoost -
+              bibliographyPenalty
 
         return {
           row,
           score,
           lexicalScore,
           qualityScore,
+          bibliographyPenalty,
         }
       })
-      .filter((item) => item.score > 0.12 || item.lexicalScore > 0.18 || item.qualityScore > 0.45)
+      .filter(
+        (item) =>
+          item.score > 0.12 ||
+          item.lexicalScore > 0.18 ||
+          (item.qualityScore > 0.45 && item.bibliographyPenalty < 0.18)
+      )
       .sort((a, b) => b.score - a.score)
 
     const fallbackScored =
@@ -1836,18 +2423,27 @@ export class UserUploadService {
               const text = String(row.chunk_text ?? "")
               const lexicalScore = computeLexicalOverlap(queryTerms, text)
               const qualityScore = getChunkQualityScore(row)
+              const bibliographyPenalty = isLikelyBibliographyNoise(text) ? 0.2 : 0
               return {
                 row,
-                score: lexicalScore * 0.72 + qualityScore * 0.28,
+                score: lexicalScore * 0.72 + qualityScore * 0.28 - bibliographyPenalty,
                 lexicalScore,
                 qualityScore,
+                bibliographyPenalty,
               }
             })
-            .filter((item) => item.score > 0.08 || item.qualityScore > 0.42)
+            .filter(
+              (item) =>
+                item.score > 0.08 ||
+                (item.qualityScore > 0.42 && item.bibliographyPenalty < 0.18)
+            )
             .sort((a, b) => b.score - a.score)
 
     if (scored.length === 0 && fallbackScored.length > 0) {
       fallbackUsed = true
+      if (fallbackReason === "none") {
+        fallbackReason = "lexical_only"
+      }
     }
 
     const selectedRows: Array<{ row: UploadChunkRow; score: number }> = []
@@ -1868,7 +2464,6 @@ export class UserUploadService {
       }
     }
 
-    const supabase = await this.getSupabase()
     const selectedUploadIds = [...new Set(selectedRows.map((item) => item.row.upload_id))]
     const selectedSourceUnitIds = [...new Set(selectedRows.map((item) => item.row.source_unit_id))]
     const [uploadsResult, sourceUnitsResult] = await Promise.all([
@@ -1962,6 +2557,12 @@ export class UserUploadService {
       ).slice(0, 10),
       followUpType: inferFollowUpType(input.query),
     }
+    const retrievalConfidence: UploadContextSearchResult["metrics"]["retrievalConfidence"] =
+      citations.length === 0 || fallbackReason !== "none"
+        ? "low"
+        : citations.length >= Math.max(3, Math.floor(topK * 0.6))
+          ? "high"
+          : "medium"
 
     return {
       intent,
@@ -1973,7 +2574,219 @@ export class UserUploadService {
         candidateCount: candidateRows.length,
         elapsedMs: Date.now() - startedAt,
         fallbackUsed: fallbackUsed || Date.now() - startedAt > maxDurationMs,
+        fallbackReason:
+          fallbackReason === "none" && (fallbackUsed || Date.now() - startedAt > maxDurationMs)
+            ? "lexical_only"
+            : fallbackReason,
+        retrievalConfidence,
+        sourceUnitCount,
+        maxUnitNumber,
+        textbookScale,
       },
+    }
+  }
+
+  async inspectUploadStructure(input: {
+    userId: string
+    uploadId?: string
+    topicContext?: UploadTopicContext
+    maxHeadings?: number
+    maxTopics?: number
+  }): Promise<UploadStructureInspection> {
+    const warnings: string[] = []
+    const maxHeadings = clamp(input.maxHeadings ?? 18, 6, 32)
+    const maxTopics = clamp(input.maxTopics ?? 16, 6, 28)
+    const topicContext = normalizeTopicContext(input.topicContext)
+    const uploadIds = await this.resolveSearchUploadIds({
+      userId: input.userId,
+      uploadId: input.uploadId || topicContext.lastUploadId || undefined,
+      topicContext,
+    })
+    if (uploadIds.length === 0) {
+      return {
+        uploadId: null,
+        uploadTitle: null,
+        sourceUnitCount: 0,
+        maxUnitNumber: 0,
+        probableTocPages: [],
+        pageOffsetEstimate: null,
+        partDistribution: {},
+        headingCandidates: [],
+        topicMap: [],
+        extractionCoverage: 0,
+        confidence: "low",
+        textbookScale: false,
+        warnings: ["No completed upload available for structure inspection."],
+        inspectedAt: new Date().toISOString(),
+      }
+    }
+
+    const selectedUploadId = uploadIds[0]
+    const supabase = await this.getSupabase()
+    const [uploadResult, sourceUnitsResult, sourceUnitCountResult, maxUnitResult] = await Promise.all([
+      (supabase as any)
+        .from("user_uploads")
+        .select("id, title, file_name, metadata")
+        .eq("id", selectedUploadId)
+        .eq("user_id", input.userId)
+        .maybeSingle(),
+      (supabase as any)
+        .from("user_upload_source_units")
+        .select("unit_number, unit_type, title, extracted_text")
+        .eq("upload_id", selectedUploadId)
+        .eq("user_id", input.userId)
+        .order("unit_number", { ascending: true })
+        .limit(260),
+      (supabase as any)
+        .from("user_upload_source_units")
+        .select("id", { count: "exact", head: true })
+        .eq("upload_id", selectedUploadId)
+        .eq("user_id", input.userId),
+      (supabase as any)
+        .from("user_upload_source_units")
+        .select("unit_number")
+        .eq("upload_id", selectedUploadId)
+        .eq("user_id", input.userId)
+        .order("unit_number", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
+
+    if (sourceUnitsResult.error || !Array.isArray(sourceUnitsResult.data)) {
+      return {
+        uploadId: selectedUploadId,
+        uploadTitle: uploadResult.data?.title || null,
+        sourceUnitCount: 0,
+        maxUnitNumber: 0,
+        probableTocPages: [],
+        pageOffsetEstimate: null,
+        partDistribution: {},
+        headingCandidates: [],
+        topicMap: [],
+        extractionCoverage: 0,
+        confidence: "low",
+        textbookScale: false,
+        warnings: ["Unable to load source units for structure inspection."],
+        inspectedAt: new Date().toISOString(),
+      }
+    }
+
+    const sourceUnits = sourceUnitsResult.data as Array<{
+      unit_number: number
+      unit_type: UploadSourceUnitType
+      title: string | null
+      extracted_text: string | null
+    }>
+    const sourceUnitCount =
+      typeof sourceUnitCountResult.count === "number" ? sourceUnitCountResult.count : sourceUnits.length
+    const maxUnitNumber =
+      typeof maxUnitResult.data?.unit_number === "number"
+        ? maxUnitResult.data.unit_number
+        : sourceUnits.at(-1)?.unit_number || 0
+    const extractionCoverageRaw =
+      typeof (uploadResult.data?.metadata as any)?.extractionCoverage === "number"
+        ? Number((uploadResult.data?.metadata as any).extractionCoverage)
+        : sourceUnits.length > 0
+          ? sourceUnits.filter((unit) => String(unit.extracted_text || "").trim().length > 0).length /
+            sourceUnits.length
+          : 0
+    const extractionCoverage = Number(Math.max(0, Math.min(1, extractionCoverageRaw)).toFixed(3))
+    const textbookScale = sourceUnitCount >= 80 || maxUnitNumber >= 80
+
+    const probableTocPages: number[] = []
+    const partDistribution: Record<string, number> = {}
+    const headingKeySet = new Set<string>()
+    const headingCandidatesList: string[] = []
+    const topicMap: UploadStructureTopic[] = []
+    for (const unit of sourceUnits) {
+      const text = String(unit.extracted_text || "").trim()
+      if (!text) continue
+      const excerpt = text.slice(0, 5200)
+      const lower = excerpt.toLowerCase()
+      const documentPart = classifyDocumentPart(excerpt, unit.unit_number, maxUnitNumber)
+      partDistribution[documentPart] = (partDistribution[documentPart] || 0) + 1
+      const tocLines = extractTopicRowsFromTocText(excerpt)
+      const tocScore =
+        (/\b(table of contents|contents)\b/.test(lower) ? 2 : 0) +
+        (tocLines.length >= 4 ? 1 : 0) +
+        ((excerpt.match(/\.{2,}\s*\d{1,4}/g) || []).length >= 3 ? 1 : 0)
+      if (tocScore >= 2 && unit.unit_number > 0) {
+        probableTocPages.push(unit.unit_number)
+      }
+      for (const row of tocLines) {
+        if (topicMap.length >= maxTopics) break
+        if (!topicMap.some((existing) => existing.label.toLowerCase() === row.label.toLowerCase())) {
+          topicMap.push({
+            ...row,
+            documentPart: "body",
+            mappedBy: row.mappedBy || "unknown",
+          })
+        }
+      }
+
+      const lines = excerpt
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+      const sampledLines = [
+        ...lines.slice(0, 6),
+        ...lines.slice(Math.max(0, Math.floor(lines.length * 0.35)), Math.floor(lines.length * 0.35) + 4),
+        ...lines.slice(Math.max(0, Math.floor(lines.length * 0.7)), Math.floor(lines.length * 0.7) + 4),
+      ]
+      for (const line of sampledLines) {
+        if (!looksLikeHeadingLine(line)) continue
+        const normalized = normalizeHeadingCandidate(line)
+        const normalizedKey = normalized.toLowerCase()
+        if (!normalized || headingKeySet.has(normalizedKey)) continue
+        headingKeySet.add(normalizedKey)
+        headingCandidatesList.push(normalized)
+        if (headingCandidatesList.length >= maxHeadings) break
+      }
+      if (headingCandidatesList.length >= maxHeadings && topicMap.length >= maxTopics) break
+    }
+
+    const headingCandidates = headingCandidatesList.slice(0, maxHeadings)
+    if (topicMap.length === 0 && headingCandidates.length > 0) {
+      topicMap.push(
+        ...headingCandidates
+          .slice(0, maxTopics)
+          .map((label) => ({
+            label,
+            page: null,
+            documentPart: "body" as const,
+            mappedBy: "heuristic" as const,
+          }))
+      )
+    }
+    const mappedTopicsResult = mapTopicsToSourceRanges(topicMap, sourceUnits, maxTopics)
+    const mappedTopicMap = mappedTopicsResult.mappedTopics
+    if (probableTocPages.length === 0) {
+      warnings.push("No explicit TOC pages were detected; structure map uses heading heuristics.")
+    }
+    const confidence: UploadStructureInspection["confidence"] =
+      mappedTopicMap.length >= 6 &&
+      probableTocPages.length > 0 &&
+      mappedTopicMap.filter((topic) => typeof topic.sourcePageStart === "number").length >= 3
+        ? "high"
+        : mappedTopicMap.length >= 3 || headingCandidates.length >= 5
+          ? "medium"
+          : "low"
+
+    return {
+      uploadId: selectedUploadId,
+      uploadTitle: uploadResult.data?.title || uploadResult.data?.file_name || null,
+      sourceUnitCount,
+      maxUnitNumber,
+      probableTocPages: Array.from(new Set(probableTocPages)).slice(0, 8),
+      pageOffsetEstimate: mappedTopicsResult.pageOffsetEstimate,
+      partDistribution,
+      headingCandidates,
+      topicMap: mappedTopicMap.slice(0, maxTopics),
+      extractionCoverage,
+      confidence,
+      textbookScale,
+      warnings,
+      inspectedAt: new Date().toISOString(),
     }
   }
 
@@ -1981,17 +2794,20 @@ export class UserUploadService {
     userId,
     query,
     apiKey,
+    embeddingApiKey,
     maxResults = 4,
   }: {
     userId: string
     query: string
     apiKey?: string
+    embeddingApiKey?: string
     maxResults?: number
   }): Promise<EvidenceCitation[]> {
     const result = await this.uploadContextSearch({
       userId,
       query,
       apiKey,
+      embeddingApiKey,
       topK: Math.max(1, maxResults),
       mode: "auto",
     })
@@ -2006,12 +2822,14 @@ export class UserUploadService {
     const includeReferences =
       input.includeReferences ?? shouldIncludeReferencesForQuery(input.query)
     const documentShape = inferDocumentShape(input.query)
+    const artifactV2Enabled = input.enableArtifactV2 !== false
     const maxSources = clamp(input.maxSources ?? 8, 3, 16)
     const search = await this.uploadContextSearch({
       userId: input.userId,
       query: input.query,
       uploadId: input.uploadId,
       apiKey: input.apiKey,
+      embeddingApiKey: input.embeddingApiKey,
       mode: "hybrid",
       topK: maxSources,
       includeNeighborPages: 1,
@@ -2030,12 +2848,19 @@ export class UserUploadService {
       })
       .filter((citation) => {
         const candidate = citation.snippet || citation.title || ""
-        return candidate.length > 24 && !looksLikeExtractionNoise(candidate)
+        return (
+          candidate.length > 24 &&
+          !looksLikeExtractionNoise(candidate) &&
+          !isLikelyBibliographyNoise(candidate)
+        )
       })
 
     const fallbackCitations = search.citations
       .slice(0, maxSources)
-      .filter((citation) => !looksLikeExtractionNoise(citation.snippet || citation.title || ""))
+      .filter((citation) => {
+        const candidate = citation.snippet || citation.title || ""
+        return !looksLikeExtractionNoise(candidate) && !isLikelyBibliographyNoise(candidate)
+      })
     const citationPool =
       preparedCitations.length > 0
         ? preparedCitations.slice(0, maxSources)
@@ -2060,33 +2885,173 @@ export class UserUploadService {
       }
     }
     const citations = diversifiedCitations.slice(0, maxSources)
-    const orderedCitations = [...citations].sort((a, b) => {
-      const left = typeof a.sourceUnitNumber === "number" ? a.sourceUnitNumber : Number.MAX_SAFE_INTEGER
-      const right = typeof b.sourceUnitNumber === "number" ? b.sourceUnitNumber : Number.MAX_SAFE_INTEGER
-      return left - right
-    })
-
-    const bibliography = includeReferences
-      ? formatBibliography(citations, citationStyle).map((entry) => ({
-          index: entry.index,
-          entry: entry.entry,
-        }))
-      : []
     const uploadId = citations[0]?.uploadId ?? input.uploadId ?? null
     const uploadTitle =
       citations[0]?.uploadFileName ||
       citations[0]?.sourceLabel ||
       (uploadId ? (await this.getUploadListItem(input.userId, uploadId))?.title : null) ||
       null
+
+    const structureInspection =
+      artifactV2Enabled &&
+      (uploadId || search.topicContext.lastUploadId)
+        ? input.structureHint ||
+          (await this.inspectUploadStructure({
+            userId: input.userId,
+            uploadId: uploadId || search.topicContext.lastUploadId || undefined,
+            topicContext: search.topicContext,
+            maxHeadings: 18,
+            maxTopics: 14,
+          }))
+        : null
+    const sectionPlan = artifactV2Enabled
+      ? inferSectionPlanFromTopics(
+          input.query,
+          structureInspection?.topicMap ?? [],
+          structureInspection?.headingCandidates ?? []
+        )
+      : []
+    const initialTargetedSections = sectionPlan.slice(
+      0,
+      structureInspection?.textbookScale ? 8 : 5
+    )
+    const isCitationWithinSectionRange = (
+      citation: EvidenceCitation,
+      section: UploadStructureTopic
+    ): boolean => {
+      if (
+        typeof section.sourcePageStart !== "number" &&
+        typeof section.sourcePageEnd !== "number" &&
+        typeof section.page !== "number"
+      ) {
+        return true
+      }
+      if (typeof citation.sourceUnitNumber !== "number") return false
+      if (
+        typeof section.sourcePageStart === "number" &&
+        typeof section.sourcePageEnd === "number"
+      ) {
+        return (
+          citation.sourceUnitNumber >= section.sourcePageStart &&
+          citation.sourceUnitNumber <= section.sourcePageEnd
+        )
+      }
+      if (typeof section.sourcePageStart === "number") {
+        return Math.abs(citation.sourceUnitNumber - section.sourcePageStart) <= 2
+      }
+      if (typeof section.page === "number") {
+        return Math.abs(citation.sourceUnitNumber - section.page) <= 2
+      }
+      return true
+    }
+    const sectionSearches = artifactV2Enabled
+      ? await Promise.all(
+          initialTargetedSections.map(async (section) => {
+            const result = await this.uploadContextSearch({
+              userId: input.userId,
+              query: `${input.query}\nFocus section: ${section.label}`,
+              uploadId: uploadId || search.topicContext.lastUploadId || undefined,
+              apiKey: input.apiKey,
+              embeddingApiKey: input.embeddingApiKey,
+              mode: "hybrid",
+              topK: 5,
+              includeNeighborPages:
+                typeof section.sourcePageStart === "number" || typeof section.page === "number"
+                  ? 0
+                  : 1,
+              page:
+                typeof section.sourcePageStart === "number" &&
+                typeof section.sourcePageEnd !== "number"
+                  ? section.sourcePageStart
+                  : typeof section.page === "number"
+                    ? section.page
+                    : undefined,
+              pageStart:
+                typeof section.sourcePageStart === "number" &&
+                typeof section.sourcePageEnd === "number"
+                  ? section.sourcePageStart
+                  : undefined,
+              pageEnd:
+                typeof section.sourcePageStart === "number" &&
+                typeof section.sourcePageEnd === "number"
+                  ? section.sourcePageEnd
+                  : undefined,
+              maxDurationMs: 1900,
+            })
+            return {
+              section,
+              citations: result.citations.filter((citation) => {
+                const candidate = citation.snippet || citation.title || ""
+                return (
+                  !isLikelyNonBodySnippet(candidate) &&
+                  isCitationWithinSectionRange(citation, section)
+                )
+              }),
+              warnings: result.warnings,
+            }
+          })
+        )
+      : []
+    const requiredBodyEvidence = structureInspection?.textbookScale ? 2 : 1
+    const validatedSectionEntries = sectionSearches
+      .map((entry) => ({
+        ...entry,
+        citations: entry.citations
+          .filter((citation) => !isLikelyNonBodySnippet(citation.snippet || citation.title || ""))
+          .slice(0, 4),
+      }))
+      .filter((entry) => entry.citations.length >= requiredBodyEvidence)
+    const targetedSections = validatedSectionEntries.map((entry) => entry.section)
+    const sectionCitationMap = new Map<string, EvidenceCitation[]>()
+    const sectionWarnings: string[] = []
+    for (const item of validatedSectionEntries) {
+      sectionCitationMap.set(item.section.label, item.citations.slice(0, 4))
+      if (item.warnings.length > 0) {
+        sectionWarnings.push(...item.warnings)
+      }
+    }
+
+    const curatedCitationPool = [...citations]
+    for (const item of validatedSectionEntries) {
+      curatedCitationPool.push(...item.citations)
+    }
+    const seenCitationKey = new Set<string>()
+    const curatedCitations = curatedCitationPool.filter((citation) => {
+      const key =
+        citation.chunkId ||
+        citation.sourceUnitId ||
+        `${citation.sourceUnitType || "unit"}:${citation.sourceUnitNumber || citation.index}`
+      if (seenCitationKey.has(key)) return false
+      seenCitationKey.add(key)
+      return true
+    })
+    const orderedCitations = [...curatedCitations].sort((a, b) => {
+      const left =
+        typeof a.sourceUnitNumber === "number" ? a.sourceUnitNumber : Number.MAX_SAFE_INTEGER
+      const right =
+        typeof b.sourceUnitNumber === "number" ? b.sourceUnitNumber : Number.MAX_SAFE_INTEGER
+      return left - right
+    })
+    const artifactCitations = orderedCitations.filter((citation) => {
+      const candidate = citation.snippet || citation.title || ""
+      return !isLikelyNonBodySnippet(candidate)
+    })
+    const bibliography = includeReferences
+      ? formatBibliography(artifactCitations.slice(0, maxSources), citationStyle).map((entry) => ({
+          index: entry.index,
+          entry: entry.entry,
+        }))
+      : []
     const maxObservedPage = Math.max(
       0,
-      ...orderedCitations
+      ...artifactCitations
         .map((citation) =>
           typeof citation.sourceUnitNumber === "number" ? citation.sourceUnitNumber : 0
         )
     )
     const isTextbookScale =
       /\b(textbook|chapter|book|manual|handbook)\b/i.test(input.query) ||
+      structureInspection?.textbookScale === true ||
       maxObservedPage >= 80 ||
       orderedCitations.length >= 8
     const keyPointLimit = isTextbookScale ? 6 : 7
@@ -2095,101 +3060,209 @@ export class UserUploadService {
     const evidenceLimit = isTextbookScale ? 8 : 6
 
     const summaryParagraph =
-      citations.length > 0
-        ? `This ${documentShape.replace("-", " ")} synthesizes "${input.query}" using ${citations.length} high-signal excerpts from your uploaded material.`
+      artifactCitations.length > 0
+        ? `This ${documentShape.replace("-", " ")} synthesizes "${input.query}" using structured retrieval across ${Math.max(1, targetedSections.length)} topic blocks from your uploaded material.`
         : `No high-confidence excerpts were found for "${input.query}". Upload a more relevant document or refine your query for better coverage.`
 
     const executiveSnapshot =
-      orderedCitations.length > 0
-        ? orderedCitations
-            .slice(0, Math.min(4, orderedCitations.length))
-            .map((citation) => {
-              const snippet = cleanSnippetForArtifact(citation.snippet || citation.title || "", 160)
-              if (!snippet) return null
-              const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
-              const cite = includeReferences
-                ? ` ${formatInlineCitation(citation, citationStyle)}`
-                : ""
-              return `- ${snippet}${location}${cite}`
-            })
-            .filter((line): line is string => Boolean(line))
-            .join("\n")
+      artifactCitations.length > 0
+        ? targetedSections.length > 0
+          ? targetedSections
+              .slice(0, 4)
+              .map((section) => {
+                const sectionCitations = sectionCitationMap.get(section.label) || []
+                const leadCitation = sectionCitations[0]
+                const snippet = cleanSnippetForArtifact(
+                  leadCitation?.snippet || section.label,
+                  160
+                )
+                if (!snippet) return null
+                const location =
+                  typeof section.sourcePageStart === "number" &&
+                    typeof section.sourcePageEnd === "number"
+                    ? ` (Pages ${section.sourcePageStart}-${section.sourcePageEnd})`
+                    : typeof section.sourcePageStart === "number"
+                      ? ` (Page ${section.sourcePageStart})`
+                      : typeof section.page === "number" && section.page > 0
+                        ? ` (Printed page ${section.page})`
+                        : leadCitation?.pageLabel
+                          ? ` (${leadCitation.pageLabel})`
+                          : ""
+                const cite =
+                  includeReferences && leadCitation
+                    ? ` ${formatInlineCitation(leadCitation, citationStyle)}`
+                    : ""
+                return `- ${snippet}${location}${cite}`
+              })
+              .filter((line): line is string => Boolean(line))
+              .join("\n")
+          : artifactCitations
+              .slice(0, Math.min(4, artifactCitations.length))
+              .map((citation) => {
+                const snippet = cleanSnippetForArtifact(
+                  citation.snippet || citation.title || "",
+                  160
+                )
+                if (!snippet) return null
+                const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+                const cite = includeReferences
+                  ? ` ${formatInlineCitation(citation, citationStyle)}`
+                  : ""
+                return `- ${snippet}${location}${cite}`
+              })
+              .filter((line): line is string => Boolean(line))
+              .join("\n")
         : "- No concise highlights were extracted from the current material."
 
     const keyPoints =
-      citations.length > 0
-        ? orderedCitations
-            .slice(0, keyPointLimit)
-            .map((citation) => {
-              const snippet = cleanSnippetForArtifact(
-                citation.snippet || citation.title || "",
-                200
-              )
-              if (!snippet) return null
-              const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
-              const cite = includeReferences
-                ? ` ${formatInlineCitation(citation, citationStyle)}`
-                : ""
-              return `- ${snippet}${location}${cite}`
-            })
-            .filter((line): line is string => Boolean(line))
-            .join("\n")
+      artifactCitations.length > 0
+        ? targetedSections.length > 0
+          ? buildSectionPriorityList(
+              targetedSections.slice(0, keyPointLimit),
+              includeReferences,
+              sectionCitationMap,
+              citationStyle,
+              keyPointLimit
+            )
+          : artifactCitations
+              .slice(0, keyPointLimit)
+              .map((citation) => {
+                const snippet = cleanSnippetForArtifact(
+                  citation.snippet || citation.title || "",
+                  200
+                )
+                if (!snippet) return null
+                const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+                const cite = includeReferences
+                  ? ` ${formatInlineCitation(citation, citationStyle)}`
+                  : ""
+                return `- ${snippet}${location}${cite}`
+              })
+              .filter((line): line is string => Boolean(line))
+              .join("\n")
         : "- No directly relevant excerpt was extracted from the selected upload."
 
     const studyPlanSection =
-      citations.length > 0
-        ? orderedCitations
-            .slice(0, studyStepLimit)
-            .map((citation, index) => {
-              const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
-              const cite = includeReferences
-                ? ` ${formatInlineCitation(citation, citationStyle)}`
-                : ""
-              return `${index + 1}. Review ${citation.title || "core concept"}${location}; capture 3 takeaways and one clinical pearl.${cite}`
-            })
-            .join("\n")
+      artifactCitations.length > 0
+        ? targetedSections.length > 0
+          ? targetedSections
+              .slice(0, studyStepLimit)
+              .map((section, index) => {
+                const location =
+                  typeof section.sourcePageStart === "number" &&
+                    typeof section.sourcePageEnd === "number"
+                    ? ` (Pages ${section.sourcePageStart}-${section.sourcePageEnd})`
+                    : typeof section.sourcePageStart === "number"
+                      ? ` (Page ${section.sourcePageStart})`
+                      : typeof section.page === "number" && section.page > 0
+                        ? ` (Printed page ${section.page})`
+                        : ""
+                const leadCitation = (sectionCitationMap.get(section.label) || [])[0]
+                const cite =
+                  includeReferences && leadCitation
+                    ? ` ${formatInlineCitation(leadCitation, citationStyle)}`
+                    : ""
+                return `${index + 1}. Review ${section.label}${location}; summarize the mechanism, clinical relevance, and one exam trap.${cite}`
+              })
+              .join("\n")
+          : artifactCitations
+              .slice(0, studyStepLimit)
+              .map((citation, index) => {
+                const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+                const cite = includeReferences
+                  ? ` ${formatInlineCitation(citation, citationStyle)}`
+                  : ""
+                return `${index + 1}. Review ${citation.title || "core concept"}${location}; capture 3 takeaways and one clinical pearl.${cite}`
+              })
+              .join("\n")
         : "1. Review the uploaded material once for broad orientation.\n2. Build concise notes by theme.\n3. Re-test yourself with short recall prompts."
 
     const recallPrompts =
-      citations.length > 0
-        ? orderedCitations
-            .slice(0, recallLimit)
-            .map((citation, index) => {
-              const seed = cleanSnippetForArtifact(
-                citation.snippet || citation.title || "",
-                120
-              )
-              return `- Q${index + 1}: Explain this concept in your own words -> ${seed}`
-            })
-            .join("\n")
+      artifactCitations.length > 0
+        ? targetedSections.length > 0
+          ? targetedSections
+              .slice(0, recallLimit)
+              .map((section, index) => {
+                const leadCitation = (sectionCitationMap.get(section.label) || [])[0]
+                const seed = cleanSnippetForArtifact(
+                  leadCitation?.snippet || section.label,
+                  120
+                )
+                return `- Q${index + 1}: Teach back "${section.label}" in your own words and cite the key page clue -> ${seed}`
+              })
+              .join("\n")
+          : artifactCitations
+              .slice(0, recallLimit)
+              .map((citation, index) => {
+                const seed = cleanSnippetForArtifact(
+                  citation.snippet || citation.title || "",
+                  120
+                )
+                return `- Q${index + 1}: Explain this concept in your own words -> ${seed}`
+              })
+              .join("\n")
         : "- Define the key syndrome patterns from this topic.\n- List first-line management options and contraindications."
 
     const evidenceReview =
-      citations.length > 0
-        ? orderedCitations
-            .slice(0, evidenceLimit)
-            .map((citation, idx) => {
-              const heading = `### Source ${idx + 1}: ${citation.title || "Untitled source"}`
-              const body =
-                cleanSnippetForArtifact(citation.snippet || citation.title || "", 300) ||
-                "No snippet available."
-              const location = citation.pageLabel ? `\n- Location: ${citation.pageLabel}` : ""
-              const marker = includeReferences
-                ? `\n- Citation: ${formatInlineCitation(citation, citationStyle)}`
-                : ""
-              return `${heading}\n- Summary: ${body}${location}${marker}`
-            })
-            .join("\n\n")
+      artifactCitations.length > 0
+        ? targetedSections.length > 0
+          ? targetedSections
+              .slice(0, evidenceLimit)
+              .map((section, idx) => {
+                const sectionCitations = sectionCitationMap.get(section.label) || []
+                const heading = `### Section ${idx + 1}: ${section.label}`
+                const body = synthesizeSectionHighlights(
+                  section.label,
+                  sectionCitations,
+                  includeReferences,
+                  citationStyle,
+                  3
+                )
+                return `${heading}\n${body}`
+              })
+              .join("\n\n")
+          : artifactCitations
+              .slice(0, evidenceLimit)
+              .map((citation, idx) => {
+                const heading = `### Source ${idx + 1}: ${citation.title || "Untitled source"}`
+                const body =
+                  cleanSnippetForArtifact(citation.snippet || citation.title || "", 300) ||
+                  "No snippet available."
+                const location = citation.pageLabel ? `\n- Location: ${citation.pageLabel}` : ""
+                const marker = includeReferences
+                  ? `\n- Citation: ${formatInlineCitation(citation, citationStyle)}`
+                  : ""
+                return `${heading}\n- Summary: ${body}${location}${marker}`
+              })
+              .join("\n\n")
         : "No evidence excerpts were available to build this section."
 
+    const traceabilityCitations =
+      targetedSections.length > 0
+        ? targetedSections
+            .flatMap((section) => sectionCitationMap.get(section.label) || [])
+            .filter((citation, index, array) => {
+              const key =
+                citation.chunkId ||
+                citation.sourceUnitId ||
+                `${citation.sourceUnitType || "unit"}:${citation.sourceUnitNumber || citation.index}`
+              return array.findIndex((candidate) => {
+                const candidateKey =
+                  candidate.chunkId ||
+                  candidate.sourceUnitId ||
+                  `${candidate.sourceUnitType || "unit"}:${candidate.sourceUnitNumber || candidate.index}`
+                return candidateKey === key
+              }) === index
+            })
+        : artifactCitations
     const referencesHeading = includeReferences
       ? `References (${citationStyle.toUpperCase()})`
       : "Source Traceability"
     const referenceSection =
       bibliography.length > 0
         ? bibliography.map((entry) => `${entry.index}. ${entry.entry}`).join("\n")
-        : citations.length > 0
-          ? citations
+        : traceabilityCitations.length > 0
+          ? traceabilityCitations
               .slice(0, 10)
               .map((citation, index) => {
                 const location = citation.pageLabel ? ` (${citation.pageLabel})` : ""
@@ -2240,15 +3313,34 @@ export class UserUploadService {
                 { heading: "Evidence Review", content: evidenceReview },
               ]
 
-    const sections = [
-      ...shapeSpecificSections,
-      { heading: referencesHeading, content: referenceSection },
-    ]
+    const validatedShapeSections = shapeSpecificSections
+      .map((section) => ({
+        ...section,
+        content: filterArtifactSectionContent(section.content),
+      }))
+      .filter((section) => section.content.trim().length > 0)
+    if (validatedShapeSections.length < shapeSpecificSections.length) {
+      sectionWarnings.push(
+        "Artifact quality gate removed non-body snippets (TOC/front matter/index/reference noise)."
+      )
+    }
+    const sections = [...validatedShapeSections, { heading: referencesHeading, content: referenceSection }]
 
     const markdownBody = sections
       .map((section) => `## ${section.heading}\n${section.content}`)
       .join("\n\n")
     const markdown = `# ${title}\n\n${markdownBody}\n`
+    const warningSet = new Set<string>([
+      ...search.warnings,
+      ...sectionWarnings,
+      ...(structureInspection?.warnings ?? []),
+    ])
+    if (search.metrics.retrievalConfidence === "low") {
+      warningSet.add("Retrieval confidence is low; refine your topic or page range for stronger grounding.")
+    }
+    if (structureInspection && structureInspection.confidence === "low") {
+      warningSet.add("Upload structure map confidence is low; consider specifying chapter/page scope.")
+    }
 
     return {
       artifactType: "document",
@@ -2260,8 +3352,8 @@ export class UserUploadService {
       markdown,
       sections,
       bibliography,
-      citations,
-      warnings: search.warnings,
+      citations: traceabilityCitations.slice(0, Math.max(maxSources + 4, 8)),
+      warnings: Array.from(warningSet),
       uploadId,
       uploadTitle,
       generatedAt: new Date().toISOString(),
@@ -2270,58 +3362,160 @@ export class UserUploadService {
 
   async generateQuizFromUpload(input: GenerateQuizFromUploadInput): Promise<QuizArtifact> {
     const questionCount = clamp(input.questionCount ?? 5, 3, 10)
+    const topicContext = normalizeTopicContext(input.topicContext)
+    const normalizedQuery = sanitizeArtifactText(input.query)
+    const queryTokenCount = normalizedQuery.split(/\s+/).filter(Boolean).length
+    const hasExplicitScopeCue =
+      /\b(topic|chapter|section|focus(?:ed)?\s+on|about|regarding|pages?|pp?\.?)\b/i.test(
+        normalizedQuery
+      )
+    const effectiveQuery =
+      queryTokenCount <= 8 && !hasExplicitScopeCue && topicContext.activeTopic
+        ? `${normalizedQuery} ${topicContext.activeTopic}`.trim()
+        : normalizedQuery || input.query
+    const quizFocus = extractQuizFocusFromQuery(effectiveQuery)
     const search = await this.uploadContextSearch({
       userId: input.userId,
-      query: input.query,
-      uploadId: input.uploadId,
+      query: effectiveQuery,
+      uploadId: input.uploadId || topicContext.lastUploadId || undefined,
       apiKey: input.apiKey,
-      mode: "hybrid",
+      embeddingApiKey: input.embeddingApiKey,
+      mode: "auto",
       topK: Math.max(questionCount + 3, 8),
       includeNeighborPages: 1,
-      maxDurationMs: 2600,
+      topicContext,
+      maxDurationMs: 3000,
     })
 
-    const citations = search.citations.slice(0, Math.max(questionCount + 2, 6))
-    const statementPool = citations
-      .map((citation) => {
-        const statement = buildQuizStatementFromCitation(citation)
-        return {
+    const citations = search.citations
+      .filter((citation) => {
+        const candidate = citation.snippet || citation.title || ""
+        return !isLikelyNonBodySnippet(candidate)
+      })
+      .slice(0, Math.max(questionCount * 3, 12))
+    const statementPoolRaw = citations
+      .flatMap((citation) => {
+        const extractedFacts = extractQuizFactsFromCitation(citation, 2)
+        const facts =
+          extractedFacts.length > 0
+            ? extractedFacts
+            : [normalizeQuizOptionText(buildQuizStatementFromCitation(citation), 260)]
+        return facts.map((statement) => ({
           citation,
           statement: normalizeQuizOptionText(statement, 260),
-        }
+          topicKey: normalizeQuizTopicKey(citation.snippet || citation.title || statement),
+        }))
       })
       .filter((item) => item.statement.length > 24)
+      .filter((item) => !isWeakQuizStatement(item.statement))
+    const seenStatement = new Set<string>()
+    const statementPool = statementPoolRaw.filter((item) => {
+      const key = normalizeQuizTopicKey(item.statement)
+      if (!key || seenStatement.has(key)) return false
+      seenStatement.add(key)
+      return true
+    })
 
     const fallbackOptions = [
-      `The uploaded material states that ${input.query} has no clinical relevance.`,
-      `The uploaded material claims there are no phases or progression patterns in ${input.query}.`,
-      `The uploaded material indicates management decisions are random and not evidence-informed.`,
-      `The uploaded material says symptoms are never linked to neurological mechanisms.`,
+      normalizeQuizOptionText(
+        `The uploaded material presents a related interpretation of ${quizFocus} that differs in mechanism.`,
+        220
+      ),
+      normalizeQuizOptionText(
+        `The uploaded material links this topic to a different diagnostic emphasis than the cited excerpt.`,
+        220
+      ),
+      normalizeQuizOptionText(
+        `The uploaded material prioritizes a different management framing for this topic.`,
+        220
+      ),
+      normalizeQuizOptionText(
+        `The uploaded material places this finding in an alternative clinical context.`,
+        220
+      ),
     ]
 
+    const diverseQuestionSource: Array<{
+      citation: EvidenceCitation
+      statement: string
+      topicKey: string
+    }> = []
+    const seenTopicKeys = new Set<string>()
+    for (const candidate of statementPool) {
+      if (diverseQuestionSource.length >= questionCount) break
+      if (!candidate.topicKey || seenTopicKeys.has(candidate.topicKey)) continue
+      seenTopicKeys.add(candidate.topicKey)
+      diverseQuestionSource.push(candidate)
+    }
+    for (const candidate of statementPool) {
+      if (diverseQuestionSource.length >= questionCount) break
+      if (!diverseQuestionSource.some((existing) => existing.statement === candidate.statement)) {
+        diverseQuestionSource.push(candidate)
+      }
+    }
     const questionSource =
-      statementPool.length > 0
-        ? statementPool.slice(0, questionCount)
-        : citations.slice(0, questionCount).map((citation) => ({
-            citation,
-            statement: normalizeQuizOptionText(
+      diverseQuestionSource.length > 0
+        ? diverseQuestionSource
+        : citations.slice(0, questionCount).map((citation) => {
+            const statement = normalizeQuizOptionText(
               citation.snippet || citation.title || "Core concept from the uploaded material.",
               260
-            ),
-          }))
+            )
+            return {
+              citation,
+              statement,
+              topicKey: normalizeQuizTopicKey(statement),
+            }
+          })
 
     const questions: QuizArtifactQuestion[] = questionSource.map((item, index) => {
       const citation = item.citation
       const correct = item.statement
-      const distractors = statementPool
+      const distractorCandidates = statementPool
+        .filter(
+          (candidate) =>
+            candidate.statement !== correct &&
+            candidate.topicKey !== item.topicKey
+        )
+        .map((candidate) => candidate.statement)
+      const backupDistractors = statementPool
         .map((candidate) => candidate.statement)
         .filter((candidate) => candidate !== correct)
-        .slice(0, 8)
-      const optionCandidates = [correct, ...distractors, ...fallbackOptions]
+      const orderedDistractors = [...distractorCandidates, ...backupDistractors]
+      const uniqueDistractors = Array.from(new Set(orderedDistractors))
+      const distractorOffset =
+        uniqueDistractors.length > 0 ? (index * 2) % uniqueDistractors.length : 0
+      const rotatedDistractors = uniqueDistractors
+        .slice(distractorOffset)
+        .concat(uniqueDistractors.slice(0, distractorOffset))
+      const selectedDistractors = rotatedDistractors.slice(0, 3)
+      for (let fillIndex = 0; selectedDistractors.length < 3; fillIndex += 1) {
+        const syntheticDistractor =
+          fillIndex % 2 === 0
+            ? createPlausibleDistractor(correct, quizFocus, citation.title || "")
+            : fallbackOptions[(index + fillIndex) % fallbackOptions.length]
+        if (
+          syntheticDistractor !== correct &&
+          !selectedDistractors.includes(syntheticDistractor)
+        ) {
+          selectedDistractors.push(syntheticDistractor)
+        } else if (fillIndex > 5) {
+          selectedDistractors.push(
+            normalizeQuizOptionText(
+              `A different interpretation from the uploaded material related to ${quizFocus}.`,
+              200
+            )
+          )
+        }
+      }
+      const optionCandidates = [correct, ...selectedDistractors, ...fallbackOptions]
       const uniqueOptions = Array.from(new Set(optionCandidates)).slice(0, 4)
       while (uniqueOptions.length < 4) {
         uniqueOptions.push(
-          `Alternative interpretation ${uniqueOptions.length + 1} from the topic.`
+          normalizeQuizOptionText(
+            `Alternative interpretation ${uniqueOptions.length + 1} from the topic.`,
+            140
+          )
         )
       }
 
@@ -2336,7 +3530,7 @@ export class UserUploadService {
 
       return {
         id: `quiz-q-${index + 1}`,
-        prompt: buildQuizPromptFromCitation(citation, input.query, correct),
+        prompt: buildQuizPromptFromCitation(citation, quizFocus, correct),
         options: rotatedOptions,
         correctOptionIndex: correctOptionIndex >= 0 ? correctOptionIndex : 0,
         explanation,
@@ -2344,21 +3538,28 @@ export class UserUploadService {
       }
     })
 
-    const uploadId = citations[0]?.uploadId ?? input.uploadId ?? null
+    const uploadId =
+      citations[0]?.uploadId ?? input.uploadId ?? search.topicContext.lastUploadId ?? null
     const uploadTitle =
       citations[0]?.uploadFileName ||
       citations[0]?.sourceLabel ||
       (uploadId ? (await this.getUploadListItem(input.userId, uploadId))?.title : null) ||
       null
+    const warningSet = new Set<string>(search.warnings)
+    if (search.metrics.retrievalConfidence !== "high") {
+      warningSet.add(
+        "Quiz grounding may improve if you specify a narrower topic or explicit page range."
+      )
+    }
 
     return {
       artifactType: "quiz",
       artifactId: crypto.randomUUID(),
-      title: uploadTitle ? `${uploadTitle} - Quiz` : `Quiz - ${input.query.slice(0, 72)}`,
-      query: input.query,
+      title: uploadTitle ? `${uploadTitle} - Quiz` : `Quiz - ${effectiveQuery.slice(0, 72)}`,
+      query: effectiveQuery,
       questions,
       citations,
-      warnings: search.warnings,
+      warnings: Array.from(warningSet),
       uploadId,
       uploadTitle,
       generatedAt: new Date().toISOString(),

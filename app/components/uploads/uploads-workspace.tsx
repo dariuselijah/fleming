@@ -389,23 +389,19 @@ export function UploadsWorkspace() {
   )
 
   const openInChatWithArtifact = useCallback(
-    (upload: UserUploadListItem, intent: "document" | "quiz") => {
+    (upload: UserUploadListItem) => {
       const tokenString = buildUploadReferenceTokens([upload.id])
+      const intent: "quiz" = "quiz"
       const basePrompt =
-        intent === "document"
-          ? `Generate a polished document artifact from this upload. Use Harvard references and include a structured bibliography.`
-          : `Generate an interactive multiple-choice quiz from this upload with answer explanations.`
+        "Generate an interactive multiple-choice quiz from this upload with answer explanations."
       const composedPrompt = `${basePrompt}\n\nSelected uploads: ${upload.title || upload.fileName}\n\n${tokenString}`
       const params = new URLSearchParams({
         prompt: composedPrompt,
         artifactIntent: intent,
       })
-      if (intent === "document") {
-        params.set("citationStyle", "harvard")
-      }
       router.push(`/?${params.toString()}`)
       toast({
-        title: intent === "document" ? "Document generation primed" : "Quiz generation primed",
+        title: "Quiz generation primed",
         description: "Review the prompt in chat and press send.",
         status: "info",
       })
@@ -571,14 +567,7 @@ export function UploadsWorkspace() {
                           <button
                             type="button"
                             className="inline-flex h-8 items-center justify-center rounded-full border border-border px-2.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                            onClick={() => openInChatWithArtifact(upload, "document")}
-                          >
-                            Generate Doc
-                          </button>
-                          <button
-                            type="button"
-                            className="inline-flex h-8 items-center justify-center rounded-full border border-border px-2.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                            onClick={() => openInChatWithArtifact(upload, "quiz")}
+                            onClick={() => openInChatWithArtifact(upload)}
                           >
                             Generate Quiz
                           </button>

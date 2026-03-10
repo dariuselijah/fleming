@@ -28,6 +28,8 @@ export const DAILY_FILE_UPLOAD_LIMIT = 25
 export const DAILY_LIMIT_PRO_MODELS = 500
 export const ENABLE_UPLOAD_CONTEXT_SEARCH =
   process.env.NEXT_PUBLIC_ENABLE_UPLOAD_CONTEXT_SEARCH !== "false"
+export const ENABLE_UPLOAD_ARTIFACT_V2 =
+  process.env.UPLOAD_ARTIFACT_V2 !== "false"
 export const ENABLE_YOUTUBE_TOOL = process.env.ENABLE_YOUTUBE_TOOL !== "false"
 export const ENABLE_WEB_SEARCH_TOOL =
   process.env.ENABLE_WEB_SEARCH_TOOL !== "false"

@@ -7,6 +7,33 @@ import { parseCitationMarkers, getUniqueCitationIndices } from "@/lib/citations/
 import { fetchPubMedArticle, searchPubMedByTitle, searchPubMedByDOI } from "@/lib/pubmed/api"
 import type { CitationData } from "./citation-popup"
 
+function isLikelyScholarlySourceUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return (
+      host.includes("pubmed") ||
+      host.includes("ncbi.nlm.nih.gov") ||
+      host.includes("doi.org") ||
+      host.includes("jamanetwork.com") ||
+      host.includes("nejm.org") ||
+      host.includes("bmj.com") ||
+      host.includes("thelancet.com") ||
+      host.includes("nature.com") ||
+      host.includes("science.org")
+    )
+  } catch {
+    return false
+  }
+}
+
+function shouldAttemptPubMedTitleLookup(source: SourceUIPart["source"]): boolean {
+  const title = String(source.title || "").trim()
+  if (!title || title.length < 16) return false
+  if (/^\d+\s+|^(oxford handbook|chapter|section)\b/i.test(title)) return false
+  if (/\b(page|pp?\.?)\s*\d+/i.test(title)) return false
+  return isLikelyScholarlySourceUrl(String(source.url || ""))
+}
+
 /**
  * Extract citation data from sources
  */
@@ -100,9 +127,10 @@ async function extractCitationFromSource(
       }
     }
     
-    // Try to search by title if we have one
-    if (source.title) {
-      const article = await searchPubMedByTitle(source.title)
+    // Try title lookup only for likely scholarly web sources.
+    if (shouldAttemptPubMedTitleLookup(source)) {
+      const sourceTitle = String(source.title || "")
+      const article = await searchPubMedByTitle(sourceTitle)
       if (article) {
         return {
           index,
