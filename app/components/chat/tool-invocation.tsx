@@ -406,8 +406,32 @@ function ArtifactRefinementCard({
   onSuggestion?: (suggestion: string) => void
 }) {
   const [customInput, setCustomInput] = useState("")
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null)
+  const [submittedText, setSubmittedText] = useState<string | null>(null)
+  const [submitState, setSubmitState] = useState<"idle" | "submitting" | "submitted">(
+    "idle"
+  )
   const customChoice =
     refinement.choices.find((choice) => choice.requiresCustomInput) || null
+  const isLocked = submitState !== "idle"
+
+  useEffect(() => {
+    setCustomInput("")
+    setSelectedChoiceId(null)
+    setSubmittedText(null)
+    setSubmitState("idle")
+  }, [refinement.title, refinement.question])
+
+  const submitRefinementChoice = (payload: string, choiceId?: string) => {
+    const value = payload.trim()
+    if (!value || !onSuggestion || isLocked) return
+    setSelectedChoiceId(choiceId || null)
+    setSubmittedText(value)
+    setSubmitState("submitting")
+    onSuggestion(value)
+    setSubmitState("submitted")
+    setCustomInput("")
+  }
 
   return (
     <div className="space-y-3 rounded-xl border border-border/70 bg-background p-3.5 shadow-sm">
@@ -436,26 +460,52 @@ function ArtifactRefinementCard({
         </div>
       ) : null}
 
-      <div className="space-y-2">
-        {refinement.choices
-          .filter((choice) => !choice.requiresCustomInput)
-          .map((choice) => (
-            <button
-              key={choice.id}
-              type="button"
-              onClick={() => onSuggestion?.(choice.submitText)}
-              disabled={!onSuggestion}
-              className="hover:bg-accent/50 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed"
-            >
-              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
-                {choice.id}
-              </span>
-              <span>{choice.label}</span>
-            </button>
-          ))}
-      </div>
+      {submitState === "idle" ? (
+        <div className="space-y-2">
+          {refinement.choices
+            .filter((choice) => !choice.requiresCustomInput)
+            .map((choice) => (
+              <button
+                key={choice.id}
+                type="button"
+                onClick={() => submitRefinementChoice(choice.submitText, choice.id)}
+                disabled={!onSuggestion || isLocked}
+                className={cn(
+                  "hover:bg-accent/50 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed",
+                  selectedChoiceId === choice.id && "border-primary/60 bg-primary/5"
+                )}
+              >
+                <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
+                  {choice.id}
+                </span>
+                <span>{choice.label}</span>
+              </button>
+            ))}
+        </div>
+      ) : (
+        <div className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Submitted
+          </p>
+          <p className="mt-1 text-xs text-foreground/90">
+            {submitState === "submitting"
+              ? "Sending your quiz requirements..."
+              : "Requirements submitted. Generating quiz..."}
+          </p>
+          {selectedChoiceId ? (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Selected option: {selectedChoiceId}
+            </p>
+          ) : null}
+          {submittedText ? (
+            <p className="mt-1 line-clamp-3 text-[11px] text-muted-foreground">
+              {submittedText}
+            </p>
+          ) : null}
+        </div>
+      )}
 
-      {customChoice ? (
+      {customChoice && submitState === "idle" ? (
         <div className="rounded-md border border-border bg-background p-2.5">
           <p className="text-xs font-semibold text-muted-foreground">
             {customChoice.id}. {customChoice.label}
@@ -463,6 +513,7 @@ function ArtifactRefinementCard({
           <textarea
             value={customInput}
             onChange={(event) => setCustomInput(event.target.value)}
+            disabled={isLocked}
             placeholder={
               refinement.customInputPlaceholder ||
               "Type your custom requirements here"
@@ -473,15 +524,12 @@ function ArtifactRefinementCard({
             <button
               type="button"
               onClick={() => {
-                const value = customInput.trim()
-                if (!value) return
-                onSuggestion?.(value)
-                setCustomInput("")
+                submitRefinementChoice(customInput, customChoice.id)
               }}
-              disabled={!onSuggestion || customInput.trim().length === 0}
+              disabled={!onSuggestion || customInput.trim().length === 0 || isLocked}
               className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
             >
-              Submit custom requirements
+              {isLocked ? "Submitted" : "Submit custom requirements"}
             </button>
           </div>
         </div>
@@ -498,6 +546,12 @@ function ArtifactRefinementFallbackCard({
   onSuggestion?: (suggestion: string) => void
 }) {
   const [customInput, setCustomInput] = useState("")
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null)
+  const [submittedText, setSubmittedText] = useState<string | null>(null)
+  const [submitState, setSubmitState] = useState<"idle" | "submitting" | "submitted">(
+    "idle"
+  )
+  const isLocked = submitState !== "idle"
   const suggestions = [
     {
       id: "A",
@@ -521,6 +575,17 @@ function ArtifactRefinementFallbackCard({
     },
   ]
 
+  const submitFallbackChoice = (payload: string, choiceId?: string) => {
+    const value = payload.trim()
+    if (!value || !onSuggestion || isLocked) return
+    setSelectedChoiceId(choiceId || null)
+    setSubmittedText(value)
+    setSubmitState("submitting")
+    onSuggestion(value)
+    setSubmitState("submitted")
+    setCustomInput("")
+  }
+
   return (
     <div className="space-y-3 rounded-xl border border-border/70 bg-background p-3.5 shadow-sm">
         <div>
@@ -534,48 +599,72 @@ function ArtifactRefinementFallbackCard({
             I am ready to generate your {intent}. Choose A-D or type custom requirements in E.
           </p>
         </div>
-        <div className="space-y-2">
-          {suggestions.map((choice) => (
-            <button
-              key={choice.id}
-              type="button"
-              onClick={() => onSuggestion?.(choice.submitText)}
-              disabled={!onSuggestion}
-              className="hover:bg-accent/50 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed"
-            >
-              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
-                {choice.id}
-              </span>
-              <span>{choice.label}</span>
-            </button>
-          ))}
-        </div>
-        <div className="rounded-md border border-border bg-background p-2.5">
-          <p className="text-xs font-semibold text-muted-foreground">
-            E. Custom requirements (blank)
-          </p>
-          <textarea
-            value={customInput}
-            onChange={(event) => setCustomInput(event.target.value)}
-            placeholder={`Type custom ${intent} requirements here`}
-            className="mt-2 min-h-[78px] w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
-          />
-          <div className="mt-2 flex justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                const value = customInput.trim()
-                if (!value) return
-                onSuggestion?.(value)
-                setCustomInput("")
-              }}
-              disabled={!onSuggestion || customInput.trim().length === 0}
-              className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
-            >
-              Submit custom requirements
-            </button>
+      {submitState === "idle" ? (
+        <>
+          <div className="space-y-2">
+            {suggestions.map((choice) => (
+              <button
+                key={choice.id}
+                type="button"
+                onClick={() => submitFallbackChoice(choice.submitText, choice.id)}
+                disabled={!onSuggestion || isLocked}
+                className={cn(
+                  "hover:bg-accent/50 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed",
+                  selectedChoiceId === choice.id && "border-primary/60 bg-primary/5"
+                )}
+              >
+                <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
+                  {choice.id}
+                </span>
+                <span>{choice.label}</span>
+              </button>
+            ))}
           </div>
+          <div className="rounded-md border border-border bg-background p-2.5">
+            <p className="text-xs font-semibold text-muted-foreground">
+              E. Custom requirements (blank)
+            </p>
+            <textarea
+              value={customInput}
+              onChange={(event) => setCustomInput(event.target.value)}
+              disabled={isLocked}
+              placeholder={`Type custom ${intent} requirements here`}
+              className="mt-2 min-h-[78px] w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+            />
+            <div className="mt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => submitFallbackChoice(customInput, "E")}
+                disabled={!onSuggestion || customInput.trim().length === 0 || isLocked}
+                className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
+              >
+                {isLocked ? "Submitted" : "Submit custom requirements"}
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Submitted
+          </p>
+          <p className="mt-1 text-xs text-foreground/90">
+            {submitState === "submitting"
+              ? "Sending your quiz requirements..."
+              : "Requirements submitted. Generating quiz..."}
+          </p>
+          {selectedChoiceId ? (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Selected option: {selectedChoiceId}
+            </p>
+          ) : null}
+          {submittedText ? (
+            <p className="mt-1 line-clamp-3 text-[11px] text-muted-foreground">
+              {submittedText}
+            </p>
+          ) : null}
         </div>
+      )}
     </div>
   )
 }

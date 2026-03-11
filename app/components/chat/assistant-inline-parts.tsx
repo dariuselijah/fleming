@@ -94,6 +94,28 @@ function isRefinementToolName(toolName: unknown): boolean {
   return /refine.*requirements/i.test(toolName)
 }
 
+function isQuizWorkflowToolName(toolName: unknown): boolean {
+  return typeof toolName === "string" && /generatequizfromupload|refinequizrequirements/i.test(toolName)
+}
+
+function looksLikeTransientQuizText(text: string): boolean {
+  const normalized = text.trim()
+  if (!normalized) return false
+  const hasQuizHeading = /\bquiz\b[:\s]/i.test(normalized)
+  const numberedQuestionMatches = normalized.match(/(?:^|\n)\s*\d+\.\s+/gm) || []
+  const choiceMatches = normalized.match(/(?:^|\n)\s*[a-e][\).\:]\s+/gim) || []
+  const hasAnswerSection =
+    /\banswers?(?:\s*&\s*|\s+and\s+)?(?:rationale|explanation|key)?\b/i.test(normalized) ||
+    /\bhow'?d you do\??/i.test(normalized)
+  return (
+    (hasQuizHeading &&
+      numberedQuestionMatches.length >= 2 &&
+      choiceMatches.length >= 4) ||
+    (numberedQuestionMatches.length >= 3 && choiceMatches.length >= 4) ||
+    (hasAnswerSection && numberedQuestionMatches.length >= 1)
+  )
+}
+
 function buildTimelineSegments(
   parts: MessageAISDK["parts"],
   fallbackText: string
@@ -115,6 +137,9 @@ function buildTimelineSegments(
     (part) => parseArtifactTypeFromToolPart(part) === "quiz"
   )
   const hasArtifactMetadata = parts.some((part) => isArtifactMetadataPart(part))
+  const hasQuizWorkflowToolInvocation = parts.some((part: any) =>
+    isQuizWorkflowToolName(part?.toolInvocation?.toolName)
+  )
   const hasArtifactResult =
     hasDocumentArtifactResult || hasQuizArtifactResult || hasArtifactMetadata
 
@@ -134,6 +159,13 @@ function buildTimelineSegments(
 
     if (part.type === "text" && typeof part.text === "string") {
       const sanitizedText = sanitizeInlineAssistantText(part.text)
+      if (
+        hasQuizWorkflowToolInvocation &&
+        looksLikeTransientQuizText(sanitizedText) &&
+        (hasQuizArtifactResult || sanitizedText.length > 160)
+      ) {
+        continue
+      }
       textBuffer += sanitizedText
       continue
     }

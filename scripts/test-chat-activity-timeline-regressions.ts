@@ -253,6 +253,80 @@ function testUnifiedSourcesWiring() {
   )
 }
 
+function testQuizFlowStabilityAndRefinementGating() {
+  const toolInvocation = read("app/components/chat/tool-invocation.tsx")
+  const messageAssistant = read("app/components/chat/message-assistant.tsx")
+  const route = read("app/api/chat/route.ts")
+  const timelineBuilder = read("app/components/chat/activity/build-timeline.ts")
+  const inlineParts = read("app/components/chat/assistant-inline-parts.tsx")
+
+  assert.match(
+    toolInvocation,
+    /submitState.*"idle" \| "submitting" \| "submitted"/s,
+    "Refinement tool card should track idle/submitting/submitted state transitions"
+  )
+  assert.match(
+    toolInvocation,
+    /Requirements submitted\. Generating quiz\.\.\./,
+    "Refinement tool card should show post-submit generating status"
+  )
+  assert.match(
+    messageAssistant,
+    /refinementSubmitState/,
+    "Annotation fallback refinement UI should track submit state locally"
+  )
+  assert.match(
+    messageAssistant,
+    /submitAnnotationRefinement\(/,
+    "Annotation fallback refinement UI should use a dedicated submit handler"
+  )
+  assert.match(
+    route,
+    /canInferScopeFromContext/,
+    "Quiz routing should infer scope from retrieval\/inspection context"
+  )
+  assert.match(
+    route,
+    /canEmitRefinementPrompt/,
+    "Refinement prompting should be gated on post-tool context readiness"
+  )
+  assert.match(
+    route,
+    /shouldDefaultToBalancedQuizGeneration/,
+    "Generic quiz requests with tool context should default to direct balanced generation"
+  )
+  assert.match(
+    route,
+    /artifactWorkflowStage === "refine" &&\s*shouldAskArtifactTopicFollowup/s,
+    "Artifact refinement annotation should emit only in refine stage"
+  )
+  assert.match(
+    route,
+    /QUIZ INSPECTION MODE:/,
+    "Quiz inspection stage should explicitly require continuing to refine or generate in the same turn"
+  )
+  assert.match(
+    route,
+    /shouldEnableArtifactGenerationToolInInspect/,
+    "Inspect stage should keep quiz generation tool available to avoid dead-end turns"
+  )
+  assert.match(
+    timelineBuilder,
+    /hasQuizArtifactSurface/,
+    "Timeline builder should detect canonical quiz artifact surface"
+  )
+  assert.match(
+    timelineBuilder,
+    /\(hasQuizArtifactSurface \|\| text\.length > 160\)/,
+    "Timeline builder should suppress only provisional quiz prose to avoid flicker"
+  )
+  assert.match(
+    inlineParts,
+    /hasQuizWorkflowToolInvocation/,
+    "Inline fallback renderer should apply quiz workflow suppression guards too"
+  )
+}
+
 function run() {
   testTimelineFlagWiring()
   testServerTimelineEmission()
@@ -260,6 +334,7 @@ function run() {
   testUploadParityAndClientIngestion()
   testQuizAndUploadSurfaceNormalization()
   testUnifiedSourcesWiring()
+  testQuizFlowStabilityAndRefinementGating()
   console.log("chat activity timeline regression checks passed")
 }
 

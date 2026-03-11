@@ -1946,16 +1946,68 @@ function buildSuggestedPageRange(recentPages: number[]): string {
   return `pages ${start}-${end}`
 }
 
+function normalizeRefinementOptionLabel(value: string): string {
+  return sanitizeTopicOption(value)
+    .replace(/\b(?:slide|slides|page|pages)\s*\d+(?:\s*[-–to]+\s*\d+)?\b/gi, " ")
+    .replace(/\b(?:ocr|scan|scanned|artifact)\b/gi, " ")
+    .replace(/[|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[,;:\-.\s]+/, "")
+    .replace(/[,;:\-.\s]+$/, "")
+    .trim()
+    .slice(0, 84)
+}
+
+function dedupeRefinementOptionLabels(options: string[], maxOptions = 4): string[] {
+  const normalized: string[] = []
+  const seen = new Set<string>()
+  for (const option of options) {
+    const value = normalizeRefinementOptionLabel(option)
+    if (!value || value.length < 12) continue
+    const key = value.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    normalized.push(value)
+    if (normalized.length >= maxOptions) break
+  }
+  return normalized
+}
+
+function buildContextAwareFallbackTopicOptions(input: {
+  query: string
+  uploadTitle?: string | null
+  recentPages: number[]
+}): string[] {
+  const trimmedQuery = input.query.replace(/\s+/g, " ").trim()
+  const queryTopic = trimmedQuery
+    .replace(/\b(?:quiz|questions?|mcqs?|on|about|from|using|the|my|uploaded|slides?|file|this)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  const uploadLabel =
+    typeof input.uploadTitle === "string" && input.uploadTitle.trim().length > 0
+      ? normalizeRefinementOptionLabel(input.uploadTitle)
+      : null
+  const pageRange = buildSuggestedPageRange(input.recentPages)
+  return dedupeRefinementOptionLabels(
+    [
+      queryTopic ? `${queryTopic} - high-yield essentials` : "",
+      uploadLabel ? `Core concepts from ${uploadLabel}` : "",
+      `Mechanisms and key processes (${pageRange})`,
+      `Clinical/application scenarios (${pageRange})`,
+    ].filter(Boolean)
+  )
+}
+
 function buildArtifactRefinementPrompt(
   intent: "document" | "quiz",
   options: string[],
   recentPages: number[] = [],
   uploadTitle?: string | null
 ): ArtifactRefinementPrompt {
-  const artifactLabel = intent === "quiz" ? "quiz" : "document"
-  const optionA = options[0] || "Core definitions and foundational concepts"
-  const optionB = options[1] || "High-yield mechanisms and processes"
-  const optionC = options[2] || "Clinical/application-style scenarios"
+  const normalizedOptions = dedupeRefinementOptionLabels(options, 4)
+  const optionA = normalizedOptions[0] || "Core definitions and foundational concepts"
+  const optionB = normalizedOptions[1] || "High-yield mechanisms and processes"
+  const optionC = normalizedOptions[2] || "Clinical/application-style scenarios"
   const suggestedPageRange = buildSuggestedPageRange(recentPages)
   const baseUploadContext =
     typeof uploadTitle === "string" && uploadTitle.trim().length > 0
@@ -2564,13 +2616,16 @@ export async function POST(req: Request) {
       hasQuizSettingsSignal(queryText) ||
       /(?:^|\n)\s*(topic|pages?)\s*:/i.test(queryText) ||
       /^\s*[A-Ea-e]\s*$/.test(queryText.trim())
-    const artifactIntent =
-      requestedArtifactIntent === "quiz"
+    // Temporary hard-disable: quiz generation/refinement is turned off.
+    const ENABLE_QUIZ_GENERATION = false
+    const artifactIntent: "none" | "quiz" =
+      ENABLE_QUIZ_GENERATION && (
+        requestedArtifactIntent === "quiz" ||
+        (hasUploadContextHint &&
+          (isQuizArtifactIntentQuery(queryText) || hasQuizContinuationSignal))
+      )
         ? "quiz"
-        : hasUploadContextHint &&
-            (isQuizArtifactIntentQuery(queryText) || hasQuizContinuationSignal)
-          ? "quiz"
-          : "none"
+        : "none"
     const allowMultipleArtifacts =
       allowMultipleArtifactsFromRequest === true || detectExplicitMultiArtifactRequest(queryText)
     const resolvedCitationStyle = normalizeCitationStyle(citationStyleFromRequest)
@@ -2810,11 +2865,17 @@ export async function POST(req: Request) {
       uploadContextResult?.metrics?.textbookScale === true ||
       (uploadContextResult?.metrics?.sourceUnitCount ?? 0) >= 80 ||
       (uploadContextResult?.metrics?.maxUnitNumber ?? 0) >= 80
+    const hasScopeSignalInQuery = hasArtifactScopeSignal(queryText)
     const shouldRunInspectionPreflight =
       ENABLE_UPLOAD_ARTIFACT_V2 &&
       (artifactIntent === "quiz" || resolvedTopicContext?.pendingArtifactIntent === "quiz") &&
       Boolean(selectedUploadIdHint || resolvedTopicContext?.lastUploadId) &&
-      (isTextbookScaleUpload || topicBreadth.isBroad || isGenericQuizRequest(queryText))
+      (
+        isTextbookScaleUpload ||
+        topicBreadth.isBroad ||
+        isGenericQuizRequest(queryText) ||
+        !hasScopeSignalInQuery
+      )
     const structureInspectionForWorkflow = shouldRunInspectionPreflight
       ? await runWithTimeBudget(
           "UPLOAD_STRUCTURE_WORKFLOW_PREFLIGHT",
@@ -2862,8 +2923,13 @@ export async function POST(req: Request) {
       resolvedTopicContext?.pendingArtifactStructureConfidence ||
       structureInspectionForWorkflow?.confidence ||
       null
-    const hasScopeSignalInQuery = hasArtifactScopeSignal(queryText)
     const hasSettingsSignalInQuery = hasQuizSettingsSignal(queryText)
+    const hasRetrievalTopicSignals =
+      topicBreadth.topicOptions.length > 0 || pageHintsForRefinement.length > 0
+    const hasToolContextForRefinement =
+      Boolean(uploadContextResult) ||
+      Boolean(structureInspectionForWorkflow) ||
+      hasRetrievalTopicSignals
     const hasWeakOrMissingRetrievalSignals =
       !uploadContextResult ||
       uploadCitationsForBreadth.length === 0 ||
@@ -2874,13 +2940,23 @@ export async function POST(req: Request) {
       (isTextbookScaleUpload ||
         topicBreadth.isBroad ||
         isGenericArtifactIntentRequest ||
-        hasWeakOrMissingRetrievalSignals)
+        hasWeakOrMissingRetrievalSignals ||
+        (!hasScopeSignalInQuery && !hasRetrievalTopicSignals))
     const inspectionGateSatisfied =
       !requiresInspectionBeforeGeneration || hasStructureInspectionReady
     const inspectionConfidenceAcceptable =
       !requiresInspectionBeforeGeneration || structureInspectionConfidence !== "low"
+    const canInferScopeFromContext =
+      hasScopeSignalInQuery ||
+      hasRetrievalTopicSignals ||
+      structureTopicOptions.length > 0
+    const canInferSettingsFromContext =
+      hasSettingsSignalInQuery ||
+      (isArtifactIntentSupported && hasToolContextForRefinement)
+    const requiresScopeClarification = !canInferScopeFromContext
+    const requiresSettingsClarification = !canInferSettingsFromContext
     const requiresScopeOrSettingsClarification =
-      !hasScopeSignalInQuery || !hasSettingsSignalInQuery
+      requiresScopeClarification || requiresSettingsClarification
     const shouldSkipRefinementForNarrowUpload =
       isArtifactIntentSupported &&
       !isTextbookScaleUpload &&
@@ -2892,19 +2968,39 @@ export async function POST(req: Request) {
       uploadCitationsForBreadth.length > 4 &&
       pageHintsForRefinement.length > 4
     const citationDerivedTopicOptions = topicBreadth.topicOptions.slice(0, 4)
+    const contextAwareFallbackTopicOptions = buildContextAwareFallbackTopicOptions({
+      query: queryText,
+      uploadTitle: uploadTitleHintForRefinement,
+      recentPages: pageHintsForRefinement,
+    })
     const fallbackTopicOptions =
       citationDerivedTopicOptions.length > 0
         ? citationDerivedTopicOptions
         : structureTopicOptions.length > 0
           ? structureTopicOptions
-          : [
-              "Core definitions and foundational concepts",
-              "High-yield mechanisms and processes",
-              "Clinical/application-style scenarios",
-            ]
-    const preferredRefinementTopicOptions = Array.from(
-      new Set([...citationDerivedTopicOptions, ...structureTopicOptions, ...fallbackTopicOptions])
-    ).slice(0, 4)
+          : contextAwareFallbackTopicOptions.length > 0
+            ? contextAwareFallbackTopicOptions
+            : [
+                "Core definitions and foundational concepts",
+                "High-yield mechanisms and processes",
+                "Clinical/application-style scenarios",
+              ]
+    const preferredRefinementTopicOptions = dedupeRefinementOptionLabels(
+      [...citationDerivedTopicOptions, ...structureTopicOptions, ...fallbackTopicOptions],
+      4
+    )
+    const hasRefinementContextSignals =
+      preferredRefinementTopicOptions.length > 0 || pageHintsForRefinement.length > 0
+    const canEmitRefinementPrompt =
+      isArtifactIntentSupported &&
+      inspectionGateSatisfied &&
+      (hasRefinementContextSignals || pendingArtifactOptions.length > 0 || hasToolContextForRefinement)
+    const shouldDefaultToBalancedQuizGeneration =
+      isArtifactIntentSupported &&
+      isGenericArtifactIntentRequest &&
+      (hasToolContextForRefinement || hasUploadContextHint) &&
+      inspectionGateSatisfied &&
+      inspectionConfidenceAcceptable
     let artifactRefinementPrompt: ArtifactRefinementPrompt | null = null
     let artifactRefinementToolResult: ArtifactRefinementToolResult | null = null
     const isPendingForCurrentArtifactIntent =
@@ -2923,12 +3019,11 @@ export async function POST(req: Request) {
       isArtifactIntentSupported &&
       !pendingArtifactTopicSelection &&
       !shouldSkipRefinementForNarrowUpload &&
+      !shouldDefaultToBalancedQuizGeneration &&
+      canEmitRefinementPrompt &&
       (
-        isGenericArtifactIntentRequest ||
-        topicBreadth.isBroad ||
-        isTextbookScaleUpload ||
+        (!canInferScopeFromContext && isGenericArtifactIntentRequest) ||
         requiresScopeOrSettingsClarification ||
-        !inspectionGateSatisfied ||
         !inspectionConfidenceAcceptable
       )
     let quizQueryOverride: string | undefined = undefined
@@ -2940,15 +3035,24 @@ export async function POST(req: Request) {
         intent: effectiveArtifactIntent,
         textbookScale: isTextbookScaleUpload,
         genericIntent: isGenericArtifactIntentRequest,
+        canInferScopeFromContext,
+        hasToolContextForRefinement,
         requiresScopeOrSettingsClarification,
         requiresInspectionBeforeGeneration,
         inspectionGateSatisfied,
         structureInspectionConfidence,
         shouldAskArtifactTopicFollowup,
+        shouldDefaultToBalancedQuizGeneration,
         retrievalConfidence: uploadContextResult?.metrics?.retrievalConfidence || "unknown",
         retrievalFallbackReason: uploadContextResult?.metrics?.fallbackReason || "none",
         embeddingProviderMismatch,
       })
+    }
+
+    if (shouldDefaultToBalancedQuizGeneration && !pendingArtifactTopicSelection) {
+      quizQueryOverride =
+        "Generate a balanced mixed-topic quiz from the uploaded slides, prioritizing core definitions, mechanisms, and high-yield clinical application."
+      quizLeadInSentence = "Here is your generated quiz from the uploaded slides."
     }
 
     if (
@@ -2976,13 +3080,33 @@ export async function POST(req: Request) {
     }
 
     if (isPendingForCurrentArtifactIntent && isArtifactIntentSupported) {
-      if (
-        artifactTopicReplyResolution.wantsAllTopics || !artifactTopicReplyResolution.resolvedTopic
-      ) {
-        const followupOptions =
+      if (artifactTopicReplyResolution.wantsAllTopics) {
+        quizQueryOverride =
+          "Generate a balanced mixed-topic quiz that covers all major themes from the uploaded material."
+        quizLeadInSentence = "Here is your generated quiz across all topics."
+        resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
+          pendingArtifactTopicSelection: false,
+          pendingArtifactRefinement: false,
+          pendingArtifactRefinementChoices: [],
+          pendingArtifactRequiredFields: [],
+          pendingArtifactCustomInputPlaceholder: null,
+          pendingArtifactTopicOptions: [],
+          pendingArtifactIntent: null,
+          pendingArtifactOriginalQuery: null,
+          pendingArtifactRequestedAt: null,
+          pendingQuizTopicSelection: false,
+          pendingQuizTopicOptions: [],
+          pendingQuizOriginalQuery: null,
+          pendingQuizRequestedAt: null,
+          followUpType: "drill_down",
+        })
+      } else if (!artifactTopicReplyResolution.resolvedTopic) {
+        const followupOptions = dedupeRefinementOptionLabels(
           pendingArtifactOptions.length > 0
             ? pendingArtifactOptions
-            : preferredRefinementTopicOptions
+            : preferredRefinementTopicOptions,
+          4
+        )
         shouldAskArtifactTopicFollowup = true
         artifactRefinementPrompt = buildArtifactRefinementPrompt(
           "quiz",
@@ -3015,38 +3139,22 @@ export async function POST(req: Request) {
           pendingQuizRequestedAt: new Date().toISOString(),
           followUpType: "clarify",
         })
-      } else if (artifactTopicReplyResolution.wantsAllTopics) {
-        quizQueryOverride =
-          "Generate a balanced mixed-topic quiz that covers all major themes from the uploaded material."
-        quizLeadInSentence = "Here is your generated quiz across all topics."
-        resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
-          pendingArtifactTopicSelection: false,
-          pendingArtifactRefinement: false,
-          pendingArtifactRefinementChoices: [],
-          pendingArtifactRequiredFields: [],
-          pendingArtifactCustomInputPlaceholder: null,
-          pendingArtifactTopicOptions: [],
-          pendingArtifactIntent: null,
-          pendingArtifactOriginalQuery: null,
-          pendingArtifactRequestedAt: null,
-          pendingQuizTopicSelection: false,
-          pendingQuizTopicOptions: [],
-          pendingQuizOriginalQuery: null,
-          pendingQuizRequestedAt: null,
-          followUpType: "drill_down",
-        })
       } else if (artifactTopicReplyResolution.resolvedTopic) {
         const replyHasSettingsSignal =
           effectiveArtifactIntent === "quiz"
             ? hasQuizSettingsSignal(queryText)
             : hasDocumentSettingsSignal(queryText)
         const shouldRequireAnotherClarification =
-          isTextbookScaleUpload && !replyHasSettingsSignal
+          isTextbookScaleUpload &&
+          !replyHasSettingsSignal &&
+          !canInferSettingsFromContext
         if (shouldRequireAnotherClarification) {
-          const followupOptions =
+          const followupOptions = dedupeRefinementOptionLabels(
             pendingArtifactOptions.length > 0
               ? pendingArtifactOptions
-              : preferredRefinementTopicOptions
+              : preferredRefinementTopicOptions,
+            4
+          )
           shouldAskArtifactTopicFollowup = true
           artifactRefinementPrompt = buildArtifactRefinementPrompt(
             effectiveArtifactIntent,
@@ -3075,38 +3183,40 @@ export async function POST(req: Request) {
             followUpType: "clarify",
           })
         } else {
-        const resolvedTopic = artifactTopicReplyResolution.resolvedTopic
-        if (effectiveArtifactIntent === "quiz") {
-          quizQueryOverride = `Generate a focused quiz on this topic from the uploaded material: ${resolvedTopic}`
-          quizLeadInSentence = `Here is your generated quiz on ${resolvedTopic}.`
-        } else {
-          documentQueryOverride = `Generate a focused study document on this topic from the uploaded material: ${resolvedTopic}`
-          documentLeadInSentence = `Here is your generated document on ${resolvedTopic}.`
-        }
-        resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
-          activeTopic: resolvedTopic,
-          pendingArtifactTopicSelection: false,
-          pendingArtifactRefinement: false,
-          pendingArtifactRefinementChoices: [],
-          pendingArtifactRequiredFields: [],
-          pendingArtifactCustomInputPlaceholder: null,
-          pendingArtifactTopicOptions: [],
-          pendingArtifactIntent: null,
-          pendingArtifactOriginalQuery: null,
-          pendingArtifactRequestedAt: null,
-          pendingQuizTopicSelection: false,
-          pendingQuizTopicOptions: [],
-          pendingQuizOriginalQuery: null,
-          pendingQuizRequestedAt: null,
-          followUpType: "drill_down",
-        })
+          const resolvedTopic = artifactTopicReplyResolution.resolvedTopic
+          if (effectiveArtifactIntent === "quiz") {
+            quizQueryOverride = `Generate a focused quiz on this topic from the uploaded material: ${resolvedTopic}`
+            quizLeadInSentence = `Here is your generated quiz on ${resolvedTopic}.`
+          } else {
+            documentQueryOverride = `Generate a focused study document on this topic from the uploaded material: ${resolvedTopic}`
+            documentLeadInSentence = `Here is your generated document on ${resolvedTopic}.`
+          }
+          resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
+            activeTopic: resolvedTopic,
+            pendingArtifactTopicSelection: false,
+            pendingArtifactRefinement: false,
+            pendingArtifactRefinementChoices: [],
+            pendingArtifactRequiredFields: [],
+            pendingArtifactCustomInputPlaceholder: null,
+            pendingArtifactTopicOptions: [],
+            pendingArtifactIntent: null,
+            pendingArtifactOriginalQuery: null,
+            pendingArtifactRequestedAt: null,
+            pendingQuizTopicSelection: false,
+            pendingQuizTopicOptions: [],
+            pendingQuizOriginalQuery: null,
+            pendingQuizRequestedAt: null,
+            followUpType: "drill_down",
+          })
         }
       } else {
         // Keep asking for scope instead of generating a generic artifact when reply is ambiguous.
-        const followupOptions =
+        const followupOptions = dedupeRefinementOptionLabels(
           pendingArtifactOptions.length > 0
             ? pendingArtifactOptions
-            : preferredRefinementTopicOptions
+            : preferredRefinementTopicOptions,
+          4
+        )
         shouldAskArtifactTopicFollowup = true
         artifactRefinementPrompt = buildArtifactRefinementPrompt(
           effectiveArtifactIntent,
@@ -3145,8 +3255,10 @@ export async function POST(req: Request) {
         })
       }
     } else if (shouldAskArtifactTopicFollowup) {
-      const followupOptions =
-        preferredRefinementTopicOptions
+      const followupOptions = dedupeRefinementOptionLabels(
+        preferredRefinementTopicOptions,
+        4
+      )
       artifactRefinementPrompt =
         isArtifactIntentSupported
           ? buildArtifactRefinementPrompt(
@@ -3188,6 +3300,45 @@ export async function POST(req: Request) {
           effectiveArtifactIntent === "quiz" ? new Date().toISOString() : null,
         followUpType: "clarify",
       })
+    }
+    if (
+      isArtifactIntentSupported &&
+      !shouldAskArtifactTopicFollowup &&
+      !quizQueryOverride &&
+      !hasScopeSignalInQuery
+    ) {
+      const inferredScope =
+        preferredRefinementTopicOptions[0] ||
+        (pageHintsForRefinement.length > 0
+          ? buildSuggestedPageRange(pageHintsForRefinement)
+          : null)
+      if (inferredScope) {
+        const countMatch = queryText.match(
+          /\bquestions?\s*:?\s*(\d+)|\b(\d+)\s*(?:questions?|mcqs?)\b/i
+        )
+        const requestedCountRaw = Number.parseInt(
+          countMatch?.[1] || countMatch?.[2] || "",
+          10
+        )
+        const inferredQuestionCount = Number.isFinite(requestedCountRaw)
+          ? Math.max(5, Math.min(15, requestedCountRaw))
+          : 10
+        const inferredDifficulty = /\bhard\b/i.test(queryText)
+          ? "hard"
+          : /\beasy\b/i.test(queryText)
+            ? "easy"
+            : "medium"
+        const inferredFormat = /\bcase[-\s]?based\b/i.test(queryText)
+          ? "case-based MCQs"
+          : /\bmixed\b/i.test(queryText)
+            ? "mixed MCQs with explanations"
+            : "single-best-answer MCQs"
+        const isPageScoped = /^pages?\s+\d+/i.test(inferredScope)
+        const scopeLine = isPageScoped
+          ? `Pages: ${inferredScope.replace(/^pages?\s*/i, "")}`
+          : `Topic: ${inferredScope}`
+        quizQueryOverride = `${scopeLine}\nQuestions: ${inferredQuestionCount}\nDifficulty: ${inferredDifficulty}\nFormat: ${inferredFormat}`
+      }
     }
 
     const artifactWorkflowStage: "none" | "inspect" | "refine" | "generate" =
@@ -3453,12 +3604,22 @@ export async function POST(req: Request) {
       canUseArtifactTools &&
       artifactWorkflowStage === "refine" &&
       effectiveArtifactIntent === "quiz"
+    const shouldEnableArtifactRefinementToolInInspect =
+      canUseArtifactTools &&
+      artifactWorkflowStage === "inspect" &&
+      effectiveArtifactIntent === "quiz" &&
+      canEmitRefinementPrompt
     const shouldEnableArtifactGenerationTools =
       canUseArtifactTools &&
       artifactWorkflowStage === "generate" &&
       inspectionGateSatisfied &&
       inspectionConfidenceAcceptable &&
       effectiveArtifactIntent === "quiz"
+    const shouldEnableArtifactGenerationToolInInspect =
+      canUseArtifactTools &&
+      artifactWorkflowStage === "inspect" &&
+      effectiveArtifactIntent === "quiz" &&
+      inspectionConfidenceAcceptable
     const shouldEnableStructureInspectionTool =
       ENABLE_UPLOAD_ARTIFACT_V2 &&
       canUseArtifactTools &&
@@ -3754,7 +3915,8 @@ export async function POST(req: Request) {
                 }),
               }
             : {}),
-          ...(shouldEnableArtifactRefinementTool
+          ...(shouldEnableArtifactRefinementTool ||
+          shouldEnableArtifactRefinementToolInInspect
             ? {
                 refineQuizRequirements: tool({
                   description:
@@ -3826,7 +3988,8 @@ export async function POST(req: Request) {
                 }),
               }
             : {}),
-          ...(shouldEnableArtifactGenerationTools
+          ...(shouldEnableArtifactGenerationTools ||
+          shouldEnableArtifactGenerationToolInInspect
             ? {
                 generateQuizFromUpload: tool({
                   description:
@@ -4320,6 +4483,23 @@ export async function POST(req: Request) {
 
       if (langGraphPlan.selectedToolNames.length > 0) {
         const selectedToolNames = new Set(langGraphPlan.selectedToolNames)
+        if (effectiveArtifactIntent === "quiz") {
+          if (artifactWorkflowStage === "inspect") {
+            selectedToolNames.add("inspectUploadStructure")
+            if (shouldEnableArtifactRefinementToolInInspect) {
+              selectedToolNames.add("refineQuizRequirements")
+              selectedToolNames.add("refineArtifactRequirements")
+            }
+            if (shouldEnableArtifactGenerationToolInInspect) {
+              selectedToolNames.add("generateQuizFromUpload")
+            }
+          } else if (artifactWorkflowStage === "refine") {
+            selectedToolNames.add("refineQuizRequirements")
+            selectedToolNames.add("refineArtifactRequirements")
+          } else if (artifactWorkflowStage === "generate") {
+            selectedToolNames.add("generateQuizFromUpload")
+          }
+        }
         const filteredEntries = Object.entries(runtimeTools).filter(([toolName]) =>
           selectedToolNames.has(toolName)
         )
@@ -4426,7 +4606,14 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - If no evidence citations are available for a claim, omit citation markers for that claim instead of fabricating references.`
     }
 
-    if (shouldEnableArtifactRefinementTool && effectiveArtifactIntent === "quiz") {
+    if (artifactWorkflowStage === "inspect" && effectiveArtifactIntent === "quiz") {
+      effectiveSystemPrompt += `\n\nQUIZ INSPECTION MODE:
+- Start by calling inspectUploadStructure once to map topic boundaries.
+- In the SAME turn, do not stop after inspection.
+- If scope/settings are still missing after inspection, call refineQuizRequirements exactly once.
+- Otherwise call generateQuizFromUpload exactly once.
+- Never end this turn with only inspection output.`
+    } else if (shouldEnableArtifactRefinementTool && effectiveArtifactIntent === "quiz") {
       effectiveSystemPrompt += `\n\nQUIZ REFINEMENT MODE:
 - You MUST call refineQuizRequirements exactly once before finalizing this turn.
 - Do NOT call generateQuizFromUpload in this turn.
@@ -4474,7 +4661,19 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
     }
 
     const artifactToolChoice =
-      shouldEnableArtifactRefinementTool
+      artifactWorkflowStage === "inspect" &&
+      effectiveArtifactIntent === "quiz" &&
+      !shouldAskArtifactTopicFollowup &&
+      shouldEnableArtifactGenerationToolInInspect
+        ? ({ type: "tool", toolName: "generateQuizFromUpload" } as const)
+        : artifactWorkflowStage === "inspect" &&
+            effectiveArtifactIntent === "quiz" &&
+      shouldEnableArtifactRefinementToolInInspect
+        ? ({
+            type: "tool",
+            toolName: "refineQuizRequirements",
+          } as const)
+      : shouldEnableArtifactRefinementTool
         ? ({
             type: "tool",
             toolName: "refineQuizRequirements",
@@ -4486,6 +4685,8 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
     const resolvedMaxSteps =
       typeof langGraphPlan?.maxSteps === "number" && Number.isFinite(langGraphPlan.maxSteps)
         ? Math.max(1, Math.min(langGraphPlan.maxSteps, 14))
+        : artifactWorkflowStage === "inspect" && effectiveArtifactIntent === "quiz"
+          ? 4
         : shouldEnableArtifactRefinementTool
           ? 1
           : effectiveArtifactIntent === "quiz"
@@ -4877,6 +5078,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
       normalizeTopicContext(resolvedTopicContext)
     )
     const artifactRefinementForStream =
+      artifactWorkflowStage === "refine" &&
       shouldAskArtifactTopicFollowup &&
       effectiveArtifactIntent === "quiz"
         ? artifactRefinementToolResult ||

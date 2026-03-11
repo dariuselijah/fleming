@@ -466,8 +466,8 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                       Welcome to Fleming
                     </DialogTitle>
                     <DialogDescription className="pt-2 text-center text-base">
-                      Choose your role so we can tailor an Apple-level experience
-                      from the first message.
+                      Choose your role so we can tailor your experience from the
+                      first message.
                     </DialogDescription>
                   </DialogHeader>
 

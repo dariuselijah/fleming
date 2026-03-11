@@ -115,14 +115,13 @@ export function Chat() {
   const [showOnboardingDialog, setShowOnboardingDialog] = useState(false)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
   
-  // Show onboarding only when it has not been completed yet.
+  // Show onboarding only after login/signup and when not yet completed.
   useEffect(() => {
-    if (!preferences) {
+    if (!preferences || !isAuthenticated) {
       return
     }
-
     setShowOnboardingDialog(!preferences.onboardingCompleted)
-  }, [preferences])
+  }, [preferences, isAuthenticated])
   const systemPrompt = useMemo(
     () => getSystemPromptByRole(preferences?.userRole || "general", user?.system_prompt || undefined),
     [user?.system_prompt, preferences?.userRole]

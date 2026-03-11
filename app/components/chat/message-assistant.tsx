@@ -284,6 +284,7 @@ function stripToolCitationArtifacts(text: string): string {
   if (!text) return ""
   return text
     .replace(/\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/gi, "")
+    .replace(/\bCITE_PLACEHOLDER_\d+\b/gi, "")
     .replace(/\[tool\s+slide\s+([^\]]+)\]/gi, " (slide $1)")
     .replace(/\[tool\s+([^\]]+)\]/gi, " ($1)")
     .replace(/\[source\s+([^\]]+)\]/gi, " ($1)")
@@ -401,27 +402,60 @@ export function MessageAssistant({
       }),
     [parts]
   )
-  const hasRefinementToolResult = useMemo(
+  const hasRefinementToolInParts = useMemo(
     () =>
       Array.isArray(parts) &&
       parts.some((part: any) => {
         if (part?.type !== "tool-invocation") return false
         const toolName = String(part?.toolInvocation?.toolName || "")
         if (!/refine.*requirements/i.test(toolName)) return false
-        return (
-          part?.toolInvocation?.state === "result" ||
-          typeof part?.toolInvocation?.result !== "undefined"
-        )
+        return true
       }),
     [parts]
   )
   const shouldRenderAnnotationRefinementFallback = Boolean(
     artifactRefinement &&
       onSuggestion &&
-      !hasRefinementToolResult &&
+      !hasRefinementToolInParts &&
       !hasQuizArtifactInParts
   )
   const [customRefinementInput, setCustomRefinementInput] = useState("")
+  const [refinementSelectedChoiceId, setRefinementSelectedChoiceId] = useState<string | null>(
+    null
+  )
+  const [refinementSubmittedText, setRefinementSubmittedText] = useState<string | null>(null)
+  const [refinementSubmitState, setRefinementSubmitState] = useState<
+    "idle" | "submitting" | "submitted"
+  >("idle")
+  const isRefinementLocked = refinementSubmitState !== "idle"
+
+  useEffect(() => {
+    setCustomRefinementInput("")
+    setRefinementSelectedChoiceId(null)
+    setRefinementSubmittedText(null)
+    setRefinementSubmitState("idle")
+  }, [artifactRefinement?.title, artifactRefinement?.question])
+
+  const submitAnnotationRefinement = useCallback(
+    (payload: string, choiceId?: string) => {
+      const value = payload.trim()
+      if (!value || !shouldRenderAnnotationRefinementFallback) return
+      const submitHandler = onWorkflowSuggestion || onSuggestion
+      if (!submitHandler || isRefinementLocked) return
+      setRefinementSelectedChoiceId(choiceId || null)
+      setRefinementSubmittedText(value)
+      setRefinementSubmitState("submitting")
+      submitHandler(value)
+      setRefinementSubmitState("submitted")
+      setCustomRefinementInput("")
+    },
+    [
+      isRefinementLocked,
+      onSuggestion,
+      onWorkflowSuggestion,
+      shouldRenderAnnotationRefinementFallback,
+    ]
+  )
   
   // Convert evidence citations to CitationData format for rendering
   const evidenceCitationMap = useMemo(() => {
@@ -1001,28 +1035,35 @@ export function MessageAssistant({
               ) : null}
 
               <div className="space-y-2">
-                {(artifactRefinement.choices || [])
-                  .filter((choice) => !choice.requiresCustomInput)
-                  .map((choice) => (
-                    <button
-                      key={choice.id}
-                      type="button"
-                      onClick={() =>
-                        (onWorkflowSuggestion || onSuggestion)?.(choice.submitText)
-                      }
-                      className="hover:bg-accent/50 flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition"
-                    >
-                      <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
-                        {choice.id}
-                      </span>
-                      <span>{choice.label}</span>
-                    </button>
-                  ))}
+                {refinementSubmitState === "idle"
+                  ? (artifactRefinement.choices || [])
+                      .filter((choice) => !choice.requiresCustomInput)
+                      .map((choice) => (
+                        <button
+                          key={choice.id}
+                          type="button"
+                          onClick={() =>
+                            submitAnnotationRefinement(choice.submitText, choice.id)
+                          }
+                          disabled={isRefinementLocked}
+                          className={cn(
+                            "hover:bg-accent/50 flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-75",
+                            refinementSelectedChoiceId === choice.id &&
+                              "border-primary/60 bg-primary/5"
+                          )}
+                        >
+                          <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
+                            {choice.id}
+                          </span>
+                          <span>{choice.label}</span>
+                        </button>
+                      ))
+                  : null}
               </div>
 
               {(artifactRefinement.choices || []).some(
                 (choice) => choice.requiresCustomInput
-              ) ? (
+              ) && refinementSubmitState === "idle" ? (
                 <div className="rounded-md border border-border bg-background p-2.5">
                   <p className="text-xs font-semibold text-muted-foreground">
                     E. Custom requirements (blank)
@@ -1030,6 +1071,7 @@ export function MessageAssistant({
                   <textarea
                     value={customRefinementInput}
                     onChange={(event) => setCustomRefinementInput(event.target.value)}
+                    disabled={isRefinementLocked}
                     placeholder={
                       artifactRefinement.customInputPlaceholder ||
                       "Type your custom requirements here"
@@ -1040,17 +1082,38 @@ export function MessageAssistant({
                     <button
                       type="button"
                       onClick={() => {
-                        const value = customRefinementInput.trim()
-                        if (!value) return
-                        ;(onWorkflowSuggestion || onSuggestion)?.(value)
-                        setCustomRefinementInput("")
+                        submitAnnotationRefinement(customRefinementInput, "E")
                       }}
-                      disabled={customRefinementInput.trim().length === 0}
+                      disabled={
+                        customRefinementInput.trim().length === 0 || isRefinementLocked
+                      }
                       className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"
                     >
-                      Submit custom requirements
+                      {isRefinementLocked ? "Submitted" : "Submit custom requirements"}
                     </button>
                   </div>
+                </div>
+              ) : null}
+              {refinementSubmitState !== "idle" ? (
+                <div className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Submitted
+                  </p>
+                  <p className="mt-1 text-xs text-foreground/90">
+                    {refinementSubmitState === "submitting"
+                      ? "Sending your quiz requirements..."
+                      : "Requirements submitted. Generating quiz..."}
+                  </p>
+                  {refinementSelectedChoiceId ? (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Selected option: {refinementSelectedChoiceId}
+                    </p>
+                  ) : null}
+                  {refinementSubmittedText ? (
+                    <p className="mt-1 line-clamp-3 text-[11px] text-muted-foreground">
+                      {refinementSubmittedText}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
           </div>

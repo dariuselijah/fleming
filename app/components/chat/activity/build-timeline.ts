@@ -191,6 +191,28 @@ function parseArtifactFromToolResult(
   return null
 }
 
+function isQuizWorkflowToolName(toolName: string): boolean {
+  return /generatequizfromupload|refinequizrequirements/i.test(toolName)
+}
+
+function looksLikeTransientQuizText(text: string): boolean {
+  const normalized = text.trim()
+  if (!normalized) return false
+  const hasQuizHeading = /\bquiz\b[:\s]/i.test(normalized)
+  const numberedQuestionMatches = normalized.match(/(?:^|\n)\s*\d+\.\s+/gm) || []
+  const choiceMatches = normalized.match(/(?:^|\n)\s*[a-e][\).\:]\s+/gim) || []
+  const hasAnswerSection =
+    /\banswers?(?:\s*&\s*|\s+and\s+)?(?:rationale|explanation|key)?\b/i.test(normalized) ||
+    /\bhow'?d you do\??/i.test(normalized)
+  return (
+    (hasQuizHeading &&
+      numberedQuestionMatches.length >= 2 &&
+      choiceMatches.length >= 4) ||
+    (numberedQuestionMatches.length >= 3 && choiceMatches.length >= 4) ||
+    (hasAnswerSection && numberedQuestionMatches.length >= 1)
+  )
+}
+
 function normalizeEvidenceCitations(
   citations: unknown
 ): EvidenceCitation[] {
@@ -479,6 +501,26 @@ export function buildChatActivityTimeline({
   const events: TimelineEvent[] = []
   const sequenceState: MutableSequence = { value: 0 }
   const artifactIds = new Set<string>()
+  const hasQuizWorkflowToolInvocation = Array.isArray(parts)
+    ? parts.some((part: any) => {
+        if (part?.type !== "tool-invocation") return false
+        const toolName = String(part?.toolInvocation?.toolName || "")
+        return isQuizWorkflowToolName(toolName)
+      })
+    : false
+  const hasQuizArtifactSurface = Array.isArray(parts)
+    ? parts.some((part: any) => {
+        if (part?.type === "tool-invocation" && part?.toolInvocation?.state === "result") {
+          const artifact = parseArtifactFromToolResult(part?.toolInvocation?.result)
+          return artifact?.artifactType === "quiz"
+        }
+        if (part?.type === "metadata" && part?.metadata) {
+          const quizArtifacts = (part.metadata as { quizArtifacts?: unknown[] }).quizArtifacts
+          return Array.isArray(quizArtifacts) && quizArtifacts.length > 0
+        }
+        return false
+      })
+    : false
 
   if (streamIntroPreview && streamIntroPreview.trim().length > 0) {
     events.push({
@@ -498,6 +540,14 @@ export function buildChatActivityTimeline({
       if (item?.type === "text" && typeof item.text === "string") {
         const text = sanitizeTimelineText(item.text).trim()
         if (!text) return
+        if (
+          hasQuizWorkflowToolInvocation &&
+          looksLikeTransientQuizText(text) &&
+          (hasQuizArtifactSurface || text.length > 160)
+        ) {
+          // Prevent flicker: hide transient long-form quiz prose during quiz workflow.
+          return
+        }
         events.push({
           id: `message-text:${messageId}:${index}`,
           kind: "message-text",
