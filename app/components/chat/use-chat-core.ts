@@ -5,6 +5,8 @@ import { getOrCreateGuestUserId } from "@/lib/api"
 import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
 import { encodeArtifactWorkflowInput } from "@/lib/chat/artifact-workflow"
 import { Attachment } from "@/lib/file-handling"
+import { buildUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
+import { isImageAttachment } from "@/lib/chat-attachments/constants"
 import {
   DEFAULT_MEDICAL_STUDENT_LEARNING_MODE,
   normalizeMedicalStudentLearningMode,
@@ -90,18 +92,24 @@ function extractSessionSafeMessageParts(message: Message): unknown[] | undefined
             }
           | undefined
         const toolName = String(invocation?.toolName || "")
-        if (!/refine.*requirements/i.test(toolName)) return null
+        const toolCallId =
+          typeof invocation?.toolCallId === "string" &&
+          invocation.toolCallId.trim().length > 0
+            ? invocation.toolCallId
+            : `${toolName || "tool"}-snapshot`
+        const state =
+          invocation?.state === "call" ||
+          invocation?.state === "partial-call" ||
+          invocation?.state === "result"
+            ? invocation.state
+            : "result"
+
         return {
           type: "tool-invocation",
           toolInvocation: {
             toolName,
-            toolCallId: String(invocation?.toolCallId || "refinement"),
-            state:
-              invocation?.state === "call" ||
-              invocation?.state === "partial-call" ||
-              invocation?.state === "result"
-                ? invocation.state
-                : "result",
+            toolCallId,
+            state,
             step:
               typeof invocation?.step === "number" ? invocation.step : undefined,
             args: compactSnapshotValue(invocation?.args),
@@ -109,18 +117,23 @@ function extractSessionSafeMessageParts(message: Message): unknown[] | undefined
           },
         }
       }
-      if (candidate?.type === "metadata" && candidate?.metadata?.topicContext) {
+      if (candidate?.type === "metadata" && candidate?.metadata) {
+        const metadata = candidate.metadata as Record<string, unknown>
         return {
           type: "metadata",
           metadata: {
-            topicContext: compactSnapshotValue(candidate.metadata.topicContext),
+            topicContext: compactSnapshotValue(metadata.topicContext),
+            evidenceCitations: compactSnapshotValue(metadata.evidenceCitations),
+            documentArtifacts: compactSnapshotValue(metadata.documentArtifacts),
+            quizArtifacts: compactSnapshotValue(metadata.quizArtifacts),
+            citationStyle: compactSnapshotValue(metadata.citationStyle),
           },
         }
       }
       return null
     })
     .filter(Boolean)
-    .slice(0, 8)
+    .slice(0, 18)
   return refinedParts.length > 0 ? refinedParts : undefined
 }
 
@@ -132,28 +145,91 @@ function extractSessionSafeAnnotations(message: Message): unknown[] | undefined 
       if (!annotation || typeof annotation !== "object") return null
       const candidate = annotation as Record<string, unknown>
       const type = String(candidate.type || "")
+      const base = {
+        ...(typeof candidate.sequence === "number"
+          ? { sequence: candidate.sequence }
+          : {}),
+        ...(typeof candidate.createdAt === "string"
+          ? { createdAt: candidate.createdAt }
+          : {}),
+      }
       if (type === "artifact-refinement") {
         return {
+          ...base,
           type,
           refinement: compactSnapshotValue(candidate.refinement),
         }
       }
       if (type === "topic-context") {
         return {
+          ...base,
           type,
           topicContext: compactSnapshotValue(candidate.topicContext),
         }
       }
       if (type === "artifact-runtime-warnings") {
         return {
+          ...base,
           type,
           warnings: compactSnapshotValue(candidate.warnings),
+        }
+      }
+      if (type === "evidence-citations") {
+        return {
+          ...base,
+          type,
+          citations: compactSnapshotValue(candidate.citations),
+        }
+      }
+      if (type === "langgraph-routing") {
+        return {
+          ...base,
+          type,
+          trace: compactSnapshotValue(candidate.trace),
+          summary: compactSnapshotValue(candidate.summary),
+          maxSteps: compactSnapshotValue(candidate.maxSteps),
+        }
+      }
+      if (type === "tool-lifecycle") {
+        return {
+          ...base,
+          type,
+          toolName: compactSnapshotValue(candidate.toolName),
+          toolCallId: compactSnapshotValue(candidate.toolCallId),
+          lifecycle: compactSnapshotValue(candidate.lifecycle),
+          detail: compactSnapshotValue(candidate.detail),
+        }
+      }
+      if (type === "timeline-event") {
+        return {
+          ...base,
+          type,
+          event: compactSnapshotValue(candidate.event),
+        }
+      }
+      if (type === "upload-status-tracking") {
+        return {
+          ...base,
+          type,
+          uploadIds: compactSnapshotValue(candidate.uploadIds),
+        }
+      }
+      if (type === "upload-status") {
+        return {
+          ...base,
+          type,
+          uploadId: compactSnapshotValue(candidate.uploadId),
+          uploadTitle: compactSnapshotValue(candidate.uploadTitle),
+          status: compactSnapshotValue(candidate.status),
+          progressStage: compactSnapshotValue(candidate.progressStage),
+          progressPercent: compactSnapshotValue(candidate.progressPercent),
+          lastError: compactSnapshotValue(candidate.lastError),
         }
       }
       return null
     })
     .filter(Boolean)
-    .slice(0, 4)
+    .slice(0, 18)
   return refinedAnnotations.length > 0 ? refinedAnnotations : undefined
 }
 
@@ -205,6 +281,56 @@ function isQuotaExceeded(error: unknown): boolean {
     error.name === "QuotaExceededError" ||
     error.name === "NS_ERROR_DOM_QUOTA_REACHED"
   )
+}
+
+function mergeEvidenceCitationAnnotations(
+  annotations: Array<{ type?: string; citations?: unknown[] }> | undefined
+) {
+  if (!Array.isArray(annotations)) return []
+  const merged: any[] = []
+  const seenKeys = new Set<string>()
+  annotations.forEach((annotation) => {
+    if (annotation?.type !== "evidence-citations" || !Array.isArray(annotation.citations)) {
+      return
+    }
+    annotation.citations.forEach((citation: any) => {
+      const key =
+        citation?.pmid ||
+        citation?.doi ||
+        citation?.url ||
+        `${citation?.title || "untitled"}:${citation?.journal || "unknown"}`
+      if (seenKeys.has(key)) return
+      seenKeys.add(key)
+      merged.push(citation)
+    })
+  })
+  return merged.map((citation, index) => ({
+    ...citation,
+    index: index + 1,
+  }))
+}
+
+function mergeMessageAnnotations(
+  existing: Array<Record<string, unknown>> | undefined,
+  incoming: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const merged = [...(Array.isArray(existing) ? existing : []), ...incoming]
+  const deduped = new Map<string, Record<string, unknown>>()
+
+  merged.forEach((annotation, index) => {
+    const type =
+      typeof annotation?.type === "string"
+        ? annotation.type
+        : `annotation-${index}`
+    const sequence =
+      typeof annotation?.sequence === "number"
+        ? annotation.sequence
+        : `seq-${index}`
+    const key = `${type}:${sequence}:${JSON.stringify(annotation).slice(0, 160)}`
+    deduped.set(key, annotation)
+  })
+
+  return Array.from(deduped.values())
 }
 
 type UseChatCoreProps = {
@@ -288,6 +414,31 @@ export function useChatCore({
   const [evidenceCitations, setEvidenceCitationsState] = useState<any[]>([])
   const topicContextRef = useRef<any | null>(null)
   const [streamIntroPreview, setStreamIntroPreview] = useState<string | null>(null)
+  const pendingHeaderTimelineAnnotationsRef = useRef<
+    Array<Record<string, unknown>>
+  >([])
+  const headerTimelineSequenceRef = useRef(0)
+
+  const pushHeaderTimelineAnnotation = useCallback(
+    (annotation: Record<string, unknown>) => {
+      headerTimelineSequenceRef.current += 1
+      pendingHeaderTimelineAnnotationsRef.current = [
+        ...pendingHeaderTimelineAnnotationsRef.current,
+        {
+          ...annotation,
+          sequence:
+            typeof annotation.sequence === "number"
+              ? annotation.sequence
+              : headerTimelineSequenceRef.current,
+          createdAt:
+            typeof annotation.createdAt === "string"
+              ? annotation.createdAt
+              : new Date().toISOString(),
+        },
+      ]
+    },
+    []
+  )
 
   const hasRenderableAssistantPayload = useCallback((message: Message) => {
     if (typeof message.content === "string" && message.content.trim().length > 0) {
@@ -748,6 +899,23 @@ export function useChatCore({
     // Optimize for streaming performance
     onFinish: async (message) => {
       setStreamIntroPreview(null)
+      const pendingHeaderAnnotations =
+        pendingHeaderTimelineAnnotationsRef.current.length > 0
+          ? [...pendingHeaderTimelineAnnotationsRef.current]
+          : []
+      pendingHeaderTimelineAnnotationsRef.current = []
+      headerTimelineSequenceRef.current = 0
+
+      if (pendingHeaderAnnotations.length > 0) {
+        const existingAnnotations = Array.isArray((message as any).annotations)
+          ? ((message as any).annotations as Array<Record<string, unknown>>)
+          : []
+        ;(message as any).annotations = mergeMessageAnnotations(
+          existingAnnotations,
+          pendingHeaderAnnotations
+        )
+      }
+
       // CRITICAL: Restore evidence citations from stream body when headers were stripped (e.g. in production)
       const annotations = (
         message as {
@@ -755,9 +923,10 @@ export function useChatCore({
         }
       ).annotations
       if (annotations && Array.isArray(annotations)) {
-        const evidencePart = annotations.find((a) => a?.type === 'evidence-citations' && Array.isArray(a.citations))
-        if (evidencePart?.citations && evidencePart.citations.length > 0) {
-          const citations = evidencePart.citations as any[]
+        const citations = mergeEvidenceCitationAnnotations(
+          annotations as Array<{ type?: string; citations?: unknown[] }>
+        )
+        if (citations.length > 0) {
           setEvidenceCitations(citations)
           console.log(`📚 [EVIDENCE] Restored ${citations.length} citations from stream body (message.annotations)`)
         }
@@ -778,9 +947,11 @@ export function useChatCore({
 
           // Fallback 0: Use citations we just restored from message.annotations above
           if (!citationsToSave && annotations && Array.isArray(annotations)) {
-            const evidencePart = annotations.find((a) => a?.type === 'evidence-citations' && Array.isArray(a.citations))
-            if (evidencePart?.citations?.length) {
-              citationsToSave = evidencePart.citations as any[]
+            const mergedAnnotationCitations = mergeEvidenceCitationAnnotations(
+              annotations as Array<{ type?: string; citations?: unknown[] }>
+            )
+            if (mergedAnnotationCitations.length > 0) {
+              citationsToSave = mergedAnnotationCitations
             }
           }
 
@@ -853,7 +1024,17 @@ export function useChatCore({
         const introHeader = response.headers.get("X-Stream-Intro")
         if (introHeader) {
           try {
-            setStreamIntroPreview(atob(introHeader))
+            const introText = atob(introHeader)
+            setStreamIntroPreview(introText)
+            if (introText.trim().length > 0) {
+              pushHeaderTimelineAnnotation({
+                type: "timeline-event",
+                event: {
+                  kind: "system-intro",
+                  text: introText,
+                },
+              })
+            }
           } catch {
             setStreamIntroPreview(null)
           }
@@ -870,6 +1051,10 @@ export function useChatCore({
           const citations = JSON.parse(citationsJson)
           console.log(`📚 [EVIDENCE] Successfully parsed ${citations.length} citations from server`)
           setEvidenceCitations(citations)
+          pushHeaderTimelineAnnotation({
+            type: "evidence-citations",
+            citations,
+          })
         } else {
           console.log('📚 [EVIDENCE] No evidence citations header found in response')
         }
@@ -1575,11 +1760,21 @@ export function useChatCore({
     // Set submitting state immediately for optimistic UI
     setIsSubmitting(true)
     setStreamIntroPreview(null)
+    pendingHeaderTimelineAnnotationsRef.current = []
+    headerTimelineSequenceRef.current = 0
     clearEvidenceCitations()
 
     // Store input and files for async processing
     const currentInput = resolvedInput
     const currentFiles = [...files]
+    const imageFiles = currentFiles.filter((file) => isImageAttachment(file.type))
+    const nonImageFiles = currentFiles.filter((file) => !isImageAttachment(file.type))
+    const optimisticImageAttachments =
+      imageFiles.length > 0 ? createOptimisticAttachments(imageFiles) : []
+    const convertedImageAttachmentsPromise =
+      optimisticImageAttachments.length > 0
+        ? convertBlobUrlsToDataUrls(optimisticImageAttachments, imageFiles)
+        : Promise.resolve([] as Attachment[])
     
     const restoreComposerState = () => {
       setInput(currentInput)
@@ -1622,14 +1817,96 @@ export function useChatCore({
     if (!optimisticChatId) {
       optimisticChatId = "temp"
     }
-    
-    // Create optimistic attachments immediately (no upload yet)
+    let finalUserInput = currentInput
+    let preparedUid: string | null = null
+    let preparedAllowed: boolean | null = null
+    let hasPreparedUploadReferences = false
+
+    if (nonImageFiles.length > 0 && optimisticChatId && optimisticChatId !== "temp") {
+      const [resolvedUid, resolvedAllowed] = await Promise.all([
+        getOrCreateGuestUserId(user),
+        user?.id ? checkLimitsAndNotify(user.id) : Promise.resolve(true),
+      ])
+      preparedUid = resolvedUid
+      preparedAllowed = resolvedAllowed
+      if (!preparedUid) {
+        setIsSubmitting(false)
+        setHasDialogAuth(true)
+        restoreComposerState()
+        return
+      }
+      if (!preparedAllowed) {
+        setIsSubmitting(false)
+        restoreComposerState()
+        return
+      }
+
+      const uploadPreparationToastId = toast({
+        title: `Preparing ${nonImageFiles.length} document${nonImageFiles.length > 1 ? "s" : ""}...`,
+        description: "Large files are routed through uploads for reliable retrieval.",
+        status: "info",
+      })
+      const processedNonImageAttachments = await handleFileUploads(
+        preparedUid,
+        optimisticChatId,
+        !!user?.id,
+        nonImageFiles
+      )
+      sonnerToast.dismiss(uploadPreparationToastId)
+      const uploadReferenceIds = (processedNonImageAttachments ?? [])
+        .map((attachment) => attachment.uploadId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+
+      if (uploadReferenceIds.length === 0) {
+        setIsSubmitting(false)
+        restoreComposerState()
+        toast({
+          title: "Couldn't prepare uploaded documents",
+          description: "Please retry your message once the files finish uploading.",
+          status: "warning",
+        })
+        return
+      }
+
+      const uploadLabelLine = `Selected uploads: ${(processedNonImageAttachments ?? [])
+        .filter((attachment) => typeof attachment.uploadId === "string")
+        .map((attachment) => attachment.name || "Upload")
+        .join(", ")}`
+      const tokenString = buildUploadReferenceTokens(uploadReferenceIds)
+      hasPreparedUploadReferences = true
+      const trimmedBaseInput = currentInput.trim()
+      finalUserInput =
+        trimmedBaseInput.length > 0
+          ? `${trimmedBaseInput}\n\n${uploadLabelLine}\n\n${tokenString}`
+          : `${uploadLabelLine}\n\nUse my selected uploads as context and provide a concise overview.\n\n${tokenString}`
+    }
+
+    // Create optimistic attachments for chat-side send activity cards.
+    // Non-image files are still routed through uploads ingestion before the assistant turn.
     let optimisticAttachments: Attachment[] | undefined = undefined
-    if (currentFiles.length > 0) {
-      const tempAttachments = createOptimisticAttachments(currentFiles)
-      // CRITICAL: Convert blob URLs to data URLs before sending to server
-      // Blob URLs only work in browser context and cannot be accessed server-side
-      optimisticAttachments = await convertBlobUrlsToDataUrls(tempAttachments, currentFiles)
+    const nonImageUploadState = hasPreparedUploadReferences ? "completed" : "processing"
+    const nonImageUploadMessage = hasPreparedUploadReferences
+      ? "Routed to uploads"
+      : "Sending to uploads"
+    const optimisticNonImageAttachments: Attachment[] = nonImageFiles.map((file) => ({
+      name: file.name,
+      contentType: file.type || "application/octet-stream",
+      url: "",
+      uploadState: nonImageUploadState,
+      uploadMessage: nonImageUploadMessage,
+    })) as Attachment[]
+
+    if (imageFiles.length > 0) {
+      const convertedImages = await convertedImageAttachmentsPromise
+      optimisticAttachments = [
+        ...optimisticNonImageAttachments,
+        ...(convertedImages.map((attachment) => ({
+          ...attachment,
+          uploadState: "sending",
+        })) as Attachment[]),
+      ]
+    } else if (optimisticNonImageAttachments.length > 0) {
+      optimisticAttachments = optimisticNonImageAttachments
     }
 
     // CRITICAL: Append message IMMEDIATELY with optimistic values - message appears instantly
@@ -1658,7 +1935,7 @@ export function useChatCore({
 
     append({
       role: "user",
-      content: currentInput,
+      content: finalUserInput,
       experimental_attachments: optimisticAttachments,
     }, optimisticOptions)
     // Clear input and files only after append has been queued.
@@ -1679,9 +1956,12 @@ export function useChatCore({
     try {
       // Run critical async operations in parallel
       const [uid, allowed] = await Promise.all([
-        getOrCreateGuestUserId(user),
-        // Pre-check limits with cached userId if available (non-blocking)
-        user?.id ? checkLimitsAndNotify(user.id) : Promise.resolve(true)
+        preparedUid ? Promise.resolve(preparedUid) : getOrCreateGuestUserId(user),
+        preparedAllowed !== null
+          ? Promise.resolve(preparedAllowed)
+          : user?.id
+            ? checkLimitsAndNotify(user.id)
+            : Promise.resolve(true),
       ])
 
       if (!uid) {
@@ -1704,23 +1984,29 @@ export function useChatCore({
         currentChatIdForSavingRef.current = currentChatId
       }
 
-      // Handle file uploads in background (non-blocking)
-      if (currentFiles.length > 0 && currentChatId && currentChatId !== "temp") {
+      // Handle image uploads in background (non-blocking).
+      // Non-image files were already routed through uploads ingestion before submit.
+      if (imageFiles.length > 0 && currentChatId && currentChatId !== "temp") {
         Promise.resolve().then(async () => {
           try {
             const uploadingToastId = toast({
-              title: `Uploading ${currentFiles.length} file${currentFiles.length > 1 ? 's' : ''}...`,
+              title: `Uploading ${imageFiles.length} image${imageFiles.length > 1 ? "s" : ""}...`,
               description: "Please wait while your files are being uploaded",
               status: "info",
             })
 
-            const processedAttachments = await handleFileUploads(uid, currentChatId, !!user?.id, currentFiles)
+            const processedAttachments = await handleFileUploads(
+              uid,
+              currentChatId,
+              !!user?.id,
+              imageFiles
+            )
             
             sonnerToast.dismiss(uploadingToastId)
             if (processedAttachments && processedAttachments.length > 0) {
               toast({
                 title: "Files uploaded successfully",
-                description: `${processedAttachments.length} file${processedAttachments.length > 1 ? 's' : ''} ready`,
+                description: `${processedAttachments.length} image${processedAttachments.length > 1 ? "s" : ""} ready`,
                 status: "success",
               })
               // Note: Real attachments will be used in the API call via streaming
@@ -1813,6 +2099,8 @@ export function useChatCore({
 
       setIsSubmitting(true)
       setStreamIntroPreview(null)
+      pendingHeaderTimelineAnnotationsRef.current = []
+      headerTimelineSequenceRef.current = 0
       clearEvidenceCitations()
       // Reset clinician mode so tabs stay hidden after sending from workflow panel
       setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
@@ -1954,6 +2242,8 @@ export function useChatCore({
     }
 
     clearEvidenceCitations()
+    pendingHeaderTimelineAnnotationsRef.current = []
+    headerTimelineSequenceRef.current = 0
 
     const options = {
       body: {

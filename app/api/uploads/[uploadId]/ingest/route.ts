@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { UserUploadService } from "@/lib/uploads/server"
+import { invalidateUploadRetrievalPreflightCacheForUser } from "@/lib/uploads/retrieval-preflight-cache"
 
 type RouteContext = {
   params: Promise<{
@@ -26,6 +27,7 @@ export async function POST(_request: Request, context: RouteContext) {
 
     const { uploadId } = await context.params
     const service = new UserUploadService(supabase)
+    invalidateUploadRetrievalPreflightCacheForUser(user.id)
     // Run ingestion detached from the request lifecycle so it can continue
     // even if the client navigates away after triggering ingestion.
     setTimeout(() => {

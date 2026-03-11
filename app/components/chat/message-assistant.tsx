@@ -5,14 +5,17 @@ import {
 } from "@/components/prompt-kit/message"
 import { ProcessingLoader } from "@/components/prompt-kit/processing-loader"
 import { cn } from "@/lib/utils"
+import { ENABLE_CHAT_ACTIVITY_TIMELINE_V2 } from "@/lib/config"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
 import { ArrowClockwise, Check, Copy } from "@phosphor-icons/react"
 import { AssistantInlineParts } from "./assistant-inline-parts"
+import { ActivityTimeline } from "./activity/activity-timeline"
+import { buildChatActivityTimeline } from "./activity/build-timeline"
+import type { ReferencedUploadStatus } from "./activity/types"
 import { getSources } from "./get-sources"
 import { SearchImages } from "./search-images"
 import { YouTubeResults, type YouTubeResultItem } from "./youtube-results"
 import { ReferencesSection } from "./references-section"
-import { EvidenceReferencesSection } from "./evidence-references-section"
 import { TrustSummaryCard } from "./trust-summary-card"
 import { extractCitationsFromSources, extractCitationsFromWebSearch, extractJournalFromUrl, extractYearFromUrl } from "./citation-utils"
 import type { CitationData } from "./citation-popup"
@@ -22,6 +25,7 @@ import { useMemo, useCallback, useEffect, useState, useRef } from "react"
 import { parseLearningCard } from "@/lib/medical-student-learning"
 import { LearningCard } from "./learning-card"
 import type { DocumentArtifact, QuizArtifact } from "@/lib/uploads/artifacts"
+import { splitTrailingSourceAppendix } from "./source-appendix"
 import {
   DocumentArtifactCard,
   InteractiveQuizArtifactCard,
@@ -66,6 +70,7 @@ function parseFilenameFromContentDisposition(value: string | null): string | nul
 }
 
 type MessageAssistantProps = {
+  messageId: string
   children: string
   isLast?: boolean
   hasScrollAnchor?: boolean
@@ -81,6 +86,7 @@ type MessageAssistantProps = {
   evidenceCitations?: EvidenceCitation[]
   contextPrompt?: string
   streamIntroPreview?: string | null
+  referencedUploads?: ReferencedUploadStatus[]
 }
 
 type ArtifactRefinementChoice = {
@@ -97,6 +103,107 @@ type ArtifactRefinementPayload = {
   choices?: ArtifactRefinementChoice[]
   requiredFields?: string[]
   customInputPlaceholder?: string
+}
+
+function buildAppendixCitationEntry(
+  entry: { title: string; pmid: string; note?: string },
+  index: number
+): CitationData {
+  const title = entry.note ? `${entry.title} (${entry.note})` : entry.title
+  return {
+    index,
+    title: title || `PMID ${entry.pmid}`,
+    authors: [],
+    journal: entry.title || "PubMed",
+    year: "",
+    url: `https://pubmed.ncbi.nlm.nih.gov/${entry.pmid}/`,
+    pmid: entry.pmid,
+  }
+}
+
+function mergeAppendixCitations(
+  baseCitations: Map<number, CitationData>,
+  appendixEntries: Array<{ title: string; pmid: string; note?: string }>
+): Map<number, CitationData> {
+  if (appendixEntries.length === 0) return baseCitations
+
+  const merged = new Map<number, CitationData>()
+  const seen = new Set<string>()
+  let maxIndex = 0
+
+  baseCitations.forEach((citation, index) => {
+    merged.set(index, citation)
+    maxIndex = Math.max(maxIndex, index)
+    const key =
+      (citation.pmid && `pmid:${citation.pmid}`) ||
+      (citation.url && `url:${citation.url}`) ||
+      `title:${(citation.title || "").toLowerCase()}`
+    seen.add(key)
+  })
+
+  appendixEntries.forEach((entry) => {
+    const key = `pmid:${entry.pmid}`
+    if (seen.has(key)) return
+    maxIndex += 1
+    merged.set(maxIndex, buildAppendixCitationEntry(entry, maxIndex))
+    seen.add(key)
+  })
+
+  return merged
+}
+
+function toCitationDataFromEvidence(citation: EvidenceCitation): CitationData {
+  return {
+    index: citation.index,
+    title: citation.title,
+    authors: citation.authors || [],
+    journal: citation.journal,
+    year: citation.year?.toString() || "",
+    url: citation.url || undefined,
+    doi: citation.doi || undefined,
+    pmid: citation.pmid || undefined,
+    evidenceLevel: citation.evidenceLevel,
+    studyType: citation.studyType,
+    sampleSize: citation.sampleSize,
+    meshTerms: citation.meshTerms,
+    snippet: citation.snippet,
+  } as CitationData
+}
+
+function mergeEvidenceIntoCitations(
+  baseCitations: Map<number, CitationData>,
+  evidenceCitations: EvidenceCitation[]
+): Map<number, CitationData> {
+  if (evidenceCitations.length === 0) return baseCitations
+
+  const merged = new Map<number, CitationData>()
+  const seen = new Set<string>()
+  let maxIndex = 0
+
+  baseCitations.forEach((citation, index) => {
+    merged.set(index, citation)
+    maxIndex = Math.max(maxIndex, index)
+    const citationKey =
+      (citation.pmid && `pmid:${citation.pmid}`) ||
+      (citation.url && `url:${citation.url}`) ||
+      `title:${(citation.title || "").toLowerCase()}`
+    seen.add(citationKey)
+  })
+
+  evidenceCitations.forEach((citation) => {
+    const key =
+      (citation.pmid && `pmid:${citation.pmid}`) ||
+      (citation.url && `url:${citation.url}`) ||
+      `title:${(citation.title || "").toLowerCase()}`
+    if (seen.has(key)) return
+
+    maxIndex += 1
+    const mapped = toCitationDataFromEvidence(citation)
+    merged.set(maxIndex, { ...mapped, index: maxIndex })
+    seen.add(key)
+  })
+
+  return merged
 }
 
 function parseArtifactRefinementPayload(
@@ -136,20 +243,6 @@ function parseArtifactRefinementPayload(
       )
       .slice(0, 5),
   }
-}
-
-function parseArtifactRuntimeWarnings(
-  annotations: Array<{ type?: string; refinement?: unknown; warnings?: unknown }> | undefined
-): string[] {
-  if (!Array.isArray(annotations) || annotations.length === 0) return []
-  const warningAnnotation = annotations.find(
-    (item) => item?.type === "artifact-runtime-warnings"
-  )
-  if (!warningAnnotation || !Array.isArray(warningAnnotation.warnings)) return []
-  return warningAnnotation.warnings
-    .map((warning) => String(warning).trim())
-    .filter((warning) => warning.length > 0)
-    .slice(0, 6)
 }
 
 function extractYouTubeVideoId(url: string): string | null {
@@ -199,6 +292,7 @@ function stripToolCitationArtifacts(text: string): string {
 }
 
 export function MessageAssistant({
+  messageId,
   children,
   isLast,
   hasScrollAnchor,
@@ -214,18 +308,26 @@ export function MessageAssistant({
   evidenceCitations = [],
   contextPrompt,
   streamIntroPreview,
+  referencedUploads = [],
 }: MessageAssistantProps) {
   const { card: learningCard, cleanContent } = useMemo(
     () => parseLearningCard(children || ""),
     [children]
   )
-  const contentToRender = useMemo(
+  const sanitizedContent = useMemo(
     () =>
       stripToolCitationArtifacts(
         (cleanContent || "").replace(/\[CITE_PLACEHOLDER_\d+\]/g, "")
       ),
     [cleanContent]
   )
+  const { contentToRender, trailingSourceEntries } = useMemo(() => {
+    const split = splitTrailingSourceAppendix(sanitizedContent)
+    return {
+      contentToRender: split.cleanText,
+      trailingSourceEntries: split.entries,
+    }
+  }, [sanitizedContent])
   
   // Memoize derived data to prevent unnecessary recalculations during streaming
   const sources = useMemo(() => getSources(parts), [parts])
@@ -271,14 +373,33 @@ export function MessageAssistant({
       return referencedIndices.has(citation.index) || (citationPmid.length > 0 && referencedPmids.has(citationPmid))
     })
   }, [contentToRender, evidenceCitations, hasAttachedEvidenceCitations])
-  const hasEvidenceCitations = referencedEvidenceCitations.length > 0
+  const displayEvidenceCitations = useMemo(
+    () =>
+      referencedEvidenceCitations.length > 0
+        ? referencedEvidenceCitations
+        : evidenceCitations,
+    [evidenceCitations, referencedEvidenceCitations]
+  )
+  const hasEvidenceCitations = displayEvidenceCitations.length > 0
   const artifactRefinement = useMemo(
     () => parseArtifactRefinementPayload(annotations),
     [annotations]
   )
-  const artifactRuntimeWarnings = useMemo(
-    () => parseArtifactRuntimeWarnings(annotations),
-    [annotations]
+  const hasQuizArtifactInParts = useMemo(
+    () =>
+      Array.isArray(parts) &&
+      parts.some((part: any) => {
+        if (part?.type === "tool-invocation" && part?.toolInvocation?.state === "result") {
+          const artifact = parseArtifactFromToolResult(part?.toolInvocation?.result)
+          return artifact?.artifactType === "quiz"
+        }
+        if (part?.type === "metadata" && part?.metadata) {
+          const quizArtifacts = (part.metadata as { quizArtifacts?: unknown[] }).quizArtifacts
+          return Array.isArray(quizArtifacts) && quizArtifacts.length > 0
+        }
+        return false
+      }),
+    [parts]
   )
   const hasRefinementToolResult = useMemo(
     () =>
@@ -295,7 +416,10 @@ export function MessageAssistant({
     [parts]
   )
   const shouldRenderAnnotationRefinementFallback = Boolean(
-    artifactRefinement && onSuggestion && !hasRefinementToolResult
+    artifactRefinement &&
+      onSuggestion &&
+      !hasRefinementToolResult &&
+      !hasQuizArtifactInParts
   )
   const [customRefinementInput, setCustomRefinementInput] = useState("")
   
@@ -304,25 +428,11 @@ export function MessageAssistant({
     if (!hasEvidenceCitations) return new Map<number, CitationData>()
     
     const map = new Map<number, CitationData>()
-    referencedEvidenceCitations.forEach((citation) => {
-      map.set(citation.index, {
-        index: citation.index,
-        title: citation.title,
-        authors: citation.authors || [],
-        journal: citation.journal,
-        year: citation.year?.toString() || '',
-        url: citation.url || undefined,
-        doi: citation.doi || undefined,
-        // Extra evidence-specific fields stored in the CitationData
-        evidenceLevel: citation.evidenceLevel,
-        studyType: citation.studyType,
-        sampleSize: citation.sampleSize,
-        meshTerms: citation.meshTerms,
-        snippet: citation.snippet,
-      } as CitationData)
+    displayEvidenceCitations.forEach((citation) => {
+      map.set(citation.index, toCitationDataFromEvidence(citation))
     })
     return map
-  }, [hasEvidenceCitations, referencedEvidenceCitations])
+  }, [displayEvidenceCitations, hasEvidenceCitations])
   
   // Extract and fetch citations from sources (fallback when no evidence citations)
   const [citations, setCitations] = useState<Map<number, CitationData>>(new Map())
@@ -347,10 +457,9 @@ export function MessageAssistant({
       return
     }
 
-    // Do not synthesize placeholder citations for evidence-style markers.
-    // If evidence metadata is missing temporarily, keeping plain markers is safer
-    // than rendering potentially incorrect "Citation X" pills.
-    if (hasEvidenceMarkers) {
+    // If evidence markers are present and we also have tool/source metadata,
+    // allow source extraction to map those markers onto real citations.
+    if (hasEvidenceMarkers && sources.length === 0) {
       return
     }
     
@@ -513,15 +622,24 @@ export function MessageAssistant({
     // Include evidenceCitations to ensure we re-check when they arrive
   }, [contentToRender, evidenceCitations, hasAttachedEvidenceCitations, sources])
   
-  // Use evidence citations if available, otherwise fall back to web search citations
-  const activeCitations = hasEvidenceCitations ? evidenceCitationMap : citations
+  const mergedCitations = useMemo(
+    () => mergeAppendixCitations(citations, trailingSourceEntries),
+    [citations, trailingSourceEntries]
+  )
 
-  // Option 3: Hide dedicated References section when all fallback entries
+  // Use evidence citations if available, otherwise fall back to web search citations
+  const activeCitations = hasEvidenceCitations ? evidenceCitationMap : mergedCitations
+  const sourcesCitations = useMemo(
+    () => mergeEvidenceIntoCitations(mergedCitations, displayEvidenceCitations),
+    [displayEvidenceCitations, mergedCitations]
+  )
+
+  // Hide dedicated sources section when all fallback entries
   // are placeholders like "Citation 1" with no real metadata.
   const hasOnlyPlaceholderCitations = useMemo(() => {
-    if (hasEvidenceCitations || citations.size === 0) return false
+    if (sourcesCitations.size === 0) return false
 
-    return Array.from(citations.values()).every((citation) => {
+    return Array.from(sourcesCitations.values()).every((citation) => {
       const title = (citation.title || "").trim()
       const journal = (citation.journal || "").trim()
       const placeholderPattern = /^Citation\s+\d+$/i
@@ -530,7 +648,7 @@ export function MessageAssistant({
         placeholderPattern.test(journal)
       )
     })
-  }, [citations, hasEvidenceCitations])
+  }, [sourcesCitations])
   
   // Check if message has citations or sources
   const hasCitations = activeCitations.size > 0
@@ -543,13 +661,12 @@ export function MessageAssistant({
       /\[PMID\s*:\s*\d+\]/i.test(contentToRender))
   // Show citations if we have them, have sources, or have citation markers in text
   const shouldShowCitations = hasCitations || hasSources || hasCitationMarkers
-  const showReferences =
+  const showSourcesSection =
     status === "ready" &&
-    hasCitations &&
+    sourcesCitations.size > 0 &&
     !isLastStreaming &&
     !hasOnlyPlaceholderCitations
-  // Show evidence references whenever evidence citations were attached to the answer.
-  const showEvidenceReferences =
+  const showTrustSummary =
     status === "ready" &&
     hasEvidenceCitations &&
     !isLastStreaming
@@ -728,6 +845,28 @@ export function MessageAssistant({
     }
     return "Your generated artifacts are ready below."
   }, [artifactPayloads.length, contentToRender, documentArtifacts.length, quizArtifacts.length])
+  const activityTimelineEvents = useMemo(
+    () =>
+      buildChatActivityTimeline({
+        messageId,
+        parts,
+        annotations: (annotations || []) as any,
+        fallbackText: inlineFallbackText,
+        streamIntroPreview,
+        referencedUploads,
+      }),
+    [
+      annotations,
+      inlineFallbackText,
+      messageId,
+      parts,
+      referencedUploads,
+      streamIntroPreview,
+    ]
+  )
+  const hasRenderableActivityTimeline = ENABLE_CHAT_ACTIVITY_TIMELINE_V2
+    ? activityTimelineEvents.length > 0
+    : hasRenderableTimelineParts
   const [exportingArtifactId, setExportingArtifactId] = useState<string | null>(null)
 
   const handleDocumentExport = useCallback(async (artifact: DocumentArtifact, format: "pdf" | "docx") => {
@@ -791,7 +930,7 @@ export function MessageAssistant({
 
         {learningCard && <LearningCard card={learningCard} />}
 
-        {contentNullOrEmpty && !hasRenderableTimelineParts ? (
+        {contentNullOrEmpty && !hasRenderableActivityTimeline ? (
         isLastStreaming ? <div
             className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
               {streamIntroPreview ? (
@@ -803,37 +942,37 @@ export function MessageAssistant({
               )}
             </div> : null
         ) : (
-          <AssistantInlineParts
-            parts={parts}
-            fallbackText={inlineFallbackText}
-            status={status}
-            onSuggestion={onSuggestion}
-            onWorkflowSuggestion={onWorkflowSuggestion}
-            shouldShowCitations={shouldShowCitations}
-            citations={activeCitations}
-            evidenceCitations={hasEvidenceCitations ? referencedEvidenceCitations : undefined}
-            streamIntroPreview={streamIntroPreview}
-          />
+          ENABLE_CHAT_ACTIVITY_TIMELINE_V2 ? (
+            <ActivityTimeline
+              events={activityTimelineEvents}
+              status={status}
+              onSuggestion={onSuggestion}
+              onWorkflowSuggestion={onWorkflowSuggestion}
+              shouldShowCitations={shouldShowCitations}
+              citations={activeCitations}
+              evidenceCitations={hasEvidenceCitations ? displayEvidenceCitations : undefined}
+              onExportDocument={handleDocumentExport}
+              exportingArtifactId={exportingArtifactId}
+            />
+          ) : (
+            <AssistantInlineParts
+              parts={parts}
+              fallbackText={inlineFallbackText}
+              status={status}
+              onSuggestion={onSuggestion}
+              onWorkflowSuggestion={onWorkflowSuggestion}
+              shouldShowCitations={shouldShowCitations}
+              citations={activeCitations}
+              evidenceCitations={hasEvidenceCitations ? displayEvidenceCitations : undefined}
+              streamIntroPreview={streamIntroPreview}
+            />
+          )
         )}
 
-        {artifactRuntimeWarnings.length > 0 ? (
-          <div className="rounded-lg border border-amber-300/70 bg-amber-50/60 p-3 text-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/80">
-              Retrieval Warnings
-            </p>
-            <ul className="mt-2 space-y-1 text-amber-950/90">
-              {artifactRuntimeWarnings.map((warning, index) => (
-                <li key={`${warning}-${index}`}>- {warning}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
         {artifactRefinement && shouldRenderAnnotationRefinementFallback ? (
-          <div className="rounded-2xl bg-gradient-to-r from-violet-200/50 via-fuchsia-200/45 to-purple-200/55 p-[1px]">
-            <div className="space-y-3 rounded-[15px] border border-violet-200/60 bg-background/98 p-3.5 shadow-sm">
+          <div className="space-y-3 rounded-xl border border-border/70 bg-background p-3.5 shadow-sm">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-violet-700/80">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Refine Generation
                 </p>
                 <p className="mt-1 text-sm font-semibold">
@@ -851,7 +990,7 @@ export function MessageAssistant({
 
               {artifactRefinement.requiredFields &&
               artifactRefinement.requiredFields.length > 0 ? (
-                <div className="rounded-md border border-violet-200/70 bg-background p-2">
+                <div className="rounded-md border border-border/70 bg-muted/25 p-2">
                   <p className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wide">
                     Required Details
                   </p>
@@ -871,9 +1010,9 @@ export function MessageAssistant({
                       onClick={() =>
                         (onWorkflowSuggestion || onSuggestion)?.(choice.submitText)
                       }
-                      className="hover:bg-violet-50/70 flex w-full items-start gap-2 rounded-lg border border-violet-200/70 bg-background px-2.5 py-2 text-left text-sm transition"
+                      className="hover:bg-accent/50 flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition"
                     >
-                      <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-violet-200/80 text-[11px] font-semibold text-violet-700/90">
+                      <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
                         {choice.id}
                       </span>
                       <span>{choice.label}</span>
@@ -914,11 +1053,11 @@ export function MessageAssistant({
                   </div>
                 </div>
               ) : null}
-            </div>
           </div>
         ) : null}
 
-        {(documentArtifacts.length > 0 || quizArtifacts.length > 0) && (
+        {!ENABLE_CHAT_ACTIVITY_TIMELINE_V2 &&
+        (documentArtifacts.length > 0 || quizArtifacts.length > 0) && (
           <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Generated Artifacts
@@ -946,15 +1085,16 @@ export function MessageAssistant({
           <YouTubeResults results={effectiveYoutubeResults} />
         )}
 
-        {showEvidenceReferences && (
+        {showTrustSummary && (
           <TrustSummaryCard
             content={contentToRender}
-            citations={referencedEvidenceCitations}
+            citations={displayEvidenceCitations}
             prompt={contextPrompt}
           />
         )}
-        {showEvidenceReferences && <EvidenceReferencesSection citations={referencedEvidenceCitations} />}
-        {showReferences && !showEvidenceReferences && <ReferencesSection citations={citations} />}
+        {showSourcesSection && (
+          <ReferencesSection citations={sourcesCitations} title="Sources" />
+        )}
 
         {Boolean(isLastStreaming || contentNullOrEmpty) ? null : (
           <MessageActions

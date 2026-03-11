@@ -1,8 +1,9 @@
 import { toast } from "@/components/ui/toast"
 import {
-  CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES,
+  getChatAttachmentMaxFileSizeBytes,
   getChatAttachmentFileId,
   getChatAttachmentSizeLimitLabel,
+  isImageAttachment,
 } from "@/lib/chat-attachments/constants"
 import {
   Attachment,
@@ -101,15 +102,19 @@ export const useFileUpload = () => {
     })
 
     try {
-      // Check limits in background (non-blocking)
-      const limitCheck = checkFileUploadLimit(uid).catch(err => {
-        const error = err as { code?: string; message?: string }
-        if (error.code === "DAILY_FILE_LIMIT_REACHED") {
-          toast({ title: error.message || "Daily file limit reached", status: "error" })
-          return false
-        }
-        return true
-      })
+      // Check limits in background (non-blocking).
+      // Non-image files route through uploads ingestion and should not consume chat attachment quota.
+      const shouldCheckLimit = targetFiles.some((file) => isImageAttachment(file.type))
+      const limitCheck = shouldCheckLimit
+        ? checkFileUploadLimit(uid).catch(err => {
+            const error = err as { code?: string; message?: string }
+            if (error.code === "DAILY_FILE_LIMIT_REACHED") {
+              toast({ title: error.message || "Daily file limit reached", status: "error" })
+              return false
+            }
+            return true
+          })
+        : Promise.resolve(true)
 
       // Process files in parallel immediately
       const processed = await processFiles(targetFiles, chatId, uid, isAuthenticated)
@@ -143,7 +148,10 @@ export const useFileUpload = () => {
         cleanupDetachedStatus(file, 3500)
       })
 
-      setFiles([])
+      const targetFileIds = new Set(targetFiles.map((file) => getChatAttachmentFileId(file)))
+      setFiles((prev) =>
+        prev.filter((file) => !targetFileIds.has(getChatAttachmentFileId(file)))
+      )
       return processed.attachments
     } catch (error) {
       console.error("File processing failed:", error)
@@ -249,7 +257,7 @@ export const useFileUpload = () => {
           }
           setStatusForFile(file, {
             state: "failed",
-            message: `File exceeds ${getChatAttachmentSizeLimitLabel()} limit`,
+            message: `File exceeds ${getChatAttachmentSizeLimitLabel(file.type)} limit`,
           })
         })
         .catch(() => {
@@ -268,10 +276,10 @@ export const useFileUpload = () => {
   const validateFileInBackground = async (file: File): Promise<Attachment | null> => {
     try {
       // Basic validation
-      if (file.size > CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES) {
+      if (file.size > getChatAttachmentMaxFileSizeBytes(file.type)) {
         toast({
           title: "File too large",
-          description: `${file.name} exceeds ${getChatAttachmentSizeLimitLabel()} limit`,
+          description: `${file.name} exceeds ${getChatAttachmentSizeLimitLabel(file.type)} limit`,
           status: "error"
         })
         return null

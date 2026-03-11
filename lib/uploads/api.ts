@@ -4,6 +4,34 @@ import { createClient } from "@/lib/supabase/client"
 type UploadProgressCallback = (progress: number) => void
 type UploadStateCallback = (upload: UserUploadListItem) => void
 const REQUEST_TIMEOUT_MS = 20000
+const STORAGE_UPLOAD_TIMEOUT_MS = 4 * 60 * 1000
+const UPLOAD_LIST_CACHE_KEY = "fleming:uploads:list:v2"
+const UPLOAD_LIST_MEMORY_MAX_AGE_MS = 60_000
+const UPLOAD_LIST_STORAGE_MAX_AGE_MS = 10 * 60 * 1000
+const UPLOAD_LIST_MAX_ITEMS = 120
+
+type UploadListCachePayload = {
+  savedAt: number
+  uploads: UserUploadListItem[]
+}
+
+type ListUserUploadsOptions = {
+  forceRefresh?: boolean
+  allowStale?: boolean
+  maxAgeMs?: number
+  revalidateInBackground?: boolean
+}
+
+let uploadListMemoryCache: UploadListCachePayload | null = null
+let uploadListRefreshPromise: Promise<UserUploadListItem[]> | null = null
+const SUPABASE_STORAGE_OBJECT_LIMIT_MB = Number.parseInt(
+  process.env.NEXT_PUBLIC_SUPABASE_STORAGE_OBJECT_LIMIT_MB || "50",
+  10
+)
+const SUPABASE_STORAGE_OBJECT_LIMIT_BYTES =
+  Number.isFinite(SUPABASE_STORAGE_OBJECT_LIMIT_MB) && SUPABASE_STORAGE_OBJECT_LIMIT_MB > 0
+    ? SUPABASE_STORAGE_OBJECT_LIMIT_MB * 1024 * 1024
+    : 50 * 1024 * 1024
 
 async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const controller = new AbortController()
@@ -18,34 +46,61 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): P
   }
 }
 
-export async function listUserUploads(): Promise<UserUploadListItem[]> {
-  let response: Response
+export async function listUserUploads(
+  options: ListUserUploadsOptions = {}
+): Promise<UserUploadListItem[]> {
+  const {
+    forceRefresh = false,
+    allowStale = true,
+    maxAgeMs = UPLOAD_LIST_MEMORY_MAX_AGE_MS,
+    revalidateInBackground = false,
+  } = options
+
+  const cached = !forceRefresh ? readUploadListCache(maxAgeMs) : null
+  if (cached) {
+    if (revalidateInBackground) {
+      void refreshUploadListCache().catch(() => {
+        // Background refresh failures should not block cached reads.
+      })
+    }
+    return cached.uploads
+  }
+
   try {
-    response = await fetchWithTimeout(`/api/uploads?ts=${Date.now()}`, {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-    })
+    return await refreshUploadListCache()
   } catch (error) {
+    if (allowStale) {
+      const staleFallback = readUploadListCache(UPLOAD_LIST_STORAGE_MAX_AGE_MS)
+      if (staleFallback) {
+        return staleFallback.uploads
+      }
+    }
     const isAbort = error instanceof Error && error.name === "AbortError"
     throw new Error(isAbort ? "Uploads refresh timed out" : "Failed to fetch uploads")
   }
+}
 
-  if (!response.ok) {
-    throw new Error("Failed to load uploads")
+export function primeUploadListCache(uploads: UserUploadListItem[]) {
+  writeUploadListCache(uploads)
+}
+
+export function invalidateUploadListCache() {
+  uploadListMemoryCache = null
+  uploadListRefreshPromise = null
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.removeItem(UPLOAD_LIST_CACHE_KEY)
+  } catch {
+    // Ignore localStorage failures.
   }
-
-  const result = await response.json()
-  return result.uploads ?? []
 }
 
 export async function getUserUploadDetail(uploadId: string): Promise<UserUploadDetail> {
   let response: Response
   try {
-    response = await fetchWithTimeout(`/api/uploads/${uploadId}?ts=${Date.now()}`, {
+    response = await fetchWithTimeout(`/api/uploads/${uploadId}`, {
       method: "GET",
       credentials: "include",
-      cache: "no-store",
     })
   } catch (error) {
     const isAbort = error instanceof Error && error.name === "AbortError"
@@ -69,6 +124,14 @@ export async function uploadKnowledgeFile(
     onUploadState?: UploadStateCallback
   }
 ): Promise<UserUploadListItem> {
+  invalidateUploadListCache()
+  if (file.size > SUPABASE_STORAGE_OBJECT_LIMIT_BYTES) {
+    const limitMb = Math.round(SUPABASE_STORAGE_OBJECT_LIMIT_BYTES / (1024 * 1024))
+    const sizeMb = Math.round(file.size / (1024 * 1024))
+    throw new Error(
+      `This file is too large for direct upload (${sizeMb}MB). Maximum supported size is ${limitMb}MB.`
+    )
+  }
   const initResponse = await fetch("/api/uploads/init", {
     method: "POST",
     headers: {
@@ -123,10 +186,13 @@ export async function uploadKnowledgeFile(
 
   const result = await response.json()
   if (result?.upload) {
+    void refreshUploadListCache().catch(() => {
+      // Keep this non-blocking. Polling/UI refresh will still update state.
+    })
     return result.upload as UserUploadListItem
   }
 
-  const uploads = await listUserUploads()
+  const uploads = await listUserUploads({ forceRefresh: true })
   const created = uploads.find((item) => item.id === pendingUpload.uploadId)
   if (created) {
     return created
@@ -144,6 +210,7 @@ export async function deleteKnowledgeFile(uploadId: string) {
     const payload = await safeJson(response)
     throw new Error(payload?.error || "Failed to delete upload")
   }
+  invalidateUploadListCache()
 }
 
 export async function reprocessKnowledgeFile(uploadId: string): Promise<UserUploadListItem> {
@@ -158,11 +225,15 @@ export async function reprocessKnowledgeFile(uploadId: string): Promise<UserUplo
     throw new Error(payload?.error || "Failed to reprocess upload")
   }
 
+  invalidateUploadListCache()
   const result = await response.json()
   if (result?.upload) {
+    void refreshUploadListCache().catch(() => {
+      // Reprocess state is eventually refreshed by polling.
+    })
     return result.upload as UserUploadListItem
   }
-  const uploads = await listUserUploads()
+  const uploads = await listUserUploads({ forceRefresh: true })
   const updated = uploads.find((item) => item.id === uploadId)
   if (updated) {
     return updated
@@ -189,7 +260,10 @@ function startUploadPolling(uploadId: string, onUploadState?: UploadStateCallbac
   const poll = async () => {
     if (!active) return
     try {
-      const uploads = await listUserUploads()
+      const uploads = await listUserUploads({
+        forceRefresh: true,
+        allowStale: true,
+      })
       const upload = uploads.find((item) => item.id === uploadId)
       if (upload) {
         onUploadState(upload)
@@ -214,6 +288,82 @@ function startUploadPolling(uploadId: string, onUploadState?: UploadStateCallbac
     if (timeoutId) {
       clearTimeout(timeoutId)
     }
+  }
+}
+
+function readUploadListCache(maxAgeMs: number): UploadListCachePayload | null {
+  const now = Date.now()
+  if (uploadListMemoryCache && now - uploadListMemoryCache.savedAt <= maxAgeMs) {
+    return uploadListMemoryCache
+  }
+
+  const fromStorage = readUploadListCacheFromStorage()
+  if (fromStorage && now - fromStorage.savedAt <= maxAgeMs) {
+    uploadListMemoryCache = fromStorage
+    return fromStorage
+  }
+  return null
+}
+
+function readUploadListCacheFromStorage(): UploadListCachePayload | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(UPLOAD_LIST_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as UploadListCachePayload
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.savedAt !== "number" ||
+      !Array.isArray(parsed.uploads)
+    ) {
+      return null
+    }
+    if (Date.now() - parsed.savedAt > UPLOAD_LIST_STORAGE_MAX_AGE_MS) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeUploadListCache(uploads: UserUploadListItem[]) {
+  const payload: UploadListCachePayload = {
+    savedAt: Date.now(),
+    uploads: uploads.slice(0, UPLOAD_LIST_MAX_ITEMS),
+  }
+  uploadListMemoryCache = payload
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(UPLOAD_LIST_CACHE_KEY, JSON.stringify(payload))
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
+async function refreshUploadListCache(): Promise<UserUploadListItem[]> {
+  if (uploadListRefreshPromise) {
+    return uploadListRefreshPromise
+  }
+  uploadListRefreshPromise = (async () => {
+    const response = await fetchWithTimeout("/api/uploads", {
+      method: "GET",
+      credentials: "include",
+    })
+    if (!response.ok) {
+      throw new Error("Failed to load uploads")
+    }
+    const result = await response.json()
+    const uploads = Array.isArray(result.uploads) ? (result.uploads as UserUploadListItem[]) : []
+    writeUploadListCache(uploads)
+    return uploads
+  })()
+
+  try {
+    return await uploadListRefreshPromise
+  } finally {
+    uploadListRefreshPromise = null
   }
 }
 
@@ -250,6 +400,7 @@ async function uploadFileToStorageWithProgress(
   await new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest()
     request.open("POST", uploadUrl)
+    request.timeout = STORAGE_UPLOAD_TIMEOUT_MS
     request.setRequestHeader("Authorization", `Bearer ${session.access_token}`)
     request.setRequestHeader("apikey", anonKey)
     request.setRequestHeader("x-upsert", "true")
@@ -263,6 +414,10 @@ async function uploadFileToStorageWithProgress(
 
     request.onerror = () => {
       reject(new Error("Failed to upload file to storage"))
+    }
+
+    request.ontimeout = () => {
+      reject(new Error("Upload timed out while sending to storage"))
     }
 
     request.onload = () => {
@@ -280,6 +435,10 @@ async function uploadFileToStorageWithProgress(
         if (request.responseText) {
           errorMessage = request.responseText
         }
+      }
+      if (/maximum allowed size|object exceeded/i.test(errorMessage)) {
+        const limitMb = Math.round(SUPABASE_STORAGE_OBJECT_LIMIT_BYTES / (1024 * 1024))
+        errorMessage = `This file exceeds the storage object limit (${limitMb}MB).`
       }
       reject(new Error(errorMessage))
     }

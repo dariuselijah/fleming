@@ -3,6 +3,7 @@ import React, { useState, useCallback, useMemo } from "react"
 import { MessageAssistant } from "./message-assistant"
 import { MessageUser } from "./message-user"
 import { parseLearningCard } from "@/lib/medical-student-learning"
+import type { ReferencedUploadStatus } from "./activity/types"
 
 type MessageProps = {
   variant: MessageType["role"]
@@ -23,6 +24,7 @@ type MessageProps = {
   evidenceCitations?: any[]
   contextPrompt?: string
   streamIntroPreview?: string | null
+  referencedUploads?: ReferencedUploadStatus[]
 }
 
 export function Message({
@@ -44,6 +46,7 @@ export function Message({
   evidenceCitations = [],
   contextPrompt,
   streamIntroPreview,
+  referencedUploads = [],
 }: MessageProps) {
   const [copied, setCopied] = useState(false)
   const clipboardText = useMemo(() => {
@@ -85,6 +88,7 @@ export function Message({
     if (variant === "assistant") {
       return (
         <MessageAssistant
+          messageId={id}
           copied={copied}
           copyToClipboard={copyToClipboard}
           onReload={memoizedOnReload}
@@ -99,6 +103,7 @@ export function Message({
           evidenceCitations={evidenceCitations}
           contextPrompt={contextPrompt}
           streamIntroPreview={streamIntroPreview}
+          referencedUploads={referencedUploads}
         >
           {children}
         </MessageAssistant>
@@ -127,6 +132,7 @@ export function Message({
     evidenceCitations,
     contextPrompt,
     streamIntroPreview,
+    referencedUploads,
   ])
 
   return messageContent

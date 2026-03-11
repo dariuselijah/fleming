@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { shouldApplyHydrationResult } from "../lib/chat-store/messages/load-guards"
 import { normalizeStoredMessageRow } from "../lib/chat-store/messages/normalize"
 import { resolveScopedSessionMessages } from "../lib/chat-store/messages/session-restore"
@@ -242,6 +242,79 @@ function testUploadsLoadingShellExists() {
   )
 }
 
+function testEvidenceAnnotationPersistenceHookExists() {
+  const useChatCore = existsSync("app/components/chat/use-chat-core.ts")
+    ? readFileSync("app/components/chat/use-chat-core.ts", "utf-8")
+    : ""
+  assert.match(
+    useChatCore,
+    /type === "evidence-citations"/,
+    "Session-safe annotations should preserve streamed evidence citation annotations"
+  )
+  assert.match(
+    useChatCore,
+    /mergeEvidenceCitationAnnotations\(/,
+    "Chat core should merge multiple evidence citation annotations during restore/save"
+  )
+  assert.match(
+    useChatCore,
+    /type === "timeline-event"/,
+    "Session-safe annotations should preserve timeline-event annotations for activity continuity"
+  )
+  assert.match(
+    useChatCore,
+    /type === "tool-lifecycle"/,
+    "Session-safe annotations should preserve tool lifecycle annotations for in-place tool cards"
+  )
+  assert.match(
+    useChatCore,
+    /summary:\s*compactSnapshotValue\(candidate\.summary\)/,
+    "Session-safe annotations should preserve langgraph summary updates"
+  )
+  assert.doesNotMatch(
+    useChatCore,
+    /if \(!\/refine\.\*requirements\/i\.test\(toolName\)\) return null/,
+    "Session-safe message parts should retain all tool invocations, not only refinement tools"
+  )
+}
+
+function testSharedArticleCitationSanitization() {
+  const article = existsSync("app/share/[chatId]/article.tsx")
+    ? readFileSync("app/share/[chatId]/article.tsx", "utf-8")
+    : ""
+  const messageAssistant = existsSync("app/components/chat/message-assistant.tsx")
+    ? readFileSync("app/components/chat/message-assistant.tsx", "utf-8")
+    : ""
+  const sourceAppendix = existsSync("app/components/chat/source-appendix.ts")
+    ? readFileSync("app/components/chat/source-appendix.ts", "utf-8")
+    : ""
+  assert.match(
+    article,
+    /sanitizeSharedMessageText\(/,
+    "Shared article view should sanitize internal citation placeholders/tokens"
+  )
+  assert.match(
+    article,
+    /splitTrailingSourceAppendix\(/,
+    "Shared article view should strip trailing source appendix blocks from body text"
+  )
+  assert.match(
+    messageAssistant,
+    /splitTrailingSourceAppendix\(/,
+    "Assistant renderer should split trailing PMID/source appendix blocks"
+  )
+  assert.match(
+    sourceAppendix,
+    /dedupeTrailingEntries\(/,
+    "Trailing source appendix parser should dedupe repeated PMID entries"
+  )
+  assert.match(
+    messageAssistant,
+    /<ReferencesSection citations={sourcesCitations} title="Sources"/,
+    "Assistant renderer should expose one unified Sources section"
+  )
+}
+
 function run() {
   testScopedSessionRestore()
   testMessageNormalization()
@@ -249,6 +322,8 @@ function run() {
   testUploadReferenceTokens()
   testScopedNewChatReset()
   testUploadsLoadingShellExists()
+  testEvidenceAnnotationPersistenceHookExists()
+  testSharedArticleCitationSanitization()
   console.log("chat-history regression checks passed")
 }
 

@@ -5,7 +5,15 @@ export type ProvenanceSourceType =
   | "guideline"
   | "clinical_trial"
   | "drug_safety"
-  | "conflict_analysis";
+  | "conflict_analysis"
+  | "scholar_gateway"
+  | "preprint"
+  | "visual_knowledge"
+  | "provider_registry"
+  | "coverage_policy"
+  | "research_dataset"
+  | "chemical_database"
+  | "lab_workflow";
 
 export interface SourceProvenance {
   id: string;
@@ -69,6 +77,14 @@ export function computeProvenanceConfidence({
     clinical_trial: 0.14,
     drug_safety: 0.18,
     conflict_analysis: 0.05,
+    scholar_gateway: 0.14,
+    preprint: 0.11,
+    visual_knowledge: 0.08,
+    provider_registry: 0.1,
+    coverage_policy: 0.12,
+    research_dataset: 0.09,
+    chemical_database: 0.12,
+    lab_workflow: 0.07,
   };
   score += authorityBoostBySource[sourceType];
   reasons.push(`source:${sourceType}`);

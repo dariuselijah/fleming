@@ -26,6 +26,14 @@ function stripInternalCitationTokens(value: string): string {
     .replace(/\[doc\s+[^\]]+\]/gi, "")
 }
 
+function stripInternalRuntimeTokensPreservePlaceholders(value: string): string {
+  if (!value) return value
+  return value
+    .replace(/\[tool\s+[^\]]+\]/gi, "")
+    .replace(/\[source\s+[^\]]+\]/gi, "")
+    .replace(/\[doc\s+[^\]]+\]/gi, "")
+}
+
 function resolveNamedMarkerIndices(
   markerText: string,
   citations: Map<number, CitationData>
@@ -102,7 +110,8 @@ function resolveNamedMarkerIndices(
 function collectNamedMarkers(
   text: string,
   existingMarkers: ReturnType<typeof parseCitationMarkers>,
-  citations: Map<number, CitationData>
+  citations: Map<number, CitationData>,
+  includeUnresolved = false
 ) {
   const namedMarkers: ReturnType<typeof parseCitationMarkers> = []
   let depth = 0
@@ -157,7 +166,7 @@ function collectNamedMarkers(
     }
 
     const indices = resolveNamedMarkerIndices(normalizedInner, citations)
-    if (indices.length > 0) {
+    if (indices.length > 0 || includeUnresolved) {
       namedMarkers.push({
         type: "named",
         indices,
@@ -172,6 +181,233 @@ function collectNamedMarkers(
   }
 
   return namedMarkers
+}
+
+function resolveSymbolicEvidenceMarkerIndices(
+  markerText: string,
+  evidenceCitationMap: Map<number, EvidenceCitation>
+): number[] {
+  const normalized = markerText.toLowerCase().trim()
+  const match = normalized.match(/^([a-z][a-z0-9-]*)[_\-\s]*(\d+)$/)
+  if (!match) return []
+
+  const markerType = match[1]
+  const ordinal = Number.parseInt(match[2], 10)
+  if (!Number.isFinite(ordinal) || ordinal < 1) return []
+
+  const allCitations = Array.from(evidenceCitationMap.values()).sort(
+    (left, right) => left.index - right.index
+  )
+  if (allCitations.length === 0) return []
+
+  const filtered = allCitations.filter((citation) => {
+    const journal = (citation.journal || "").toLowerCase()
+    const title = (citation.title || "").toLowerCase()
+    const sourceLabel = (citation.sourceLabel || "").toLowerCase()
+    const url = (citation.url || "").toLowerCase()
+    const studyType = (citation.studyType || "").toLowerCase()
+
+    if (markerType.startsWith("guideline")) {
+      return (
+        /guideline|consensus|position statement|kdigo|nice|esc|acc\/aha|ada/i.test(
+          `${journal} ${title} ${sourceLabel}`
+        )
+      )
+    }
+    if (markerType === "pubmed") {
+      return Boolean(citation.pmid) || url.includes("pubmed")
+    }
+    if (markerType.startsWith("trial")) {
+      return /trial|randomized|rct/i.test(studyType)
+    }
+    if (markerType.startsWith("upload")) {
+      return citation.sourceType === "user_upload"
+    }
+    if (markerType.includes("chembl")) {
+      return /chembl/.test(`${journal} ${title} ${sourceLabel} ${url}`)
+    }
+    if (markerType.includes("biorxiv")) {
+      return /biorxiv/.test(`${journal} ${title} ${sourceLabel} ${url}`)
+    }
+    if (markerType.includes("scholar")) {
+      return /scholar|google scholar/.test(`${journal} ${title} ${sourceLabel} ${url}`)
+    }
+    // citation/source fallback: any evidence citation
+    return true
+  })
+
+  const pool = filtered.length > 0 ? filtered : allCitations
+  const selected = pool[ordinal - 1]
+  return selected ? [selected.index] : []
+}
+
+function resolveNamedEvidenceMarkerIndices(
+  markerText: string,
+  evidenceCitationMap: Map<number, EvidenceCitation>
+): number[] {
+  const normalizedMarker = markerText.toLowerCase().trim()
+  if (!normalizedMarker) return []
+
+  const stopwords = new Set([
+    "for",
+    "and",
+    "the",
+    "with",
+    "from",
+    "this",
+    "that",
+    "are",
+    "of",
+    "in",
+    "on",
+    "to",
+    "or",
+    "by",
+    "latest",
+    "recent",
+    "evidence",
+    "source",
+    "sources",
+  ])
+
+  const markerTokens = normalizedMarker
+    .split(/[^a-z0-9.]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+    .filter((token) => !stopwords.has(token))
+
+  const scored = Array.from(evidenceCitationMap.values())
+    .map((citation) => {
+      const haystack = [
+        citation.title || "",
+        citation.journal || "",
+        citation.url || "",
+        citation.pmid || "",
+        citation.doi || "",
+        citation.sourceLabel || "",
+        citation.studyType || "",
+      ]
+        .join(" ")
+        .toLowerCase()
+      let score = 0
+
+      for (const token of markerTokens) {
+        if (haystack.includes(token)) score += 1
+      }
+
+      if (
+        /(biorxiv|bio-rxiv|bio rxiv)/.test(normalizedMarker) &&
+        /biorxiv/.test(haystack)
+      ) {
+        score += 3
+      }
+      if (
+        /(scholar|google scholar|scholar gateway)/.test(normalizedMarker) &&
+        /(scholar|google scholar)/.test(haystack)
+      ) {
+        score += 3
+      }
+      if (/synapse/.test(normalizedMarker) && /synapse/.test(haystack)) {
+        score += 3
+      }
+
+      return { index: citation.index, score }
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+
+  return scored.slice(0, 3).map((entry) => entry.index)
+}
+
+function resolveSymbolicCitationIndices(
+  markerText: string,
+  citations: Map<number, CitationData>
+): number[] {
+  const normalized = markerText.toLowerCase().trim()
+  const match = normalized.match(/^([a-z][a-z0-9-]*)[_\-\s]*(\d+)$/)
+  if (!match) return []
+
+  const markerType = match[1]
+  const ordinal = Number.parseInt(match[2], 10)
+  if (!Number.isFinite(ordinal) || ordinal < 1) return []
+
+  const allCitations = Array.from(citations.values()).sort((left, right) => left.index - right.index)
+  if (allCitations.length === 0) return []
+
+  const filtered = allCitations.filter((citation) => {
+    const title = (citation.title || "").toLowerCase()
+    const journal = (citation.journal || "").toLowerCase()
+    const url = (citation.url || "").toLowerCase()
+    const haystack = `${title} ${journal} ${url}`
+
+    if (markerType.includes("guideline")) {
+      return /guideline|consensus|position statement|kdigo|nice|esc|acc\/aha|ada/i.test(haystack)
+    }
+    if (markerType.includes("pubmed")) {
+      return Boolean(citation.pmid) || url.includes("pubmed")
+    }
+    if (markerType.includes("chembl")) {
+      return /chembl/.test(haystack)
+    }
+    if (markerType.includes("biorxiv")) {
+      return /biorxiv/.test(haystack)
+    }
+    if (markerType.includes("scholar")) {
+      return /scholar|google scholar/.test(haystack)
+    }
+    if (markerType.includes("trial")) {
+      return /trial|randomized|rct/.test(haystack)
+    }
+
+    return markerType.length >= 3 ? haystack.includes(markerType) : false
+  })
+
+  const pool = filtered.length > 0 ? filtered : allCitations
+  const selected = pool[ordinal - 1]
+  return selected ? [selected.index] : []
+}
+
+function collectSymbolicMarkers(
+  text: string,
+  existingMarkers: ReturnType<typeof parseCitationMarkers>,
+  resolver: (markerName: string) => number[]
+) {
+  const symbolicMarkers: ReturnType<typeof parseCitationMarkers> = []
+  const symbolicPattern = /\[([a-z][a-z0-9-]*[_\-\s]*\d+)\]/gi
+  let match: RegExpExecArray | null
+
+  while ((match = symbolicPattern.exec(text)) !== null) {
+    const markerBody = match[1]?.trim() || ""
+    const normalizedBody = markerBody.toLowerCase()
+    if (!normalizedBody) continue
+    if (/^\d+(?:\s*(?:,|-)\s*\d+)*$/.test(normalizedBody)) continue
+    if (
+      /^citation\s*:|^pmid\s*:|^doi\s*:|^source\s*:|^tool\s*:|^doc\s*:|^cite_placeholder_/i.test(
+        normalizedBody
+      )
+    ) {
+      continue
+    }
+
+    const startIndex = match.index
+    const endIndex = match.index + match[0].length
+    const overlapsExisting = existingMarkers.some(
+      (existing) => startIndex < existing.endIndex && endIndex > existing.startIndex
+    )
+    if (overlapsExisting) continue
+
+    const indices = resolver(normalizedBody)
+    symbolicMarkers.push({
+      type: "named",
+      indices,
+      startIndex,
+      endIndex,
+      fullMatch: match[0],
+      quoteText: normalizedBody,
+    })
+  }
+
+  return symbolicMarkers
 }
 
 /**
@@ -284,11 +520,55 @@ export function CitationMarkdown({
           fullMatch: pmidMatch[0],
         })
       }
+
+      // Resolve symbolic markers used by synthesis prompts, e.g. [guideline_1], [pubmed_2], [chembl_1].
+      const symbolicMarkers = collectSymbolicMarkers(sanitizedChildren, result, (markerName) =>
+        resolveSymbolicEvidenceMarkerIndices(markerName, evidenceCitationMap)
+      )
+      result.push(...symbolicMarkers)
+
+      // Resolve free-text bracketed markers in evidence mode, e.g. [bioRxiv 2025.06.10.656785]
+      const evidenceAsCitationMap = new Map<number, CitationData>()
+      evidenceCitationMap.forEach((citation, index) => {
+        evidenceAsCitationMap.set(index, {
+          index,
+          title: citation.title,
+          authors: citation.authors || [],
+          journal: citation.journal || "",
+          year: citation.year ? String(citation.year) : "",
+          url: citation.url || undefined,
+          doi: citation.doi || undefined,
+          pmid: citation.pmid || undefined,
+        })
+      })
+      const namedMarkers = collectNamedMarkers(
+        sanitizedChildren,
+        result,
+        evidenceAsCitationMap,
+        true
+      )
+      const resolvedNamedMarkers = namedMarkers.map((marker) => {
+        if (marker.indices.length > 0) return marker
+        const fallbackIndices = resolveNamedEvidenceMarkerIndices(
+          marker.quoteText || marker.fullMatch,
+          evidenceCitationMap
+        )
+        return {
+          ...marker,
+          indices: fallbackIndices,
+        }
+      })
+      result.push(...resolvedNamedMarkers)
     }
 
     // Resolve named bracket citations for non-evidence mode, e.g.
     // [OpenFDA drug labels for acetaminophen, dapagliflozin, and metformin]
     if (!evidenceCitationMap && citations.size > 0) {
+      const symbolicMarkers = collectSymbolicMarkers(sanitizedChildren, result, (markerName) =>
+        resolveSymbolicCitationIndices(markerName, citations)
+      )
+      result.push(...symbolicMarkers)
+
       const namedMarkers = collectNamedMarkers(sanitizedChildren, result, citations)
       result.push(...namedMarkers)
     }
@@ -432,7 +712,7 @@ function processText(
   markerMap: Map<string, ReturnType<typeof parseCitationMarkers>[0]>,
   evidenceCitationMap: Map<number, EvidenceCitation> | null
 ): React.ReactNode {
-  const sanitizedText = stripInternalCitationTokens(text)
+  const sanitizedText = stripInternalRuntimeTokensPreservePlaceholders(text)
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   // Match the placeholder format [CITE_PLACEHOLDER_0]
@@ -459,9 +739,7 @@ function processText(
           evidenceCitationMap.has(idx)
         )
         if (!allIndicesResolvable) {
-          // Keep bracketed numbers as plain text when they do not map to real citations.
-          // This prevents false pills for values like [2017] that are just years.
-          parts.push(marker.fullMatch)
+          // Strict contract: unresolved markers should not leak.
           lastIndex = matchIndex + matchLength
           continue
         }
@@ -496,8 +774,6 @@ function processText(
               </span>
             )
           }
-        } else {
-          parts.push(marker.fullMatch)
         }
       } else {
         if (marker.type === "named") {
@@ -534,8 +810,6 @@ function processText(
             } else {
               parts.push(journalTags[0])
             }
-          } else {
-            parts.push(marker.fullMatch)
           }
 
           lastIndex = matchIndex + matchLength
@@ -579,17 +853,10 @@ function processText(
           } else if (journalTags.length === 1) {
             parts.push(journalTags[0])
           }
-        } else {
-          // Safety-first: keep unresolved marker as plain text instead of
-          // rendering a citation pill that could imply incorrect mapping.
-          parts.push(marker.fullMatch)
         }
       }
-    } else {
-      // Safety fallback: if placeholder map is missing, avoid leaking raw placeholder token.
-      parts.push(`[${match[1]}]`)
     }
-    
+
     lastIndex = matchIndex + matchLength
   }
   

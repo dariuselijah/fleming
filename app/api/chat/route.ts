@@ -3,6 +3,9 @@ import {
   ENABLE_UPLOAD_CONTEXT_SEARCH,
   ENABLE_UPLOAD_ARTIFACT_V2,
   ENABLE_YOUTUBE_TOOL,
+  ENABLE_LANGGRAPH_HARNESS,
+  ENABLE_CONNECTOR_REGISTRY,
+  ENABLE_STRICT_CITATION_CONTRACT,
   getSystemPromptByRole,
 } from "@/lib/config"
 import { getAllModels, getModelInfo } from "@/lib/models"
@@ -29,6 +32,7 @@ import {
   Message as MessageAISDK,
   convertToCoreMessages,
   streamText,
+  generateText,
   ToolSet,
   tool,
   createDataStreamResponse,
@@ -70,16 +74,25 @@ import {
 import { UserUploadService } from "@/lib/uploads/server"
 import pdfParse from "pdf-parse/lib/pdf-parse.js"
 import type { UploadContextSearchMode, UploadTopicContext } from "@/lib/uploads/server"
+import type { UserUploadListItem } from "@/lib/uploads/types"
 import {
   extractUploadReferenceIds,
   stripUploadReferenceTokens,
 } from "@/lib/uploads/reference-tokens"
+import {
+  buildUploadRetrievalPreflightCacheKey,
+  getUploadRetrievalPreflightCache,
+  setUploadRetrievalPreflightCache,
+} from "@/lib/uploads/retrieval-preflight-cache"
 import { decodeArtifactWorkflowInput } from "@/lib/chat/artifact-workflow"
 import type { TopicContext } from "@/app/types/api.types"
 import {
   normalizeCitationStyle,
   type CitationStyle,
 } from "@/lib/citations/formatters"
+import { runClinicalAgentHarness } from "@/lib/clinical-agent/graph"
+import { recordCitationContractViolation } from "@/lib/clinical-agent/telemetry"
+import { runConnectorSearch } from "@/lib/evidence/connectors"
 
 export const maxDuration = 60
 const BENCH_STRICT_MODE = process.env.BENCH_STRICT_MODE === "true"
@@ -95,6 +108,52 @@ const getCachedSystemPrompt = (role: "doctor" | "general" | "medical_student" | 
     systemPromptCache.set(cacheKey, prompt)
   }
   return systemPromptCache.get(cacheKey)!
+}
+
+type ImplicitUploadIntentSignal = {
+  hasImplicitUploadIntent: boolean
+  preferSlides: boolean
+}
+
+function detectImplicitUploadIntent(query: string): ImplicitUploadIntentSignal {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) {
+    return { hasImplicitUploadIntent: false, preferSlides: false }
+  }
+  const hasUploadCue =
+    /\bfrom\s+my\s+upload(?:ed)?(?:\s+(?:files?|docs?|documents?|slides?|decks?))?\b/i.test(normalized) ||
+    /\b(?:my|the)\s+upload(?:ed)?\s+(?:files?|docs?|documents?|slides?|decks?)\b/i.test(normalized) ||
+    /\buse\s+(?:my|the)\s+upload(?:ed)?(?:\s+(?:files?|docs?|documents?|slides?|decks?))?\b/i.test(normalized) ||
+    /\bfrom\s+my\s+uploads?\b/i.test(normalized)
+  const preferSlides = /\b(slides?|pptx|deck|presentation)\b/i.test(normalized)
+  return {
+    hasImplicitUploadIntent: hasUploadCue,
+    preferSlides,
+  }
+}
+
+function resolveAutoLatestUploadIds(
+  uploads: UserUploadListItem[],
+  intentSignal: ImplicitUploadIntentSignal,
+  maxCount = 3
+): string[] {
+  if (!intentSignal.hasImplicitUploadIntent) return []
+  const kindPriority = intentSignal.preferSlides
+    ? { pptx: 6, pdf: 5, docx: 4, text: 3, image: 1 }
+    : { pdf: 6, docx: 5, text: 4, pptx: 4, image: 1 }
+
+  return [...uploads]
+    .filter((upload) => upload.status === "completed")
+    .sort((a, b) => {
+      const aPriority = kindPriority[a.uploadKind as keyof typeof kindPriority] ?? 0
+      const bPriority = kindPriority[b.uploadKind as keyof typeof kindPriority] ?? 0
+      if (aPriority !== bPriority) return bPriority - aPriority
+      const aUpdated = new Date(a.updatedAt || a.createdAt).getTime()
+      const bUpdated = new Date(b.updatedAt || b.createdAt).getTime()
+      return bUpdated - aUpdated
+    })
+    .slice(0, maxCount)
+    .map((upload) => upload.id)
 }
 
 /**
@@ -478,13 +537,70 @@ function ensureRefinementToolResultInMessages(
   return nextMessages
 }
 
-function buildSafeIntroPreview(query: string): string {
-  const normalized = query.replace(/\s+/g, " ").trim()
-  if (!normalized) {
-    return "I am preparing a grounded response and will stream results as tools complete."
-  }
+function buildSafeIntroPreview(input: {
+  query: string
+  shouldPreferUploadContext?: boolean
+  shouldRunEvidenceSynthesis?: boolean
+  shouldRunWebSearchPreflight?: boolean
+  artifactIntent?: "none" | "quiz"
+  artifactWorkflowStage?: "none" | "inspect" | "refine" | "generate"
+}): string {
+  const normalized = input.query.replace(/\s+/g, " ").trim()
   const snippet = normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized
-  return `I am preparing a grounded response for "${snippet}" and will stream tool activity inline.`
+
+  if (input.artifactIntent === "quiz") {
+    if (input.artifactWorkflowStage === "inspect") {
+      return snippet
+        ? `Scanning your uploaded material to shape a focused quiz for "${snippet}".`
+        : "Scanning your uploaded material to shape a focused quiz."
+    }
+    if (input.artifactWorkflowStage === "refine") {
+      return snippet
+        ? `Narrowing the quiz scope for "${snippet}" so the questions stay grounded and high-yield.`
+        : "Narrowing the quiz scope so the questions stay grounded and high-yield."
+    }
+    return snippet
+      ? `Building a source-grounded quiz for "${snippet}" and checking the supporting passages as I go.`
+      : "Building a source-grounded quiz and checking the supporting passages as I go."
+  }
+
+  if (input.shouldPreferUploadContext) {
+    return snippet
+      ? `Checking your uploaded material for the best supporting passages on "${snippet}".`
+      : "Checking your uploaded material for the best supporting passages."
+  }
+
+  if (input.shouldRunEvidenceSynthesis && input.shouldRunWebSearchPreflight) {
+    return snippet
+      ? `Pulling together the strongest evidence and current sources for "${snippet}".`
+      : "Pulling together the strongest evidence and current sources."
+  }
+
+  if (input.shouldRunEvidenceSynthesis) {
+    return snippet
+      ? `Gathering evidence-backed guidance for "${snippet}".`
+      : "Gathering evidence-backed guidance."
+  }
+
+  if (input.shouldRunWebSearchPreflight) {
+    return snippet
+      ? `Looking up current sources for "${snippet}" and drafting the answer inline.`
+      : "Looking up current sources and drafting the answer inline."
+  }
+
+  if (!snippet) {
+    return "Pulling together a grounded response and streaming the useful steps inline."
+  }
+  return `Working through "${snippet}" and surfacing the useful steps inline.`
+}
+
+const EVIDENCE_SEEKING_INTENT_PATTERN =
+  /\b(treat(?:ment|ing)?|manage(?:ment|ing)?|guideline|guidelines|recommendation|consensus|workup|diagnos(?:is|e)|compare|comparison|drug|medication|therapy|therapeutic|prognos(?:is|tic)|risk|benefit|evidence(?:-based)?|citation|citations|source|sources|meta-analysis|systematic review)\b/i
+
+function hasEvidenceSeekingIntent(query: string): boolean {
+  const normalized = query.trim()
+  if (!normalized) return false
+  return EVIDENCE_SEEKING_INTENT_PATTERN.test(normalized)
 }
 
 async function runWithTimeBudget<T>(
@@ -521,6 +637,166 @@ async function runWithTimeBudget<T>(
     console.warn(`⏱️ [${label}] failed, using fallback:`, error)
     return fallbackValue
   }
+}
+
+const DYNAMIC_ACTIVITY_COPY_TIMEOUT_MS = 240
+const DYNAMIC_ACTIVITY_COPY_CACHE_TTL_MS = 6 * 60 * 1000
+const dynamicActivityCopyCache = new Map<
+  string,
+  { intro: string; reasoning: string; savedAt: number }
+>()
+
+type DynamicActivityCopyInput = {
+  query: string
+  role: "doctor" | "general" | "medical_student"
+  learningMode: MedicalStudentLearningMode
+  clinicianMode: ClinicianWorkflowMode
+  artifactIntent: "none" | "quiz"
+  artifactWorkflowStage: "none" | "inspect" | "refine" | "generate"
+  shouldPreferUploadContext: boolean
+  shouldRunEvidenceSynthesis: boolean
+  shouldRunWebSearchPreflight: boolean
+  selectedToolNames: string[]
+  langGraphTrace: string[]
+}
+
+function normalizeActivityLine(
+  value: string | undefined,
+  fallback: string,
+  maxChars: number
+): string {
+  const normalized = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim()
+  if (!normalized) return fallback
+  return normalized.length > maxChars ? `${normalized.slice(0, maxChars - 3)}...` : normalized
+}
+
+function parseDynamicActivityCopyPayload(
+  rawText: string
+): { intro: string; reasoning: string } | null {
+  const trimmed = rawText.trim()
+  if (!trimmed) return null
+
+  const parseCandidate = (candidate: string) => {
+    try {
+      const parsed = JSON.parse(candidate) as { intro?: unknown; reasoning?: unknown }
+      if (
+        typeof parsed?.intro === "string" &&
+        parsed.intro.trim().length > 0 &&
+        typeof parsed?.reasoning === "string" &&
+        parsed.reasoning.trim().length > 0
+      ) {
+        return { intro: parsed.intro, reasoning: parsed.reasoning }
+      }
+    } catch {
+      return null
+    }
+    return null
+  }
+
+  const direct = parseCandidate(trimmed)
+  if (direct) return direct
+
+  const jsonBlockMatch = trimmed.match(/\{[\s\S]*\}/)
+  if (jsonBlockMatch?.[0]) {
+    const fromBlock = parseCandidate(jsonBlockMatch[0])
+    if (fromBlock) return fromBlock
+  }
+
+  return null
+}
+
+function buildDynamicActivityCopyCacheKey(input: DynamicActivityCopyInput): string {
+  const normalizedQuery = input.query.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 180)
+  const toolSignature = [...input.selectedToolNames].sort().join("|")
+  const traceSignature = input.langGraphTrace
+    .filter((token) => /^classify:|^mode:|^route:tools=|^route:connectors=/i.test(token))
+    .map((token) => token.toLowerCase())
+    .join("|")
+  return [
+    normalizedQuery,
+    input.role,
+    input.learningMode,
+    input.clinicianMode,
+    input.artifactIntent,
+    input.artifactWorkflowStage,
+    input.shouldPreferUploadContext ? "upload" : "no-upload",
+    input.shouldRunEvidenceSynthesis ? "evidence" : "no-evidence",
+    input.shouldRunWebSearchPreflight ? "web" : "no-web",
+    toolSignature,
+    traceSignature,
+  ].join("::")
+}
+
+async function generateDynamicActivityCopy(
+  model: any,
+  input: DynamicActivityCopyInput,
+  fallbackIntro: string
+): Promise<{ intro: string; reasoning: string } | null> {
+  const cacheKey = buildDynamicActivityCopyCacheKey(input)
+  const cached = dynamicActivityCopyCache.get(cacheKey)
+  if (cached && Date.now() - cached.savedAt <= DYNAMIC_ACTIVITY_COPY_CACHE_TTL_MS) {
+    return { intro: cached.intro, reasoning: cached.reasoning }
+  }
+
+  const contextPayload = {
+    query: input.query,
+    role: input.role,
+    learningMode: input.learningMode,
+    clinicianMode: input.clinicianMode,
+    artifactIntent: input.artifactIntent,
+    artifactWorkflowStage: input.artifactWorkflowStage,
+    uploadContext: input.shouldPreferUploadContext,
+    evidenceMode: input.shouldRunEvidenceSynthesis,
+    webSearchMode: input.shouldRunWebSearchPreflight,
+    tools: input.selectedToolNames.slice(0, 16),
+    trace: input.langGraphTrace.slice(0, 8),
+  }
+
+  const generated = await runWithTimeBudget(
+    "dynamic-activity-copy",
+    async () => {
+      const { text } = await generateText({
+        model,
+        temperature: 0.2,
+        system:
+          "You generate concise live chat activity copy. Return strict JSON only with keys intro and reasoning.",
+        prompt: [
+          "Write two short timeline lines for this assistant turn.",
+          "- intro: one sentence (10-20 words) describing immediate action.",
+          "- reasoning: one sentence (10-24 words) describing plan and source strategy.",
+          "- Keep language user-facing, specific, and non-repetitive.",
+          "- Never mention internal routing or traces.",
+          "- Return valid JSON only.",
+          "",
+          `Context: ${JSON.stringify(contextPayload)}`,
+        ].join("\n"),
+      })
+      const parsed = parseDynamicActivityCopyPayload(text)
+      if (!parsed) return null
+      return {
+        intro: normalizeActivityLine(parsed.intro, fallbackIntro, 180),
+        reasoning: normalizeActivityLine(
+          parsed.reasoning,
+          "Selecting the best tools and sources for your request.",
+          220
+        ),
+      }
+    },
+    DYNAMIC_ACTIVITY_COPY_TIMEOUT_MS,
+    null
+  )
+
+  if (generated) {
+    dynamicActivityCopyCache.set(cacheKey, {
+      ...generated,
+      savedAt: Date.now(),
+    })
+  }
+
+  return generated
 }
 
 type ChatAttachment = {
@@ -845,6 +1121,25 @@ function dedupeAndReindexCitations(citations: EvidenceCitation[]): EvidenceCitat
   }))
 }
 
+function citationsFromProvenance(provenance: SourceProvenance[]): EvidenceCitation[] {
+  if (!Array.isArray(provenance) || provenance.length === 0) return []
+  return dedupeAndReindexCitations(
+    provenance.map((item, idx) => provenanceToEvidenceCitation(item, idx + 1))
+  )
+}
+
+function citationsFromToolResult(result: unknown): EvidenceCitation[] {
+  if (!result || typeof result !== "object") return []
+  const candidate = result as Record<string, unknown>
+  if (Array.isArray(candidate.provenance)) {
+    return citationsFromProvenance(candidate.provenance as SourceProvenance[])
+  }
+  if (Array.isArray(candidate.citations)) {
+    return dedupeAndReindexCitations(candidate.citations as EvidenceCitation[])
+  }
+  return []
+}
+
 function rankCitationsForQuery(
   citations: EvidenceCitation[],
   queryText: string,
@@ -1095,7 +1390,6 @@ const MEDICAL_QUERY_STOP_WORDS = new Set([
   "those",
   "workup",
   "evaluation",
-  "guidelines",
   "review",
   "adult",
   "adults",
@@ -1106,7 +1400,7 @@ const MEDICAL_QUERY_STOP_WORDS = new Set([
 function extractClinicalQueryTerms(query: string): string[] {
   return query
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^\w\s-]/g, " ")
     .split(/\s+/)
     .map((term) => term.trim())
     .filter(
@@ -1118,9 +1412,53 @@ function extractClinicalQueryTerms(query: string): string[] {
 }
 
 function buildFocusedPubMedQuery(query: string): string {
-  const terms = extractClinicalQueryTerms(query).slice(0, 6)
-  if (terms.length === 0) return query
-  return terms.map((term) => `${term}[Title/Abstract]`).join(" AND ")
+  const normalized = query.replace(/\s+/g, " ").trim()
+  if (!normalized) return query
+  const terms = extractClinicalQueryTerms(normalized).slice(0, 4)
+  if (terms.length === 0) return normalized
+
+  const publicationClauses: string[] = []
+  if (/\bmeta-analysis|meta analysis\b/i.test(normalized)) {
+    publicationClauses.push(`("Meta-Analysis"[Publication Type] OR "meta-analysis"[Title])`)
+  }
+  if (/\bsystematic review\b/i.test(normalized)) {
+    publicationClauses.push(`("Systematic Review"[Title] OR systematic review[Title/Abstract])`)
+  }
+  if (/\bguideline|guidelines|recommendation|consensus|statement\b/i.test(normalized)) {
+    publicationClauses.push(
+      `("Guideline"[Publication Type] OR "Practice Guideline"[Publication Type] OR guideline[Title] OR guidelines[Title] OR recommendation[Title/Abstract] OR consensus[Title/Abstract])`
+    )
+  }
+  if (/\bevidence-based|evidence based\b/i.test(normalized)) {
+    publicationClauses.push(`("evidence-based"[Title/Abstract] OR "evidence based"[Title/Abstract])`)
+  }
+
+  const coreQuery = terms.map((term) => `${term}[Title/Abstract]`).join(" AND ")
+  if (publicationClauses.length === 0) {
+    return coreQuery
+  }
+  return `${coreQuery} AND ${publicationClauses.join(" AND ")}`
+}
+
+function buildPubMedQueryStrategies(query: string): string[] {
+  const normalized = query.replace(/\s+/g, " ").trim()
+  if (!normalized) return [query]
+
+  const strategies = new Set<string>([normalized])
+  const lower = normalized.toLowerCase()
+
+  if (!/\bguideline|guidelines|recommendation|consensus|statement\b/i.test(lower)) {
+    strategies.add(`${normalized} guideline`)
+  }
+  if (/\bmeta-analysis|meta analysis\b/i.test(lower)) {
+    strategies.add(`${normalized} "Meta-Analysis"[Publication Type]`)
+  }
+  if (/\bsystematic review\b/i.test(lower)) {
+    strategies.add(`${normalized} systematic review`)
+  }
+
+  strategies.add(buildFocusedPubMedQuery(normalized))
+  return Array.from(strategies).filter((candidate) => candidate.trim().length > 0).slice(0, 5)
 }
 
 function computeKeywordOverlapScore(query: string, text: string): number {
@@ -1719,6 +2057,23 @@ function sanitizeTopicOption(value: string): string {
     .slice(0, 96)
 }
 
+function isLowQualityTopicOption(value: string): boolean {
+  const normalized = sanitizeTopicOption(value)
+  if (!normalized) return true
+  if (normalized.length < 10) return true
+  if (!/[a-z]{3}/i.test(normalized)) return true
+  if (/(.)\1{4,}/.test(normalized)) return true
+  if (/[^a-z0-9\s:;,\-()/]/i.test(normalized)) return true
+
+  const words = normalized.split(/\s+/).filter(Boolean)
+  if (words.length < 3) return true
+  const alphaChars = (normalized.match(/[a-z]/gi) || []).length
+  const alphaRatio = alphaChars / Math.max(normalized.length, 1)
+  if (alphaRatio < 0.55) return true
+
+  return false
+}
+
 function buildTopicOptionsFromUploadCitations(
   citations: Array<{
     title?: string | null
@@ -1734,6 +2089,7 @@ function buildTopicOptionsFromUploadCitations(
   const pushOption = (candidate: string | undefined | null) => {
     if (!candidate) return
     const normalized = sanitizeTopicOption(candidate)
+    if (isLowQualityTopicOption(normalized)) return
     if (normalized.length < 16) return
     if (
       /\b(references?|bibliography|table of contents|contents|index|appendix|first published|edition|copyright|isbn|oxford university press)\b/i.test(
@@ -1785,6 +2141,7 @@ function buildTopicOptionsFromStructureInspection(
   const push = (value?: string | null) => {
     if (!value) return
     const normalized = sanitizeTopicOption(value)
+    if (isLowQualityTopicOption(normalized)) return
     if (normalized.length < 10) return
     if (/\b(references?|index|appendix|copyright|first published)\b/i.test(normalized)) return
     const key = normalized.toLowerCase()
@@ -2153,9 +2510,33 @@ export async function POST(req: Request) {
     const lastUserMessage = messages.filter(m => m.role === "user").pop()
     const rawQueryText =
       typeof lastUserMessage?.content === "string" ? lastUserMessage.content : ""
-    const selectedUploadIds = extractUploadReferenceIds(rawQueryText)
-    const selectedUploadIdHint = selectedUploadIds[0]
     const queryText = decodeArtifactWorkflowInput(stripUploadReferenceTokens(rawQueryText))
+    const implicitUploadIntentSignal = detectImplicitUploadIntent(queryText)
+    const uploadService = new UserUploadService()
+    const explicitSelectedUploadIds = extractUploadReferenceIds(rawQueryText)
+    let selectedUploadIds = explicitSelectedUploadIds
+    let autoSelectedUploadIds: string[] = []
+    if (
+      selectedUploadIds.length === 0 &&
+      implicitUploadIntentSignal.hasImplicitUploadIntent &&
+      isAuthenticated &&
+      userId !== "temp"
+    ) {
+      try {
+        autoSelectedUploadIds = resolveAutoLatestUploadIds(
+          await uploadService.listUploads(userId),
+          implicitUploadIntentSignal,
+          3
+        )
+        selectedUploadIds = autoSelectedUploadIds
+      } catch (error) {
+        console.warn(
+          "[UPLOAD INTENT] Failed to resolve auto-latest uploads:",
+          error instanceof Error ? error.message : error
+        )
+      }
+    }
+    const selectedUploadIdHint = selectedUploadIds[0]
     const attachmentContextPromise = buildAttachmentContext(lastUserMessage)
     const persistedTopicContext = extractTopicContextFromMessages(messages)
     const selectedUploadTopicContext = selectedUploadIdHint
@@ -2175,6 +2556,10 @@ export async function POST(req: Request) {
     const effectiveClinicianMode = normalizeClinicianWorkflowMode(clinicianMode)
     const requestedArtifactIntent = artifactIntentFromRequest === "quiz" ? "quiz" : "none"
     const hasUploadContextHint = Boolean(selectedUploadIdHint || effectiveTopicContext?.lastUploadId)
+    const shouldPreferUploadContext =
+      hasUploadContextHint ||
+      implicitUploadIntentSignal.hasImplicitUploadIntent ||
+      autoSelectedUploadIds.length > 0
     const hasQuizContinuationSignal =
       hasQuizSettingsSignal(queryText) ||
       /(?:^|\n)\s*(topic|pages?)\s*:/i.test(queryText) ||
@@ -2247,18 +2632,18 @@ export async function POST(req: Request) {
 
     const clinicianRoleFromResolvedRole =
       effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
+    const evidenceSeekingIntent = hasEvidenceSeekingIntent(queryText) || hasGuidelineIntent(queryText)
     const finalEnableEvidence =
-      enableEvidenceFromClient === true || clinicianRoleFromResolvedRole
+      enableEvidenceFromClient === true || clinicianRoleFromResolvedRole || evidenceSeekingIntent
     const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
     const finalEnableSearch =
       ENABLE_WEB_SEARCH_TOOL &&
       enableSearchFromClient === true &&
       hasWebSearchSupport
-    const shouldRunWebSearchPreflight = finalEnableSearch && queryText.length > 0
-    const streamIntroPreview = buildSafeIntroPreview(queryText)
+    const shouldRunWebSearchPreflight =
+      finalEnableSearch && queryText.length > 0 && !shouldPreferUploadContext
     const minEvidenceLevelForQuery = clinicianRoleFromResolvedRole ? 3 : 5
 
-    const uploadService = new UserUploadService()
     const uploadSearchMode: UploadContextSearchMode =
       /\b(page|pp?\.?)\s*\d+/i.test(queryText) || /\bpages?\s*\d+\s*(?:-|to)\s*\d+\b/i.test(queryText)
         ? "auto"
@@ -2272,6 +2657,21 @@ export async function POST(req: Request) {
       isAuthenticated &&
       userId !== "temp" &&
       queryText.length > 0
+    const uploadContextPreflightCacheKey = shouldRunUploadContextSearch
+      ? buildUploadRetrievalPreflightCacheKey({
+          userId,
+          query: queryText,
+          uploadId: selectedUploadIdHint,
+          mode: uploadSearchMode,
+          selectedUploadIds,
+          topicContext: (effectiveTopicContext ?? null) as UploadTopicContext | null,
+        })
+      : null
+    const cachedUploadContextResult = uploadContextPreflightCacheKey
+      ? getUploadRetrievalPreflightCache<
+          Awaited<ReturnType<UserUploadService["uploadContextSearch"]>> | null
+        >(uploadContextPreflightCacheKey)
+      : undefined
     const webSearchPreflightPromise = shouldRunWebSearchPreflight
       ? runWithTimeBudget<Awaited<ReturnType<typeof searchWeb>> | null>(
           "WEB_SEARCH_PREFLIGHT",
@@ -2310,30 +2710,37 @@ export async function POST(req: Request) {
           )
         : Promise.resolve(null),
       shouldRunUploadContextSearch
-        ? runWithTimeBudget(
-            "UPLOAD_CONTEXT_SEARCH",
-            async () =>
-              uploadService
-                .uploadContextSearch({
-                  userId,
-                  query: queryText,
-                  apiKey,
-                  embeddingApiKey,
-                  uploadId: selectedUploadIdHint,
-                  mode: uploadSearchMode,
-                  topK: 6,
-                  includeNeighborPages: 1,
-                  topicContext: (effectiveTopicContext ??
-                    undefined) as UploadTopicContext | undefined,
-                  maxDurationMs: uploadContextMaxDurationMs,
-                })
-                .catch((err) => {
-                  console.warn("📚 [UPLOAD RETRIEVAL] Structured retrieval failed:", err)
-                  return null
-                }),
-            uploadContextTimeBudgetMs,
-            null
-          )
+        ? cachedUploadContextResult !== undefined
+          ? Promise.resolve(cachedUploadContextResult)
+          : runWithTimeBudget(
+              "UPLOAD_CONTEXT_SEARCH",
+              async () =>
+                uploadService
+                  .uploadContextSearch({
+                    userId,
+                    query: queryText,
+                    apiKey,
+                    embeddingApiKey,
+                    uploadId: selectedUploadIdHint,
+                    mode: uploadSearchMode,
+                    topK: 6,
+                    includeNeighborPages: 1,
+                    topicContext: (effectiveTopicContext ??
+                      undefined) as UploadTopicContext | undefined,
+                    maxDurationMs: uploadContextMaxDurationMs,
+                  })
+                  .catch((err) => {
+                    console.warn("📚 [UPLOAD RETRIEVAL] Structured retrieval failed:", err)
+                    return null
+                  }),
+              uploadContextTimeBudgetMs,
+              null
+            ).then((result) => {
+              if (uploadContextPreflightCacheKey) {
+                setUploadRetrievalPreflightCache(uploadContextPreflightCacheKey, userId, result)
+              }
+              return result
+            })
         : Promise.resolve(null),
       webSearchPreflightPromise,
     ])
@@ -2457,18 +2864,23 @@ export async function POST(req: Request) {
       null
     const hasScopeSignalInQuery = hasArtifactScopeSignal(queryText)
     const hasSettingsSignalInQuery = hasQuizSettingsSignal(queryText)
-    const requiresInspectionBeforeGeneration = false
+    const hasWeakOrMissingRetrievalSignals =
+      !uploadContextResult ||
+      uploadCitationsForBreadth.length === 0 ||
+      uploadContextResult.metrics.retrievalConfidence === "low" ||
+      uploadContextResult.metrics.retrievalConfidence === "medium"
+    const requiresInspectionBeforeGeneration =
+      isArtifactIntentSupported &&
+      (isTextbookScaleUpload ||
+        topicBreadth.isBroad ||
+        isGenericArtifactIntentRequest ||
+        hasWeakOrMissingRetrievalSignals)
     const inspectionGateSatisfied =
       !requiresInspectionBeforeGeneration || hasStructureInspectionReady
     const inspectionConfidenceAcceptable =
       !requiresInspectionBeforeGeneration || structureInspectionConfidence !== "low"
     const requiresScopeOrSettingsClarification =
       !hasScopeSignalInQuery || !hasSettingsSignalInQuery
-    const hasWeakOrMissingRetrievalSignals =
-      !uploadContextResult ||
-      uploadCitationsForBreadth.length === 0 ||
-      uploadContextResult.metrics.retrievalConfidence === "low" ||
-      uploadContextResult.metrics.retrievalConfidence === "medium"
     const shouldSkipRefinementForNarrowUpload =
       isArtifactIntentSupported &&
       !isTextbookScaleUpload &&
@@ -2479,18 +2891,20 @@ export async function POST(req: Request) {
       !hasWeakOrMissingRetrievalSignals &&
       uploadCitationsForBreadth.length > 4 &&
       pageHintsForRefinement.length > 4
+    const citationDerivedTopicOptions = topicBreadth.topicOptions.slice(0, 4)
     const fallbackTopicOptions =
-      structureTopicOptions.length > 0
-        ? structureTopicOptions
-        : [
-            "Core definitions and foundational concepts",
-            "High-yield mechanisms and processes",
-            "Clinical/application-style scenarios",
-          ]
-    const preferredRefinementTopicOptions =
-      structureTopicOptions.length > 0
-        ? structureTopicOptions
-        : fallbackTopicOptions
+      citationDerivedTopicOptions.length > 0
+        ? citationDerivedTopicOptions
+        : structureTopicOptions.length > 0
+          ? structureTopicOptions
+          : [
+              "Core definitions and foundational concepts",
+              "High-yield mechanisms and processes",
+              "Clinical/application-style scenarios",
+            ]
+    const preferredRefinementTopicOptions = Array.from(
+      new Set([...citationDerivedTopicOptions, ...structureTopicOptions, ...fallbackTopicOptions])
+    ).slice(0, 4)
     let artifactRefinementPrompt: ArtifactRefinementPrompt | null = null
     let artifactRefinementToolResult: ArtifactRefinementToolResult | null = null
     const isPendingForCurrentArtifactIntent =
@@ -2784,6 +3198,14 @@ export async function POST(req: Request) {
           : shouldAskArtifactTopicFollowup
             ? "refine"
             : "generate"
+    const streamIntroPreview = buildSafeIntroPreview({
+      query: queryText,
+      shouldPreferUploadContext,
+      shouldRunEvidenceSynthesis,
+      shouldRunWebSearchPreflight,
+      artifactIntent: effectiveArtifactIntent,
+      artifactWorkflowStage,
+    })
     if (isArtifactIntentSupported) {
       resolvedTopicContext = mergeTopicContexts(resolvedTopicContext, {
         pendingArtifactStage: artifactWorkflowStage === "none" ? null : artifactWorkflowStage,
@@ -3011,6 +3433,7 @@ export async function POST(req: Request) {
       finalEnableSearch &&
       supportsTools &&
       queryText.length > 0 &&
+      !shouldPreferUploadContext &&
       hasWebSearchConfigured()
     const shouldEnablePubMedTools =
       finalEnableEvidence &&
@@ -3057,6 +3480,101 @@ export async function POST(req: Request) {
     let quizArtifactCallCount = 0
     let cachedDocumentArtifact: Record<string, unknown> | null = null
     let cachedQuizArtifact: Record<string, unknown> | null = null
+    let langGraphHarnessTrace: string[] = []
+    let timelineAnnotationSequence = 0
+    let syntheticToolCallCounter = 0
+    let activeStreamWriter: {
+      writeMessageAnnotation: (annotation: unknown) => void
+    } | null = null
+    const pendingMessageAnnotations: unknown[] = []
+    let runtimeEvidenceCitations: EvidenceCitation[] = []
+
+    const nextTimelineSequence = () => {
+      timelineAnnotationSequence += 1
+      return timelineAnnotationSequence
+    }
+
+    const writeStreamAnnotation = (annotation: unknown) => {
+      if (activeStreamWriter) {
+        activeStreamWriter.writeMessageAnnotation(
+          annotation as Parameters<typeof activeStreamWriter.writeMessageAnnotation>[0]
+        )
+        return
+      }
+      pendingMessageAnnotations.push(annotation)
+    }
+
+    const emitTimelineEvent = (event: Record<string, unknown>) => {
+      writeStreamAnnotation({
+        type: "timeline-event",
+        event: {
+          ...event,
+          sequence: event.sequence ?? nextTimelineSequence(),
+          createdAt:
+            typeof event.createdAt === "string"
+              ? event.createdAt
+              : new Date().toISOString(),
+        },
+      })
+    }
+
+    const resolveToolLifecycleCallId = (
+      toolName: string,
+      context: unknown
+    ): string => {
+      const candidate =
+        context && typeof context === "object"
+          ? (context as { toolCallId?: unknown }).toolCallId
+          : undefined
+      if (typeof candidate === "string" && candidate.trim().length > 0) {
+        return candidate
+      }
+      syntheticToolCallCounter += 1
+      return `${toolName}-${Date.now()}-${syntheticToolCallCounter}`
+    }
+
+    const emitToolLifecycleEvent = (payload: {
+      toolName: string
+      toolCallId: string
+      lifecycle: "queued" | "running" | "completed" | "failed"
+      detail?: string | null
+    }) => {
+      const createdAt = new Date().toISOString()
+      const sequence = nextTimelineSequence()
+      writeStreamAnnotation({
+        type: "tool-lifecycle",
+        sequence,
+        createdAt,
+        toolName: payload.toolName,
+        toolCallId: payload.toolCallId,
+        lifecycle: payload.lifecycle,
+        detail: payload.detail || undefined,
+      })
+      emitTimelineEvent({
+        kind: "tool-lifecycle",
+        sequence,
+        createdAt,
+        toolName: payload.toolName,
+        toolCallId: payload.toolCallId,
+        lifecycle: payload.lifecycle,
+        detail: payload.detail || undefined,
+      })
+    }
+
+    const pushRuntimeEvidenceCitations = (toolResult: unknown) => {
+      const citations = citationsFromToolResult(toolResult)
+      if (citations.length === 0) return
+      runtimeEvidenceCitations = dedupeAndReindexCitations([
+        ...runtimeEvidenceCitations,
+        ...citations,
+      ]).slice(0, 12)
+      writeStreamAnnotation({
+        type: "evidence-citations",
+        sequence: nextTimelineSequence(),
+        createdAt: new Date().toISOString(),
+        citations: runtimeEvidenceCitations,
+      })
+    }
 
     if (ENABLE_YOUTUBE_TOOL && supportsTools && queryText.length > 0) {
       console.log("[YOUTUBE INTENT]", {
@@ -3361,20 +3879,36 @@ export async function POST(req: Request) {
               maxResults: z.number().int().min(1).max(10).default(5),
             }),
             execute: async ({ query, maxResults }) => {
-              // Normalize tool queries to reduce broad, irrelevant retrieval.
-              const focusedQuery = buildFocusedPubMedQuery(query)
-              const result = await searchPubMed(
-                focusedQuery,
-                Math.min(maxResults * 3, 30)
-              )
-              const relevantArticles = result.articles
-                .filter((article) =>
-                  isTextRelevantToClinicalQuery(
-                    `${article.title || ""} ${article.abstract || ""}`,
-                    query
-                  )
-                )
-                .slice(0, maxResults)
+              const strategies = buildPubMedQueryStrategies(query)
+              let rawTotalResults = 0
+              const collectedArticles: Array<Awaited<ReturnType<typeof searchPubMed>>["articles"][number]> = []
+              const seenPmids = new Set<string>()
+              let usedQuery = strategies[0] || query
+
+              for (const strategy of strategies) {
+                const result = await searchPubMed(strategy, Math.min(maxResults * 4, 32))
+                rawTotalResults = Math.max(rawTotalResults, result.totalResults)
+                if (result.articles.length === 0) {
+                  continue
+                }
+                usedQuery = strategy
+                for (const article of result.articles) {
+                  if (!article?.pmid || seenPmids.has(article.pmid)) continue
+                  if (
+                    !isTextRelevantToClinicalQuery(
+                      `${article.title || ""} ${article.abstract || ""}`,
+                      query
+                    )
+                  ) {
+                    continue
+                  }
+                  seenPmids.add(article.pmid)
+                  collectedArticles.push(article)
+                  if (collectedArticles.length >= maxResults) break
+                }
+                if (collectedArticles.length >= maxResults) break
+              }
+              const relevantArticles = collectedArticles.slice(0, maxResults)
 
               const provenance: SourceProvenance[] = relevantArticles.map((a, idx) =>
                 buildProvenance({
@@ -3393,9 +3927,11 @@ export async function POST(req: Request) {
                   snippet: (a.abstract || "").slice(0, 320),
                 })
               )
-              return {
+              const payload = {
                 totalResults: relevantArticles.length,
-                searchedQuery: focusedQuery,
+                rawTotalResults,
+                searchedQuery: usedQuery,
+                attemptedQueries: strategies,
                 articles: relevantArticles.map(a => ({
                   pmid: a.pmid,
                   title: a.title,
@@ -3406,6 +3942,8 @@ export async function POST(req: Request) {
                 })),
                 provenance,
               }
+              pushRuntimeEvidenceCitations(payload)
+              return payload
             },
           }),
           pubmedLookup: tool({
@@ -3433,7 +3971,7 @@ export async function POST(req: Request) {
                   snippet: article.abstract || "",
                 }),
               ]
-              return {
+              const payload = {
                 found: true,
                 article: {
                   pmid: article.pmid,
@@ -3446,6 +3984,8 @@ export async function POST(req: Request) {
                 },
                 provenance,
               }
+              pushRuntimeEvidenceCitations(payload)
+              return payload
             },
           }),
           guidelineSearch: tool({
@@ -3460,9 +4000,16 @@ export async function POST(req: Request) {
                 : maxResults
               const result = await searchGuidelines(query, strictMaxResults, "US")
               if (result.results.length > 0 || !benchStrictMode) {
+                pushRuntimeEvidenceCitations(result)
                 return result
               }
-              return searchGuidelines(`${query} guideline`, strictMaxResults, "GLOBAL")
+              const fallbackResult = await searchGuidelines(
+                `${query} guideline`,
+                strictMaxResults,
+                "GLOBAL"
+              )
+              pushRuntimeEvidenceCitations(fallbackResult)
+              return fallbackResult
             },
           }),
           clinicalTrialsSearch: tool({
@@ -3472,7 +4019,9 @@ export async function POST(req: Request) {
               maxResults: z.number().int().min(1).max(10).default(5),
             }),
             execute: async ({ query, maxResults }) => {
-              return searchClinicalTrials(query, maxResults)
+              const payload = await searchClinicalTrials(query, maxResults)
+              pushRuntimeEvidenceCitations(payload)
+              return payload
             },
           }),
           drugSafetyLookup: tool({
@@ -3496,6 +4045,156 @@ export async function POST(req: Request) {
           }),
         }
       : ({} as ToolSet)
+
+    const connectorRuntimeTools: ToolSet =
+      ENABLE_CONNECTOR_REGISTRY && shouldEnableEvidenceTools
+        ? {
+            scholarGatewaySearch: tool({
+              description:
+                "Search scholar-oriented sources to enrich evidence with literature-focused records.",
+              parameters: z.object({
+                query: z.string().min(3).describe("Scholar gateway query"),
+                maxResults: z.number().int().min(1).max(10).default(5),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await runConnectorSearch({
+                  connectorId: "scholar_gateway",
+                  query,
+                  maxResults,
+                  medicalOnly: true,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            bioRxivSearch: tool({
+              description:
+                "Search bioRxiv preprints for very recent biomedical research signals.",
+              parameters: z.object({
+                query: z.string().min(3).describe("bioRxiv query"),
+                maxResults: z.number().int().min(1).max(10).default(5),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await runConnectorSearch({
+                  connectorId: "biorxiv",
+                  query,
+                  maxResults,
+                  medicalOnly: false,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            bioRenderSearch: tool({
+              description:
+                "Search BioRender resources for visual scientific explanations and figures.",
+              parameters: z.object({
+                query: z.string().min(2).describe("BioRender topic or concept"),
+                maxResults: z.number().int().min(1).max(8).default(4),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await runConnectorSearch({
+                  connectorId: "biorender",
+                  query,
+                  maxResults,
+                  medicalOnly: false,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            npiRegistrySearch: tool({
+              description:
+                "Search the US NPI Registry for provider records and identifiers.",
+              parameters: z.object({
+                query: z.string().min(2).describe("Provider organization/name or NPI number"),
+                maxResults: z.number().int().min(1).max(10).default(5),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await runConnectorSearch({
+                  connectorId: "npi_registry",
+                  query,
+                  maxResults,
+                  medicalOnly: false,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            synapseSearch: tool({
+              description:
+                "Search Synapse scientific datasets and metadata for research context.",
+              parameters: z.object({
+                query: z.string().min(3).describe("Synapse dataset query"),
+                maxResults: z.number().int().min(1).max(10).default(5),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await runConnectorSearch({
+                  connectorId: "synapse",
+                  query,
+                  maxResults,
+                  medicalOnly: false,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            cmsCoverageSearch: tool({
+              description:
+                "Search CMS coverage policy resources (NCD/LCD-style references).",
+              parameters: z.object({
+                query: z.string().min(3).describe("CMS coverage query"),
+                maxResults: z.number().int().min(1).max(10).default(5),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await runConnectorSearch({
+                  connectorId: "cms_coverage",
+                  query,
+                  maxResults,
+                  medicalOnly: true,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            chemblSearch: tool({
+              description:
+                "Search ChEMBL for molecule and compound records relevant to biomedical questions.",
+              parameters: z.object({
+                query: z.string().min(2).describe("ChEMBL molecule/compound query"),
+                maxResults: z.number().int().min(1).max(10).default(5),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await runConnectorSearch({
+                  connectorId: "chembl",
+                  query,
+                  maxResults,
+                  medicalOnly: false,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            benchlingSearch: tool({
+              description:
+                "Search Benchling-oriented resources for experimental workflows and lab context.",
+              parameters: z.object({
+                query: z.string().min(3).describe("Benchling/lab workflow query"),
+                maxResults: z.number().int().min(1).max(10).default(5),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await runConnectorSearch({
+                  connectorId: "benchling",
+                  query,
+                  maxResults,
+                  medicalOnly: false,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+          }
+        : ({} as ToolSet)
 
     const youtubeRuntimeTools: ToolSet = shouldEnableYoutubeTool
       ? {
@@ -3598,11 +4297,99 @@ export async function POST(req: Request) {
         }
       : ({} as ToolSet)
 
-    const runtimeTools: ToolSet = {
+    let runtimeTools: ToolSet = {
       ...webSearchRuntimeTools,
       ...evidenceRuntimeTools,
+      ...connectorRuntimeTools,
       ...youtubeRuntimeTools,
     }
+
+    let langGraphPlan: Awaited<ReturnType<typeof runClinicalAgentHarness>> | null = null
+    if (ENABLE_LANGGRAPH_HARNESS && supportsTools && queryText.trim().length > 0) {
+      langGraphPlan = await runClinicalAgentHarness({
+        query: queryText,
+        role: effectiveUserRole,
+        learningMode: effectiveLearningMode,
+        clinicianMode: effectiveClinicianMode,
+        artifactIntent: effectiveArtifactIntent,
+        supportsTools,
+        evidenceEnabled: finalEnableEvidence,
+        availableToolNames: Object.keys(runtimeTools),
+      })
+      langGraphHarnessTrace = langGraphPlan.trace
+
+      if (langGraphPlan.selectedToolNames.length > 0) {
+        const selectedToolNames = new Set(langGraphPlan.selectedToolNames)
+        const filteredEntries = Object.entries(runtimeTools).filter(([toolName]) =>
+          selectedToolNames.has(toolName)
+        )
+        if (filteredEntries.length > 0) {
+          runtimeTools = Object.fromEntries(filteredEntries) as ToolSet
+        }
+      }
+
+      if (langGraphPlan.systemPromptAdditions.length > 0) {
+        effectiveSystemPrompt += `\n\n${langGraphPlan.systemPromptAdditions.join("\n")}`
+      }
+    }
+
+    const wrapRuntimeToolWithLifecycle = (
+      toolName: string,
+      toolDefinition: unknown
+    ) => {
+      if (!toolDefinition || typeof toolDefinition !== "object") {
+        return toolDefinition
+      }
+      const candidate = toolDefinition as { execute?: unknown }
+      if (typeof candidate.execute !== "function") {
+        return toolDefinition
+      }
+      const originalExecute = candidate.execute as (
+        args: unknown,
+        context?: unknown
+      ) => Promise<unknown>
+
+      return {
+        ...(toolDefinition as Record<string, unknown>),
+        execute: async (args: unknown, context?: unknown) => {
+          const toolCallId = resolveToolLifecycleCallId(toolName, context)
+          emitToolLifecycleEvent({
+            toolName,
+            toolCallId,
+            lifecycle: "queued",
+          })
+          emitToolLifecycleEvent({
+            toolName,
+            toolCallId,
+            lifecycle: "running",
+          })
+          try {
+            const result = await originalExecute(args, context)
+            emitToolLifecycleEvent({
+              toolName,
+              toolCallId,
+              lifecycle: "completed",
+            })
+            return result
+          } catch (error) {
+            emitToolLifecycleEvent({
+              toolName,
+              toolCallId,
+              lifecycle: "failed",
+              detail: extractErrorMessage(error),
+            })
+            throw error
+          }
+        },
+      }
+    }
+
+    runtimeTools = Object.fromEntries(
+      Object.entries(runtimeTools).map(([toolName, toolDefinition]) => [
+        toolName,
+        wrapRuntimeToolWithLifecycle(toolName, toolDefinition),
+      ])
+    ) as ToolSet
 
     if (shouldEnableEvidenceTools) {
       effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:
@@ -3613,6 +4400,9 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.
 - Use guidelineSearch for formal recommendations and regional guidance.
 - Use clinicalTrialsSearch for ongoing/new evidence.
+- ${ENABLE_CONNECTOR_REGISTRY ? "Use scholarGatewaySearch and bioRxivSearch for broader/early research signals when guideline and PubMed retrieval are sparse." : "Connector registry tools are disabled."}
+- ${ENABLE_CONNECTOR_REGISTRY ? "Use npiRegistrySearch and cmsCoverageSearch for provider identity and coverage-policy queries." : "Provider/coverage connector tools are disabled."}
+- ${ENABLE_CONNECTOR_REGISTRY ? "Use chemblSearch, synapseSearch, bioRenderSearch, and benchlingSearch only when the user intent explicitly needs molecular, dataset, visual, or lab-workflow context." : "Specialized connector tools are disabled."}
 - Use drugSafetyLookup for contraindications/interactions/renal dosing checks.
 - Use evidenceConflictCheck when sources disagree.
 - IMPORTANT: Keep tool queries tightly aligned to the user question (specific condition/drug terms, not broad generic terms).
@@ -3627,6 +4417,13 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
       }
     } else if (shouldEnablePubMedTools) {
       effectiveSystemPrompt += `\n\nYou may use PubMed tools when the question requests latest evidence, guideline updates, or when provided evidence is sparse. Prefer retrieved PubMed records for recency-sensitive claims and cite them explicitly.`
+    }
+
+    if (ENABLE_STRICT_CITATION_CONTRACT && finalEnableEvidence) {
+      effectiveSystemPrompt += `\n\nSTRICT CITATION CONTRACT:
+- Never output unresolved placeholder tokens such as [CITE_PLACEHOLDER_0].
+- Only emit numeric bracket citations [n] when they map to returned evidence citations.
+- If no evidence citations are available for a claim, omit citation markers for that claim instead of fabricating references.`
     }
 
     if (shouldEnableArtifactRefinementTool && effectiveArtifactIntent === "quiz") {
@@ -3686,6 +4483,16 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             effectiveArtifactIntent === "quiz"
           ? ({ type: "tool", toolName: "generateQuizFromUpload" } as const)
           : undefined
+    const resolvedMaxSteps =
+      typeof langGraphPlan?.maxSteps === "number" && Number.isFinite(langGraphPlan.maxSteps)
+        ? Math.max(1, Math.min(langGraphPlan.maxSteps, 14))
+        : shouldEnableArtifactRefinementTool
+          ? 1
+          : effectiveArtifactIntent === "quiz"
+            ? 2
+            : shouldEnableYoutubeTool
+              ? 4
+              : 10
 
     const result = streamText({
       model: modelWithSearch,
@@ -3693,14 +4500,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
       messages: coreMessages,
       tools: runtimeTools,
       ...(artifactToolChoice ? ({ toolChoice: artifactToolChoice } as any) : {}),
-      maxSteps:
-        shouldEnableArtifactRefinementTool
-          ? 1
-          : effectiveArtifactIntent === "quiz"
-          ? 2
-          : shouldEnableYoutubeTool
-            ? 4
-            : 10,
+      maxSteps: resolvedMaxSteps,
       onError: (err: unknown) => {
         console.error("Streaming error occurred:", err)
       },
@@ -3763,6 +4563,9 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             console.log(`[WEB SEARCH] Found ${urlMatches.length} URLs in message content:`, urlMatches.slice(0, 5))
           }
         }
+        const runtimeToolCitations = dedupeAndReindexCitations(
+          toolInvocationParts.flatMap((part: any) => citationsFromToolResult(part?.toolInvocation?.result))
+        )
         
         console.log('='.repeat(80) + '\n')
         
@@ -3840,6 +4643,14 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                   responseText = textParts.join('\n\n')
                 }
               }
+
+              if (
+                ENABLE_STRICT_CITATION_CONTRACT &&
+                /\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/i.test(responseText)
+              ) {
+                recordCitationContractViolation()
+                responseText = responseText.replace(/\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/gi, "")
+              }
               
               // Extract referenced citations from the response
               // CRITICAL: Only extract citations if evidence mode is enabled
@@ -3848,7 +4659,21 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
               
               // Only extract citations if evidence mode was enabled
               if (finalEnableEvidence) {
-                const contextToUse = capturedEvidenceContext || evidenceContext
+                const contextToUse =
+                  runtimeToolCitations.length > 0
+                    ? {
+                        ...(capturedEvidenceContext || evidenceContext || {
+                          shouldUseEvidence: true,
+                          searchTimeMs: 0,
+                        }),
+                        context: buildEvidenceContext(
+                          dedupeAndReindexCitations([
+                            ...((capturedEvidenceContext || evidenceContext)?.context?.citations || []),
+                            ...runtimeToolCitations,
+                          ])
+                        ),
+                      }
+                    : capturedEvidenceContext || evidenceContext
                 
                 if (contextToUse?.context?.citations) {
                 console.log(`📚 [CITATION EXTRACTION] Using evidence context with ${contextToUse.context.citations.length} citations`)
@@ -4068,11 +4893,36 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             uploadTitleHintForRefinement
           )
         : null
+    const selectedToolNamesForTurn = Object.keys(runtimeTools)
+    const dynamicActivityCopyPromise =
+      queryText.trim().length > 0
+        ? generateDynamicActivityCopy(
+            modelWithSearch,
+            {
+              query: queryText,
+              role: effectiveUserRole || "general",
+              learningMode: effectiveLearningMode,
+              clinicianMode: effectiveClinicianMode,
+              artifactIntent: effectiveArtifactIntent,
+              artifactWorkflowStage,
+              shouldPreferUploadContext,
+              shouldRunEvidenceSynthesis,
+              shouldRunWebSearchPreflight,
+              selectedToolNames: selectedToolNamesForTurn,
+              langGraphTrace: langGraphHarnessTrace,
+            },
+            streamIntroPreview
+          )
+        : Promise.resolve(null)
     if (finalEnableEvidence) {
       const contextForStream = capturedEvidenceContext || evidenceContext
-      if (contextForStream?.context?.citations?.length) {
+      const mergedStreamCitations = [
+        ...(contextForStream?.context?.citations || []),
+        ...runtimeEvidenceCitations,
+      ]
+      if (mergedStreamCitations.length) {
         evidenceCitationsForStream = dedupeAndReindexCitations(
-          rankCitationsForQuery(contextForStream.context.citations, queryText)
+          rankCitationsForQuery(mergedStreamCitations, queryText)
         ).slice(0, 12)
 
         const encodedHeader = encodeEvidenceCitationsHeader(evidenceCitationsForStream)
@@ -4087,40 +4937,107 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
       status: 200,
       headers: responseHeaders,
       execute: (writer) => {
+        activeStreamWriter = writer as typeof activeStreamWriter
+        if (pendingMessageAnnotations.length > 0) {
+          for (const annotation of pendingMessageAnnotations.splice(
+            0,
+            pendingMessageAnnotations.length
+          )) {
+            writeStreamAnnotation(annotation)
+          }
+        }
+
+        emitTimelineEvent({
+          kind: "system-intro",
+          text: streamIntroPreview,
+        })
+
+        if (selectedUploadIds.length > 0) {
+          const uploadTrackingSequence = nextTimelineSequence()
+          const uploadTrackingCreatedAt = new Date().toISOString()
+          writeStreamAnnotation({
+            type: "upload-status-tracking",
+            sequence: uploadTrackingSequence,
+            createdAt: uploadTrackingCreatedAt,
+            uploadIds: selectedUploadIds,
+          })
+          selectedUploadIds.forEach((uploadId) => {
+            emitTimelineEvent({
+              kind: "upload-status",
+              uploadId,
+              uploadTitle: null,
+              status: "pending",
+              progressStage: "queued",
+              progressPercent: 0,
+              lastError: null,
+            })
+          })
+        }
+
+        if (langGraphHarnessTrace.length > 0) {
+          writeStreamAnnotation({
+            type: "langgraph-routing",
+            sequence: nextTimelineSequence(),
+            createdAt: new Date().toISOString(),
+            trace: langGraphHarnessTrace,
+            maxSteps: resolvedMaxSteps,
+          })
+        }
+        void dynamicActivityCopyPromise
+          .then((dynamicCopy) => {
+            if (!dynamicCopy) return
+
+            emitTimelineEvent({
+              kind: "system-intro",
+              text: dynamicCopy.intro,
+            })
+            writeStreamAnnotation({
+              type: "langgraph-routing",
+              sequence: nextTimelineSequence(),
+              createdAt: new Date().toISOString(),
+              trace: langGraphHarnessTrace,
+              summary: dynamicCopy.reasoning,
+              maxSteps: resolvedMaxSteps,
+            })
+          })
+          .catch((error) => {
+            console.warn("Dynamic activity copy generation failed:", error)
+          })
+
         if (topicContextForStream) {
-          writer.writeMessageAnnotation(
-            {
-              type: "topic-context",
-              topicContext: topicContextForStream,
-            } as unknown as Parameters<typeof writer.writeMessageAnnotation>[0]
-          )
+          writeStreamAnnotation({
+            type: "topic-context",
+            sequence: nextTimelineSequence(),
+            createdAt: new Date().toISOString(),
+            topicContext: topicContextForStream,
+          })
         }
         if (artifactRefinementForStream) {
-          writer.writeMessageAnnotation(
-            {
-              type: "artifact-refinement",
-              refinement: {
-                ...artifactRefinementForStream,
-                intent: effectiveArtifactIntent,
-              },
-            } as unknown as Parameters<typeof writer.writeMessageAnnotation>[0]
-          )
+          writeStreamAnnotation({
+            type: "artifact-refinement",
+            sequence: nextTimelineSequence(),
+            createdAt: new Date().toISOString(),
+            refinement: {
+              ...artifactRefinementForStream,
+              intent: effectiveArtifactIntent,
+            },
+          })
         }
         if (artifactRuntimeWarningsForStream.length > 0) {
-          writer.writeMessageAnnotation(
-            {
-              type: "artifact-runtime-warnings",
-              warnings: artifactRuntimeWarningsForStream,
-            } as unknown as Parameters<typeof writer.writeMessageAnnotation>[0]
-          )
+          writeStreamAnnotation({
+            type: "artifact-runtime-warnings",
+            sequence: nextTimelineSequence(),
+            createdAt: new Date().toISOString(),
+            warnings: artifactRuntimeWarningsForStream,
+          })
         }
         if (evidenceCitationsForStream.length > 0) {
-          writer.writeMessageAnnotation(
-            {
-              type: "evidence-citations",
-              citations: evidenceCitationsForStream,
-            } as unknown as Parameters<typeof writer.writeMessageAnnotation>[0]
-          )
+          writeStreamAnnotation({
+            type: "evidence-citations",
+            sequence: nextTimelineSequence(),
+            createdAt: new Date().toISOString(),
+            citations: evidenceCitationsForStream,
+          })
         }
         result.mergeIntoDataStream(writer, {
           sendReasoning: true,

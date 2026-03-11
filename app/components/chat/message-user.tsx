@@ -20,7 +20,8 @@ import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"
 import { Check, Copy, Trash } from "@phosphor-icons/react"
 import Image from "next/image"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { UserUploadSendActivity } from "./user-upload-send-activity"
 
 const getTextFromDataUrl = (dataUrl: string) => {
   const base64 = dataUrl.split(",")[1]
@@ -56,6 +57,17 @@ export function MessageUser({
   const [editInput, setEditInput] = useState(displayChildren)
   const [isEditing, setIsEditing] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
+  const activityAttachments = useMemo(
+    () =>
+      (attachments || []).filter((attachment) => {
+        return !attachment.contentType?.startsWith("image")
+      }),
+    [attachments]
+  )
+  const imageAttachments = useMemo(
+    () => (attachments || []).filter((attachment) => attachment.contentType?.startsWith("image")),
+    [attachments]
+  )
 
   useEffect(() => {
     if (!isEditing) {
@@ -88,7 +100,18 @@ export function MessageUser({
         className
       )}
     >
-      {attachments?.map((attachment, index) => (
+      {activityAttachments.length > 0 ? (
+        <UserUploadSendActivity
+          attachments={activityAttachments as Array<{
+            name?: string | null
+            contentType?: string | null
+            uploadState?: string | null
+            uploadMessage?: string | null
+          }>}
+          className="mb-2"
+        />
+      ) : null}
+      {imageAttachments.map((attachment, index) => (
         <div
           className="flex flex-row gap-2"
           key={`${attachment.name}-${index}`}

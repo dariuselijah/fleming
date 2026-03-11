@@ -11,7 +11,6 @@ import {
   ImageSquare,
   SpinnerGap,
   StopIcon,
-  WarningCircle,
   X,
 } from "@phosphor-icons/react"
 import {
@@ -22,6 +21,7 @@ import {
 import { getModelInfo } from "@/lib/models"
 import { useModel } from "@/lib/model-store/provider"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import { cn } from "@/lib/utils"
 import { listUserUploads } from "@/lib/uploads/api"
 import type { UserUploadListItem } from "@/lib/uploads/types"
 import { buildUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
@@ -40,55 +40,10 @@ import { ButtonFileUpload } from "./button-file-upload"
 import { ButtonSearch } from "./button-search"
 import { ClinicianWorkflowPanel } from "./clinician-workflow-panel"
 import { ClinicianModeSelector } from "./clinician-mode-selector"
-import { FileList } from "./file-list"
 import { LearningModeSelector } from "./learning-mode-selector"
 import type { FileUploadSummary, FileUploadStatus } from "../chat/use-file-upload"
 
 // Fleming 3.5 has been removed - only Fleming 4 is available
-
-const UPLOADS_CACHE_KEY = "fleming:uploads:list:v1"
-const UPLOADS_CACHE_MAX_AGE_MS = 10 * 60 * 1000
-
-type UploadsCachePayload = {
-  savedAt: number
-  uploads: UserUploadListItem[]
-}
-
-function readCachedUploads(): UploadsCachePayload | null {
-  if (typeof window === "undefined") return null
-  try {
-    const raw = window.localStorage.getItem(UPLOADS_CACHE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as UploadsCachePayload
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      typeof parsed.savedAt !== "number" ||
-      !Array.isArray(parsed.uploads)
-    ) {
-      return null
-    }
-    if (Date.now() - parsed.savedAt > UPLOADS_CACHE_MAX_AGE_MS) {
-      return null
-    }
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function writeCachedUploads(uploads: UserUploadListItem[]) {
-  if (typeof window === "undefined") return
-  try {
-    const payload: UploadsCachePayload = {
-      savedAt: Date.now(),
-      uploads: uploads.slice(0, 80),
-    }
-    window.localStorage.setItem(UPLOADS_CACHE_KEY, JSON.stringify(payload))
-  } catch {
-    // Cache failures should never block chat input behavior.
-  }
-}
 
 type ChatInputProps = {
   value: string
@@ -453,24 +408,18 @@ export function ChatInput({
 
   useEffect(() => {
     if (!isUserAuthenticated) return
-    if (uploadResults.length > 0) return
-    const cached = readCachedUploads()
-    if (!cached || cached.uploads.length === 0) return
-    setUploadResults(cached.uploads)
-    setUploadsLoadedAt(cached.savedAt)
-  }, [isUserAuthenticated, uploadResults.length])
-
-  useEffect(() => {
-    if (!isUserAuthenticated) return
     if (uploadResults.length > 0 && Date.now() - uploadsLoadedAt < 60_000) return
 
     let active = true
-    listUserUploads()
+    listUserUploads({
+      allowStale: true,
+      maxAgeMs: 60_000,
+      revalidateInBackground: true,
+    })
       .then((uploads) => {
         if (!active) return
         setUploadResults(uploads)
         setUploadsLoadedAt(Date.now())
-        writeCachedUploads(uploads)
       })
       .catch(() => {
         if (!active) return
@@ -488,12 +437,20 @@ export function ChatInput({
 
     let active = true
     setIsUploadsLoading(true)
-    listUserUploads()
-      .then((uploads) => {
+    listUserUploads({
+      allowStale: true,
+      maxAgeMs: 20_000,
+      revalidateInBackground: true,
+    })
+      .then(async (uploads) => {
         if (!active) return
         setUploadResults(uploads)
         setUploadsLoadedAt(Date.now())
-        writeCachedUploads(uploads)
+        if (!isStale) return
+        const fresh = await listUserUploads({ forceRefresh: true, allowStale: true })
+        if (!active) return
+        setUploadResults(fresh)
+        setUploadsLoadedAt(Date.now())
       })
       .catch(() => {
         if (!active) return
@@ -603,7 +560,57 @@ export function ChatInput({
             value={value}
             onValueChange={onValueChange}
           >
-            <FileList files={files} getFileStatus={getFileStatus} onFileRemove={onFileRemove} />
+            {files.length > 0 ? (
+              <div className="px-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    {files.length} file{files.length === 1 ? "" : "s"} ready to send
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => files.forEach((file) => onFileRemove(file))}
+                    className="text-xs text-muted-foreground transition hover:text-foreground"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {files.slice(0, 3).map((file) => {
+                    const fileStatus = getFileStatus?.(file)
+                    const toneClass =
+                      fileStatus?.state === "failed"
+                        ? "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300"
+                        : fileStatus?.state === "uploading"
+                          ? "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                          : "border-border/70 bg-muted/45 text-muted-foreground"
+                    return (
+                      <div
+                        key={`${file.name}-${file.size}-${file.lastModified}`}
+                        className={cn(
+                          "flex max-w-[220px] items-center gap-1.5 rounded-full border px-2 py-1 text-[11px]",
+                          toneClass
+                        )}
+                      >
+                        <span className="truncate font-medium">{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => onFileRemove(file)}
+                          className="opacity-80 transition hover:opacity-100"
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {files.length > 3 ? (
+                    <span className="inline-flex items-center rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
+                      +{files.length - 3} more
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             {selectedUploads.length > 0 && (
               <div className="flex flex-wrap gap-2 px-2 pt-1">
                 {selectedUploads.map((upload) => {
@@ -725,19 +732,6 @@ export function ChatInput({
                   className="h-9 rounded-full"
                 />
               </div>
-              {fileUploadSummary?.hasProcessing ? (
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
-                  <SpinnerGap className="size-3 animate-spin" />
-                  Processing {fileUploadSummary.processingCount} file
-                  {fileUploadSummary.processingCount === 1 ? "" : "s"}...
-                </div>
-              ) : fileUploadSummary && fileUploadSummary.failedCount > 0 && files.length > 0 ? (
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-red-500/25 bg-red-500/10 px-2 py-1 text-[11px] text-red-700 dark:text-red-300">
-                  <WarningCircle className="size-3" weight="fill" />
-                  {fileUploadSummary.failedCount} file
-                  {fileUploadSummary.failedCount === 1 ? "" : "s"} need attention
-                </div>
-              ) : null}
               <PromptInputAction tooltip={status === "streaming" ? "Stop" : "Send"}>
                 <Button
                   size="sm"

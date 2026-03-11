@@ -125,7 +125,8 @@ export function ButtonFileUpload({
           <FileArrowUp className="text-muted-foreground size-8" />
           <span className="mt-4 mb-1 text-lg font-medium">Drop files here</span>
           <span className="text-muted-foreground text-sm">
-            Drop images or documents here (up to {getChatAttachmentSizeLimitLabel()} each)
+            Drop images or documents here (up to {getChatAttachmentSizeLimitLabel("image/png")} for
+            images, {getChatAttachmentSizeLimitLabel("application/pdf")} for documents)
           </span>
         </div>
       </FileUploadContent>

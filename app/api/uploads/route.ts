@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { UserUploadService } from "@/lib/uploads/server"
+import { invalidateUploadRetrievalPreflightCacheForUser } from "@/lib/uploads/retrieval-preflight-cache"
 
 export async function GET() {
   const noStoreHeaders = {
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
       file,
       title: typeof title === "string" ? title : undefined,
     })
+    invalidateUploadRetrievalPreflightCacheForUser(user.id)
 
     return NextResponse.json({ upload })
   } catch (error) {

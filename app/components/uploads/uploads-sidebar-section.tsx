@@ -221,7 +221,11 @@ export function UploadsSidebarSection() {
 
     let cancelled = false
     setIsLoading(true)
-    listUserUploads()
+    listUserUploads({
+      allowStale: true,
+      maxAgeMs: 30_000,
+      revalidateInBackground: true,
+    })
       .then((items) => {
         if (!cancelled) {
           setUploads(items)

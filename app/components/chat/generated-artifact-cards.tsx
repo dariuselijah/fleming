@@ -246,6 +246,22 @@ export function InteractiveQuizArtifactCard({ artifact }: { artifact: QuizArtifa
   const [answers, setAnswers] = useState<Record<string, number>>({})
   const [submitted, setSubmitted] = useState(false)
   const total = artifact.questions.length
+  const citationMap = useMemo(
+    () => new Map(artifact.citations.map((citation) => [citation.index, citation])),
+    [artifact.citations]
+  )
+  const referencedCitations = useMemo(() => {
+    const seen = new Set<number>()
+    return artifact.questions.flatMap((question) =>
+      question.citationIndices
+        .filter((index) => !seen.has(index))
+        .map((index) => {
+          seen.add(index)
+          return citationMap.get(index) || null
+        })
+        .filter(Boolean)
+    )
+  }, [artifact.questions, citationMap])
 
   const score = artifact.questions.reduce((acc, question) => {
     if (answers[question.id] === question.correctOptionIndex) {
@@ -292,20 +308,23 @@ export function InteractiveQuizArtifactCard({ artifact }: { artifact: QuizArtifa
                   <button
                     key={`${question.id}-${optionIndex}`}
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      if (submitted) return
                       setAnswers((prev) => ({
                         ...prev,
                         [question.id]: optionIndex,
                       }))
-                    }
+                    }}
                     className={cn(
                       "w-full rounded-md border px-3 py-3 text-left text-sm transition",
                       selected
                         ? "border-primary bg-primary/15 ring-2 ring-primary/35 shadow-sm"
                         : "border-border hover:bg-accent/40",
                       revealCorrect && "border-green-500/50 bg-green-500/10",
-                      revealWrong && "border-red-500/40 bg-red-500/10"
+                      revealWrong && "border-red-500/40 bg-red-500/10",
+                      submitted && "cursor-default"
                     )}
+                    disabled={submitted}
                   >
                     <span className="flex items-start gap-2.5">
                       <span
@@ -341,6 +360,32 @@ export function InteractiveQuizArtifactCard({ artifact }: { artifact: QuizArtifa
                   {String.fromCharCode(65 + question.correctOptionIndex)}.
                 </p>
                 <p className="mt-1 text-sm leading-6 text-foreground">{question.explanation}</p>
+                {question.citationIndices.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {question.citationIndices
+                      .map((index) => citationMap.get(index))
+                      .filter(Boolean)
+                      .map((citation) => (
+                        <a
+                          key={`${question.id}-${citation!.index}`}
+                          href={citation!.url || undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block rounded-md border border-border/70 bg-background px-2 py-1.5 text-xs hover:bg-accent/40"
+                        >
+                          <span className="font-medium">
+                            [{citation!.index}] {citation!.pageLabel || citation!.sourceLabel || citation!.title}
+                          </span>
+                          {citation!.snippet ? (
+                            <span className="mt-1 block text-muted-foreground">
+                              {(citation!.snippet || "").slice(0, 180)}
+                              {(citation!.snippet || "").length > 180 ? "..." : ""}
+                            </span>
+                          ) : null}
+                        </a>
+                      ))}
+                  </div>
+                ) : null}
               </details>
             ) : null}
           </div>
@@ -364,6 +409,35 @@ export function InteractiveQuizArtifactCard({ artifact }: { artifact: QuizArtifa
           <p className="text-xs text-muted-foreground">Select one answer per question</p>
         )}
       </div>
+
+      {submitted && referencedCitations.length > 0 ? (
+        <div className="mt-4 rounded-lg border border-border/70 bg-muted/20 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            References
+          </p>
+          <div className="mt-2 space-y-2">
+            {referencedCitations.map((citation) => (
+              <a
+                key={`artifact-citation-${citation!.index}`}
+                href={citation!.url || undefined}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded-md border border-border/70 bg-background px-2.5 py-2 text-xs hover:bg-accent/40"
+              >
+                <span className="font-medium">
+                  [{citation!.index}] {citation!.pageLabel || citation!.sourceLabel || citation!.title}
+                </span>
+                {citation!.snippet ? (
+                  <span className="mt-1 block text-muted-foreground">
+                    {(citation!.snippet || "").slice(0, 200)}
+                    {(citation!.snippet || "").length > 200 ? "..." : ""}
+                  </span>
+                ) : null}
+              </a>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -290,16 +290,6 @@ function DocumentArtifactCard({ artifact }: { artifact: DocumentArtifactResult }
             </div>
           ))}
         </div>
-        {Array.isArray(artifact.warnings) && artifact.warnings.length > 0 ? (
-          <div className="mt-3 rounded-md border border-amber-300/70 bg-amber-50/70 p-2 text-xs">
-            <p className="font-semibold uppercase tracking-wide text-amber-900/80">
-              Retrieval Warnings
-            </p>
-            <p className="mt-1 text-amber-950/90">
-              {artifact.warnings.slice(0, 2).join(" | ")}
-            </p>
-          </div>
-        ) : null}
         {exportError ? (
           <p className="mt-2 text-xs text-red-500">{exportError}</p>
         ) : null}
@@ -357,18 +347,21 @@ function QuizArtifactCard({ artifact }: { artifact: QuizArtifactResult }) {
                   <button
                     key={`${question.id}-${optionIndex}`}
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      if (submitted) return
                       setAnswers((prev) => ({
                         ...prev,
                         [question.id]: optionIndex,
                       }))
-                    }
+                    }}
                     className={cn(
                       "w-full rounded-md border px-2 py-1.5 text-left text-sm transition",
                       selected ? "border-primary/60 bg-primary/10" : "border-border hover:bg-accent/40",
                       revealCorrect && "border-green-500/50 bg-green-500/10",
-                      revealWrong && "border-red-500/40 bg-red-500/10"
+                      revealWrong && "border-red-500/40 bg-red-500/10",
+                      submitted && "cursor-default"
                     )}
+                    disabled={submitted}
                   >
                     {option}
                   </button>
@@ -417,10 +410,9 @@ function ArtifactRefinementCard({
     refinement.choices.find((choice) => choice.requiresCustomInput) || null
 
   return (
-    <div className="rounded-2xl bg-gradient-to-r from-violet-200/50 via-fuchsia-200/45 to-purple-200/55 p-[1px]">
-      <div className="space-y-3 rounded-[15px] border border-violet-200/60 bg-background/98 p-3.5 shadow-sm">
+    <div className="space-y-3 rounded-xl border border-border/70 bg-background p-3.5 shadow-sm">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-violet-700/80">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Refine Generation
         </p>
         <p className="mt-1 text-sm font-semibold">{refinement.title}</p>
@@ -453,9 +445,9 @@ function ArtifactRefinementCard({
               type="button"
               onClick={() => onSuggestion?.(choice.submitText)}
               disabled={!onSuggestion}
-              className="hover:bg-violet-50/70 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-violet-200/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed"
+              className="hover:bg-accent/50 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed"
             >
-              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-violet-200/80 text-[11px] font-semibold text-violet-700/90">
+              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
                 {choice.id}
               </span>
               <span>{choice.label}</span>
@@ -495,7 +487,6 @@ function ArtifactRefinementCard({
         </div>
       ) : null}
     </div>
-    </div>
   )
 }
 
@@ -531,10 +522,9 @@ function ArtifactRefinementFallbackCard({
   ]
 
   return (
-    <div className="rounded-2xl bg-gradient-to-r from-violet-200/50 via-fuchsia-200/45 to-purple-200/55 p-[1px]">
-      <div className="space-y-3 rounded-[15px] border border-violet-200/60 bg-background/98 p-3.5 shadow-sm">
+    <div className="space-y-3 rounded-xl border border-border/70 bg-background p-3.5 shadow-sm">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-violet-700/80">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Refine Generation
           </p>
           <p className="mt-1 text-sm font-semibold">
@@ -551,9 +541,9 @@ function ArtifactRefinementFallbackCard({
               type="button"
               onClick={() => onSuggestion?.(choice.submitText)}
               disabled={!onSuggestion}
-              className="hover:bg-violet-50/70 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-violet-200/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed"
+              className="hover:bg-accent/50 disabled:text-muted-foreground flex w-full items-start gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left text-sm transition disabled:cursor-not-allowed"
             >
-              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-violet-200/80 text-[11px] font-semibold text-violet-700/90">
+              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold text-foreground/80">
                 {choice.id}
               </span>
               <span>{choice.label}</span>
@@ -586,7 +576,6 @@ function ArtifactRefinementFallbackCard({
             </button>
           </div>
         </div>
-      </div>
     </div>
   )
 }

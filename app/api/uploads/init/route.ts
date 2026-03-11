@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { UserUploadService } from "@/lib/uploads/server"
+import { invalidateUploadRetrievalPreflightCacheForUser } from "@/lib/uploads/retrieval-preflight-cache"
 
 export async function POST(request: Request) {
   try {
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
       fileSize: Number(body.fileSize || 0),
       title: typeof body.title === "string" ? body.title : undefined,
     })
+    invalidateUploadRetrievalPreflightCacheForUser(user.id)
 
     return NextResponse.json({ upload: pendingUpload })
   } catch (error) {

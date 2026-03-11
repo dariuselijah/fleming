@@ -728,6 +728,67 @@ function extractQuizFocusFromQuery(query: string): string {
   return cleanSnippetForArtifact(query, 90)
 }
 
+type QuizDifficulty = "easy" | "medium" | "hard"
+type QuizQuestionStyle = "single_best_answer" | "clinical_application" | "mixed"
+
+type QuizGenerationSettings = {
+  questionCount: number
+  difficulty: QuizDifficulty
+  style: QuizQuestionStyle
+  scopeLabel: string
+  pageStart?: number
+  pageEnd?: number
+}
+
+function parseQuizGenerationSettings(
+  query: string,
+  fallbackQuestionCount: number
+): QuizGenerationSettings {
+  const normalized = query.replace(/\r/g, "")
+  const questionCountMatch =
+    normalized.match(/\bquestions?\s*:?\s*(\d{1,2})\b/i) ||
+    normalized.match(/\b(\d{1,2})\s*(?:questions?|mcqs?)\b/i)
+  const questionCount = clamp(
+    questionCountMatch?.[1] ? Number.parseInt(questionCountMatch[1], 10) : fallbackQuestionCount,
+    3,
+    12
+  )
+  const difficulty: QuizDifficulty =
+    /\bhard|advanced|board[-\s]?style\b/i.test(normalized)
+      ? "hard"
+      : /\beasy|introductory|basic\b/i.test(normalized)
+        ? "easy"
+        : "medium"
+  const style: QuizQuestionStyle =
+    /\bcase[-\s]?based|clinical|scenario\b/i.test(normalized)
+      ? "clinical_application"
+      : /\bmixed\b/i.test(normalized)
+        ? "mixed"
+        : "single_best_answer"
+  const explicitPages =
+    normalized.match(/\bpages?\s*:?\s*(\d+)\s*(?:-|–|to)\s*(\d+)\b/i) ||
+    normalized.match(/\bpages?\s+(\d+)\s*(?:-|–|to)\s*(\d+)\b/i)
+  const singlePage =
+    normalized.match(/\bpage\s*:?\s*(\d+)\b/i) || normalized.match(/\bpage\s+(\d+)\b/i)
+  const pageStart = explicitPages?.[1]
+    ? Number.parseInt(explicitPages[1], 10)
+    : singlePage?.[1]
+      ? Number.parseInt(singlePage[1], 10)
+      : undefined
+  const pageEnd = explicitPages?.[2]
+    ? Number.parseInt(explicitPages[2], 10)
+    : pageStart
+  const scopeLabel = extractQuizFocusFromQuery(query)
+  return {
+    questionCount,
+    difficulty,
+    style,
+    scopeLabel,
+    pageStart,
+    pageEnd,
+  }
+}
+
 function normalizeQuizOptionText(value: string, maxLength = 260): string {
   const normalized = sanitizeArtifactText(value)
   if (!normalized) return ""
@@ -753,12 +814,19 @@ function normalizeQuizOptionText(value: string, maxLength = 260): string {
 function buildQuizPromptFromCitation(
   citation: EvidenceCitation,
   quizFocus: string,
-  statement: string
+  statement: string,
+  style: QuizQuestionStyle = "single_best_answer"
 ): string {
   const statementSeed = cleanSnippetForArtifact(statement, 110)
   const concept = statementSeed.split(/[.:;!?]/)[0]?.trim() || statementSeed
   const topicSeed = cleanSnippetForArtifact(concept || quizFocus || citation.title || "", 80)
   const pageHint = citation.pageLabel ? ` (${citation.pageLabel})` : ""
+  if (style === "clinical_application") {
+    return `Based on the uploaded material${pageHint}, which option best applies this concept in a clinical scenario about "${topicSeed}"?`
+  }
+  if (style === "mixed") {
+    return `Based on the uploaded material${pageHint}, which option is the strongest supported answer about "${topicSeed}"?`
+  }
   return `Based on the uploaded material${pageHint}, which statement is best supported about "${topicSeed}"?`
 }
 
@@ -800,6 +868,102 @@ function extractQuizFactsFromCitation(citation: EvidenceCitation, maxFacts = 2):
     .filter((sentence) => !isWeakQuizStatement(sentence))
   const unique = Array.from(new Set(candidates))
   return unique.slice(0, Math.max(1, maxFacts))
+}
+
+function scoreQuizCitationFit(
+  citation: EvidenceCitation,
+  settings: QuizGenerationSettings,
+  query: string
+): number {
+  const haystack = `${citation.title || ""} ${citation.snippet || ""}`.toLowerCase()
+  const keywords = extractQuizQueryKeywords(query)
+  const overlap = keywords.filter((keyword) => haystack.includes(keyword)).length
+  const overlapScore = keywords.length > 0 ? overlap / keywords.length : 0
+  const pageMatch =
+    typeof settings.pageStart === "number" &&
+    typeof citation.sourceUnitNumber === "number" &&
+    citation.sourceUnitNumber >= settings.pageStart &&
+    citation.sourceUnitNumber <= (settings.pageEnd || settings.pageStart)
+      ? 0.45
+      : 0
+  const pageLabelBoost = citation.pageLabel ? 0.08 : 0
+  const qualityPenalty = isLikelyNonBodySnippet(citation.snippet || "") ? -1 : 0
+  return overlapScore + pageMatch + pageLabelBoost + qualityPenalty
+}
+
+function isVerifiedQuizCandidate(
+  citation: EvidenceCitation,
+  statement: string,
+  settings: QuizGenerationSettings,
+  query: string
+): boolean {
+  if (!statement || isWeakQuizStatement(statement)) return false
+  const excerpt = sanitizeArtifactText(citation.snippet || citation.title || "")
+  if (!excerpt || excerpt.length < 35) return false
+  const statementKey = normalizeQuizTopicKey(statement)
+  const excerptKey = normalizeQuizTopicKey(excerpt)
+  if (!statementKey || !excerptKey) return false
+  const hasTopicOverlap = statementKey
+    .split(" ")
+    .filter(Boolean)
+    .some((token) => excerptKey.includes(token))
+  if (!hasTopicOverlap) return false
+  if (scoreQuizCitationFit(citation, settings, query) < 0.15) return false
+  return true
+}
+
+function computeTokenOverlapRatio(left: string, right: string): number {
+  const leftTokens = normalizeQuizTopicKey(left).split(" ").filter(Boolean)
+  const rightTokens = new Set(normalizeQuizTopicKey(right).split(" ").filter(Boolean))
+  if (leftTokens.length === 0 || rightTokens.size === 0) return 0
+  const overlap = leftTokens.filter((token) => rightTokens.has(token)).length
+  return overlap / Math.max(leftTokens.length, 1)
+}
+
+function isValidDistractorCandidate(
+  citation: EvidenceCitation,
+  candidate: string,
+  correct: string,
+  settings: QuizGenerationSettings,
+  query: string
+): boolean {
+  const normalized = normalizeQuizOptionText(candidate, 220)
+  if (!normalized) return false
+  if (normalized === correct) return false
+  if (isWeakQuizStatement(normalized)) return false
+  if (/^(all|none|both)\b/i.test(normalized)) return false
+
+  const overlapWithCorrect = computeTokenOverlapRatio(normalized, correct)
+  if (overlapWithCorrect > 0.9) return false
+
+  const excerpt = sanitizeArtifactText(citation.snippet || citation.title || "").toLowerCase()
+  const candidateTokens = normalizeQuizTopicKey(normalized).split(" ").filter(Boolean)
+  const topicalOverlap = candidateTokens.filter((token) => excerpt.includes(token)).length
+  if (candidateTokens.length > 0 && topicalOverlap === 0) return false
+
+  // Keep distractors in the same conceptual neighborhood as the query/citation,
+  // but block options that are clearly low-signal.
+  if (scoreQuizCitationFit(citation, settings, query) < 0.08) return false
+  return true
+}
+
+function dedupeQuizCitations(citations: EvidenceCitation[]): EvidenceCitation[] {
+  const deduped = new Map<string, EvidenceCitation>()
+  citations.forEach((citation) => {
+    const key =
+      citation.pmid ||
+      citation.doi ||
+      citation.url ||
+      citation.chunkId ||
+      `${citation.title || "untitled"}:${citation.journal || "unknown"}`
+    if (!deduped.has(key)) {
+      deduped.set(key, citation)
+    }
+  })
+  return Array.from(deduped.values()).map((citation, index) => ({
+    ...citation,
+    index: index + 1,
+  }))
 }
 
 function sanitizeFileName(value: string): string {
@@ -1091,6 +1255,61 @@ function pickExcerpt(text: string, maxLength = 260) {
   const normalized = text.replace(/\s+/g, " ").trim()
   if (normalized.length <= maxLength) return normalized
   return `${normalized.slice(0, maxLength).trim()}...`
+}
+
+const QUIZ_QUERY_STOP_WORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "that",
+  "this",
+  "your",
+  "uploaded",
+  "material",
+  "materials",
+  "document",
+  "documents",
+  "file",
+  "files",
+  "quiz",
+  "questions",
+  "question",
+  "difficulty",
+  "format",
+  "style",
+  "topic",
+  "pages",
+  "page",
+])
+
+function extractQuizQueryKeywords(query: string): string[] {
+  return sanitizeArtifactText(query)
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !QUIZ_QUERY_STOP_WORDS.has(token))
+    .slice(0, 8)
+}
+
+function pickFocusedExcerpt(text: string, query: string, maxLength = 260) {
+  const normalized = text.replace(/\s+/g, " ").trim()
+  if (!normalized) return ""
+  if (normalized.length <= maxLength) return normalized
+  const keywords = extractQuizQueryKeywords(query)
+  const lowered = normalized.toLowerCase()
+  const pivot =
+    keywords
+      .map((keyword) => lowered.indexOf(keyword))
+      .find((index) => typeof index === "number" && index >= 0) ?? 0
+  const start = Math.max(0, pivot - Math.floor(maxLength * 0.3))
+  const end = Math.min(normalized.length, start + maxLength)
+  const window = normalized.slice(start, end).trim()
+  const prefix = start > 0 ? "..." : ""
+  const suffix = end < normalized.length ? "..." : ""
+  return `${prefix}${window}${suffix}`.trim()
 }
 
 function errorMessageFromUnknown(error: unknown): string {
@@ -2514,7 +2733,7 @@ export class UserUploadService {
         sampleSize: null,
         meshTerms: [],
         url: viewerUrl,
-        snippet: pickExcerpt(row.chunk_text, 320),
+        snippet: pickFocusedExcerpt(row.chunk_text, input.query, 320) || pickExcerpt(row.chunk_text, 320),
         score: item.score,
         sourceType: "user_upload",
         sourceLabel: `${formatSourceLabel(sourceUnit.unit_type, sourceUnit.unit_number)} • ${upload.file_name}`,
@@ -3361,7 +3580,7 @@ export class UserUploadService {
   }
 
   async generateQuizFromUpload(input: GenerateQuizFromUploadInput): Promise<QuizArtifact> {
-    const questionCount = clamp(input.questionCount ?? 5, 3, 10)
+    const requestedQuestionCount = clamp(input.questionCount ?? 5, 3, 10)
     const topicContext = normalizeTopicContext(input.topicContext)
     const normalizedQuery = sanitizeArtifactText(input.query)
     const queryTokenCount = normalizedQuery.split(/\s+/).filter(Boolean).length
@@ -3369,33 +3588,77 @@ export class UserUploadService {
       /\b(topic|chapter|section|focus(?:ed)?\s+on|about|regarding|pages?|pp?\.?)\b/i.test(
         normalizedQuery
       )
+    const settings = parseQuizGenerationSettings(input.query, requestedQuestionCount)
     const effectiveQuery =
       queryTokenCount <= 8 && !hasExplicitScopeCue && topicContext.activeTopic
         ? `${normalizedQuery} ${topicContext.activeTopic}`.trim()
         : normalizedQuery || input.query
-    const quizFocus = extractQuizFocusFromQuery(effectiveQuery)
+    const structureInspection = await this.inspectUploadStructure({
+      userId: input.userId,
+      uploadId: input.uploadId || topicContext.lastUploadId || undefined,
+      topicContext,
+    })
+    const structureTopicHint =
+      !hasExplicitScopeCue && structureInspection.topicMap.length > 0
+        ? cleanSnippetForArtifact(structureInspection.topicMap[0]?.label || "", 90)
+        : ""
+    const retrievalQuery =
+      structureTopicHint &&
+      !effectiveQuery.toLowerCase().includes(structureTopicHint.toLowerCase())
+        ? `${effectiveQuery}\nTopic: ${structureTopicHint}`
+        : effectiveQuery
+    const quizFocus = settings.scopeLabel || extractQuizFocusFromQuery(retrievalQuery)
     const search = await this.uploadContextSearch({
       userId: input.userId,
-      query: effectiveQuery,
+      query: retrievalQuery,
       uploadId: input.uploadId || topicContext.lastUploadId || undefined,
       apiKey: input.apiKey,
       embeddingApiKey: input.embeddingApiKey,
       mode: "auto",
-      topK: Math.max(questionCount + 3, 8),
-      includeNeighborPages: 1,
+      topK: Math.max(settings.questionCount * 4, 12),
+      includeNeighborPages: typeof settings.pageStart === "number" ? 0 : 1,
       topicContext,
       maxDurationMs: 3000,
     })
 
+    const warningSet = new Set<string>([
+      ...search.warnings,
+      ...(structureInspection.warnings ?? []),
+    ])
+    if (structureInspection.confidence === "low") {
+      warningSet.add("Structure inspection confidence is low; explicit topic or page scope will improve quiz quality.")
+    }
+
     const citations = search.citations
+      .map((citation) => ({
+        ...citation,
+        snippet:
+          pickFocusedExcerpt(citation.snippet || citation.title || "", retrievalQuery, 280) ||
+          citation.snippet ||
+          citation.title ||
+          "",
+      }))
       .filter((citation) => {
         const candidate = citation.snippet || citation.title || ""
         return !isLikelyNonBodySnippet(candidate)
       })
-      .slice(0, Math.max(questionCount * 3, 12))
+      .sort(
+        (a, b) =>
+          scoreQuizCitationFit(b, settings, retrievalQuery) -
+          scoreQuizCitationFit(a, settings, retrievalQuery)
+      )
+      .slice(0, Math.max(settings.questionCount * 4, 16))
+
+    if (citations.length === 0) {
+      throw new Error("I couldn't find grounded passages for a reliable quiz. Please specify a topic or page range.")
+    }
+
     const statementPoolRaw = citations
       .flatMap((citation) => {
-        const extractedFacts = extractQuizFactsFromCitation(citation, 2)
+        const extractedFacts = extractQuizFactsFromCitation(
+          citation,
+          settings.difficulty === "hard" ? 3 : 2
+        )
         const facts =
           extractedFacts.length > 0
             ? extractedFacts
@@ -3404,17 +3667,21 @@ export class UserUploadService {
           citation,
           statement: normalizeQuizOptionText(statement, 260),
           topicKey: normalizeQuizTopicKey(citation.snippet || citation.title || statement),
+          score: scoreQuizCitationFit(citation, settings, retrievalQuery),
         }))
       })
       .filter((item) => item.statement.length > 24)
       .filter((item) => !isWeakQuizStatement(item.statement))
+      .filter((item) =>
+        isVerifiedQuizCandidate(item.citation, item.statement, settings, retrievalQuery)
+      )
     const seenStatement = new Set<string>()
     const statementPool = statementPoolRaw.filter((item) => {
       const key = normalizeQuizTopicKey(item.statement)
       if (!key || seenStatement.has(key)) return false
       seenStatement.add(key)
       return true
-    })
+    }).sort((a, b) => b.score - a.score)
 
     const fallbackOptions = [
       normalizeQuizOptionText(
@@ -3439,16 +3706,17 @@ export class UserUploadService {
       citation: EvidenceCitation
       statement: string
       topicKey: string
+      score: number
     }> = []
     const seenTopicKeys = new Set<string>()
     for (const candidate of statementPool) {
-      if (diverseQuestionSource.length >= questionCount) break
+      if (diverseQuestionSource.length >= settings.questionCount) break
       if (!candidate.topicKey || seenTopicKeys.has(candidate.topicKey)) continue
       seenTopicKeys.add(candidate.topicKey)
       diverseQuestionSource.push(candidate)
     }
     for (const candidate of statementPool) {
-      if (diverseQuestionSource.length >= questionCount) break
+      if (diverseQuestionSource.length >= settings.questionCount) break
       if (!diverseQuestionSource.some((existing) => existing.statement === candidate.statement)) {
         diverseQuestionSource.push(candidate)
       }
@@ -3456,7 +3724,7 @@ export class UserUploadService {
     const questionSource =
       diverseQuestionSource.length > 0
         ? diverseQuestionSource
-        : citations.slice(0, questionCount).map((citation) => {
+        : citations.slice(0, settings.questionCount).map((citation) => {
             const statement = normalizeQuizOptionText(
               citation.snippet || citation.title || "Core concept from the uploaded material.",
               260
@@ -3465,19 +3733,22 @@ export class UserUploadService {
               citation,
               statement,
               topicKey: normalizeQuizTopicKey(statement),
+              score: scoreQuizCitationFit(citation, settings, retrievalQuery),
             }
           })
 
-    const questions: QuizArtifactQuestion[] = questionSource.map((item, index) => {
+    const questionDrafts = questionSource
+      .map((item, index) => {
       const citation = item.citation
       const correct = item.statement
-      const distractorCandidates = statementPool
+      const peerStatements = statementPool
         .filter(
           (candidate) =>
             candidate.statement !== correct &&
             candidate.topicKey !== item.topicKey
         )
-        .map((candidate) => candidate.statement)
+        .sort((a, b) => b.score - a.score)
+      const distractorCandidates = peerStatements.map((candidate) => candidate.statement)
       const backupDistractors = statementPool
         .map((candidate) => candidate.statement)
         .filter((candidate) => candidate !== correct)
@@ -3488,36 +3759,39 @@ export class UserUploadService {
       const rotatedDistractors = uniqueDistractors
         .slice(distractorOffset)
         .concat(uniqueDistractors.slice(0, distractorOffset))
-      const selectedDistractors = rotatedDistractors.slice(0, 3)
+      const selectedDistractors: string[] = []
+      const considerDistractor = (candidate: string) => {
+        const normalized = normalizeQuizOptionText(candidate, 220)
+        if (
+          isValidDistractorCandidate(citation, normalized, correct, settings, retrievalQuery) &&
+          !selectedDistractors.includes(normalized)
+        ) {
+          selectedDistractors.push(normalized)
+        }
+      }
+      rotatedDistractors.forEach((candidate) => {
+        if (selectedDistractors.length < 3) {
+          considerDistractor(candidate)
+        }
+      })
       for (let fillIndex = 0; selectedDistractors.length < 3; fillIndex += 1) {
         const syntheticDistractor =
           fillIndex % 2 === 0
             ? createPlausibleDistractor(correct, quizFocus, citation.title || "")
             : fallbackOptions[(index + fillIndex) % fallbackOptions.length]
-        if (
-          syntheticDistractor !== correct &&
-          !selectedDistractors.includes(syntheticDistractor)
-        ) {
-          selectedDistractors.push(syntheticDistractor)
-        } else if (fillIndex > 5) {
-          selectedDistractors.push(
-            normalizeQuizOptionText(
-              `A different interpretation from the uploaded material related to ${quizFocus}.`,
-              200
-            )
-          )
+        considerDistractor(syntheticDistractor)
+        if (fillIndex > 8) break
+      }
+      if (selectedDistractors.length < 3) {
+        for (const fallback of fallbackOptions) {
+          if (selectedDistractors.length >= 3) break
+          considerDistractor(fallback)
         }
       }
-      const optionCandidates = [correct, ...selectedDistractors, ...fallbackOptions]
-      const uniqueOptions = Array.from(new Set(optionCandidates)).slice(0, 4)
-      while (uniqueOptions.length < 4) {
-        uniqueOptions.push(
-          normalizeQuizOptionText(
-            `Alternative interpretation ${uniqueOptions.length + 1} from the topic.`,
-            140
-          )
-        )
+      if (selectedDistractors.length < 3) {
+        return null
       }
+      const uniqueOptions = [correct, ...selectedDistractors.slice(0, 3)]
 
       const rotation = index % uniqueOptions.length
       const rotatedOptions = uniqueOptions.slice(rotation).concat(uniqueOptions.slice(0, rotation))
@@ -3525,40 +3799,113 @@ export class UserUploadService {
       const explanationSnippet = cleanSnippetForArtifact(citation.snippet || citation.title || "", 220)
       const inline = formatInlineCitation(citation, "vancouver")
       const explanation = explanationSnippet
-        ? `Supported by uploaded material: "${explanationSnippet}" ${inline} Other options represent different or unsupported interpretations.`
+        ? `Supported by ${citation.pageLabel || "the uploaded material"}: "${explanationSnippet}" ${inline} The distractors were not directly supported by the cited excerpt.`
         : `This choice directly reflects the cited uploaded excerpt ${inline}.`
+      const styleForQuestion: QuizQuestionStyle =
+        settings.style === "mixed"
+          ? index % 2 === 0
+            ? "single_best_answer"
+            : "clinical_application"
+          : settings.style
 
       return {
-        id: `quiz-q-${index + 1}`,
-        prompt: buildQuizPromptFromCitation(citation, quizFocus, correct),
-        options: rotatedOptions,
-        correctOptionIndex: correctOptionIndex >= 0 ? correctOptionIndex : 0,
-        explanation,
-        citationIndices: [citation.index],
+        question: {
+          id: `quiz-q-${index + 1}`,
+          prompt: buildQuizPromptFromCitation(citation, quizFocus, correct, styleForQuestion),
+          options: rotatedOptions,
+          correctOptionIndex: correctOptionIndex >= 0 ? correctOptionIndex : 0,
+          explanation,
+          citationIndices: [citation.index],
+        },
+        citation,
+        verificationScore: scoreQuizCitationFit(citation, settings, retrievalQuery),
+      }
+    })
+      .filter(
+        (
+          draft
+        ): draft is {
+          question: QuizArtifactQuestion
+          citation: EvidenceCitation
+          verificationScore: number
+        } => draft !== null
+      )
+
+    const verifiedQuestionDrafts = questionDrafts
+      .filter((draft) =>
+        isVerifiedQuizCandidate(
+          draft.citation,
+          draft.question.options[draft.question.correctOptionIndex] || "",
+          settings,
+          retrievalQuery
+        )
+      )
+      .sort((a, b) => b.verificationScore - a.verificationScore)
+
+    if (verifiedQuestionDrafts.length < settings.questionCount) {
+      warningSet.add(
+        `Only ${verifiedQuestionDrafts.length} strongly grounded question${verifiedQuestionDrafts.length === 1 ? "" : "s"} passed quiz verification.`
+      )
+    }
+
+    const finalizedDrafts = verifiedQuestionDrafts.slice(0, settings.questionCount)
+    if (finalizedDrafts.length === 0) {
+      throw new Error("I couldn't verify enough grounded questions. Please narrow the topic or specify pages.")
+    }
+
+    const finalizedCitationPool = dedupeQuizCitations(
+      finalizedDrafts.map((draft) => draft.citation)
+    )
+    const citationIndexMap = new Map<number, number>()
+    finalizedCitationPool.forEach((citation) => {
+      const original = finalizedDrafts.find(
+        (draft) =>
+          draft.citation.url === citation.url ||
+          draft.citation.chunkId === citation.chunkId ||
+          draft.citation.title === citation.title
+      )?.citation.index
+      if (typeof original === "number") {
+        citationIndexMap.set(original, citation.index)
       }
     })
 
+    const questions: QuizArtifactQuestion[] = finalizedDrafts.map((draft) => ({
+      ...draft.question,
+      citationIndices: draft.question.citationIndices.map(
+        (index) => citationIndexMap.get(index) || index
+      ),
+    }))
+
     const uploadId =
-      citations[0]?.uploadId ?? input.uploadId ?? search.topicContext.lastUploadId ?? null
+      finalizedCitationPool[0]?.uploadId ??
+      citations[0]?.uploadId ??
+      input.uploadId ??
+      search.topicContext.lastUploadId ??
+      null
     const uploadTitle =
+      finalizedCitationPool[0]?.uploadFileName ||
       citations[0]?.uploadFileName ||
+      finalizedCitationPool[0]?.sourceLabel ||
       citations[0]?.sourceLabel ||
       (uploadId ? (await this.getUploadListItem(input.userId, uploadId))?.title : null) ||
       null
-    const warningSet = new Set<string>(search.warnings)
+
     if (search.metrics.retrievalConfidence !== "high") {
       warningSet.add(
         "Quiz grounding may improve if you specify a narrower topic or explicit page range."
       )
     }
+    if (finalizedCitationPool.length < questions.length) {
+      warningSet.add("Some questions share the same source excerpt; narrower scope should improve coverage.")
+    }
 
     return {
       artifactType: "quiz",
       artifactId: crypto.randomUUID(),
-      title: uploadTitle ? `${uploadTitle} - Quiz` : `Quiz - ${effectiveQuery.slice(0, 72)}`,
-      query: effectiveQuery,
+      title: uploadTitle ? `${uploadTitle} - Quiz` : `Quiz - ${retrievalQuery.slice(0, 72)}`,
+      query: retrievalQuery,
       questions,
-      citations,
+      citations: finalizedCitationPool,
       warnings: Array.from(warningSet),
       uploadId,
       uploadTitle,

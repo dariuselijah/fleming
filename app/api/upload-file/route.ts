@@ -1,6 +1,6 @@
 import { validateUserIdentity } from "@/lib/server/api"
 import {
-  CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES,
+  getChatAttachmentMaxFileSizeBytes,
   getChatAttachmentSizeLimitLabel,
 } from "@/lib/chat-attachments/constants"
 import { NextRequest, NextResponse } from "next/server"
@@ -129,12 +129,12 @@ export async function POST(request: NextRequest) {
 }
 
 async function validateFile(file: File): Promise<{ isValid: boolean; error?: string }> {
-  const MAX_FILE_SIZE = CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES
+  const maxFileSize = getChatAttachmentMaxFileSizeBytes(file.type)
 
-  if (file.size > MAX_FILE_SIZE) {
+  if (file.size > maxFileSize) {
     return {
       isValid: false,
-      error: `File size exceeds ${getChatAttachmentSizeLimitLabel()} limit`,
+      error: `File size exceeds ${getChatAttachmentSizeLimitLabel(file.type)} limit`,
     }
   }
 

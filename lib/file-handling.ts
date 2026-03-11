@@ -1,20 +1,21 @@
 import { toast } from "@/components/ui/toast"
 import type { EvidenceCitation, UploadVisualReference } from "@/lib/evidence/types"
 import {
-  CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES,
   getChatAttachmentFileId,
+  getChatAttachmentMaxFileSizeBytes,
   getChatAttachmentSizeLimitLabel,
+  isImageAttachment,
 } from "@/lib/chat-attachments/constants"
+import { uploadKnowledgeFile } from "@/lib/uploads/api"
 import { DAILY_FILE_UPLOAD_LIMIT } from "./config"
 import { isSupabaseEnabled } from "./supabase/config"
-
-const MAX_FILE_SIZE = CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES
 
 export type Attachment = {
   name: string
   contentType: string
   url: string
   filePath?: string // Store file path for secure access
+  uploadId?: string
 }
 
 export type ProcessFilesResult = {
@@ -28,10 +29,11 @@ const signedUrlCache = new Map<string, { url: string; expiresAt: number }>()
 export async function validateFile(
   file: File
 ): Promise<{ isValid: boolean; error?: string }> {
-  if (file.size > MAX_FILE_SIZE) {
+  const maxFileSize = getChatAttachmentMaxFileSizeBytes(file.type)
+  if (file.size > maxFileSize) {
     return {
       isValid: false,
-      error: `File size exceeds ${getChatAttachmentSizeLimitLabel()} limit`,
+      error: `File size exceeds ${getChatAttachmentSizeLimitLabel(file.type)} limit`,
     }
   }
 
@@ -40,12 +42,18 @@ export async function validateFile(
   return { isValid: true }
 }
 
-export function createAttachment(file: File, url: string, filePath?: string): Attachment {
+export function createAttachment(
+  file: File,
+  url: string,
+  filePath?: string,
+  uploadId?: string
+): Attachment {
   return {
     name: file.name,
     contentType: file.type,
     url,
-    filePath
+    filePath,
+    uploadId,
   }
 }
 
@@ -186,9 +194,14 @@ export async function processFiles(
 
       let url: string
       let filePath: string | undefined
+      let uploadId: string | undefined
 
-      if (isSupabaseEnabled) {
-        // Use server-side API for file uploads
+      if (!isImageAttachment(file.type) && isAuthenticated) {
+        const upload = await uploadKnowledgeFile(file, file.name)
+        url = `upload-ref://${upload.id}`
+        uploadId = upload.id
+      } else if (isSupabaseEnabled) {
+        // Use server-side API for image uploads
         const formData = new FormData()
         formData.append("file", file)
         formData.append("userId", userId)
@@ -219,14 +232,14 @@ export async function processFiles(
           console.error("Failed to parse success response:", jsonError)
           throw new Error("Invalid response from server")
         }
-        
+
         url = result.signedUrl
         filePath = result.filePath
       } else {
         url = URL.createObjectURL(file)
       }
 
-      const attachment = createAttachment(file, url, filePath)
+      const attachment = createAttachment(file, url, filePath, uploadId)
       console.log(`File ${file.name} processed successfully`)
       return attachment
     } catch (error) {

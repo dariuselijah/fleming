@@ -33,6 +33,14 @@ export const ENABLE_UPLOAD_ARTIFACT_V2 =
 export const ENABLE_YOUTUBE_TOOL = process.env.ENABLE_YOUTUBE_TOOL !== "false"
 export const ENABLE_WEB_SEARCH_TOOL =
   process.env.ENABLE_WEB_SEARCH_TOOL !== "false"
+export const ENABLE_LANGGRAPH_HARNESS =
+  process.env.ENABLE_LANGGRAPH_HARNESS !== "false"
+export const ENABLE_CONNECTOR_REGISTRY =
+  process.env.ENABLE_CONNECTOR_REGISTRY !== "false"
+export const ENABLE_STRICT_CITATION_CONTRACT =
+  process.env.ENABLE_STRICT_CITATION_CONTRACT !== "false"
+export const ENABLE_CHAT_ACTIVITY_TIMELINE_V2 =
+  process.env.ENABLE_CHAT_ACTIVITY_TIMELINE_V2 !== "false"
 
 // Hourly rate limits (ChatGPT-style)
 export const NON_AUTH_HOURLY_MESSAGE_LIMIT = 3

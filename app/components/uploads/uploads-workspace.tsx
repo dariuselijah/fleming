@@ -12,6 +12,7 @@ import {
 } from "@/lib/uploads/api"
 import { buildUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
 import type { UploadProgressStage, UserUploadListItem } from "@/lib/uploads/types"
+import { getUploadStatusLabel } from "@/lib/uploads/status-label"
 import {
   ArrowClockwise,
   CheckCircle,
@@ -41,13 +42,6 @@ const ACCEPTED_KNOWLEDGE_UPLOADS = [
   "image/webp",
   "image/gif",
 ].join(",")
-
-const INGESTION_STAGES: Array<{ key: UploadProgressStage; label: string }> = [
-  { key: "extracting_pages", label: "Extracting pages" },
-  { key: "chunking", label: "Chunking" },
-  { key: "embedding", label: "Embedding" },
-  { key: "ready", label: "Ready" },
-]
 
 const PIPELINE_STAGE_SEQUENCE: Array<{
   key: ActiveUploadState["stage"]
@@ -83,14 +77,6 @@ function fileIcon(kind: UserUploadListItem["uploadKind"]) {
   if (kind === "image") return ImageSquare
   if (kind === "text") return FileText
   return FolderOpen
-}
-
-function statusLabel(upload: UserUploadListItem) {
-  const stage = upload.latestJob?.progressStage
-  if (upload.status === "processing" && stage && stage !== "queued") {
-    return INGESTION_STAGES.find((item) => item.key === stage)?.label || "Processing"
-  }
-  return upload.status
 }
 
 function UploadPipelineCard({ state }: { state: ActiveUploadState }) {
@@ -204,7 +190,7 @@ export function UploadsWorkspace() {
 
   const refreshUploads = useCallback(async () => {
     try {
-      const items = await listUserUploads()
+      const items = await listUserUploads({ forceRefresh: true, allowStale: true })
       setUploads(items)
     } catch (error) {
       console.warn(
@@ -222,7 +208,11 @@ export function UploadsWorkspace() {
 
     let cancelled = false
     setIsLoading(true)
-    listUserUploads()
+    listUserUploads({
+      allowStale: true,
+      maxAgeMs: 30_000,
+      revalidateInBackground: true,
+    })
       .then((items) => {
         if (!cancelled) setUploads(items)
       })
@@ -534,7 +524,7 @@ export function UploadsWorkspace() {
                           upload.status === "pending" && "bg-amber-500/10 text-amber-700 dark:text-amber-300"
                         )}
                       >
-                        {statusLabel(upload)}
+                        {getUploadStatusLabel(upload)}
                       </span>
                     </div>
 

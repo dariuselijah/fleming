@@ -86,6 +86,12 @@ async function extractCitationFromSource(
   index: number
 ): Promise<CitationData | null> {
   try {
+    const extendedSource = source as SourceUIPart["source"] & {
+      journal?: string
+      year?: string
+      pmid?: string
+      doi?: string
+    }
     // Check if URL is a PubMed URL
     const pubmedMatch = source.url.match(/pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)/)
     if (pubmedMatch) {
@@ -126,6 +132,23 @@ async function extractCitationFromSource(
         }
       }
     }
+
+    if (extendedSource.pmid && /^\d+$/.test(extendedSource.pmid)) {
+      const article = await fetchPubMedArticle(extendedSource.pmid)
+      if (article) {
+        return {
+          index,
+          title: article.title,
+          authors: article.authors,
+          journal: article.journal,
+          year: article.year,
+          url: article.url,
+          doi: article.doi,
+          pmid: article.pmid,
+          abstract: article.abstract,
+        }
+      }
+    }
     
     // Try title lookup only for likely scholarly web sources.
     if (shouldAttemptPubMedTitleLookup(source)) {
@@ -149,6 +172,7 @@ async function extractCitationFromSource(
     // Fallback: create citation from source metadata
     // Extract institution/journal name from URL
     const journalName = extractJournalFromUrl(source.url) || 
+                        extendedSource.journal ||
                         source.title?.split(' - ')[0] || 
                         'Unknown Source'
     
@@ -157,8 +181,10 @@ async function extractCitationFromSource(
       title: source.title || 'Untitled',
       authors: [],
       journal: journalName,
-      year: extractYearFromUrl(source.url) || '',
+      year: extendedSource.year || extractYearFromUrl(source.url) || '',
       url: source.url,
+      doi: extendedSource.doi,
+      pmid: extendedSource.pmid,
     }
   } catch (error) {
     console.error('Error extracting citation from source:', error)

@@ -34,6 +34,11 @@ export function getSources(parts: MessageAISDK["parts"]) {
           if (Array.isArray(result)) {
             return result.flat()
           }
+          if (result.provenance && Array.isArray(result.provenance)) {
+            return result.provenance
+              .map((item: any) => normalizeProvenanceSource(item))
+              .filter(Boolean)
+          }
           if (result.sources && Array.isArray(result.sources)) {
             return result.sources
           }
@@ -88,6 +93,31 @@ export function getSources(parts: MessageAISDK["parts"]) {
     }) || []
 
   return validSources
+}
+
+function normalizeProvenanceSource(value: unknown) {
+  if (!value || typeof value !== "object") return null
+  const candidate = value as Record<string, unknown>
+  const url = normalizeSourceUrl(candidate.url)
+  if (!url) return null
+  return {
+    url,
+    title:
+      typeof candidate.title === "string" && candidate.title.trim().length > 0
+        ? candidate.title
+        : extractTitleFromUrl(url),
+    sourceType: typeof candidate.sourceType === "string" ? candidate.sourceType : undefined,
+    sourceName: typeof candidate.sourceName === "string" ? candidate.sourceName : undefined,
+    journal: typeof candidate.journal === "string" ? candidate.journal : undefined,
+    year:
+      typeof candidate.publishedAt === "string"
+        ? candidate.publishedAt
+        : typeof candidate.year === "string"
+          ? candidate.year
+          : undefined,
+    pmid: typeof candidate.pmid === "string" ? candidate.pmid : undefined,
+    doi: typeof candidate.doi === "string" ? candidate.doi : undefined,
+  }
 }
 
 function normalizeSourceUrl(value: unknown): string | null {

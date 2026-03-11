@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { UserUploadService } from "@/lib/uploads/server"
+import { invalidateUploadRetrievalPreflightCacheForUser } from "@/lib/uploads/retrieval-preflight-cache"
 
 type RouteContext = {
   params: Promise<{
@@ -59,6 +60,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
     const { uploadId } = await context.params
     const service = new UserUploadService(supabase)
     await service.deleteUpload(user.id, uploadId)
+    invalidateUploadRetrievalPreflightCacheForUser(user.id)
 
     return NextResponse.json({ success: true })
   } catch (error) {

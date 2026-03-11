@@ -5,9 +5,15 @@ import {
 import { ProcessingLoader } from "@/components/prompt-kit/processing-loader"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
 import { isArtifactWorkflowInput } from "@/lib/chat/artifact-workflow"
+import { ENABLE_CHAT_ACTIVITY_TIMELINE_V2 } from "@/lib/config"
 import { Message as MessageType } from "@ai-sdk/react"
 import { useRef, useMemo, useCallback } from "react"
+import type { ReferencedUploadStatus } from "./activity/types"
 import { Message } from "./message"
+import {
+  extractReferencedUploadIdsFromMessage,
+  useReferencedUploadStatus,
+} from "./use-referenced-upload-status"
 
 type ConversationProps = {
   messages: MessageType[]
@@ -33,6 +39,10 @@ export function Conversation({
   streamIntroPreview = null,
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
+  const { uploadsById } = useReferencedUploadStatus({
+    messages,
+    enabled: ENABLE_CHAT_ACTIVITY_TIMELINE_V2,
+  })
 
   // Memoize message rendering for streaming performance
   const renderedMessages = useMemo(() => {
@@ -82,6 +92,19 @@ export function Conversation({
       const previousUserMessage = [...uniqueMessages.slice(0, index)]
         .reverse()
         .find((candidate) => candidate.role === "user")
+      const referencedUploadIds = ENABLE_CHAT_ACTIVITY_TIMELINE_V2
+        ? Array.from(
+            new Set([
+              ...extractReferencedUploadIdsFromMessage(message),
+              ...(message.role === "assistant" && previousUserMessage
+                ? extractReferencedUploadIdsFromMessage(previousUserMessage)
+                : []),
+            ])
+          )
+        : []
+      const referencedUploads: ReferencedUploadStatus[] = referencedUploadIds
+        .map((uploadId) => uploadsById[uploadId])
+        .filter(Boolean) as ReferencedUploadStatus[]
 
       return (
         <Message
@@ -101,6 +124,7 @@ export function Conversation({
           status={status}
           evidenceCitations={messageEvidenceCitations}
           contextPrompt={previousUserMessage?.content}
+          referencedUploads={referencedUploads}
           streamIntroPreview={
             message.role === "assistant" && isLast && status === "streaming"
               ? streamIntroPreview
@@ -120,6 +144,7 @@ export function Conversation({
     onSuggestion,
     onWorkflowSuggestion,
     evidenceCitations,
+    uploadsById,
   ])
 
   // Memoize handlers to prevent unnecessary re-renders

@@ -10,6 +10,7 @@ import { CitationPopup } from "./citation-popup"
 interface ReferencesSectionProps {
   citations: Map<number, CitationData>
   className?: string
+  title?: string
 }
 
 const TRANSITION = {
@@ -18,8 +19,12 @@ const TRANSITION = {
   bounce: 0,
 }
 
-export function ReferencesSection({ citations, className }: ReferencesSectionProps) {
-  const [isExpanded, setIsExpanded] = useState(true)
+export function ReferencesSection({
+  citations,
+  className,
+  title = "Sources",
+}: ReferencesSectionProps) {
+  const [isExpanded, setIsExpanded] = useState(false)
   const [popupCitation, setPopupCitation] = useState<{ citation: CitationData; index: number } | null>(null)
 
   if (citations.size === 0) return null
@@ -35,19 +40,19 @@ export function ReferencesSection({ citations, className }: ReferencesSectionPro
   }
 
   return (
-    <div className={cn("my-6 border-t border-border pt-6", className)}>
+    <div className={cn("my-4 overflow-hidden rounded-xl border border-border/70 bg-background/70", className)}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         type="button"
-        className="hover:bg-accent flex w-full flex-row items-center gap-2 rounded-md px-2 py-2 transition-colors"
+        className="hover:bg-accent/35 flex w-full flex-row items-center gap-2 px-3 py-2.5 transition-colors"
       >
-        <ListNumbers className="h-4 w-4" />
+        <ListNumbers className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-medium">
-          References
+          {title} <span className="text-muted-foreground">({sortedCitations.length})</span>
         </span>
         <CaretDown
           className={cn(
-            "ml-auto h-4 w-4 transition-transform",
+            "ml-auto h-4 w-4 text-muted-foreground transition-transform",
             isExpanded ? "rotate-180 transform" : ""
           )}
         />
@@ -60,23 +65,23 @@ export function ReferencesSection({ citations, className }: ReferencesSectionPro
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={TRANSITION}
-            className="overflow-hidden"
+            className="overflow-hidden border-t border-border/70"
           >
-            <ol className="mt-4 space-y-4">
+            <ol className="space-y-3 p-3">
               {sortedCitations.map(([index, citation]) => (
                 <li
                   key={index}
-                  className="group relative flex items-start gap-3 text-sm"
+                  className="group relative flex items-start gap-3 rounded-lg border border-border/60 bg-muted/15 p-2.5 text-sm"
                 >
-                  <span className="text-foreground mt-0.5 flex-shrink-0 font-medium">
+                  <span className="text-foreground mt-0.5 flex h-5 min-w-5 items-center justify-center rounded-full border border-border/70 text-[11px] font-semibold">
                     {index}.
                   </span>
                   <div className="min-w-0 flex-1">
                     <button
                       onClick={() => setPopupCitation({ citation, index })}
-                      className="text-left hover:text-orange-600 dark:hover:text-orange-400 transition-colors w-full"
+                      className="w-full text-left transition-colors hover:text-foreground"
                     >
-                      <h4 className="font-medium leading-tight text-orange-600 dark:text-orange-400 mb-1">
+                      <h4 className="mb-1 line-clamp-2 font-medium leading-tight text-foreground/90">
                         {citation.title}
                       </h4>
                     </button>
@@ -104,7 +109,7 @@ export function ReferencesSection({ citations, className }: ReferencesSectionPro
                         href={citation.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-primary hover:text-primary/80 mt-2 inline-block text-xs underline"
+                        className="text-primary hover:text-primary/80 mt-2 inline-block text-xs underline underline-offset-2"
                         onClick={(e) => e.stopPropagation()}
                       >
                         View on {citation.url.includes('pubmed') ? 'PubMed' : 

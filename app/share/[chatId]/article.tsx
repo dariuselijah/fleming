@@ -1,4 +1,5 @@
 import { getSources } from "@/app/components/chat/get-sources"
+import { splitTrailingSourceAppendix } from "@/app/components/chat/source-appendix"
 import { SourcesList } from "@/app/components/chat/sources-list"
 import type { Tables } from "@/app/types/database.types"
 import { Message, MessageContent } from "@/components/prompt-kit/message"
@@ -16,6 +17,19 @@ type ArticleProps = {
   title: string
   subtitle: string
   messages: MessageType[]
+}
+
+function sanitizeSharedMessageText(value: string): string {
+  if (!value) return value
+  const sanitized = value
+    .replace(/\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/gi, "")
+    .replace(/\[tool\s+[^\]]+\]/gi, "")
+    .replace(/\[source\s+[^\]]+\]/gi, "")
+    .replace(/\[doc\s+[^\]]+\]/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+  return splitTrailingSourceAppendix(sanitized).cleanText
 }
 
 export default function Article({
@@ -65,7 +79,9 @@ export default function Article({
             const parts = message?.parts as MessageAISDK["parts"]
             const sources = getSources(parts)
             const safeContent =
-              typeof message.content === "string" ? message.content : ""
+              typeof message.content === "string"
+                ? sanitizeSharedMessageText(message.content)
+                : ""
 
             return (
               <div key={message.id}>
