@@ -36,7 +36,7 @@ export const CLINICIAN_MODE_PLACEHOLDERS: Record<
   string
 > = {
   open_search:
-    "Search across notes, labs, and clinical context (e.g., summarize key findings for today's patient)...",
+    "Ask a clinical question or describe the case (e.g., 68yo with new dyspnea and leg swelling—what’s on the differential and next steps?)",
   clinical_summary:
     "Generate a concise clinical summary (e.g., problem list, active issues, and plan)...",
   drug_interactions:

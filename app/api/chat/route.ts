@@ -72,13 +72,16 @@ import {
   type ClinicianWorkflowMode,
 } from "@/lib/clinician-mode"
 import { UserUploadService } from "@/lib/uploads/server"
-import pdfParse from "pdf-parse/lib/pdf-parse.js"
 import type { UploadContextSearchMode, UploadTopicContext } from "@/lib/uploads/server"
 import type { UserUploadListItem } from "@/lib/uploads/types"
 import {
   extractUploadReferenceIds,
   stripUploadReferenceTokens,
 } from "@/lib/uploads/reference-tokens"
+import {
+  CHAT_ATTACHMENT_MAX_IMAGES_PER_MESSAGE,
+  enforceImageAttachmentPolicy,
+} from "@/lib/chat-attachments/policy"
 import {
   buildUploadRetrievalPreflightCacheKey,
   getUploadRetrievalPreflightCache,
@@ -807,6 +810,7 @@ type ChatAttachment = {
 
 const MAX_INLINE_ATTACHMENT_DATA_URL_CHARS = 16 * 1024 * 1024
 const MAX_INLINE_ATTACHMENT_BUFFER_BYTES = 12 * 1024 * 1024
+const MAX_ATTACHMENT_CONTEXT_ITEMS = 2
 
 function decodeDataUrl(dataUrl: string): { mimeType: string; buffer: Buffer } | null {
   if (!dataUrl.startsWith("data:")) return null
@@ -848,9 +852,8 @@ async function extractAttachmentText(attachment: ChatAttachment): Promise<string
 
   try {
     if (contentType === "application/pdf") {
-      const parsed = await pdfParse(decoded.buffer)
-      const text = String(parsed?.text || "").replace(/\s+/g, " ").trim()
-      return text ? text.slice(0, 6000) : null
+      // PDF parsing is intentionally skipped pre-stream to avoid delaying first token.
+      return null
     }
 
     if (
@@ -872,15 +875,15 @@ async function buildAttachmentContext(message?: MessageAISDK): Promise<string> {
   const attachments = (message as any)?.experimental_attachments as ChatAttachment[] | undefined
   if (!attachments || attachments.length === 0) return ""
 
-  const chunks: string[] = []
-  for (const attachment of attachments) {
-    const text = await extractAttachmentText(attachment)
-    if (text) {
-      chunks.push(
-        `Attachment: ${attachment.name || "Untitled"}\nExtracted content preview:\n${text}`
-      )
-    }
-  }
+  const chunks = (
+    await Promise.all(
+      attachments.slice(0, MAX_ATTACHMENT_CONTEXT_ITEMS).map(async (attachment) => {
+        const text = await extractAttachmentText(attachment)
+        if (!text) return null
+        return `Attachment: ${attachment.name || "Untitled"}\nExtracted content preview:\n${text}`
+      })
+    )
+  ).filter((value): value is string => Boolean(value))
 
   if (chunks.length === 0) return ""
   return chunks.join("\n\n---\n\n")
@@ -2447,8 +2450,65 @@ type ChatRequest = {
   allowMultipleArtifacts?: boolean
 }
 
+const chatAttachmentRequestSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    url: z.string().min(1).optional(),
+    contentType: z.string().min(1).optional(),
+    mimeType: z.string().min(1).optional(),
+    filePath: z.string().min(1).optional(),
+  })
+  .passthrough()
+
+const chatMessageRequestSchema = z
+  .object({
+    role: z.string(),
+    content: z.unknown().optional(),
+    experimental_attachments: z.array(chatAttachmentRequestSchema).optional(),
+  })
+  .passthrough()
+
+const chatRequestSchema = z
+  .object({
+    messages: z.array(chatMessageRequestSchema).min(1),
+    chatId: z.string().min(1),
+    userId: z.string().min(1),
+    model: z.string().min(1),
+    isAuthenticated: z.boolean(),
+    systemPrompt: z.string(),
+    enableSearch: z.boolean(),
+    enableEvidence: z.boolean().optional(),
+    message_group_id: z.string().optional(),
+    userRole: z.enum(["doctor", "general", "medical_student"]).optional(),
+    medicalSpecialty: z.string().optional(),
+    clinicalDecisionSupport: z.boolean().optional(),
+    medicalLiteratureAccess: z.boolean().optional(),
+    medicalComplianceMode: z.boolean().optional(),
+    learningMode: z.string().optional(),
+    clinicianMode: z.string().optional(),
+    benchmarkStrictMode: z.boolean().optional(),
+    topicContext: z.unknown().optional(),
+    artifactIntent: z.enum(["none", "quiz"]).optional(),
+    citationStyle: z.string().optional(),
+    allowMultipleArtifacts: z.boolean().optional(),
+  })
+  .passthrough()
+
 export async function POST(req: Request) {
   try {
+    const requestStartTime = performance.now()
+    const rawBody = await req.json()
+    const parsedRequest = chatRequestSchema.safeParse(rawBody)
+    if (!parsedRequest.success) {
+      return new Response(
+        JSON.stringify({
+          error: "Invalid chat request payload",
+          details: parsedRequest.error.flatten(),
+        }),
+        { status: 400 }
+      )
+    }
+
     const {
       messages,
       chatId,
@@ -2471,7 +2531,7 @@ export async function POST(req: Request) {
       artifactIntent: artifactIntentFromRequest,
       citationStyle: citationStyleFromRequest,
       allowMultipleArtifacts: allowMultipleArtifactsFromRequest,
-    } = (await req.json()) as ChatRequest
+    } = parsedRequest.data as unknown as ChatRequest
 
     if (!messages || !chatId || !userId) {
       return new Response(
@@ -2703,15 +2763,23 @@ export async function POST(req: Request) {
       /\b(page|pp?\.?)\s*\d+/i.test(queryText) || /\bpages?\s*\d+\s*(?:-|to)\s*\d+\b/i.test(queryText)
         ? "auto"
         : "hybrid"
-    const shouldRunEvidenceSynthesis = finalEnableEvidence && queryText.length > 0
+    const shouldRunEvidenceSynthesis =
+      finalEnableEvidence &&
+      queryText.length > 0 &&
+      (
+        evidenceSeekingIntent ||
+        shouldPreferUploadContext ||
+        queryText.trim().length >= 40
+      )
     const isArtifactRequestForRetrievalBudget = artifactIntent === "quiz"
-    const uploadContextMaxDurationMs = isArtifactRequestForRetrievalBudget ? 3600 : 2200
-    const uploadContextTimeBudgetMs = isArtifactRequestForRetrievalBudget ? 3900 : 2300
+    const uploadContextMaxDurationMs = isArtifactRequestForRetrievalBudget ? 2400 : 1200
+    const uploadContextTimeBudgetMs = isArtifactRequestForRetrievalBudget ? 2600 : 1500
     const shouldRunUploadContextSearch =
       ENABLE_UPLOAD_CONTEXT_SEARCH &&
       isAuthenticated &&
       userId !== "temp" &&
-      queryText.length > 0
+      queryText.length > 0 &&
+      shouldPreferUploadContext
     const uploadContextPreflightCacheKey = shouldRunUploadContextSearch
       ? buildUploadRetrievalPreflightCacheKey({
           userId,
@@ -2733,11 +2801,11 @@ export async function POST(req: Request) {
           async () =>
             searchWeb(queryText, {
               maxResults: 4,
-              timeoutMs: 1200,
+              timeoutMs: 800,
               retries: 1,
               medicalOnly: clinicianRoleFromResolvedRole,
             }),
-          1400,
+          900,
           null
         )
       : Promise.resolve(null)
@@ -2760,7 +2828,7 @@ export async function POST(req: Request) {
                 console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", err)
                 return null
               }),
-            2400,
+            1200,
             null
           )
         : Promise.resolve(null),
@@ -2802,7 +2870,7 @@ export async function POST(req: Request) {
 
     const uploadEvidenceCitations =
       uploadContextResult?.citations ??
-      (isAuthenticated && userId !== "temp" && queryText.length > 0
+      (isAuthenticated && userId !== "temp" && queryText.length > 0 && shouldPreferUploadContext
         ? await runWithTimeBudget(
             "UPLOAD_LEGACY_CITATIONS",
             async () =>
@@ -2818,7 +2886,7 @@ export async function POST(req: Request) {
                   console.warn("📚 [UPLOAD RETRIEVAL] Legacy retrieval failed:", err)
                   return []
                 }),
-            1400,
+            800,
             []
           )
         : [])
@@ -2885,7 +2953,7 @@ export async function POST(req: Request) {
               uploadId: selectedUploadIdHint,
               topicContext: (resolvedTopicContext ?? undefined) as UploadTopicContext | undefined,
             }),
-          2200,
+          1200,
           null
         )
       : null
@@ -3380,9 +3448,15 @@ export async function POST(req: Request) {
 
       if (guidelinePriority && !hasGuidelineCitationSignal(mergedCitations)) {
         try {
-          const fallbackGuidelineCitations = await fetchGuidelineFallbackCitations(
-            queryText,
-            6
+          const fallbackGuidelineCitations = await runWithTimeBudget(
+            "GUIDELINE_FALLBACK_CITATIONS",
+            () =>
+              fetchGuidelineFallbackCitations(
+                queryText,
+                6
+              ),
+            900,
+            [] as EvidenceCitation[]
           )
           if (fallbackGuidelineCitations.length > 0) {
             mergedCitations = [...mergedCitations, ...fallbackGuidelineCitations]
@@ -3456,7 +3530,12 @@ export async function POST(req: Request) {
       effectiveSystemPrompt = buildEvidenceSystemPrompt(effectiveSystemPrompt, evidenceContext.context)
     }
 
-    const attachmentContext = await attachmentContextPromise
+    const attachmentContext = await runWithTimeBudget(
+      "ATTACHMENT_CONTEXT_PREVIEW",
+      () => attachmentContextPromise,
+      350,
+      ""
+    )
     if (attachmentContext) {
       effectiveSystemPrompt += isArtifactIntentSupported
         ? `\n\nUSER ATTACHMENT CONTEXT (preview only):\n${attachmentContext}\n\nThis preview may be incomplete for large PDFs. For document/quiz artifact generation, prefer upload tools (inspectUploadStructure, uploadContextSearch, generation tools) over direct preview text.`
@@ -3506,49 +3585,67 @@ export async function POST(req: Request) {
       }
     })
 
-    // Filter attachments (sync)
-    // Vision models can process both data URLs (base64) and blob URLs directly
-    const filteredMessages = messagesSansUploadReferenceTokens.map(message => {
-      if (message.experimental_attachments) {
-        // Keep only provider-safe visual attachments in model messages.
-        // Non-image docs (e.g. PDF) are handled via upload ingestion + retrieval citations.
-        const filteredAttachments = message.experimental_attachments
-          .filter((attachment: any) => {
-            if (!attachment?.url || !attachment?.name) return false
-            const contentType = String(
-              attachment.contentType || attachment.mimeType || ""
-            ).toLowerCase()
-            return contentType.startsWith("image/")
+    const modelSupportsVision = Boolean(modelConfig?.vision)
+    let sawImageAttachmentAttempt = false
+    const rejectedImageAttachmentDetails: Array<{ name: string; detail: string }> = []
+    const filteredMessages = messagesSansUploadReferenceTokens.map((message) => {
+      if (!Array.isArray(message.experimental_attachments) || message.experimental_attachments.length === 0) {
+        return message
+      }
+
+      const imageCandidates = message.experimental_attachments.filter((attachment: any) => {
+        const contentType = String(
+          attachment?.contentType || attachment?.mimeType || ""
+        ).toLowerCase()
+        const url = String(attachment?.url || "")
+        return contentType.startsWith("image/") || url.startsWith("data:image/")
+      })
+      if (imageCandidates.length > 0) {
+        sawImageAttachmentAttempt = true
+      }
+
+      const { accepted, rejected } = enforceImageAttachmentPolicy(imageCandidates, {
+        modelSupportsVision,
+        maxImages: CHAT_ATTACHMENT_MAX_IMAGES_PER_MESSAGE,
+      })
+
+      if (rejected.length > 0) {
+        rejected.slice(0, 4).forEach((entry) => {
+          rejectedImageAttachmentDetails.push({
+            name: entry.attachment?.name || "image",
+            detail: entry.detail,
           })
-          .map((attachment: any) => ({
-            ...attachment,
-            contentType: attachment.contentType || "application/octet-stream",
-          }))
-        
-        console.log(
-          `Processing provider-safe image attachments for message: ${filteredAttachments.length}/${message.experimental_attachments.length} kept`
-        )
-        if (filteredAttachments.length > 0) {
-          console.log('Valid attachments:', filteredAttachments.map(a => ({ 
-            name: a.name, 
-            contentType: a.contentType,
-            url: a.url?.startsWith('blob:') ? 'blob:...' : 
-                 a.url?.startsWith('data:') ? 'data:...' : 
-                 a.url?.substring(0, 50) + '...' 
-          })))
-        } else if (message.experimental_attachments.length > 0) {
-          console.log(
-            "No provider-safe image attachments kept; non-image uploads will be used via upload retrieval citations."
-          )
-        }
-        
+        })
+      }
+
+      if (accepted.length === 0) {
         return {
           ...message,
-          experimental_attachments: filteredAttachments.length > 0 ? filteredAttachments : undefined
+          experimental_attachments: undefined,
         }
       }
-      return message
+
+      return {
+        ...message,
+        experimental_attachments: accepted.map((attachment) => ({
+          ...attachment,
+          contentType: attachment.contentType || "application/octet-stream",
+        })),
+      }
     })
+
+    if (sawImageAttachmentAttempt && !modelSupportsVision) {
+      return new Response(
+        JSON.stringify({
+          error: "Selected model does not support image uploads. Please switch to a vision-enabled model.",
+          code: "MODEL_DOES_NOT_SUPPORT_VISION",
+        }),
+        { status: 400 }
+      )
+    }
+    if (rejectedImageAttachmentDetails.length > 0) {
+      console.warn("[/api/chat] Rejected image attachments:", rejectedImageAttachmentDetails)
+    }
 
     // CRITICAL: Anonymize messages before sending to LLM providers
     // This ensures no PII/PHI is sent to third-party LLM services (HIPAA compliance)
@@ -3649,6 +3746,7 @@ export async function POST(req: Request) {
     } | null = null
     const pendingMessageAnnotations: unknown[] = []
     let runtimeEvidenceCitations: EvidenceCitation[] = []
+    let firstStreamWriteLogged = false
 
     const nextTimelineSequence = () => {
       timelineAnnotationSequence += 1
@@ -3657,6 +3755,14 @@ export async function POST(req: Request) {
 
     const writeStreamAnnotation = (annotation: unknown) => {
       if (activeStreamWriter) {
+        if (!firstStreamWriteLogged) {
+          firstStreamWriteLogged = true
+          console.log(
+            `[TTFT][server] first-stream-write ${Math.round(
+              performance.now() - requestStartTime
+            )}ms`
+          )
+        }
         activeStreamWriter.writeMessageAnnotation(
           annotation as Parameters<typeof activeStreamWriter.writeMessageAnnotation>[0]
         )
@@ -5055,8 +5161,9 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
       'Connection': 'keep-alive',
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
-      'Access-Control-Expose-Headers': 'X-Stream-Intro',
+      'Access-Control-Expose-Headers': 'X-Stream-Intro, X-Chat-Id',
       'X-Stream-Intro': Buffer.from(streamIntroPreview, "utf-8").toString("base64"),
+      'X-Chat-Id': effectiveChatId,
     }
     let evidenceCitationsForStream: EvidenceCitation[] = []
     const artifactRuntimeWarningsForStream = Array.from(
@@ -5129,11 +5236,16 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 
         const encodedHeader = encodeEvidenceCitationsHeader(evidenceCitationsForStream)
         if (encodedHeader) {
-          responseHeaders["Access-Control-Expose-Headers"] = "X-Evidence-Citations, X-Stream-Intro"
+          responseHeaders["Access-Control-Expose-Headers"] =
+            "X-Evidence-Citations, X-Stream-Intro, X-Chat-Id"
           responseHeaders["X-Evidence-Citations"] = encodedHeader
         }
       }
     }
+
+    console.log(
+      `[TTFT][server] response-ready ${Math.round(performance.now() - requestStartTime)}ms`
+    )
 
     return createDataStreamResponse({
       status: 200,

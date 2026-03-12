@@ -20,6 +20,12 @@ import {
 import { normalizeCitationStyle, type CitationStyle } from "@/lib/citations/formatters"
 import { resolveScopedSessionMessages } from "@/lib/chat-store/messages/session-restore"
 import { API_ROUTE_CHAT } from "@/lib/routes"
+import { getModelInfo } from "@/lib/models"
+import {
+  CHAT_ATTACHMENT_MAX_IMAGES_PER_MESSAGE,
+  enforceImageAttachmentPolicy,
+  enforceImageFilePolicy,
+} from "@/lib/chat-attachments/policy"
 import type { UserProfile } from "@/lib/user/types"
 import type { Message } from "@ai-sdk/react"
 import { useChat } from "@ai-sdk/react"
@@ -32,6 +38,30 @@ const SESSION_SNAPSHOT_FALLBACK_MAX_MESSAGES = 12
 const SESSION_SNAPSHOT_FALLBACK_MAX_CONTENT_CHARS = 1800
 const SESSION_SNAPSHOT_LATEST_MAX_MESSAGES = 8
 const SESSION_SNAPSHOT_PART_TEXT_MAX_CHARS = 800
+const INSTANT_STREAM_INTRO = "Working on your request..."
+const IMAGE_UPLOAD_PREP_BUDGET_MS = 1200
+
+function createEphemeralChatId() {
+  return `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T
+): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  try {
+    const timeoutPromise = new Promise<T>((resolve) => {
+      timeoutHandle = setTimeout(() => resolve(fallback), timeoutMs)
+    })
+    return await Promise.race([promise, timeoutPromise])
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle)
+    }
+  }
+}
 
 function truncateSnapshotString(value: string, maxChars: number): string {
   return value.length > maxChars ? `${value.slice(0, maxChars - 3)}...` : value
@@ -380,13 +410,10 @@ export function useChatCore({
   createOptimisticAttachments,
   setFiles,
   checkLimitsAndNotify,
-  cleanupOptimisticAttachments,
-  ensureChatExists,
   handleFileUploads,
   convertBlobUrlsToDataUrls,
   selectedModel,
   clearDraft,
-  bumpChat,
   setHasDialogAuth,
   setHasRateLimitPaywall,
   setRateLimitWaitTime,
@@ -839,6 +866,27 @@ export function useChatCore({
   const isStreamingRef = useRef(false)
   const messagesBeforeNavigationRef = useRef<Message[]>([])
   const stableChatIdRef = useRef<string | undefined>(undefined) // Stable ID for useChat to prevent resets
+  const submitSourceRef = useRef<"submit" | "suggestion" | "reload" | null>(null)
+  const submitStartedAtRef = useRef<number | null>(null)
+  const firstByteMeasuredRef = useRef(false)
+  const firstTokenMeasuredRef = useRef(false)
+
+  const startSubmitTelemetry = useCallback(
+    (source: "submit" | "suggestion" | "reload") => {
+      submitSourceRef.current = source
+      submitStartedAtRef.current = performance.now()
+      firstByteMeasuredRef.current = false
+      firstTokenMeasuredRef.current = false
+    },
+    []
+  )
+
+  const finishSubmitTelemetry = useCallback(() => {
+    submitSourceRef.current = null
+    submitStartedAtRef.current = null
+    firstByteMeasuredRef.current = false
+    firstTokenMeasuredRef.current = false
+  }, [])
   
   // CRITICAL: Determine stable chatId for useChat
   // Strategy: Allow reset when navigating to a NEW chat, but prevent reset during streaming
@@ -894,6 +942,7 @@ export function useChatCore({
       // CRITICAL: Reset submitting state on error
       setIsSubmitting(false)
       setStreamIntroPreview(null)
+      finishSubmitTelemetry()
       handleError(error)
     },
     // Optimize for streaming performance
@@ -1011,16 +1060,39 @@ export function useChatCore({
         }
       }
       
+      finishSubmitTelemetry()
       setIsSubmitting(false)
     },
     // Ensure immediate status updates and extract evidence citations from headers
     onResponse: (response) => {
+      if (
+        submitStartedAtRef.current !== null &&
+        !firstByteMeasuredRef.current
+      ) {
+        firstByteMeasuredRef.current = true
+        const firstByteMs = Math.round(performance.now() - submitStartedAtRef.current)
+        console.log(
+          `[TTFT][client] first-byte ${firstByteMs}ms (${submitSourceRef.current || "unknown"})`
+        )
+      }
+
       // This ensures status changes to "streaming" immediately
       // Also extract evidence citations from response headers
       console.log('📚 [EVIDENCE] onResponse called, checking headers...')
       console.log('📚 [EVIDENCE] Available headers:', [...response.headers.keys()])
       
       try {
+        const chatIdFromServer = response.headers.get("X-Chat-Id")
+        const hasPersistentChatId = (value: string | null | undefined) =>
+          Boolean(value && value !== "temp" && !value.startsWith("temp-chat-"))
+        if (hasPersistentChatId(chatIdFromServer)) {
+          currentChatIdForSavingRef.current = chatIdFromServer as string
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem(`hasSentMessage:${chatIdFromServer}`, "true")
+          }
+          console.log(`[CHAT] Received canonical chat id from server: ${chatIdFromServer}`)
+        }
+
         const introHeader = response.headers.get("X-Stream-Intro")
         if (introHeader) {
           try {
@@ -1229,17 +1301,35 @@ export function useChatCore({
       }
     }
   }, [messages, status, isSubmitting, setMessages])
+
+  useEffect(() => {
+    if (submitStartedAtRef.current === null || firstTokenMeasuredRef.current) {
+      return
+    }
+    const lastAssistantMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && hasRenderableAssistantPayload(message))
+    if (!lastAssistantMessage) {
+      return
+    }
+    firstTokenMeasuredRef.current = true
+    const firstTokenMs = Math.round(performance.now() - submitStartedAtRef.current)
+    console.log(
+      `[TTFT][client] first-token ${firstTokenMs}ms (${submitSourceRef.current || "unknown"})`
+    )
+  }, [messages, hasRenderableAssistantPayload])
   
   // CRITICAL: Watch status changes and ensure isSubmitting resets properly
   useEffect(() => {
     if (status === 'ready' || status === 'error') {
       setIsSubmitting(false)
+      finishSubmitTelemetry()
       // CRITICAL: Reset streaming ref when status becomes ready
       isStreamingRef.current = false
     } else if (status === 'streaming' || status === 'submitted') {
       isStreamingRef.current = true
     }
-  }, [status])
+  }, [status, finishSubmitTelemetry])
   
   // CRITICAL: Clear sessionStorage and reset state when navigating to home page
   useEffect(() => {
@@ -1716,22 +1806,18 @@ export function useChatCore({
   const submit = useCallback(async (overrideInput?: string) => {
     const resolvedInput = typeof overrideInput === "string" ? overrideInput : input
     if (!resolvedInput.trim() && files.length === 0) return
-   
-    // CRITICAL: Check authentication FIRST before doing anything
-    const isAuthenticated = !!user?.id
-    
-    if (!isAuthenticated) {
-      // Store pending message for sending after authentication
-      // Note: Files can't be serialized, so we store file metadata
-      const fileMetadata = files.map(file => ({
+
+    const isAuthenticatedNow = !!user?.id
+    if (!isAuthenticatedNow) {
+      const fileMetadata = files.map((file) => ({
         name: file.name,
         size: file.size,
         type: file.type,
       }))
-      
+
       const pendingMessage = {
         content: resolvedInput.trim(),
-        files: fileMetadata, // Store metadata only
+        files: fileMetadata,
         hasFiles: files.length > 0,
         selectedModel,
         enableSearch,
@@ -1742,87 +1828,99 @@ export function useChatCore({
         citationStyle,
         timestamp: Date.now(),
       }
-      
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('pendingMessage', JSON.stringify(pendingMessage))
-        // Store files in a separate way if needed (IndexedDB or temporary storage)
-        // For now, we'll just note that files need to be re-uploaded
-        if (files.length > 0) {
-          console.log('Files were attached but cannot be preserved. User will need to re-upload after login.')
-        }
+
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("pendingMessage", JSON.stringify(pendingMessage))
       }
-      
-      // Redirect to login page immediately
-      router.push('/auth')
+
+      router.push("/auth")
       return
     }
 
-    // Set submitting state immediately for optimistic UI
+    startSubmitTelemetry("submit")
     setIsSubmitting(true)
-    setStreamIntroPreview(null)
+    setStreamIntroPreview(INSTANT_STREAM_INTRO)
     pendingHeaderTimelineAnnotationsRef.current = []
     headerTimelineSequenceRef.current = 0
     clearEvidenceCitations()
+    pushHeaderTimelineAnnotation({
+      type: "timeline-event",
+      event: {
+        kind: "system-intro",
+        text: INSTANT_STREAM_INTRO,
+      },
+    })
 
-    // Store input and files for async processing
     const currentInput = resolvedInput
     const currentFiles = [...files]
-    const imageFiles = currentFiles.filter((file) => isImageAttachment(file.type))
-    const nonImageFiles = currentFiles.filter((file) => !isImageAttachment(file.type))
-    const optimisticImageAttachments =
-      imageFiles.length > 0 ? createOptimisticAttachments(imageFiles) : []
-    const convertedImageAttachmentsPromise =
-      optimisticImageAttachments.length > 0
-        ? convertBlobUrlsToDataUrls(optimisticImageAttachments, imageFiles)
-        : Promise.resolve([] as Attachment[])
-    
     const restoreComposerState = () => {
       setInput(currentInput)
       setFiles(currentFiles)
     }
 
+    const modelSupportsVision = Boolean(getModelInfo(selectedModel)?.vision)
+    const originalImageFiles = currentFiles.filter((file) => isImageAttachment(file.type))
+    const nonImageFiles = currentFiles.filter((file) => !isImageAttachment(file.type))
+    const { accepted: acceptedImageCandidates, rejected: rejectedImageFiles } =
+      enforceImageFilePolicy(originalImageFiles)
+    const imageFiles = modelSupportsVision ? (acceptedImageCandidates as File[]) : []
+
+    if (originalImageFiles.length > 0 && !modelSupportsVision) {
+      toast({
+        title: "This model does not support image uploads",
+        description: "Switch to a vision-enabled model to send images.",
+        status: "warning",
+      })
+      setIsSubmitting(false)
+      setStreamIntroPreview(null)
+      finishSubmitTelemetry()
+      return
+    }
+
+    if (rejectedImageFiles.length > 0) {
+      toast({
+        title: "Some images were skipped",
+        description: rejectedImageFiles[0]?.detail || "Unsupported image format or size.",
+        status: "warning",
+      })
+    }
+
+    if (!currentInput.trim() && nonImageFiles.length === 0 && imageFiles.length === 0) {
+      setIsSubmitting(false)
+      setStreamIntroPreview(null)
+      finishSubmitTelemetry()
+      return
+    }
+
     const isPersistentChatId = (value: string | null | undefined) =>
       Boolean(value && value !== "temp" && !value.startsWith("temp-chat-"))
-
     const isOnChatRoute =
       typeof window !== "undefined" && window.location.pathname.startsWith("/c/")
     const chatIdFromUrl = isOnChatRoute
       ? window.location.pathname.split("/c/")[1]
       : null
 
-    // Resolve canonical chat id before submit so authenticated first sends never stream on temp ids.
     let optimisticChatId =
       chatIdFromUrl ||
       (chatId && !chatId.startsWith("temp-chat-") ? chatId : null) ||
       currentChatIdForSavingRef.current ||
+      lastUsedTempChatIdRef.current ||
       null
 
-    if (isAuthenticated && !isPersistentChatId(optimisticChatId)) {
-      const ensuredChatId = await ensureChatExists(user.id, currentInput, {
-        navigate: false,
-      })
-      if (!isPersistentChatId(ensuredChatId)) {
-        setIsSubmitting(false)
-        restoreComposerState()
-        toast({
-          title: "Couldn't start a new chat. Please try again.",
-          status: "error",
-        })
-        return
-      }
-      optimisticChatId = ensuredChatId
-      currentChatIdForSavingRef.current = ensuredChatId
+    if (!optimisticChatId) {
+      optimisticChatId = createEphemeralChatId()
+      lastUsedTempChatIdRef.current = optimisticChatId
+    }
+    if (!isPersistentChatId(optimisticChatId)) {
+      lastUsedTempChatIdRef.current = optimisticChatId
     }
 
-    if (!optimisticChatId) {
-      optimisticChatId = "temp"
-    }
     let finalUserInput = currentInput
     let preparedUid: string | null = null
     let preparedAllowed: boolean | null = null
     let hasPreparedUploadReferences = false
 
-    if (nonImageFiles.length > 0 && optimisticChatId && optimisticChatId !== "temp") {
+    if (nonImageFiles.length > 0 && optimisticChatId) {
       const [resolvedUid, resolvedAllowed] = await Promise.all([
         getOrCreateGuestUserId(user),
         user?.id ? checkLimitsAndNotify(user.id) : Promise.resolve(true),
@@ -1833,11 +1931,15 @@ export function useChatCore({
         setIsSubmitting(false)
         setHasDialogAuth(true)
         restoreComposerState()
+        setStreamIntroPreview(null)
+        finishSubmitTelemetry()
         return
       }
       if (!preparedAllowed) {
         setIsSubmitting(false)
         restoreComposerState()
+        setStreamIntroPreview(null)
+        finishSubmitTelemetry()
         return
       }
 
@@ -1860,6 +1962,8 @@ export function useChatCore({
       if (uploadReferenceIds.length === 0) {
         setIsSubmitting(false)
         restoreComposerState()
+        setStreamIntroPreview(null)
+        finishSubmitTelemetry()
         toast({
           title: "Couldn't prepare uploaded documents",
           description: "Please retry your message once the files finish uploading.",
@@ -1881,9 +1985,44 @@ export function useChatCore({
           : `${uploadLabelLine}\n\nUse my selected uploads as context and provide a concise overview.\n\n${tokenString}`
     }
 
-    // Create optimistic attachments for chat-side send activity cards.
-    // Non-image files are still routed through uploads ingestion before the assistant turn.
-    let optimisticAttachments: Attachment[] | undefined = undefined
+    const optimisticImageAttachments =
+      imageFiles.length > 0 ? createOptimisticAttachments(imageFiles) : []
+    const convertedImageAttachmentsPromise =
+      optimisticImageAttachments.length > 0
+        ? convertBlobUrlsToDataUrls(optimisticImageAttachments, imageFiles)
+        : Promise.resolve([] as Attachment[])
+    const uploadedImageAttachmentsPromise =
+      imageFiles.length > 0 && optimisticChatId
+        ? (async () => {
+            const uidForImageUpload = preparedUid || (await getOrCreateGuestUserId(user))
+            if (!uidForImageUpload) return null
+            return handleFileUploads(
+              uidForImageUpload,
+              optimisticChatId as string,
+              !!user?.id,
+              imageFiles
+            )
+          })()
+        : null
+
+    let imageAttachmentsUsedUploadedUrls = false
+    let resolvedImageAttachments: Attachment[] = []
+    if (imageFiles.length > 0) {
+      const uploadedWithinBudget = uploadedImageAttachmentsPromise
+        ? await withTimeout<Attachment[] | null>(
+            uploadedImageAttachmentsPromise,
+            IMAGE_UPLOAD_PREP_BUDGET_MS,
+            null
+          )
+        : null
+      if (uploadedWithinBudget && uploadedWithinBudget.length > 0) {
+        resolvedImageAttachments = uploadedWithinBudget
+        imageAttachmentsUsedUploadedUrls = true
+      } else {
+        resolvedImageAttachments = await convertedImageAttachmentsPromise
+      }
+    }
+
     const nonImageUploadState = hasPreparedUploadReferences ? "completed" : "processing"
     const nonImageUploadMessage = hasPreparedUploadReferences
       ? "Routed to uploads"
@@ -1896,24 +2035,44 @@ export function useChatCore({
       uploadMessage: nonImageUploadMessage,
     })) as Attachment[]
 
-    if (imageFiles.length > 0) {
-      const convertedImages = await convertedImageAttachmentsPromise
+    let optimisticAttachments: Attachment[] | undefined = undefined
+    if (resolvedImageAttachments.length > 0) {
+      const { accepted, rejected } = enforceImageAttachmentPolicy(
+        resolvedImageAttachments as Array<{
+          name?: string
+          url?: string
+          contentType?: string
+          mimeType?: string
+          filePath?: string
+        }>,
+        {
+          modelSupportsVision,
+          maxImages: CHAT_ATTACHMENT_MAX_IMAGES_PER_MESSAGE,
+        }
+      )
+      if (rejected.length > 0) {
+        toast({
+          title: "Some image attachments were skipped",
+          description: rejected[0]?.detail || "Unsupported image payload.",
+          status: "warning",
+        })
+      }
+
       optimisticAttachments = [
         ...optimisticNonImageAttachments,
-        ...(convertedImages.map((attachment) => ({
+        ...(accepted.map((attachment) => ({
           ...attachment,
-          uploadState: "sending",
+          uploadState: attachment.url?.startsWith("http") ? "uploaded" : "sending",
         })) as Attachment[]),
       ]
     } else if (optimisticNonImageAttachments.length > 0) {
       optimisticAttachments = optimisticNonImageAttachments
     }
 
-    // CRITICAL: Append message IMMEDIATELY with optimistic values - message appears instantly
     const optimisticOptions = {
       body: {
         chatId: optimisticChatId,
-        userId: user?.id || "temp", // Use cached userId if available
+        userId: user?.id || "temp",
         model: selectedModel,
         isAuthenticated: !!user?.id,
         systemPrompt,
@@ -1921,7 +2080,6 @@ export function useChatCore({
         enableEvidence,
         learningMode,
         clinicianMode,
-        // CRITICAL: Ensure userRole is passed correctly for evidence mode
         userRole: userPreferences.preferences.userRole || "general",
         medicalSpecialty: userPreferences.preferences.medicalSpecialty,
         clinicalDecisionSupport: userPreferences.preferences.clinicalDecisionSupport,
@@ -1933,28 +2091,26 @@ export function useChatCore({
       },
     }
 
-    append({
-      role: "user",
-      content: finalUserInput,
-      experimental_attachments: optimisticAttachments,
-    }, optimisticOptions)
-    // Clear input and files only after append has been queued.
+    append(
+      {
+        role: "user",
+        content: finalUserInput,
+        experimental_attachments: optimisticAttachments,
+      },
+      optimisticOptions
+    )
     setInput("")
     setFiles([])
     clearDraft()
-    // Reset clinician mode so tabs stay hidden and placeholder is generic
     setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
     setArtifactIntent("none")
 
-    // Mark that we've sent the first message to prevent redirect
     hasSentFirstMessageRef.current = true
-    if (typeof window !== 'undefined' && optimisticChatId) {
-      sessionStorage.setItem(`hasSentMessage:${optimisticChatId}`, 'true')
+    if (typeof window !== "undefined" && optimisticChatId) {
+      sessionStorage.setItem(`hasSentMessage:${optimisticChatId}`, "true")
     }
 
-    // NOW do async work in parallel (non-blocking - message already visible)
     try {
-      // Run critical async operations in parallel
       const [uid, allowed] = await Promise.all([
         preparedUid ? Promise.resolve(preparedUid) : getOrCreateGuestUserId(user),
         preparedAllowed !== null
@@ -1968,25 +2124,29 @@ export function useChatCore({
         setIsSubmitting(false)
         setHasDialogAuth(true)
         restoreComposerState()
+        setStreamIntroPreview(null)
+        finishSubmitTelemetry()
         return
       }
 
       if (!allowed) {
         setIsSubmitting(false)
         restoreComposerState()
+        setStreamIntroPreview(null)
+        finishSubmitTelemetry()
         return
       }
 
-      let currentChatId = optimisticChatId
-
-      // Update chatId ref for next message
-      if (currentChatId && !currentChatId.startsWith('temp-chat-')) {
+      const currentChatId = optimisticChatId
+      if (currentChatId && !currentChatId.startsWith("temp-chat-")) {
         currentChatIdForSavingRef.current = currentChatId
       }
 
-      // Handle image uploads in background (non-blocking).
-      // Non-image files were already routed through uploads ingestion before submit.
-      if (imageFiles.length > 0 && currentChatId && currentChatId !== "temp") {
+      if (
+        imageFiles.length > 0 &&
+        currentChatId &&
+        !imageAttachmentsUsedUploadedUrls
+      ) {
         Promise.resolve().then(async () => {
           try {
             const uploadingToastId = toast({
@@ -1994,14 +2154,13 @@ export function useChatCore({
               description: "Please wait while your files are being uploaded",
               status: "info",
             })
+            const processedAttachments = uploadedImageAttachmentsPromise
+              ? await uploadedImageAttachmentsPromise.then((result) => {
+                  if (result && result.length > 0) return result
+                  return handleFileUploads(uid, currentChatId, !!user?.id, imageFiles)
+                })
+              : await handleFileUploads(uid, currentChatId, !!user?.id, imageFiles)
 
-            const processedAttachments = await handleFileUploads(
-              uid,
-              currentChatId,
-              !!user?.id,
-              imageFiles
-            )
-            
             sonnerToast.dismiss(uploadingToastId)
             if (processedAttachments && processedAttachments.length > 0) {
               toast({
@@ -2009,7 +2168,6 @@ export function useChatCore({
                 description: `${processedAttachments.length} image${processedAttachments.length > 1 ? "s" : ""} ready`,
                 status: "success",
               })
-              // Note: Real attachments will be used in the API call via streaming
             }
           } catch (error) {
             console.error("File upload failed:", error)
@@ -2021,7 +2179,6 @@ export function useChatCore({
           }
         })
       }
-
     } catch (error) {
       console.error("Error in submit:", error)
       restoreComposerState()
@@ -2030,17 +2187,16 @@ export function useChatCore({
         status: "error",
       })
       setIsSubmitting(false)
+      setStreamIntroPreview(null)
+      finishSubmitTelemetry()
     }
-    // Note: Don't set isSubmitting to false here - let onFinish handle it
   }, [
     user,
     input,
     files,
     chatId,
-    messages,
     convertBlobUrlsToDataUrls,
     checkLimitsAndNotify,
-    ensureChatExists,
     handleFileUploads,
     append,
     selectedModel,
@@ -2052,28 +2208,25 @@ export function useChatCore({
     artifactIntent,
     citationStyle,
     clearEvidenceCitations,
-    bumpChat,
     clearDraft,
     setHasDialogAuth,
     setInput,
     setFiles,
     userPreferences,
     createOptimisticAttachments,
-    isAuthenticated,
-    setHasRateLimitPaywall,
-    setRateLimitWaitTime,
-    setRateLimitType,
     setArtifactIntent,
+    pushHeaderTimelineAnnotation,
+    startSubmitTelemetry,
+    finishSubmitTelemetry,
+    router,
   ]);
 
   // Handle suggestion - optimized for immediate response
   const handleSuggestion = useCallback(
     async (suggestion: string) => {
-      // CRITICAL: Check authentication FIRST before doing anything
-      const isAuthenticated = !!user?.id
-      
-      if (!isAuthenticated) {
-        // Store pending message for sending after authentication
+      const isAuthenticatedNow = !!user?.id
+
+      if (!isAuthenticatedNow) {
         const pendingMessage = {
           content: suggestion,
           files: [],
@@ -2097,11 +2250,19 @@ export function useChatCore({
         return
       }
 
+      startSubmitTelemetry("suggestion")
       setIsSubmitting(true)
-      setStreamIntroPreview(null)
+      setStreamIntroPreview(INSTANT_STREAM_INTRO)
       pendingHeaderTimelineAnnotationsRef.current = []
       headerTimelineSequenceRef.current = 0
       clearEvidenceCitations()
+      pushHeaderTimelineAnnotation({
+        type: "timeline-event",
+        event: {
+          kind: "system-intro",
+          text: INSTANT_STREAM_INTRO,
+        },
+      })
       // Reset clinician mode so tabs stay hidden after sending from workflow panel
       setClinicianModeState(DEFAULT_CLINICIAN_WORKFLOW_MODE)
 
@@ -2116,26 +2277,15 @@ export function useChatCore({
         chatIdFromUrl ||
         (chatId && !chatId.startsWith("temp-chat-") ? chatId : null) ||
         currentChatIdForSavingRef.current ||
+        lastUsedTempChatIdRef.current ||
         null
 
-      if (isAuthenticated && !isPersistentChatId(optimisticChatId)) {
-        const ensuredChatId = await ensureChatExists(user.id, suggestion, {
-          navigate: false,
-        })
-        if (!isPersistentChatId(ensuredChatId)) {
-          setIsSubmitting(false)
-          toast({
-            title: "Couldn't start a new chat. Please try again.",
-            status: "error",
-          })
-          return
-        }
-        optimisticChatId = ensuredChatId
-        currentChatIdForSavingRef.current = ensuredChatId
-      }
-
       if (!optimisticChatId) {
-        optimisticChatId = "temp"
+        optimisticChatId = createEphemeralChatId()
+        lastUsedTempChatIdRef.current = optimisticChatId
+      }
+      if (!isPersistentChatId(optimisticChatId)) {
+        lastUsedTempChatIdRef.current = optimisticChatId
       }
 
       // CRITICAL: Append message IMMEDIATELY with optimistic values - message appears instantly
@@ -2179,11 +2329,15 @@ export function useChatCore({
 
         if (!uid) {
           setIsSubmitting(false)
+          setStreamIntroPreview(null)
+          finishSubmitTelemetry()
           return
         }
 
         if (!allowed) {
           setIsSubmitting(false)
+          setStreamIntroPreview(null)
+          finishSubmitTelemetry()
           return
         }
 
@@ -2201,6 +2355,8 @@ export function useChatCore({
       } catch {
         toast({ title: "Failed to send suggestion", status: "error" })
         setIsSubmitting(false)
+        setStreamIntroPreview(null)
+        finishSubmitTelemetry()
       }
     },
     [
@@ -2209,9 +2365,6 @@ export function useChatCore({
       user,
       append,
       checkLimitsAndNotify,
-      ensureChatExists,
-      isAuthenticated,
-      bumpChat,
       userPreferences,
       router,
       enableSearch,
@@ -2222,6 +2375,9 @@ export function useChatCore({
       citationStyle,
       clearEvidenceCitations,
       setArtifactIntent,
+      pushHeaderTimelineAnnotation,
+      startSubmitTelemetry,
+      finishSubmitTelemetry,
     ]
   )
 
@@ -2236,14 +2392,25 @@ export function useChatCore({
 
   // Handle reload
   const handleReload = useCallback(async () => {
+    startSubmitTelemetry("reload")
     const uid = await getOrCreateGuestUserId(user)
     if (!uid) {
+      finishSubmitTelemetry()
       return
     }
 
+    setIsSubmitting(true)
+    setStreamIntroPreview(INSTANT_STREAM_INTRO)
     clearEvidenceCitations()
     pendingHeaderTimelineAnnotationsRef.current = []
     headerTimelineSequenceRef.current = 0
+    pushHeaderTimelineAnnotation({
+      type: "timeline-event",
+      event: {
+        kind: "system-intro",
+        text: INSTANT_STREAM_INTRO,
+      },
+    })
 
     const options = {
       body: {
@@ -2276,7 +2443,10 @@ export function useChatCore({
     artifactIntent,
     citationStyle,
     clearEvidenceCitations,
+    finishSubmitTelemetry,
+    pushHeaderTimelineAnnotation,
     reload,
+    startSubmitTelemetry,
   ])
 
   // Handle input change - optimized for streaming

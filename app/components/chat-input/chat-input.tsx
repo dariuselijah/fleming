@@ -22,9 +22,11 @@ import { getModelInfo } from "@/lib/models"
 import { useModel } from "@/lib/model-store/provider"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
+import { toast } from "@/components/ui/toast"
 import { listUserUploads } from "@/lib/uploads/api"
 import type { UserUploadListItem } from "@/lib/uploads/types"
 import { buildUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
+import { enforceImageFilePolicy } from "@/lib/chat-attachments/policy"
 import type { MedicalStudentLearningMode } from "@/lib/medical-student-learning"
 import type { CitationStyle } from "@/lib/citations/formatters"
 import {
@@ -129,6 +131,7 @@ export function ChatInput({
 
   const selectModelConfig = getModelInfo(effectiveModelId)
   const hasSearchSupport = Boolean(selectModelConfig?.webSearch)
+  const hasVisionSupport = Boolean(selectModelConfig?.vision)
   const isOnlyWhitespace = (text: string | undefined | null) => {
     if (!text) return true
     return !/[^\s]/.test(text)
@@ -367,6 +370,16 @@ export function ChatInput({
         return
       }
 
+      if (!hasVisionSupport && hasImageContent) {
+        e.preventDefault()
+        toast({
+          title: "This model does not support image uploads",
+          description: "Switch to a vision-enabled model to paste images.",
+          status: "warning",
+        })
+        return
+      }
+
       if (isUserAuthenticated && hasImageContent) {
         const imageFiles: File[] = []
 
@@ -385,11 +398,21 @@ export function ChatInput({
         }
 
         if (imageFiles.length > 0) {
-          onFileUpload(imageFiles)
+          const { accepted, rejected } = enforceImageFilePolicy(imageFiles)
+          if (accepted.length > 0) {
+            onFileUpload(accepted as File[])
+          }
+          if (rejected.length > 0) {
+            toast({
+              title: "Some pasted images were skipped",
+              description: rejected[0]?.detail || "Unsupported image format or size.",
+              status: "warning",
+            })
+          }
         }
       }
     },
-    [isUserAuthenticated, onFileUpload]
+    [hasVisionSupport, isUserAuthenticated, onFileUpload]
   )
 
   useEffect(() => {

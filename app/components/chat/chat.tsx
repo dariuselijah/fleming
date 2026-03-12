@@ -368,6 +368,7 @@ export function Chat() {
     () => ({
       messages,
       status,
+      isSubmitting,
       onDelete: handleDelete,
       onEdit: handleEdit,
       onReload: handleReload,
@@ -379,6 +380,7 @@ export function Chat() {
     [
       messages,
       status,
+      isSubmitting,
       handleDelete,
       handleEdit,
       handleReload,
@@ -527,8 +529,8 @@ export function Chat() {
     // After mount, check actual state
     // CRITICAL: Only show onboarding if no chatId AND no messages
     // This prevents hydration mismatch because we start with server state
-    setShowOnboarding(!chatId && messages.length === 0)
-  }, [chatId, messages.length])
+    setShowOnboarding(!chatId && messages.length === 0 && !isSubmitting)
+  }, [chatId, messages.length, isSubmitting])
   
   // CRITICAL: Clear sessionStorage on home page to prevent stale messages
   useEffect(() => {

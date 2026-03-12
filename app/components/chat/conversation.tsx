@@ -18,6 +18,7 @@ import {
 type ConversationProps = {
   messages: MessageType[]
   status?: "streaming" | "ready" | "submitted" | "error"
+  isSubmitting?: boolean
   onDelete: (id: string) => void
   onEdit: (id: string, newText: string) => void
   onReload: () => void
@@ -30,6 +31,7 @@ type ConversationProps = {
 export function Conversation({
   messages,
   status = "ready",
+  isSubmitting = false,
   onDelete,
   onEdit,
   onReload,
@@ -155,6 +157,13 @@ export function Conversation({
   // Always render the same structure to prevent hydration mismatches
   // Don't use early return - always render full structure
   const hasMessages = messages && messages.length > 0
+  const lastMessage = hasMessages ? messages[messages.length - 1] : null
+  const shouldShowProcessing =
+    (isSubmitting ||
+      status === "submitted" ||
+      status === "streaming" ||
+      (hasMessages && lastMessage?.role === "user" && status === "ready")) &&
+    ((hasMessages && lastMessage?.role === "user") || isSubmitting)
 
   return (
     <div className="relative flex h-full w-full flex-col items-center overflow-x-hidden overflow-y-auto">
@@ -172,10 +181,7 @@ export function Conversation({
         >
           {hasMessages && renderedMessages}
           {/* Show loading immediately when user sends message or when streaming */}
-          {(status === "submitted" || status === "streaming" || 
-            (hasMessages && messages[messages.length - 1].role === "user" && status === "ready")) &&
-            hasMessages &&
-            messages[messages.length - 1].role === "user" && (
+          {shouldShowProcessing && (
               <div className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
                 {streamIntroPreview ? (
                   <div className="text-muted-foreground text-sm leading-6">

@@ -18,6 +18,7 @@ import { getModelInfo } from "@/lib/models"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { cn } from "@/lib/utils"
 import { getChatAttachmentSizeLimitLabel } from "@/lib/chat-attachments/constants"
+import { CHAT_ALLOWED_IMAGE_MIME_TYPES } from "@/lib/chat-attachments/policy"
 import { FileArrowUp, Paperclip } from "@phosphor-icons/react"
 import React from "react"
 import { PopoverContentAuth } from "./popover-content-auth"
@@ -33,6 +34,8 @@ export function ButtonFileUpload({
   isUserAuthenticated,
   model,
 }: ButtonFileUploadProps) {
+  const supportedImageAccept = CHAT_ALLOWED_IMAGE_MIME_TYPES.join(",")
+
   if (!isSupabaseEnabled) {
     return null
   }
@@ -98,7 +101,7 @@ export function ButtonFileUpload({
       onFilesAdded={onFileUpload}
       multiple
       disabled={!isUserAuthenticated}
-      accept=".txt,.md,.pdf,.pptx,.docx,image/jpeg,image/png,image/gif,image/webp,image/svg,image/heic,image/heif"
+      accept={`.txt,.md,.pdf,.pptx,.docx,${supportedImageAccept}`}
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -126,7 +129,9 @@ export function ButtonFileUpload({
           <span className="mt-4 mb-1 text-lg font-medium">Drop files here</span>
           <span className="text-muted-foreground text-sm">
             Drop images or documents here (up to {getChatAttachmentSizeLimitLabel("image/png")} for
-            images, {getChatAttachmentSizeLimitLabel("application/pdf")} for documents)
+            images; supported image types: JPEG, PNG, WEBP, GIF; {getChatAttachmentSizeLimitLabel(
+              "application/pdf"
+            )} for documents)
           </span>
         </div>
       </FileUploadContent>
