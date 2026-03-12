@@ -3,7 +3,7 @@ import {
   isImageAttachment,
 } from "@/lib/chat-attachments/constants"
 
-export const CHAT_ATTACHMENT_MAX_IMAGES_PER_MESSAGE = 6
+export const CHAT_ATTACHMENT_MAX_IMAGES_PER_MESSAGE = 5
 export const CHAT_ALLOWED_IMAGE_MIME_TYPES = [
   "image/jpeg",
   "image/png",

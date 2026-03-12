@@ -1246,6 +1246,24 @@ async function extractPdfPages(buffer: Buffer): Promise<{
   }
 }
 
+function extractLoosePdfText(buffer: Buffer, maxChars = 12000): string {
+  // Keep fallback parsing bounded to avoid high memory usage on large PDFs.
+  const sample = buffer.subarray(0, Math.min(buffer.length, 4 * 1024 * 1024))
+  const latin = sample.toString("latin1")
+
+  const parenthetical = Array.from(latin.matchAll(/\(([^()]{12,420})\)/g))
+    .map((match) => match[1] || "")
+    .filter((value) => /[A-Za-z]{3,}/.test(value))
+  const asciiRuns = latin.match(/[A-Za-z][A-Za-z0-9 ,.;:()'"\/\\\-]{24,}/g) ?? []
+
+  const merged = normalizeExtractedText(
+    [...parenthetical.slice(0, 140), ...asciiRuns.slice(0, 160)].join("\n")
+  )
+  if (!merged) return ""
+  const clipped = merged.slice(0, maxChars)
+  return clipTextAtBoundary(clipped, maxChars)
+}
+
 function formatSourceLabel(unitType: UploadSourceUnitType, unitNumber: number) {
   if (unitType === "image") return "Image"
   return `${unitType.charAt(0).toUpperCase()}${unitType.slice(1)} ${unitNumber}`
@@ -1536,37 +1554,135 @@ function tryReadImageDimensions(buffer: Buffer) {
 }
 
 async function extractPdfDocument(buffer: Buffer, title: string): Promise<ParsedUploadDocument> {
-  const { pageCount, pageTexts, info } = await extractPdfPages(buffer)
-  const sourceUnits: ParsedSourceUnit[] = []
-  const extractedPageCount = pageTexts.filter((text) => text.length > 0).length
+  try {
+    const { pageCount, pageTexts, info } = await extractPdfPages(buffer)
+    const sourceUnits: ParsedSourceUnit[] = []
+    const extractedPageCount = pageTexts.filter((text) => text.length > 0).length
 
-  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-    const extractedText = pageTexts[pageNumber - 1] || ""
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+      const extractedText = pageTexts[pageNumber - 1] || ""
 
-    sourceUnits.push({
-      unitType: "page",
-      unitNumber: pageNumber,
-      title: `Page ${pageNumber}`,
-      extractedText,
-      figures: [],
-      ocrStatus: extractedText ? "completed" : "pending",
+      sourceUnits.push({
+        unitType: "page",
+        unitNumber: pageNumber,
+        title: `Page ${pageNumber}`,
+        extractedText,
+        figures: [],
+        ocrStatus: extractedText ? "completed" : "pending",
+        metadata: {
+          pageNumber,
+          extractedTextLength: extractedText.length,
+        },
+      })
+    }
+
+    return {
+      kind: "pdf",
+      title,
       metadata: {
-        pageNumber,
-        extractedTextLength: extractedText.length,
+        pageCount,
+        extractedPageCount,
+        extractionCoverage: pageCount > 0 ? Number((extractedPageCount / pageCount).toFixed(3)) : 0,
+        info,
       },
-    })
-  }
+      sourceUnits,
+    }
+  } catch (primaryError) {
+    const primaryMessage = errorMessageFromUnknown(primaryError)
+    console.warn("[Uploads] Primary PDF extraction failed, trying fallback parser:", primaryMessage)
 
-  return {
-    kind: "pdf",
-    title,
-    metadata: {
-      pageCount,
-      extractedPageCount,
-      extractionCoverage: pageCount > 0 ? Number((extractedPageCount / pageCount).toFixed(3)) : 0,
-      info,
-    },
-    sourceUnits,
+    try {
+      const fallbackParsed = await pdfParse(buffer)
+      const fallbackPages = String(fallbackParsed.text || "")
+        .split(/\f+/)
+        .map((page) => normalizeExtractedText(page))
+      const fallbackPageCount = Math.max(
+        Number(fallbackParsed.numpages || 0),
+        fallbackPages.length,
+        1
+      )
+
+      const sourceUnits: ParsedSourceUnit[] = []
+      for (let pageNumber = 1; pageNumber <= fallbackPageCount; pageNumber += 1) {
+        const extractedText = fallbackPages[pageNumber - 1] || ""
+        sourceUnits.push({
+          unitType: "page",
+          unitNumber: pageNumber,
+          title: `Page ${pageNumber}`,
+          extractedText,
+          figures: [],
+          ocrStatus: extractedText ? "completed" : "pending",
+          metadata: {
+            pageNumber,
+            extractedTextLength: extractedText.length,
+            fallbackParserApplied: true,
+            primaryParseError: primaryMessage,
+          },
+        })
+      }
+
+      const extractedPageCount = sourceUnits.filter((unit) => unit.extractedText.length > 0).length
+      return {
+        kind: "pdf",
+        title,
+        metadata: {
+          pageCount: fallbackPageCount,
+          extractedPageCount,
+          extractionCoverage:
+            fallbackPageCount > 0
+              ? Number((extractedPageCount / fallbackPageCount).toFixed(3))
+              : 0,
+          info: {
+            ...((fallbackParsed.info as Record<string, unknown>) || {}),
+            fallbackParserApplied: true,
+            primaryParseError: primaryMessage,
+          },
+        },
+        sourceUnits,
+      }
+    } catch (fallbackError) {
+      const fallbackMessage = errorMessageFromUnknown(fallbackError)
+      console.warn(
+        "[Uploads] Fallback PDF extraction failed, returning resilient placeholder:",
+        fallbackMessage
+      )
+
+      const recoveredText = extractLoosePdfText(buffer)
+      const extractedPageCount = recoveredText.length > 0 ? 1 : 0
+
+      return {
+        kind: "pdf",
+        title,
+        metadata: {
+          pageCount: 1,
+          extractedPageCount,
+          extractionCoverage: extractedPageCount > 0 ? 1 : 0,
+          info: {
+            fallbackParserApplied: true,
+            placeholderExtraction: true,
+            primaryParseError: primaryMessage,
+            fallbackParseError: fallbackMessage,
+          },
+        },
+        sourceUnits: [
+          {
+            unitType: "page",
+            unitNumber: 1,
+            title: "Page 1",
+            extractedText: recoveredText,
+            figures: [],
+            ocrStatus: recoveredText ? "completed" : "pending",
+            metadata: {
+              pageNumber: 1,
+              extractedTextLength: recoveredText.length,
+              placeholderExtraction: true,
+              primaryParseError: primaryMessage,
+              fallbackParseError: fallbackMessage,
+            },
+          },
+        ],
+      }
+    }
   }
 }
 

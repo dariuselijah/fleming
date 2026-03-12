@@ -3,7 +3,6 @@ import {
   getChatAttachmentMaxFileSizeBytes,
   getChatAttachmentFileId,
   getChatAttachmentSizeLimitLabel,
-  isImageAttachment,
 } from "@/lib/chat-attachments/constants"
 import {
   Attachment,
@@ -103,17 +102,22 @@ export const useFileUpload = () => {
 
     try {
       // Check limits in background (non-blocking).
-      // Non-image files route through uploads ingestion and should not consume chat attachment quota.
-      const shouldCheckLimit = targetFiles.some((file) => isImageAttachment(file.type))
+      // Enforce hourly attachment budget for all files included in chat messages.
+      const shouldCheckLimit = targetFiles.length > 0
       const limitCheck = shouldCheckLimit
-        ? checkFileUploadLimit(uid).catch(err => {
-            const error = err as { code?: string; message?: string }
-            if (error.code === "DAILY_FILE_LIMIT_REACHED") {
-              toast({ title: error.message || "Daily file limit reached", status: "error" })
-              return false
-            }
-            return true
-          })
+        ? checkFileUploadLimit(uid, targetFiles.length)
+            .then(() => true)
+            .catch((err) => {
+              const error = err as { code?: string; message?: string }
+              if (error.code === "HOURLY_ATTACHMENT_LIMIT_REACHED") {
+                toast({
+                  title: error.message || "Hourly file limit reached",
+                  status: "error",
+                })
+                return false
+              }
+              return true
+            })
         : Promise.resolve(true)
 
       // Process files in parallel immediately
@@ -125,7 +129,7 @@ export const useFileUpload = () => {
         targetFiles.forEach((file) => {
           setStatusForFile(file, {
             state: "failed",
-            message: "Daily upload limit reached. Try again tomorrow.",
+            message: "Hourly file limit reached. Try again later.",
           })
           cleanupDetachedStatus(file, 9000)
         })

@@ -1,4 +1,5 @@
 import {
+  AUTH_HOURLY_ATTACHMENT_LIMIT,
   ENABLE_WEB_SEARCH_TOOL,
   ENABLE_UPLOAD_CONTEXT_SEARCH,
   ENABLE_UPLOAD_ARTIFACT_V2,
@@ -6,6 +7,7 @@ import {
   ENABLE_LANGGRAPH_HARNESS,
   ENABLE_CONNECTOR_REGISTRY,
   ENABLE_STRICT_CITATION_CONTRACT,
+  NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
   getSystemPromptByRole,
 } from "@/lib/config"
 import { getAllModels, getModelInfo } from "@/lib/models"
@@ -2452,11 +2454,14 @@ type ChatRequest = {
 
 const chatAttachmentRequestSchema = z
   .object({
-    name: z.string().min(1).optional(),
-    url: z.string().min(1).optional(),
-    contentType: z.string().min(1).optional(),
-    mimeType: z.string().min(1).optional(),
-    filePath: z.string().min(1).optional(),
+    // Keep schema permissive for in-flight optimistic attachments.
+    // Some client-side placeholders intentionally send empty/null values
+    // (for example non-image docs routed through upload references).
+    name: z.string().nullish(),
+    url: z.string().nullish(),
+    contentType: z.string().nullish(),
+    mimeType: z.string().nullish(),
+    filePath: z.string().nullish(),
   })
   .passthrough()
 
@@ -2547,6 +2552,27 @@ export async function POST(req: Request) {
       )
     }
 
+    const latestUserMessageForLimits = [...messages]
+      .reverse()
+      .find((message) => message.role === "user")
+    const requestedAttachmentCount = Array.isArray(
+      (latestUserMessageForLimits as any)?.experimental_attachments
+    )
+      ? ((latestUserMessageForLimits as any).experimental_attachments as unknown[]).length
+      : 0
+    const perMessageAttachmentLimit = isAuthenticated
+      ? AUTH_HOURLY_ATTACHMENT_LIMIT
+      : NON_AUTH_HOURLY_ATTACHMENT_LIMIT
+    if (requestedAttachmentCount > perMessageAttachmentLimit) {
+      return new Response(
+        JSON.stringify({
+          error: `You can include up to ${perMessageAttachmentLimit} images/files in a single message.`,
+          code: "ATTACHMENT_LIMIT_EXCEEDED",
+        }),
+        { status: 400 }
+      )
+    }
+
     let effectiveChatId = chatId
 
     // CRITICAL: Check rate limits FIRST - fail fast before any other work
@@ -2557,6 +2583,7 @@ export async function POST(req: Request) {
           userId,
           model,
           isAuthenticated,
+          attachmentCount: requestedAttachmentCount,
         })
         if (!validatedSupabase) {
           return new Response(
@@ -2619,7 +2646,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const lastUserMessage = messages.filter(m => m.role === "user").pop()
+    const lastUserMessage = latestUserMessageForLimits
     const rawQueryText =
       typeof lastUserMessage?.content === "string" ? lastUserMessage.content : ""
     const queryText = decodeArtifactWorkflowInput(stripUploadReferenceTokens(rawQueryText))
@@ -4894,6 +4921,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                 userId,
                 model: effectiveModel,
                 isAuthenticated,
+                attachmentCount: 0,
               })
             }
 

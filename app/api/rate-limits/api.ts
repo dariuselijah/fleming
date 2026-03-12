@@ -1,12 +1,14 @@
 import {
   AUTH_DAILY_MESSAGE_LIMIT,
+  AUTH_HOURLY_ATTACHMENT_LIMIT,
   AUTH_HOURLY_MESSAGE_LIMIT,
   DAILY_LIMIT_PRO_MODELS,
   NON_AUTH_DAILY_MESSAGE_LIMIT,
+  NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
   NON_AUTH_HOURLY_MESSAGE_LIMIT,
 } from "@/lib/config"
 import { validateUserIdentity } from "@/lib/server/api"
-import { checkHourlyUsage } from "@/lib/usage"
+import { checkHourlyAttachmentUsage, checkHourlyUsage } from "@/lib/usage"
 
 export async function getMessageUsage(
   userId: string,
@@ -33,6 +35,13 @@ export async function getMessageUsage(
       hourlyCount: 0,
       hourlyLimit: isAuthenticated ? AUTH_HOURLY_MESSAGE_LIMIT : NON_AUTH_HOURLY_MESSAGE_LIMIT,
       remainingHourly: isAuthenticated ? AUTH_HOURLY_MESSAGE_LIMIT : NON_AUTH_HOURLY_MESSAGE_LIMIT,
+      hourlyAttachmentCount: 0,
+      hourlyAttachmentLimit: isAuthenticated
+        ? AUTH_HOURLY_ATTACHMENT_LIMIT
+        : NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
+      remainingHourlyAttachments: isAuthenticated
+        ? AUTH_HOURLY_ATTACHMENT_LIMIT
+        : NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
       waitTimeSeconds: null,
     }
   }
@@ -48,6 +57,13 @@ export async function getMessageUsage(
       hourlyCount: 0,
       hourlyLimit: isAuthenticated ? AUTH_HOURLY_MESSAGE_LIMIT : NON_AUTH_HOURLY_MESSAGE_LIMIT,
       remainingHourly: isAuthenticated ? AUTH_HOURLY_MESSAGE_LIMIT : NON_AUTH_HOURLY_MESSAGE_LIMIT,
+      hourlyAttachmentCount: 0,
+      hourlyAttachmentLimit: isAuthenticated
+        ? AUTH_HOURLY_ATTACHMENT_LIMIT
+        : NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
+      remainingHourlyAttachments: isAuthenticated
+        ? AUTH_HOURLY_ATTACHMENT_LIMIT
+        : NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
       waitTimeSeconds: null,
     }
   }
@@ -65,11 +81,27 @@ export async function getMessageUsage(
     hourlyLimit: isAuthenticated ? AUTH_HOURLY_MESSAGE_LIMIT : NON_AUTH_HOURLY_MESSAGE_LIMIT,
     waitTimeSeconds: null as number | null,
   }
+  let hourlyAttachmentUsage = {
+    hourlyAttachmentCount: 0,
+    hourlyAttachmentLimit: isAuthenticated
+      ? AUTH_HOURLY_ATTACHMENT_LIMIT
+      : NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
+    waitTimeSeconds: null as number | null,
+  }
 
   try {
     hourlyUsage = await checkHourlyUsage(supabase, userId, isAuthenticated)
   } catch (err) {
     console.error("Error fetching hourly usage:", err)
+  }
+  try {
+    hourlyAttachmentUsage = await checkHourlyAttachmentUsage(
+      supabase,
+      userId,
+      isAuthenticated
+    )
+  } catch (err) {
+    console.error("Error fetching hourly attachment usage:", err)
   }
 
   return {
@@ -81,6 +113,12 @@ export async function getMessageUsage(
     hourlyCount: hourlyUsage.hourlyCount,
     hourlyLimit: hourlyUsage.hourlyLimit,
     remainingHourly: hourlyUsage.hourlyLimit - hourlyUsage.hourlyCount,
-    waitTimeSeconds: hourlyUsage.waitTimeSeconds,
+    hourlyAttachmentCount: hourlyAttachmentUsage.hourlyAttachmentCount,
+    hourlyAttachmentLimit: hourlyAttachmentUsage.hourlyAttachmentLimit,
+    remainingHourlyAttachments:
+      hourlyAttachmentUsage.hourlyAttachmentLimit -
+      hourlyAttachmentUsage.hourlyAttachmentCount,
+    waitTimeSeconds:
+      hourlyUsage.waitTimeSeconds ?? hourlyAttachmentUsage.waitTimeSeconds,
   }
 }

@@ -7,7 +7,7 @@ import {
   isImageAttachment,
 } from "@/lib/chat-attachments/constants"
 import { uploadKnowledgeFile } from "@/lib/uploads/api"
-import { DAILY_FILE_UPLOAD_LIMIT } from "./config"
+import { AUTH_HOURLY_ATTACHMENT_LIMIT } from "./config"
 import { isSupabaseEnabled } from "./supabase/config"
 
 export type Attachment = {
@@ -417,11 +417,14 @@ export class FileUploadLimitError extends Error {
   code: string
   constructor(message: string) {
     super(message)
-    this.code = "DAILY_FILE_LIMIT_REACHED"
+    this.code = "HOURLY_ATTACHMENT_LIMIT_REACHED"
   }
 }
 
-export async function checkFileUploadLimit(userId: string) {
+export async function checkFileUploadLimit(
+  userId: string,
+  requestedAttachmentCount = 0
+) {
   if (!isSupabaseEnabled) return 0
 
   try {
@@ -442,9 +445,12 @@ export async function checkFileUploadLimit(userId: string) {
 
     const result = await response.json()
     const count = result.count || 0
-    
-    if (count >= DAILY_FILE_UPLOAD_LIMIT) {
-      throw new FileUploadLimitError("Daily file upload limit reached.")
+    const hourlyLimit = result.hourlyLimit || AUTH_HOURLY_ATTACHMENT_LIMIT
+
+    if (count + requestedAttachmentCount > hourlyLimit) {
+      throw new FileUploadLimitError(
+        `Hourly file limit reached. You can include up to ${hourlyLimit} files/images per hour.`
+      )
     }
 
     return count

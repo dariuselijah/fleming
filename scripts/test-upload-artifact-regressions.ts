@@ -101,6 +101,16 @@ function testUploadServerStructureAndSynthesis() {
     /fallbackReason:\s*"none"/,
     "Upload context metrics should include explicit fallback reason"
   )
+  assert.match(
+    server,
+    /extractLoosePdfText\(/,
+    "Upload parsing should include bounded loose-text fallback for malformed PDFs"
+  )
+  assert.match(
+    server,
+    /placeholderExtraction:\s*true/,
+    "Malformed PDFs should degrade gracefully with placeholder extraction instead of hard failing"
+  )
 }
 
 function testWorkflowBiasCleanup() {

@@ -76,6 +76,7 @@ export interface ChatApiParams {
   userId: string
   model: SupportedModel
   isAuthenticated: boolean
+  attachmentCount?: number
 }
 
 export interface LogUserMessageParams {

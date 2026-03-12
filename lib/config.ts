@@ -43,8 +43,10 @@ export const ENABLE_CHAT_ACTIVITY_TIMELINE_V2 =
   process.env.ENABLE_CHAT_ACTIVITY_TIMELINE_V2 !== "false"
 
 // Hourly rate limits (ChatGPT-style)
-export const NON_AUTH_HOURLY_MESSAGE_LIMIT = 3
-export const AUTH_HOURLY_MESSAGE_LIMIT = 50
+export const NON_AUTH_HOURLY_MESSAGE_LIMIT = 10
+export const AUTH_HOURLY_MESSAGE_LIMIT = 10
+export const NON_AUTH_HOURLY_ATTACHMENT_LIMIT = 5
+export const AUTH_HOURLY_ATTACHMENT_LIMIT = 5
 
 export const NON_AUTH_ALLOWED_MODELS = ["fleming-4", "grok-3", "o3", "gpt-4o"]
 

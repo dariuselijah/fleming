@@ -80,7 +80,7 @@ function testImagePolicyWiring() {
   )
   assert.match(
     policy,
-    /CHAT_ATTACHMENT_MAX_IMAGES_PER_MESSAGE = 6/,
+    /CHAT_ATTACHMENT_MAX_IMAGES_PER_MESSAGE = 5/,
     "Shared policy should define max images per message"
   )
 }

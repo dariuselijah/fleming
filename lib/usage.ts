@@ -1,10 +1,12 @@
 import { UsageLimitError } from "@/lib/api"
 import {
   AUTH_DAILY_MESSAGE_LIMIT,
+  AUTH_HOURLY_ATTACHMENT_LIMIT,
   AUTH_HOURLY_MESSAGE_LIMIT,
   DAILY_LIMIT_PRO_MODELS,
   FREE_MODELS_IDS,
   NON_AUTH_DAILY_MESSAGE_LIMIT,
+  NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
   NON_AUTH_HOURLY_MESSAGE_LIMIT,
 } from "@/lib/config"
 import { SupabaseClient } from "@supabase/supabase-js"
@@ -270,6 +272,89 @@ export async function checkHourlyUsage(
   }
 }
 
+function normalizeAttachmentArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+function countAttachmentsFromMessageValue(value: unknown): number {
+  return normalizeAttachmentArray(value).filter(Boolean).length
+}
+
+export async function checkHourlyAttachmentUsage(
+  supabase: SupabaseClient,
+  userId: string,
+  isAuthenticated: boolean
+): Promise<{
+  hourlyAttachmentCount: number
+  hourlyAttachmentLimit: number
+  waitTimeSeconds: number | null
+}> {
+  const { data: userData, error: userDataError } = await supabase
+    .from("users")
+    .select("anonymous")
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (userDataError) {
+    throw new Error("Error fetching user data: " + userDataError.message)
+  }
+  if (!userData) {
+    throw new Error("User record not found for id: " + userId)
+  }
+
+  const isAnonymous = userData.anonymous || !isAuthenticated
+  const hourlyAttachmentLimit = isAnonymous
+    ? NON_AUTH_HOURLY_ATTACHMENT_LIMIT
+    : AUTH_HOURLY_ATTACHMENT_LIMIT
+
+  const now = Date.now()
+  const oneHourAgoIso = new Date(now - 60 * 60 * 1000).toISOString()
+  const { data: recentMessages, error: messagesError } = await supabase
+    .from("messages")
+    .select("experimental_attachments, created_at")
+    .eq("user_id", userId)
+    .eq("role", "user")
+    .gte("created_at", oneHourAgoIso)
+    .order("created_at", { ascending: true })
+
+  if (messagesError) {
+    throw new Error("Error fetching recent message attachments: " + messagesError.message)
+  }
+
+  let hourlyAttachmentCount = 0
+  let earliestAttachmentTimestamp: number | null = null
+  ;(recentMessages || []).forEach((row: any) => {
+    const attachmentCount = countAttachmentsFromMessageValue(row?.experimental_attachments)
+    if (attachmentCount <= 0) return
+    hourlyAttachmentCount += attachmentCount
+    if (earliestAttachmentTimestamp === null && row?.created_at) {
+      earliestAttachmentTimestamp = new Date(row.created_at).getTime()
+    }
+  })
+
+  let waitTimeSeconds: number | null = null
+  if (hourlyAttachmentCount >= hourlyAttachmentLimit && earliestAttachmentTimestamp) {
+    const timeElapsed = now - earliestAttachmentTimestamp
+    const timeUntilReset = Math.max(0, 60 * 60 * 1000 - timeElapsed)
+    waitTimeSeconds = Math.ceil(timeUntilReset / 1000)
+  }
+
+  return {
+    hourlyAttachmentCount,
+    hourlyAttachmentLimit,
+    waitTimeSeconds,
+  }
+}
+
 /**
  * Increments hourly message counter
  */
@@ -316,7 +401,10 @@ export async function checkUsageByModel(
   supabase: SupabaseClient,
   userId: string,
   modelId: string,
-  isAuthenticated: boolean
+  isAuthenticated: boolean,
+  options?: {
+    attachmentCount?: number
+  }
 ) {
   // First check hourly limits (ChatGPT-style)
   const hourlyUsage = await checkHourlyUsage(supabase, userId, isAuthenticated)
@@ -327,6 +415,39 @@ export async function checkUsageByModel(
     ;(error as any).waitTimeSeconds = hourlyUsage.waitTimeSeconds
     ;(error as any).limitType = "hourly"
     throw error
+  }
+
+  const requestedAttachmentCount = Math.max(
+    0,
+    Math.floor(options?.attachmentCount || 0)
+  )
+  if (requestedAttachmentCount > 0) {
+    const hourlyAttachmentUsage = await checkHourlyAttachmentUsage(
+      supabase,
+      userId,
+      isAuthenticated
+    )
+    if (requestedAttachmentCount > hourlyAttachmentUsage.hourlyAttachmentLimit) {
+      const error = new UsageLimitError(
+        `You can include up to ${hourlyAttachmentUsage.hourlyAttachmentLimit} images/files in a single message.`
+      )
+      ;(error as any).code = "ATTACHMENT_LIMIT_EXCEEDED"
+      ;(error as any).limitType = "hourly"
+      ;(error as any).waitTimeSeconds = hourlyAttachmentUsage.waitTimeSeconds
+      throw error
+    }
+    if (
+      hourlyAttachmentUsage.hourlyAttachmentCount + requestedAttachmentCount >
+      hourlyAttachmentUsage.hourlyAttachmentLimit
+    ) {
+      const error = new UsageLimitError(
+        `Hourly attachment limit reached. You can include up to ${hourlyAttachmentUsage.hourlyAttachmentLimit} images/files per hour.`
+      )
+      ;(error as any).code = "HOURLY_ATTACHMENT_LIMIT_REACHED"
+      ;(error as any).limitType = "hourly"
+      ;(error as any).waitTimeSeconds = hourlyAttachmentUsage.waitTimeSeconds
+      throw error
+    }
   }
 
   if (isProModel(modelId)) {

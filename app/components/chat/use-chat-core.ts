@@ -374,7 +374,10 @@ type UseChatCoreProps = {
     files: File[]
   ) => Attachment[]
   setFiles: (files: File[]) => void
-  checkLimitsAndNotify: (uid: string) => Promise<boolean>
+  checkLimitsAndNotify: (
+    uid: string,
+    requestedAttachmentCount?: number
+  ) => Promise<boolean>
   cleanupOptimisticAttachments: (attachments?: Array<{ url?: string }>) => void
   ensureChatExists: (
     uid: string,
@@ -1923,7 +1926,9 @@ export function useChatCore({
     if (nonImageFiles.length > 0 && optimisticChatId) {
       const [resolvedUid, resolvedAllowed] = await Promise.all([
         getOrCreateGuestUserId(user),
-        user?.id ? checkLimitsAndNotify(user.id) : Promise.resolve(true),
+        user?.id
+          ? checkLimitsAndNotify(user.id, nonImageFiles.length + imageFiles.length)
+          : Promise.resolve(true),
       ])
       preparedUid = resolvedUid
       preparedAllowed = resolvedAllowed
@@ -2116,7 +2121,7 @@ export function useChatCore({
         preparedAllowed !== null
           ? Promise.resolve(preparedAllowed)
           : user?.id
-            ? checkLimitsAndNotify(user.id)
+            ? checkLimitsAndNotify(user.id, nonImageFiles.length + imageFiles.length)
             : Promise.resolve(true),
       ])
 

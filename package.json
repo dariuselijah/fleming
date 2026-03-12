@@ -13,6 +13,7 @@
     "test:clinical-harness": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-clinical-harness-regressions.ts",
     "test:chat-timeline": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-chat-activity-timeline-regressions.ts",
     "test:ttft-image": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-chat-ttft-image-regressions.ts",
+    "test:hourly-rate-limits": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-hourly-rate-limit-regressions.ts",
     "ingest": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts",
     "ingest:recommended": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --high-evidence",
     "ingest:dry-run": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/ingest-pubmed.ts --recommended --dry-run",

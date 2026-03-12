@@ -49,7 +49,10 @@ export function useChatOperations({
   const chatCreationPromiseRef = useRef<Promise<string | null> | null>(null)
 
   // Chat utilities
-  const checkLimitsAndNotify = async (uid: string) => {
+  const checkLimitsAndNotify = async (
+    uid: string,
+    requestedAttachmentCount = 0
+  ) => {
     try {
       const rateData = await checkRateLimits(uid, isAuthenticated)
 
@@ -65,6 +68,25 @@ export function useChatOperations({
 
       if (rateData.remaining === 0 && !isAuthenticated) {
         setHasDialogAuth(true)
+        return false
+      }
+
+      if (
+        requestedAttachmentCount > 0 &&
+        typeof rateData.remainingHourlyAttachments === "number" &&
+        requestedAttachmentCount > rateData.remainingHourlyAttachments
+      ) {
+        if (setHasRateLimitPaywall && setRateLimitWaitTime && setRateLimitType) {
+          setRateLimitWaitTime(rateData.waitTimeSeconds || null)
+          setRateLimitType("hourly")
+          setHasRateLimitPaywall(true)
+        } else {
+          toast({
+            title: "Hourly attachment limit reached",
+            description: "You can include up to 5 images/files per hour.",
+            status: "warning",
+          })
+        }
         return false
       }
 

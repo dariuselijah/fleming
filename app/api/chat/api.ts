@@ -41,6 +41,7 @@ export async function validateAndTrackUsage({
   userId,
   model,
   isAuthenticated,
+  attachmentCount = 0,
 }: ChatApiParams): Promise<SupabaseClientType | null> {
   const supabase = await validateUserIdentity(userId, isAuthenticated)
   if (!supabase) return null
@@ -72,7 +73,9 @@ export async function validateAndTrackUsage({
   }
 
   // Check usage limits for the model
-  await checkUsageByModel(supabase, userId, model, isAuthenticated)
+  await checkUsageByModel(supabase, userId, model, isAuthenticated, {
+    attachmentCount,
+  })
 
   return supabase
 }
