@@ -26,18 +26,17 @@ export function useModel({
   updateChatModel,
   chatId,
 }: UseModelProps) {
-  // Calculate the effective model based on priority: chat model > first favorite model > default
+  // Calculate the effective model based on priority: chat model > default
   const getEffectiveModel = useCallback(() => {
-    const firstFavoriteModel = user?.favorite_models?.[0]
-    let effectiveModel = currentChat?.model || firstFavoriteModel || MODEL_DEFAULT
+    let effectiveModel = currentChat?.model || MODEL_DEFAULT
     
-    // Migrate old model names to fleming-4
+    // Migrate legacy aliases to the current default model
     if (effectiveModel === 'grok-4' || effectiveModel === 'grok-4-fast-reasoning' || effectiveModel === 'fleming-3.5') {
-      effectiveModel = 'fleming-4'
+      effectiveModel = MODEL_DEFAULT
     }
     
     return effectiveModel
-  }, [currentChat?.model, user?.favorite_models])
+  }, [currentChat?.model])
 
   // Use local state only for temporary overrides, derive base value from props
   const [localSelectedModel, setLocalSelectedModel] = useState<string | null>(

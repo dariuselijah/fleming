@@ -18,6 +18,7 @@ import {
   DEFAULT_CLINICIAN_WORKFLOW_MODE,
   type ClinicianWorkflowMode,
 } from "@/lib/clinician-mode"
+import { MODEL_DEFAULT } from "@/lib/config"
 import { getModelInfo } from "@/lib/models"
 import { useModel } from "@/lib/model-store/provider"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
@@ -124,13 +125,12 @@ export function ChatInput({
   // Migrate old model aliases to the default model id.
   const effectiveModelId = useMemo(() => {
     if (selectedModel === 'grok-4' || selectedModel === 'grok-4-fast-reasoning' || selectedModel === 'fleming-3.5') {
-      return 'fleming-4'
+      return MODEL_DEFAULT
     }
-    return selectedModel || 'fleming-4'
+    return selectedModel || MODEL_DEFAULT
   }, [selectedModel])
 
   const selectModelConfig = getModelInfo(effectiveModelId)
-  const hasSearchSupport = Boolean(selectModelConfig?.webSearch)
   const hasVisionSupport = Boolean(selectModelConfig?.vision)
   const isOnlyWhitespace = (text: string | undefined | null) => {
     if (!text) return true
@@ -414,12 +414,6 @@ export function ChatInput({
     },
     [hasVisionSupport, isUserAuthenticated, onFileUpload]
   )
-
-  useEffect(() => {
-    if (!hasSearchSupport && enableSearch) {
-      setEnableSearch?.(false)
-    }
-  }, [hasSearchSupport, enableSearch, setEnableSearch])
 
   useEffect(() => {
     if (!isSlashUploadsMode) {
@@ -741,13 +735,11 @@ export function ChatInput({
                   isUserAuthenticated={isUserAuthenticated}
                   model={effectiveModelId}
                 />
-                {hasSearchSupport ? (
-                  <ButtonSearch
-                    isSelected={enableSearch}
-                    onToggle={setEnableSearch}
-                    isAuthenticated={isUserAuthenticated}
-                  />
-                ) : null}
+                <ButtonSearch
+                  isSelected={enableSearch}
+                  onToggle={setEnableSearch}
+                  isAuthenticated={isUserAuthenticated}
+                />
                 <ModelSelector
                   selectedModelId={effectiveModelId}
                   setSelectedModelId={onSelectModel}

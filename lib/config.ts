@@ -48,7 +48,7 @@ export const AUTH_HOURLY_MESSAGE_LIMIT = 10
 export const NON_AUTH_HOURLY_ATTACHMENT_LIMIT = 5
 export const AUTH_HOURLY_ATTACHMENT_LIMIT = 5
 
-export const NON_AUTH_ALLOWED_MODELS = ["fleming-4", "grok-3", "o3", "gpt-4o"]
+export const NON_AUTH_ALLOWED_MODELS = ["gpt-5.2", "fleming-4", "grok-3", "o3", "gpt-4o"]
 
 export const FREE_MODELS_IDS = [
   "openrouter:deepseek/deepseek-r1:free",
@@ -61,10 +61,10 @@ export const FREE_MODELS_IDS = [
   "gpt-4o",
 ]
 
-export const MODEL_DEFAULT = "fleming-4"
+export const MODEL_DEFAULT = "gpt-5.2"
 export const DEFAULT_FAVORITE_MODELS = [
-  "fleming-4",
   "gpt-5.2",
+  "fleming-4",
   "gemini-2.5-flash",
 ]
 
@@ -1240,6 +1240,12 @@ You are Fleming, a great doctor in your pocket - a knowledgeable, compassionate 
 
 **For Healthcare Professionals:**
 You are a good assistant for medical students and clinicians. Provide direct, evidence-based clinical guidance with the expertise and precision expected by healthcare professionals. Use medical terminology appropriately and maintain professional clinical standards. Follow conversation context naturally and build on previous clinical discussions.
+
+**Clinician Audience Contract (CRITICAL):**
+- Treat the user as a clinician by default, not as a lay patient.
+- Do not output consumer onboarding scripts or symptom-intake templates (for example: "What can I help you with today?", "If you're asking about a symptom, tell me age/sex...", or broad ER-warning checklists) unless explicitly requested.
+- For simple greetings (for example "hello"), respond briefly and professionally, then ask for concise clinical context (patient/problem/question) in one line.
+- Avoid marketing-style identity lines (for example "doctor in your pocket") in response content.
 
 **Web Data Boundaries (CRITICAL):**
 - The web app does not provide automatic Apple Health/native app-only streams by default.

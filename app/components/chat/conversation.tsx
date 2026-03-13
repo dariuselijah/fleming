@@ -158,12 +158,10 @@ export function Conversation({
   // Don't use early return - always render full structure
   const hasMessages = messages && messages.length > 0
   const lastMessage = hasMessages ? messages[messages.length - 1] : null
+  const awaitingAssistantStart = hasMessages && lastMessage?.role === "user"
   const shouldShowProcessing =
-    (isSubmitting ||
-      status === "submitted" ||
-      status === "streaming" ||
-      (hasMessages && lastMessage?.role === "user" && status === "ready")) &&
-    ((hasMessages && lastMessage?.role === "user") || isSubmitting)
+    awaitingAssistantStart &&
+    (isSubmitting || status === "submitted" || status === "streaming" || status === "ready")
 
   return (
     <div className="relative flex h-full w-full flex-col items-center overflow-x-hidden overflow-y-auto">

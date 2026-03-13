@@ -26,16 +26,14 @@ export function SubMenu({ hoveredModelData }: SubMenuProps) {
   const benchmarkRows = hoveredModelData.healthcareBenchmarks?.slice(0, 3) || []
   const verifiedBenchmarks = hoveredModelData.verifiedBenchmarks?.slice(0, 3) || []
   const displayName =
-    hoveredModelData.id === "fleming-4"
-      ? "Auto"
-      : hoveredModelData.id === "claude-sonnet-4-6"
-        ? "Claude Sonnet"
-        : hoveredModelData.id === "gemini-2.5-flash"
-          ? "Gemini 2.5 Fast"
-          : hoveredModelData.name
+    hoveredModelData.id === "claude-sonnet-4-6"
+      ? "Claude Sonnet"
+      : hoveredModelData.id === "gemini-2.5-flash"
+        ? "Gemini 2.5 Fast"
+        : hoveredModelData.name
 
   return (
-    <div className="bg-popover border-border w-[300px] rounded-xl border p-3.5 shadow-lg">
+    <div className="bg-popover border-border w-[300px] max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-xl border p-3.5 shadow-lg">
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
           {provider?.icon && <provider.icon className="size-5" />}

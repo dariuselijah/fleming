@@ -36,15 +36,15 @@ export const CLINICIAN_MODE_PLACEHOLDERS: Record<
   string
 > = {
   open_search:
-    "Ask a clinical question or describe the case (e.g., 68yo with new dyspnea and leg swelling—what’s on the differential and next steps?)",
+    "Ask a clinical question or describe the case",
   clinical_summary:
-    "Generate a concise clinical summary (e.g., problem list, active issues, and plan)...",
+    "Generate a concise clinical summary (problem list, active issues, and plan)...",
   drug_interactions:
-    "Check interactions and safety (e.g., interactions between apixaban, amiodarone, and clarithromycin)...",
+    "Check interactions and safety (interactions between apixaban, amiodarone, and clarithromycin)...",
   stewardship:
     "Build an evidence-backed antimicrobial plan with empiric options, de-escalation triggers, and duration guidance...",
   icd10_codes:
-    "Map assessment to ICD10 coding options (e.g., diabetes with CKD and hypertension)...",
+    "Map assessment to ICD10 coding options (diabetes with CKD and hypertension)...",
   med_review:
     "Review medication regimen for risks and optimization opportunities...",
 }
@@ -113,6 +113,7 @@ Operate as a broad clinical copilot:
 - Synthesize the user's query with all relevant context.
 - Prioritize high-signal facts, differential framing, and next diagnostic/management steps.
 - Use concise structure with practical action points.
+- Assume a clinician audience; avoid layperson onboarding or generic symptom-intake scripts unless explicitly requested.
 - ${commonGuardrail}
 - ${escalationGuardrail}
 `.trim()

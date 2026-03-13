@@ -4,17 +4,18 @@ import { Button } from "@/components/ui/button"
 import { DrawerClose } from "@/components/ui/drawer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
-import { cn, isDev } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import {
-  CubeIcon,
   GearSixIcon,
   PaintBrushIcon,
+  PlugsConnectedIcon,
   XIcon,
 } from "@phosphor-icons/react"
 import { useState } from "react"
 import { InteractionPreferences } from "./appearance/interaction-preferences"
 import { LayoutSettings } from "./appearance/layout-settings"
 import { ThemeSelection } from "./appearance/theme-selection"
+import { ConnectorsSettings } from "./connectors/connectors-settings"
 import { AccountManagement } from "./general/account-management"
 import { UserProfile } from "./general/user-profile"
 import { HealthContext } from "./general/health-context"
@@ -24,7 +25,7 @@ type SettingsContentProps = {
   isDrawer?: boolean
 }
 
-type TabType = "general" | "appearance"
+type TabType = "general" | "appearance" | "connectors"
 
 export function SettingsContent({
   isDrawer = false,
@@ -76,6 +77,13 @@ export function SettingsContent({
                   <PaintBrushIcon className="size-4" />
                   <span>Appearance</span>
                 </TabsTrigger>
+                <TabsTrigger
+                  value="connectors"
+                  className="flex shrink-0 items-center gap-2"
+                >
+                  <PlugsConnectedIcon className="size-4" />
+                  <span>Connectors</span>
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -95,6 +103,10 @@ export function SettingsContent({
               <ThemeSelection />
               <LayoutSettings />
               <InteractionPreferences />
+            </TabsContent>
+
+            <TabsContent value="connectors" className="space-y-6 px-6">
+              <ConnectorsSettings />
             </TabsContent>
           </div>
         ) : (
@@ -121,6 +133,16 @@ export function SettingsContent({
                     <span>Appearance</span>
                   </div>
                 </TabsTrigger>
+
+                <TabsTrigger
+                  value="connectors"
+                  className="w-full justify-start rounded-md px-3 py-2 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <PlugsConnectedIcon className="size-4" />
+                    <span>Connectors</span>
+                  </div>
+                </TabsTrigger>
               </div>
             </TabsList>
 
@@ -141,6 +163,10 @@ export function SettingsContent({
                 <ThemeSelection />
                 <LayoutSettings />
                 <InteractionPreferences />
+              </TabsContent>
+
+              <TabsContent value="connectors" className="mt-0 space-y-6">
+                <ConnectorsSettings />
               </TabsContent>
             </div>
           </>

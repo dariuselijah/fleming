@@ -2777,11 +2777,9 @@ export async function POST(req: Request) {
     const evidenceSeekingIntent = hasEvidenceSeekingIntent(queryText) || hasGuidelineIntent(queryText)
     const finalEnableEvidence =
       enableEvidenceFromClient === true || clinicianRoleFromResolvedRole || evidenceSeekingIntent
-    const hasWebSearchSupport = Boolean(modelConfig?.webSearch)
     const finalEnableSearch =
       ENABLE_WEB_SEARCH_TOOL &&
-      enableSearchFromClient === true &&
-      hasWebSearchSupport
+      enableSearchFromClient === true
     const shouldRunWebSearchPreflight =
       finalEnableSearch && queryText.length > 0 && !shouldPreferUploadContext
     const minEvidenceLevelForQuery = clinicianRoleFromResolvedRole ? 3 : 5

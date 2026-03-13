@@ -38,7 +38,7 @@ import { useMemo, useRef, useState } from "react"
 import { ProModelDialog } from "./pro-dialog"
 import { SubMenu } from "./sub-menu"
 
-const AUTO_MODEL_ID = "fleming-4"
+const AUTO_MODEL_ID = "gpt-5.2"
 const POPULAR_MODEL_IDS = ["claude-sonnet-4-6", "gpt-5.2", "gemini-2.5-flash"] as const
 const LATEST_MODEL_IDS = [
   "grok-4-1-fast-reasoning",
@@ -52,7 +52,6 @@ const CURATED_MODEL_IDS = [
   ...LATEST_MODEL_IDS,
 ] as const
 const MODEL_LABEL_OVERRIDES: Record<string, string> = {
-  "fleming-4": "Auto",
   "claude-sonnet-4-6": "Claude Sonnet",
   "gemini-2.5-flash": "Gemini 2.5 Fast",
 }
@@ -85,8 +84,10 @@ export function ModelSelector({
   const [selectedProModel, setSelectedProModel] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
 
-  const getDisplayModelName = (model: ModelConfig) =>
-    MODEL_LABEL_OVERRIDES[model.id] ?? model.name
+  const getDisplayModelName = (
+    model: ModelConfig,
+    section: "auto" | "default" = "default"
+  ) => (section === "auto" ? "Auto" : MODEL_LABEL_OVERRIDES[model.id] ?? model.name)
 
   // Ref for input to maintain focus
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -102,7 +103,10 @@ export function ModelSelector({
     }
   )
 
-  const renderModelItem = (model: ModelConfig) => {
+  const renderModelItem = (
+    model: ModelConfig,
+    section: "auto" | "default" = "default"
+  ) => {
     const isLocked = !model.accessible
     const provider = PROVIDERS.find((provider) => provider.id === model.icon)
 
@@ -131,7 +135,7 @@ export function ModelSelector({
         <div className="flex items-center gap-3">
           {provider?.icon && <provider.icon className="size-5" />}
           <div className="flex flex-col gap-0">
-            <span className="text-sm">{getDisplayModelName(model)}</span>
+            <span className="text-sm">{getDisplayModelName(model, section)}</span>
           </div>
         </div>
         {isLocked && (
@@ -194,13 +198,23 @@ export function ModelSelector({
     >
       <div className="flex items-center gap-2">
         {currentProvider?.icon && <currentProvider.icon className="size-5" />}
-        <span>{currentModel ? getDisplayModelName(currentModel) : "Select model"}</span>
+        <span>
+          {currentModel
+            ? currentModel.id === AUTO_MODEL_ID
+              ? "Auto"
+              : getDisplayModelName(currentModel)
+            : "Select model"}
+        </span>
       </div>
       <CaretDownIcon className="size-4 opacity-50" />
     </Button>
   )
 
-  const renderSection = (title: string, sectionModels: ModelConfig[]) => {
+  const renderSection = (
+    title: string,
+    sectionModels: ModelConfig[],
+    section: "auto" | "default" = "default"
+  ) => {
     if (sectionModels.length === 0) return null
     return (
       <div className="mb-2">
@@ -242,7 +256,7 @@ export function ModelSelector({
               <div className="flex items-center gap-3">
                 {provider?.icon && <provider.icon className="size-5" />}
                 <div className="flex flex-col gap-0">
-                  <span className="text-sm">{getDisplayModelName(model)}</span>
+                  <span className="text-sm">{getDisplayModelName(model, section)}</span>
                 </div>
               </div>
               {isLocked && (
@@ -334,7 +348,9 @@ export function ModelSelector({
                     <div className="text-muted-foreground px-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
                       Auto
                     </div>
-                    {sectionedModels.auto.map((model) => renderModelItem(model))}
+                    {sectionedModels.auto.map((model) =>
+                      renderModelItem(model, "auto")
+                    )}
                   </div>
                   <div className="mb-2">
                     <div className="text-muted-foreground px-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
@@ -426,7 +442,7 @@ export function ModelSelector({
                 </div>
               ) : filteredModels.length > 0 ? (
                 <>
-                  {renderSection("Auto", sectionedModels.auto)}
+                  {renderSection("Auto", sectionedModels.auto, "auto")}
                   {renderSection("Popular", sectionedModels.popular)}
                   {renderSection("Latest", sectionedModels.latest)}
                 </>
@@ -449,7 +465,7 @@ export function ModelSelector({
 
             {/* Submenu positioned absolutely */}
             {hoveredModelData && (
-              <div className="absolute top-0 left-[calc(100%+8px)]">
+              <div className="absolute top-[calc(50%+24px)] left-[calc(100%+8px)] -translate-y-1/2">
                 <SubMenu hoveredModelData={hoveredModelData} />
               </div>
             )}
