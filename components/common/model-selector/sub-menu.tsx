@@ -33,7 +33,7 @@ export function SubMenu({ hoveredModelData }: SubMenuProps) {
         : hoveredModelData.name
 
   return (
-    <div className="bg-popover border-border w-[300px] max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-xl border p-3.5 shadow-lg">
+    <div className="bg-popover border-border w-[300px] max-h-[calc(100dvh-10rem)] overflow-y-auto overscroll-contain rounded-xl border p-3.5 shadow-lg">
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
           {provider?.icon && <provider.icon className="size-5" />}

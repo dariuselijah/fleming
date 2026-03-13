@@ -465,7 +465,7 @@ export function ModelSelector({
 
             {/* Submenu positioned absolutely */}
             {hoveredModelData && (
-              <div className="absolute top-[calc(50%+24px)] left-[calc(100%+8px)] -translate-y-1/2">
+              <div className="absolute top-[calc(50%+48px)] left-[calc(100%+8px)] -translate-y-1/2">
                 <SubMenu hoveredModelData={hoveredModelData} />
               </div>
             )}
