@@ -47,6 +47,13 @@ export type ClinicalGraphOutput = {
   systemPromptAdditions: string[]
   maxSteps: number
   trace: string[]
+  routingSummary: {
+    intent: ClinicalIntentClass
+    selectedConnectorIds: ClinicalConnectorId[]
+    selectedToolNames: string[]
+    modePolicy: ClinicalModePolicy
+    maxSteps: number
+  }
 }
 
 export const CONNECTOR_TOOL_NAME_MAP: Record<ClinicalConnectorId, string[]> = {

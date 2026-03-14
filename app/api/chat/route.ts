@@ -34,7 +34,6 @@ import {
   Message as MessageAISDK,
   convertToCoreMessages,
   streamText,
-  generateText,
   ToolSet,
   tool,
   createDataStreamResponse,
@@ -97,7 +96,11 @@ import {
 } from "@/lib/citations/formatters"
 import { runClinicalAgentHarness } from "@/lib/clinical-agent/graph"
 import { recordCitationContractViolation } from "@/lib/clinical-agent/telemetry"
-import { runConnectorSearch } from "@/lib/evidence/connectors"
+import {
+  runConnectorSearch,
+  type ClinicalConnectorId,
+  type ConnectorSearchPayload,
+} from "@/lib/evidence/connectors"
 
 export const maxDuration = 60
 const BENCH_STRICT_MODE = process.env.BENCH_STRICT_MODE === "true"
@@ -642,166 +645,6 @@ async function runWithTimeBudget<T>(
     console.warn(`⏱️ [${label}] failed, using fallback:`, error)
     return fallbackValue
   }
-}
-
-const DYNAMIC_ACTIVITY_COPY_TIMEOUT_MS = 240
-const DYNAMIC_ACTIVITY_COPY_CACHE_TTL_MS = 6 * 60 * 1000
-const dynamicActivityCopyCache = new Map<
-  string,
-  { intro: string; reasoning: string; savedAt: number }
->()
-
-type DynamicActivityCopyInput = {
-  query: string
-  role: "doctor" | "general" | "medical_student"
-  learningMode: MedicalStudentLearningMode
-  clinicianMode: ClinicianWorkflowMode
-  artifactIntent: "none" | "quiz"
-  artifactWorkflowStage: "none" | "inspect" | "refine" | "generate"
-  shouldPreferUploadContext: boolean
-  shouldRunEvidenceSynthesis: boolean
-  shouldRunWebSearchPreflight: boolean
-  selectedToolNames: string[]
-  langGraphTrace: string[]
-}
-
-function normalizeActivityLine(
-  value: string | undefined,
-  fallback: string,
-  maxChars: number
-): string {
-  const normalized = String(value || "")
-    .replace(/\s+/g, " ")
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .trim()
-  if (!normalized) return fallback
-  return normalized.length > maxChars ? `${normalized.slice(0, maxChars - 3)}...` : normalized
-}
-
-function parseDynamicActivityCopyPayload(
-  rawText: string
-): { intro: string; reasoning: string } | null {
-  const trimmed = rawText.trim()
-  if (!trimmed) return null
-
-  const parseCandidate = (candidate: string) => {
-    try {
-      const parsed = JSON.parse(candidate) as { intro?: unknown; reasoning?: unknown }
-      if (
-        typeof parsed?.intro === "string" &&
-        parsed.intro.trim().length > 0 &&
-        typeof parsed?.reasoning === "string" &&
-        parsed.reasoning.trim().length > 0
-      ) {
-        return { intro: parsed.intro, reasoning: parsed.reasoning }
-      }
-    } catch {
-      return null
-    }
-    return null
-  }
-
-  const direct = parseCandidate(trimmed)
-  if (direct) return direct
-
-  const jsonBlockMatch = trimmed.match(/\{[\s\S]*\}/)
-  if (jsonBlockMatch?.[0]) {
-    const fromBlock = parseCandidate(jsonBlockMatch[0])
-    if (fromBlock) return fromBlock
-  }
-
-  return null
-}
-
-function buildDynamicActivityCopyCacheKey(input: DynamicActivityCopyInput): string {
-  const normalizedQuery = input.query.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 180)
-  const toolSignature = [...input.selectedToolNames].sort().join("|")
-  const traceSignature = input.langGraphTrace
-    .filter((token) => /^classify:|^mode:|^route:tools=|^route:connectors=/i.test(token))
-    .map((token) => token.toLowerCase())
-    .join("|")
-  return [
-    normalizedQuery,
-    input.role,
-    input.learningMode,
-    input.clinicianMode,
-    input.artifactIntent,
-    input.artifactWorkflowStage,
-    input.shouldPreferUploadContext ? "upload" : "no-upload",
-    input.shouldRunEvidenceSynthesis ? "evidence" : "no-evidence",
-    input.shouldRunWebSearchPreflight ? "web" : "no-web",
-    toolSignature,
-    traceSignature,
-  ].join("::")
-}
-
-async function generateDynamicActivityCopy(
-  model: any,
-  input: DynamicActivityCopyInput,
-  fallbackIntro: string
-): Promise<{ intro: string; reasoning: string } | null> {
-  const cacheKey = buildDynamicActivityCopyCacheKey(input)
-  const cached = dynamicActivityCopyCache.get(cacheKey)
-  if (cached && Date.now() - cached.savedAt <= DYNAMIC_ACTIVITY_COPY_CACHE_TTL_MS) {
-    return { intro: cached.intro, reasoning: cached.reasoning }
-  }
-
-  const contextPayload = {
-    query: input.query,
-    role: input.role,
-    learningMode: input.learningMode,
-    clinicianMode: input.clinicianMode,
-    artifactIntent: input.artifactIntent,
-    artifactWorkflowStage: input.artifactWorkflowStage,
-    uploadContext: input.shouldPreferUploadContext,
-    evidenceMode: input.shouldRunEvidenceSynthesis,
-    webSearchMode: input.shouldRunWebSearchPreflight,
-    tools: input.selectedToolNames.slice(0, 16),
-    trace: input.langGraphTrace.slice(0, 8),
-  }
-
-  const generated = await runWithTimeBudget(
-    "dynamic-activity-copy",
-    async () => {
-      const { text } = await generateText({
-        model,
-        temperature: 0.2,
-        system:
-          "You generate concise live chat activity copy. Return strict JSON only with keys intro and reasoning.",
-        prompt: [
-          "Write two short timeline lines for this assistant turn.",
-          "- intro: one sentence (10-20 words) describing immediate action.",
-          "- reasoning: one sentence (10-24 words) describing plan and source strategy.",
-          "- Keep language user-facing, specific, and non-repetitive.",
-          "- Never mention internal routing or traces.",
-          "- Return valid JSON only.",
-          "",
-          `Context: ${JSON.stringify(contextPayload)}`,
-        ].join("\n"),
-      })
-      const parsed = parseDynamicActivityCopyPayload(text)
-      if (!parsed) return null
-      return {
-        intro: normalizeActivityLine(parsed.intro, fallbackIntro, 180),
-        reasoning: normalizeActivityLine(
-          parsed.reasoning,
-          "Selecting the best tools and sources for your request.",
-          220
-        ),
-      }
-    },
-    DYNAMIC_ACTIVITY_COPY_TIMEOUT_MS,
-    null
-  )
-
-  if (generated) {
-    dynamicActivityCopyCache.set(cacheKey, {
-      ...generated,
-      savedAt: Date.now(),
-    })
-  }
-
-  return generated
 }
 
 type ChatAttachment = {
@@ -3868,6 +3711,197 @@ export async function POST(req: Request) {
       })
     }
 
+    const CONNECTOR_ALTERNATES: Partial<Record<ClinicalConnectorId, ClinicalConnectorId[]>> = {
+      chembl: ["pubmed", "scholar_gateway"],
+      biorxiv: ["pubmed", "scholar_gateway"],
+      scholar_gateway: ["pubmed", "guideline"],
+      guideline: ["pubmed", "clinical_trials"],
+      clinical_trials: ["pubmed", "guideline"],
+      synapse: ["scholar_gateway", "pubmed"],
+      benchling: ["scholar_gateway", "pubmed"],
+      biorender: ["scholar_gateway", "pubmed"],
+      cms_coverage: ["guideline", "pubmed"],
+      npi_registry: ["cms_coverage", "pubmed"],
+      pubmed: ["guideline", "clinical_trials"],
+    }
+
+    const CONNECTOR_WEB_SCOPE_HINT: Partial<Record<ClinicalConnectorId, string>> = {
+      chembl: "site:ebi.ac.uk/chembl metformin mechanism target",
+      biorxiv: "site:biorxiv.org preprint",
+      scholar_gateway: "systematic review meta-analysis",
+      synapse: "site:synapse.org biomedical dataset",
+      benchling: "site:benchling.com protocol",
+      biorender: "site:biorender.com figure",
+      cms_coverage: "site:cms.gov coverage policy",
+      npi_registry: "site:npiregistry.cms.hhs.gov provider",
+      pubmed: "site:pubmed.ncbi.nlm.nih.gov",
+      guideline: "clinical practice guideline",
+      clinical_trials: "site:clinicaltrials.gov",
+    }
+
+    const sourceTypeForConnector = (
+      connectorId: ClinicalConnectorId
+    ): SourceProvenance["sourceType"] => {
+      const map: Record<ClinicalConnectorId, SourceProvenance["sourceType"]> = {
+        pubmed: "pubmed",
+        guideline: "guideline",
+        clinical_trials: "clinical_trial",
+        scholar_gateway: "scholar_gateway",
+        biorxiv: "preprint",
+        biorender: "visual_knowledge",
+        npi_registry: "provider_registry",
+        synapse: "research_dataset",
+        cms_coverage: "coverage_policy",
+        chembl: "chemical_database",
+        benchling: "lab_workflow",
+      }
+      return map[connectorId]
+    }
+
+    const isConnectorPayloadDegraded = (payload: ConnectorSearchPayload): boolean => {
+      if (payload.metrics?.degraded) return true
+      if (payload.results.length === 0) return true
+      if (payload.confidence < 0.45) return true
+      const warningHeavy = (payload.warnings || []).some((warning) =>
+        /timeout|failed|unavailable|disabled|no matching records|low-utility/i.test(warning)
+      )
+      return warningHeavy
+    }
+
+    const buildWebFallbackPayload = async (
+      connectorId: ClinicalConnectorId,
+      query: string,
+      maxResults: number,
+      medicalOnly: boolean
+    ): Promise<ConnectorSearchPayload> => {
+      const scopeHint = CONNECTOR_WEB_SCOPE_HINT[connectorId] || ""
+      const webResponse = await searchWeb(`${query} ${scopeHint}`.trim(), {
+        maxResults: Math.min(Math.max(maxResults, 1), 8),
+        retries: 1,
+        timeoutMs: 5500,
+        medicalOnly,
+      })
+      const records = webResponse.results.map((item, index) => ({
+        id: `${connectorId}_web_${index + 1}`,
+        title: item.title,
+        snippet: item.snippet,
+        url: item.url || null,
+        publishedAt: item.publishedDate || null,
+        sourceLabel: "Web fallback",
+      }))
+      const provenance = records.map((record, index) =>
+        buildProvenance({
+          id: `${connectorId}_fallback_${index + 1}`,
+          sourceType: sourceTypeForConnector(connectorId),
+          sourceName: "Web fallback",
+          title: record.title,
+          url: record.url,
+          publishedAt: record.publishedAt,
+          region: null,
+          journal: "Web fallback",
+          doi: null,
+          pmid: null,
+          evidenceLevel: 4,
+          studyType: "Web fallback",
+          snippet: record.snippet,
+        })
+      )
+      return {
+        connectorId,
+        query,
+        results: records,
+        warnings: [...(webResponse.warnings || []), "Connector fallback used web search."],
+        provenance,
+        confidence: records.length > 0 ? 0.52 : 0.2,
+        licenseTier: "public",
+        metrics: {
+          elapsedMs: webResponse.metrics.elapsedMs,
+          retriesUsed: webResponse.metrics.retriesUsed,
+          sourceCount: records.length,
+          fallbackUsed: true,
+          cacheHit: webResponse.metrics.cacheHit,
+          circuitOpen: false,
+          degraded: records.length === 0,
+          qualityScore: records.length > 0 ? 0.52 : 0.2,
+        },
+      }
+    }
+
+    const executeConnectorWithFallback = async (params: {
+      connectorId: ClinicalConnectorId
+      query: string
+      maxResults: number
+      medicalOnly: boolean
+    }): Promise<ConnectorSearchPayload> => {
+      const primary = await runConnectorSearch({
+        connectorId: params.connectorId,
+        query: params.query,
+        maxResults: params.maxResults,
+        medicalOnly: params.medicalOnly,
+      })
+      if (!isConnectorPayloadDegraded(primary)) {
+        return primary
+      }
+
+      const narrowedQuery = params.query
+        .trim()
+        .split(/\s+/)
+        .slice(0, 6)
+        .join(" ")
+      if (narrowedQuery.length >= 3 && narrowedQuery !== params.query.trim()) {
+        const narrowed = await runConnectorSearch({
+          connectorId: params.connectorId,
+          query: narrowedQuery,
+          maxResults: params.maxResults,
+          medicalOnly: params.medicalOnly,
+        })
+        if (!isConnectorPayloadDegraded(narrowed)) {
+          return {
+            ...narrowed,
+            warnings: [...narrowed.warnings, "Applied narrowed-query retry for connector quality."],
+            metrics: {
+              ...narrowed.metrics,
+              fallbackUsed: true,
+            },
+          }
+        }
+      }
+
+      const alternates = CONNECTOR_ALTERNATES[params.connectorId] || []
+      for (const alternateConnector of alternates.slice(0, 2)) {
+        const alternatePayload = await runConnectorSearch({
+          connectorId: alternateConnector,
+          query: params.query,
+          maxResults: params.maxResults,
+          medicalOnly: params.medicalOnly,
+        })
+        if (!isConnectorPayloadDegraded(alternatePayload)) {
+          return {
+            ...alternatePayload,
+            warnings: [
+              ...alternatePayload.warnings,
+              `Primary connector ${params.connectorId} degraded; used alternate ${alternateConnector}.`,
+            ],
+            metrics: {
+              ...alternatePayload.metrics,
+              fallbackUsed: true,
+            },
+          }
+        }
+      }
+
+      if (hasWebSearchConfigured()) {
+        return buildWebFallbackPayload(
+          params.connectorId,
+          params.query,
+          params.maxResults,
+          params.medicalOnly
+        )
+      }
+
+      return primary
+    }
+
     if (ENABLE_YOUTUBE_TOOL && supportsTools && queryText.length > 0) {
       console.log("[YOUTUBE INTENT]", {
         shouldEnableYoutubeTool,
@@ -4351,7 +4385,7 @@ export async function POST(req: Request) {
                 maxResults: z.number().int().min(1).max(10).default(5),
               }),
               execute: async ({ query, maxResults }) => {
-                const payload = await runConnectorSearch({
+                const payload = await executeConnectorWithFallback({
                   connectorId: "scholar_gateway",
                   query,
                   maxResults,
@@ -4369,7 +4403,7 @@ export async function POST(req: Request) {
                 maxResults: z.number().int().min(1).max(10).default(5),
               }),
               execute: async ({ query, maxResults }) => {
-                const payload = await runConnectorSearch({
+                const payload = await executeConnectorWithFallback({
                   connectorId: "biorxiv",
                   query,
                   maxResults,
@@ -4387,7 +4421,7 @@ export async function POST(req: Request) {
                 maxResults: z.number().int().min(1).max(8).default(4),
               }),
               execute: async ({ query, maxResults }) => {
-                const payload = await runConnectorSearch({
+                const payload = await executeConnectorWithFallback({
                   connectorId: "biorender",
                   query,
                   maxResults,
@@ -4405,7 +4439,7 @@ export async function POST(req: Request) {
                 maxResults: z.number().int().min(1).max(10).default(5),
               }),
               execute: async ({ query, maxResults }) => {
-                const payload = await runConnectorSearch({
+                const payload = await executeConnectorWithFallback({
                   connectorId: "npi_registry",
                   query,
                   maxResults,
@@ -4423,7 +4457,7 @@ export async function POST(req: Request) {
                 maxResults: z.number().int().min(1).max(10).default(5),
               }),
               execute: async ({ query, maxResults }) => {
-                const payload = await runConnectorSearch({
+                const payload = await executeConnectorWithFallback({
                   connectorId: "synapse",
                   query,
                   maxResults,
@@ -4441,7 +4475,7 @@ export async function POST(req: Request) {
                 maxResults: z.number().int().min(1).max(10).default(5),
               }),
               execute: async ({ query, maxResults }) => {
-                const payload = await runConnectorSearch({
+                const payload = await executeConnectorWithFallback({
                   connectorId: "cms_coverage",
                   query,
                   maxResults,
@@ -4459,7 +4493,7 @@ export async function POST(req: Request) {
                 maxResults: z.number().int().min(1).max(10).default(5),
               }),
               execute: async ({ query, maxResults }) => {
-                const payload = await runConnectorSearch({
+                const payload = await executeConnectorWithFallback({
                   connectorId: "chembl",
                   query,
                   maxResults,
@@ -4477,7 +4511,7 @@ export async function POST(req: Request) {
                 maxResults: z.number().int().min(1).max(10).default(5),
               }),
               execute: async ({ query, maxResults }) => {
-                const payload = await runConnectorSearch({
+                const payload = await executeConnectorWithFallback({
                   connectorId: "benchling",
                   query,
                   maxResults,
@@ -5229,26 +5263,23 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
           )
         : null
     const selectedToolNamesForTurn = Object.keys(runtimeTools)
-    const dynamicActivityCopyPromise =
-      queryText.trim().length > 0
-        ? generateDynamicActivityCopy(
-            modelWithSearch,
-            {
-              query: queryText,
-              role: effectiveUserRole || "general",
-              learningMode: effectiveLearningMode,
-              clinicianMode: effectiveClinicianMode,
-              artifactIntent: effectiveArtifactIntent,
-              artifactWorkflowStage,
-              shouldPreferUploadContext,
-              shouldRunEvidenceSynthesis,
-              shouldRunWebSearchPreflight,
-              selectedToolNames: selectedToolNamesForTurn,
-              langGraphTrace: langGraphHarnessTrace,
-            },
-            streamIntroPreview
-          )
-        : Promise.resolve(null)
+    const routingSummaryForStream = {
+      intent: langGraphPlan?.routingSummary?.intent || langGraphPlan?.intent || "general",
+      querySnippet: queryText.trim().replace(/\s+/g, " ").slice(0, 140),
+      selectedConnectorIds:
+        langGraphPlan?.routingSummary?.selectedConnectorIds ||
+        langGraphPlan?.selectedConnectorIds ||
+        [],
+      selectedToolNames: selectedToolNamesForTurn.slice(0, 24),
+      modePolicy:
+        langGraphPlan?.routingSummary?.modePolicy ||
+        langGraphPlan?.modePolicy ||
+        null,
+      maxSteps: resolvedMaxSteps,
+      artifactWorkflowStage,
+      learningMode: effectiveLearningMode,
+      clinicianMode: effectiveClinicianMode,
+    }
     if (finalEnableEvidence) {
       const contextForStream = capturedEvidenceContext || evidenceContext
       const mergedStreamCitations = [
@@ -5320,30 +5351,9 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             sequence: nextTimelineSequence(),
             createdAt: new Date().toISOString(),
             trace: langGraphHarnessTrace,
-            maxSteps: resolvedMaxSteps,
+            ...routingSummaryForStream,
           })
         }
-        void dynamicActivityCopyPromise
-          .then((dynamicCopy) => {
-            if (!dynamicCopy) return
-
-            emitTimelineEvent({
-              kind: "system-intro",
-              text: dynamicCopy.intro,
-            })
-            writeStreamAnnotation({
-              type: "langgraph-routing",
-              sequence: nextTimelineSequence(),
-              createdAt: new Date().toISOString(),
-              trace: langGraphHarnessTrace,
-              summary: dynamicCopy.reasoning,
-              maxSteps: resolvedMaxSteps,
-            })
-          })
-          .catch((error) => {
-            console.warn("Dynamic activity copy generation failed:", error)
-          })
-
         if (topicContextForStream) {
           writeStreamAnnotation({
             type: "topic-context",

@@ -32,6 +32,8 @@ export type ConnectorSearchMetrics = {
   fallbackUsed: boolean
   cacheHit: boolean
   circuitOpen: boolean
+  degraded: boolean
+  qualityScore: number
 }
 
 export type ConnectorSearchPayload = {

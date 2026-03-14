@@ -12,6 +12,7 @@ type ConnectorItem = {
   description: string
   domain: string
   isFeatured: boolean
+  isAvailable?: boolean
 }
 
 const CONNECTORS: ConnectorItem[] = [
@@ -46,9 +47,10 @@ const CONNECTORS: ConnectorItem[] = [
   {
     id: "biorender",
     name: "BioRender",
-    description: "Search for and use scientific templates and icons",
+    description: "Temporarily unavailable (pending official API support)",
     domain: "biorender.com",
     isFeatured: false,
+    isAvailable: false,
   },
   {
     id: "npi_registry",
@@ -60,9 +62,10 @@ const CONNECTORS: ConnectorItem[] = [
   {
     id: "synapse",
     name: "Synapse.org",
-    description: "Search and metadata tools for Synapse scientific data",
+    description: "Temporarily unavailable (requires Synapse access token)",
     domain: "synapse.org",
     isFeatured: false,
+    isAvailable: false,
   },
   {
     id: "cms_coverage",
@@ -88,9 +91,10 @@ const CONNECTORS: ConnectorItem[] = [
   {
     id: "benchling",
     name: "Benchling",
-    description: "Connect to R&D data, source experiments, and notebooks",
+    description: "Temporarily unavailable (requires Benchling API credentials)",
     domain: "benchling.com",
     isFeatured: false,
+    isAvailable: false,
   },
 ]
 
@@ -104,6 +108,8 @@ function ConnectorCard({ connector, isEnabled, onToggleEnabled }: ConnectorCardP
   const logoUrl = `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent(
     `https://${connector.domain}`
   )}`
+
+  const isAvailable = connector.isAvailable !== false
 
   return (
     <div className="bg-card border-border flex min-h-24 items-center justify-between rounded-xl border px-3 py-2.5">
@@ -133,10 +139,15 @@ function ConnectorCard({ connector, isEnabled, onToggleEnabled }: ConnectorCardP
           "h-10 w-10 shrink-0 rounded-lg",
           isEnabled ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15" : ""
         )}
-        aria-label={`${isEnabled ? "Disable" : "Enable"} ${connector.name}`}
+        aria-label={
+          isAvailable
+            ? `${isEnabled ? "Disable" : "Enable"} ${connector.name}`
+            : `${connector.name} unavailable`
+        }
         onClick={() => onToggleEnabled(connector.id)}
+        disabled={!isAvailable}
       >
-        {isEnabled ? <CheckIcon className="size-4" /> : <PlusIcon className="size-4" />}
+        {!isAvailable ? "-" : isEnabled ? <CheckIcon className="size-4" /> : <PlusIcon className="size-4" />}
       </Button>
     </div>
   )

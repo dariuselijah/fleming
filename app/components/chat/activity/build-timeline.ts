@@ -36,9 +36,6 @@ const EVENT_KIND_ORDER: Record<TimelineEvent["kind"], number> = {
 
 type MutableSequence = { value: number }
 
-const ENABLE_DEBUG_ROUTING_TRACE =
-  process.env.NEXT_PUBLIC_ENABLE_DEBUG_ROUTING_TRACE === "true"
-
 function nextSequence(state: MutableSequence): number {
   state.value += 1
   return state.value
@@ -64,6 +61,12 @@ function asString(value: unknown): string | null {
   if (typeof value !== "string") return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function extractReasoningText(part: any): string | null {
+  const explicit = asString(part?.reasoning)
+  if (explicit) return explicit
+  return asString(part?.text)
 }
 
 function asNumber(value: unknown): number | null {
@@ -108,58 +111,6 @@ function asUploadProgressStage(value: unknown): UploadProgressStage | null {
     return value
   }
   return null
-}
-
-function summarizeLangGraphTrace(trace: string[]): string | null {
-  if (!Array.isArray(trace) || trace.length === 0) return null
-
-  const lowerTrace = trace.map((item) => String(item).toLowerCase())
-  const classifyToken = lowerTrace.find((item) => item.startsWith("classify:"))
-  const modeToken = lowerTrace.find((item) => item.startsWith("mode:"))
-  const toolToken = lowerTrace.find((item) => item.startsWith("route:tools="))
-  const connectorToken = lowerTrace.find((item) => item.startsWith("route:connectors="))
-
-  const summaryParts: string[] = []
-  const intent = classifyToken?.split(":")[1]?.trim()
-  if (intent) {
-    summaryParts.push(`Interpreting this as a ${intent} request.`)
-  } else {
-    summaryParts.push("Selecting the best response path for your request.")
-  }
-
-  if (modeToken?.includes("student=true")) {
-    summaryParts.push("Using student learning mode.")
-  } else if (modeToken?.includes("clinician=true")) {
-    summaryParts.push("Using clinician guidance mode.")
-  }
-
-  if (toolToken) {
-    const countMatch = toolToken.match(/route:tools=(\d+)/)
-    const toolCount = countMatch?.[1] ? Number.parseInt(countMatch[1], 10) : null
-    if (toolCount && Number.isFinite(toolCount) && toolCount > 0) {
-      summaryParts.push(
-        `Planning ${toolCount} tool step${toolCount === 1 ? "" : "s"} to gather context quickly.`
-      )
-    }
-  }
-
-  if (connectorToken) {
-    const values = connectorToken
-      .replace("route:connectors=", "")
-      .split("|")
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .slice(0, 3)
-    if (values.length > 0) {
-      summaryParts.push(`Prioritizing ${values.join(", ")} sources first.`)
-    }
-  }
-
-  if (summaryParts.length > 0) {
-    return summaryParts.join(" ")
-  }
-
-  return "Selecting the most relevant tools and sources for this request."
 }
 
 function isDocumentArtifact(value: unknown): value is DocumentArtifact {
@@ -343,24 +294,7 @@ function parseTimelineEventAnnotation(
   }
 
   if (type === "langgraph-routing") {
-    const summaryText = asString(record.summary)
-    const trace = Array.isArray(record.trace)
-      ? record.trace.map((item) => String(item))
-      : []
-    const text = ENABLE_DEBUG_ROUTING_TRACE
-      ? trace.length > 0
-        ? `Routing trace: ${trace.join(" -> ")}`
-        : summaryText
-      : summaryText || summarizeLangGraphTrace(trace)
-    if (!text) return null
-    return {
-      id: `reasoning:langgraph:${messageId}`,
-      kind: "reasoning",
-      messageId,
-      sequence: normalizeSequence(record.sequence, sequenceState),
-      createdAt,
-      text,
-    }
+    return null
   }
 
   if (type === "timeline-event") {
@@ -559,8 +493,8 @@ export function buildChatActivityTimeline({
         return
       }
 
-      if (item?.type === "reasoning" && typeof item.reasoning === "string") {
-        const text = item.reasoning.trim()
+      if (item?.type === "reasoning") {
+        const text = extractReasoningText(item)
         if (!text) return
         events.push({
           id: `reasoning:${messageId}:${index}`,

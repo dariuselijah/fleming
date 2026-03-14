@@ -53,6 +53,17 @@ function sanitizeInlineAssistantText(text: string): string {
     .replace(/[ \t]{2,}/g, " ")
 }
 
+function extractReasoningText(part: any): string | null {
+  if (!part || typeof part !== "object") return null
+  if (typeof part.reasoning === "string" && part.reasoning.trim().length > 0) {
+    return part.reasoning
+  }
+  if (typeof part.text === "string" && part.text.trim().length > 0) {
+    return part.text
+  }
+  return null
+}
+
 function parseArtifactTypeFromToolPart(part: any): "document" | "quiz" | null {
   if (!part || part.type !== "tool-invocation") return null
   if (part?.toolInvocation?.state !== "result") return null
@@ -170,12 +181,16 @@ function buildTimelineSegments(
       continue
     }
 
-    if (part.type === "reasoning" && typeof part.reasoning === "string") {
+    if (part.type === "reasoning") {
+      const reasoningText = extractReasoningText(part)
+      if (!reasoningText) {
+        continue
+      }
       flushText()
       segments.push({
         type: "reasoning",
         key: `reasoning-${idx}`,
-        text: part.reasoning,
+        text: reasoningText,
       })
       continue
     }

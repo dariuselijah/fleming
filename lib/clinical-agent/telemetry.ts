@@ -1,6 +1,10 @@
 type ConnectorMetric = {
-  hits: number
+  successes: number
+  degraded: number
   failures: number
+  fallbacks: number
+  empty: number
+  reasons: Record<string, number>
 }
 
 type ClinicalTelemetryState = {
@@ -28,15 +32,34 @@ export function recordCitationContractViolation(): void {
   telemetryState.citationContractViolations += 1
 }
 
-export function recordConnectorMetric(connectorId: string, success: boolean): void {
+export function recordConnectorMetric(
+  connectorId: string,
+  outcome: "success" | "degraded" | "failure",
+  details?: { fallbackUsed?: boolean; sourceCount?: number; reason?: string | null }
+): void {
   const current = telemetryState.connectorMetrics.get(connectorId) || {
-    hits: 0,
+    successes: 0,
+    degraded: 0,
     failures: 0,
+    fallbacks: 0,
+    empty: 0,
+    reasons: {},
   }
-  if (success) {
-    current.hits += 1
+  if (outcome === "success") {
+    current.successes += 1
+  } else if (outcome === "degraded") {
+    current.degraded += 1
   } else {
     current.failures += 1
+  }
+  if (details?.fallbackUsed) {
+    current.fallbacks += 1
+  }
+  if (typeof details?.sourceCount === "number" && details.sourceCount <= 0) {
+    current.empty += 1
+  }
+  if (details?.reason) {
+    current.reasons[details.reason] = (current.reasons[details.reason] || 0) + 1
   }
   telemetryState.connectorMetrics.set(connectorId, current)
 }

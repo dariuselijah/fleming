@@ -137,6 +137,19 @@ export type TimelineAnnotation =
       trace?: string[]
       summary?: string
       maxSteps?: number
+      intent?: string
+      querySnippet?: string
+      selectedConnectorIds?: string[]
+      selectedToolNames?: string[]
+      modePolicy?: {
+        studentMode?: boolean
+        clinicianMode?: boolean
+        requireStrictUncertainty?: boolean
+        requireEvidenceForClinicalClaims?: boolean
+      } | null
+      artifactWorkflowStage?: string
+      learningMode?: string
+      clinicianMode?: string
     }
   | {
       type: "artifact-refinement"

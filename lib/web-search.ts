@@ -21,11 +21,15 @@ export type WebSearchResponse = {
   }
 }
 
+export type LiveCrawlMode = "always" | "preferred" | "fallback" | "never"
+
 export type WebSearchOptions = {
   maxResults?: number
   timeoutMs?: number
   retries?: number
   medicalOnly?: boolean
+  /** Use "preferred" or "fallback" for faster results when Exa cache is available; "always" (default) forces live crawl. */
+  liveCrawl?: LiveCrawlMode
 }
 
 const DEFAULT_MAX_RESULTS = 6
@@ -120,7 +124,9 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 
 async function callExaWithRetry(
   query: string,
-  options: Required<Pick<WebSearchOptions, "maxResults" | "timeoutMs" | "retries">>
+  options: Required<Pick<WebSearchOptions, "maxResults" | "timeoutMs" | "retries">> & {
+    liveCrawl: LiveCrawlMode
+  }
 ): Promise<{ rows: Array<z.infer<typeof EXA_RESULT_SCHEMA>>; retriesUsed: number }> {
   const exaApiKey = process.env.EXA_API_KEY
   if (!exaApiKey) {
@@ -137,7 +143,7 @@ async function callExaWithRetry(
         exa.searchAndContents(query, {
           numResults: clamp(options.maxResults * 2, options.maxResults, 20),
           text: true,
-          livecrawl: "always",
+          livecrawl: options.liveCrawl,
         }) as Promise<{ results?: unknown[] }>,
         options.timeoutMs
       )
@@ -182,6 +188,7 @@ export async function searchWeb(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const retries = clamp(options.retries ?? DEFAULT_RETRIES, 0, 3)
   const medicalOnly = options.medicalOnly ?? false
+  const liveCrawl = options.liveCrawl ?? "always"
 
   if (!normalizedQuery) {
     return {
@@ -197,7 +204,7 @@ export async function searchWeb(
     }
   }
 
-  const cacheKey = JSON.stringify({ normalizedQuery, maxResults, medicalOnly })
+  const cacheKey = JSON.stringify({ normalizedQuery, maxResults, medicalOnly, liveCrawl })
   const cached = cache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) {
     return {
@@ -229,6 +236,7 @@ export async function searchWeb(
       maxResults,
       timeoutMs,
       retries,
+      liveCrawl,
     })
 
     const deduped = new Map<string, WebSearchResult>()

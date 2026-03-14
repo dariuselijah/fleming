@@ -63,6 +63,16 @@ function testConnectorRegistryWiring() {
     "Connector registry should emit connector telemetry events"
   )
   assert.match(
+    registry,
+    /isConnectorPayloadDegraded\(/,
+    "Connector registry should classify degraded low-utility payloads"
+  )
+  assert.match(
+    registry,
+    /enabled:\s*\(\)\s*=>\s*hasWebSearchConfigured\(\)/,
+    "Web-backed connectors should be dependency-gated on web search configuration"
+  )
+  assert.match(
     route,
     /scholarGatewaySearch:\s*tool\(/,
     "Chat route should expose Scholar Gateway as runtime tool"
@@ -86,6 +96,11 @@ function testConnectorRegistryWiring() {
     route,
     /chemblSearch:\s*tool\(/,
     "Chat route should expose ChEMBL as runtime tool"
+  )
+  assert.match(
+    route,
+    /executeConnectorWithFallback\s*=\s*async/,
+    "Chat route should orchestrate connector retry\/alternate\/web fallback chain"
   )
   assert.match(
     provenance,

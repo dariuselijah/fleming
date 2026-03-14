@@ -1,7 +1,11 @@
 import { searchGuidelines, searchClinicalTrials } from "@/lib/evidence/live-tools"
 import { buildProvenance, type ProvenanceSourceType } from "@/lib/evidence/provenance"
 import { searchPubMed } from "@/lib/pubmed"
-import { hasWebSearchConfigured, searchWeb } from "@/lib/web-search"
+import {
+  hasWebSearchConfigured,
+  searchWeb,
+  type LiveCrawlMode,
+} from "@/lib/web-search"
 import { recordConnectorMetric } from "@/lib/clinical-agent/telemetry"
 import type {
   ClinicalConnectorId,
@@ -10,15 +14,18 @@ import type {
   ConnectorSearchPayload,
   ConnectorSearchRecord,
 } from "./types"
+import { searchBiorxivApi } from "./biorxiv-api"
+import { searchScholarApi } from "./scholar-api"
+import { searchCmsCoverageApi } from "./cms-coverage-api"
 
 const CONNECTOR_RETRY_COUNT = 1
 const CONNECTOR_CIRCUIT_FAIL_THRESHOLD = 3
+const CONNECTOR_CIRCUIT_DEGRADED_THRESHOLD = 4
 const CONNECTOR_CIRCUIT_OPEN_MS = 60_000
 const CONNECTOR_WEB_DEFAULT_TIMEOUT_MS = 5_500
 
 const CONNECTOR_WEB_TIMEOUT_MS_BY_ID: Partial<Record<ClinicalConnectorId, number>> = {
   scholar_gateway: 9_000,
-  biorxiv: 8_000,
   synapse: 10_000,
   biorender: 5_000,
   benchling: 5_000,
@@ -26,15 +33,19 @@ const CONNECTOR_WEB_TIMEOUT_MS_BY_ID: Partial<Record<ClinicalConnectorId, number
 }
 
 const CONNECTOR_WEB_RETRY_COUNT_BY_ID: Partial<Record<ClinicalConnectorId, number>> = {
-  // One retry gives these slower sources a chance without over-looping.
   scholar_gateway: 1,
-  biorxiv: 1,
   synapse: 1,
 }
 
+/** Use cache when available for faster results. */
+const CONNECTOR_WEB_LIVECRAWL_BY_ID: Partial<Record<ClinicalConnectorId, LiveCrawlMode>> = {}
+
+/** Skip the second broader-query attempt on timeout to avoid long waits. */
+const CONNECTOR_SKIP_TIMEOUT_RECOVERY_BY_ID: Partial<Record<ClinicalConnectorId, boolean>> = {}
+
 const connectorCircuitState = new Map<
   ClinicalConnectorId,
-  { failures: number; openedUntil: number }
+  { failures: number; degraded: number; openedUntil: number }
 >()
 
 function nowIsoDate(): string {
@@ -52,6 +63,22 @@ function scoreFromResultCount(count: number): number {
   if (count < 3) return 0.55
   if (count < 6) return 0.72
   return 0.82
+}
+
+function computeQualityScore(
+  records: ConnectorSearchRecord[],
+  warnings: string[],
+  fallbackUsed: boolean
+): number {
+  const base = scoreFromResultCount(records.length)
+  const warningPenalty = Math.min(warnings.length * 0.12, 0.45)
+  const fallbackPenalty = fallbackUsed ? 0.08 : 0
+  const urlCoverage =
+    records.length > 0
+      ? records.filter((record) => Boolean(record.url)).length / records.length
+      : 0
+  const urlBoost = Math.min(urlCoverage * 0.08, 0.08)
+  return Math.max(0, Math.min(1, base - warningPenalty - fallbackPenalty + urlBoost))
 }
 
 function emptyPayload(
@@ -76,8 +103,30 @@ function emptyPayload(
       fallbackUsed: false,
       cacheHit: false,
       circuitOpen,
+      degraded: true,
+      qualityScore: 0,
     },
   }
+}
+
+function isConnectorPayloadDegraded(payload: ConnectorSearchPayload): {
+  degraded: boolean
+  reason: string | null
+} {
+  const warnings = payload.warnings || []
+  const hasHardWarning = warnings.some((warning) =>
+    /timeout|failed|unavailable|disabled|no matching records|error/i.test(warning)
+  )
+  if (payload.results.length === 0) {
+    return { degraded: true, reason: hasHardWarning ? "empty_with_warning" : "empty" }
+  }
+  if (hasHardWarning) {
+    return { degraded: true, reason: "warning_heavy" }
+  }
+  if (payload.confidence < 0.45) {
+    return { degraded: true, reason: "low_confidence" }
+  }
+  return { degraded: false, reason: null }
 }
 
 function sourceTypeForConnector(connectorId: ClinicalConnectorId): ProvenanceSourceType {
@@ -141,13 +190,15 @@ function normalizeConnectorPayload(
   const provenance = records.map((record, index) =>
     buildConnectorProvenance(connectorId, record, index)
   )
+  const qualityScore = computeQualityScore(records, warnings, fallbackUsed)
+  const degraded = records.length === 0 || qualityScore < 0.45
   return {
     connectorId,
     query: input.query,
     results: records,
     warnings,
     provenance,
-    confidence: scoreFromResultCount(records.length),
+    confidence: qualityScore,
     licenseTier,
     metrics: {
       elapsedMs: Math.round(performance.now() - startedAt),
@@ -156,6 +207,8 @@ function normalizeConnectorPayload(
       fallbackUsed,
       cacheHit: false,
       circuitOpen: false,
+      degraded,
+      qualityScore,
     },
   }
 }
@@ -180,12 +233,17 @@ async function runDomainScopedWebConnector(
   const effectiveRetryCount =
     CONNECTOR_WEB_RETRY_COUNT_BY_ID[connectorId] ?? CONNECTOR_RETRY_COUNT
   const effectiveMaxResults = Math.min(Math.max(input.maxResults ?? 5, 1), 6)
+  const effectiveLiveCrawl =
+    CONNECTOR_WEB_LIVECRAWL_BY_ID[connectorId] ?? "always"
+  const skipTimeoutRecovery =
+    CONNECTOR_SKIP_TIMEOUT_RECOVERY_BY_ID[connectorId] ?? false
 
   const searchResponse = await searchWeb(`${input.query} ${scopeHint}`.trim(), {
     maxResults: effectiveMaxResults,
     retries: effectiveRetryCount,
     timeoutMs: effectiveTimeoutMs,
     medicalOnly,
+    liveCrawl: effectiveLiveCrawl,
   })
   let finalResponse = searchResponse
 
@@ -193,13 +251,18 @@ async function runDomainScopedWebConnector(
   const hasTimeoutWarning = (searchResponse.warnings || []).some((warning) =>
     /timeout/i.test(warning)
   )
-  if (searchResponse.results.length === 0 && hasTimeoutWarning) {
+  if (
+    !skipTimeoutRecovery &&
+    searchResponse.results.length === 0 &&
+    hasTimeoutWarning
+  ) {
     const broaderTimeoutMs = Math.min(effectiveTimeoutMs + 2_500, 13_000)
     const broaderResponse = await searchWeb(input.query.trim(), {
       maxResults: effectiveMaxResults,
       retries: 0,
       timeoutMs: broaderTimeoutMs,
       medicalOnly,
+      liveCrawl: effectiveLiveCrawl,
     })
     finalResponse =
       broaderResponse.results.length > 0 || (broaderResponse.warnings || []).length > 0
@@ -484,6 +547,265 @@ async function chemblConnector(input: ConnectorSearchInput): Promise<ConnectorSe
   }
 }
 
+async function biorxivConnector(input: ConnectorSearchInput): Promise<ConnectorSearchPayload> {
+  const startedAt = performance.now()
+  const maxResults = Math.min(Math.max(input.maxResults ?? 5, 1), 10)
+  try {
+    const { records, warnings } = await searchBiorxivApi(input.query, {
+      maxResults,
+      medicalOnly: input.medicalOnly ?? false,
+      timeoutMs: 6_000,
+    })
+    if (records.length > 0) {
+      return normalizeConnectorPayload(
+        input,
+        "biorxiv",
+        records,
+        warnings,
+        startedAt,
+        0,
+        false,
+        "public"
+      )
+    }
+    const apiFailed =
+      warnings.some((w) =>
+        /503|502|504|timeout|unavailable|API error/i.test(w)
+      )
+    if (apiFailed && hasWebSearchConfigured()) {
+      const fallback = await runDomainScopedWebConnector(
+        input,
+        "biorxiv",
+        "bioRxiv",
+        "preprint site:biorxiv.org",
+        false
+      )
+      if (fallback.results.length > 0) {
+        return {
+          ...fallback,
+          warnings: [
+            ...fallback.warnings,
+            "bioRxiv API was unavailable; results from web search.",
+          ],
+          metrics: {
+            ...fallback.metrics,
+            fallbackUsed: true,
+          },
+        }
+      }
+    }
+    return normalizeConnectorPayload(
+      input,
+      "biorxiv",
+      records,
+      warnings,
+      startedAt,
+      0,
+      false,
+      "public"
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "bioRxiv API failed."
+    if (hasWebSearchConfigured() && /503|502|504|timeout/i.test(message)) {
+      try {
+        const fallback = await runDomainScopedWebConnector(
+          input,
+          "biorxiv",
+          "bioRxiv",
+          "preprint site:biorxiv.org",
+          false
+        )
+        if (fallback.results.length > 0) {
+          return {
+            ...fallback,
+            warnings: [
+              ...fallback.warnings,
+              "bioRxiv API was unavailable; results from web search.",
+            ],
+            metrics: { ...fallback.metrics, fallbackUsed: true },
+          }
+        }
+      } catch {
+        // ignore fallback failure
+      }
+    }
+    return emptyPayload(input, "biorxiv", message)
+  }
+}
+
+async function scholarGatewayConnector(input: ConnectorSearchInput): Promise<ConnectorSearchPayload> {
+  const startedAt = performance.now()
+  const maxResults = Math.min(Math.max(input.maxResults ?? 5, 1), 10)
+  try {
+    const { records, warnings } = await searchScholarApi(input.query, {
+      maxResults,
+      timeoutMs: 6_500,
+    })
+    if (records.length > 0) {
+      return normalizeConnectorPayload(
+        input,
+        "scholar_gateway",
+        records,
+        warnings,
+        startedAt,
+        0,
+        false,
+        "public"
+      )
+    }
+
+    if (hasWebSearchConfigured()) {
+      const fallback = await runDomainScopedWebConnector(
+        input,
+        "scholar_gateway",
+        "Scholar Gateway",
+        "scholarly evidence systematic review site:scholar.google.com OR site:openalex.org OR site:europepmc.org",
+        true
+      )
+      if (fallback.results.length > 0) {
+        return {
+          ...fallback,
+          warnings: [
+            ...warnings,
+            ...fallback.warnings,
+            "Scholar native APIs returned sparse results; using web fallback.",
+          ],
+          metrics: {
+            ...fallback.metrics,
+            fallbackUsed: true,
+          },
+        }
+      }
+    }
+
+    return normalizeConnectorPayload(
+      input,
+      "scholar_gateway",
+      records,
+      warnings,
+      startedAt,
+      0,
+      false,
+      "public"
+    )
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Scholar native API lookup failed."
+    if (hasWebSearchConfigured()) {
+      try {
+        const fallback = await runDomainScopedWebConnector(
+          input,
+          "scholar_gateway",
+          "Scholar Gateway",
+          "scholarly evidence systematic review site:scholar.google.com OR site:openalex.org OR site:europepmc.org",
+          true
+        )
+        if (fallback.results.length > 0) {
+          return {
+            ...fallback,
+            warnings: [
+              ...fallback.warnings,
+              "Scholar native APIs were unavailable; using web fallback.",
+            ],
+            metrics: {
+              ...fallback.metrics,
+              fallbackUsed: true,
+            },
+          }
+        }
+      } catch {
+        // ignore fallback failure
+      }
+    }
+    return emptyPayload(input, "scholar_gateway", message)
+  }
+}
+
+async function cmsCoverageConnector(input: ConnectorSearchInput): Promise<ConnectorSearchPayload> {
+  const startedAt = performance.now()
+  const maxResults = Math.min(Math.max(input.maxResults ?? 5, 1), 10)
+  try {
+    const { records, warnings } = await searchCmsCoverageApi(input.query, {
+      maxResults,
+      timeoutMs: 7_000,
+    })
+    if (records.length > 0) {
+      return normalizeConnectorPayload(
+        input,
+        "cms_coverage",
+        records,
+        warnings,
+        startedAt,
+        0,
+        false,
+        "public"
+      )
+    }
+
+    if (hasWebSearchConfigured()) {
+      const fallback = await runDomainScopedWebConnector(
+        input,
+        "cms_coverage",
+        "CMS Coverage",
+        "coverage policy LCD NCD site:cms.gov",
+        true
+      )
+      if (fallback.results.length > 0) {
+        return {
+          ...fallback,
+          warnings: [
+            ...warnings,
+            ...fallback.warnings,
+            "CMS native API returned no direct ID match; using web fallback.",
+          ],
+          metrics: {
+            ...fallback.metrics,
+            fallbackUsed: true,
+          },
+        }
+      }
+    }
+
+    return normalizeConnectorPayload(
+      input,
+      "cms_coverage",
+      records,
+      warnings,
+      startedAt,
+      0,
+      false,
+      "public"
+    )
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "CMS coverage native lookup failed."
+    if (hasWebSearchConfigured()) {
+      try {
+        const fallback = await runDomainScopedWebConnector(
+          input,
+          "cms_coverage",
+          "CMS Coverage",
+          "coverage policy LCD NCD site:cms.gov",
+          true
+        )
+        if (fallback.results.length > 0) {
+          return {
+            ...fallback,
+            warnings: [...fallback.warnings, "CMS native API was unavailable; using web fallback."],
+            metrics: {
+              ...fallback.metrics,
+              fallbackUsed: true,
+            },
+          }
+        }
+      } catch {
+        // ignore fallback failure
+      }
+    }
+    return emptyPayload(input, "cms_coverage", message)
+  }
+}
+
 function createWebBackedAdapter(
   id: ClinicalConnectorId,
   label: string,
@@ -494,7 +816,7 @@ function createWebBackedAdapter(
     id,
     label,
     licenseTier: "public",
-    enabled: () => true,
+    enabled: () => hasWebSearchConfigured(),
     search: async (input) =>
       runDomainScopedWebConnector(input, id, label, scopeHint, medicalOnly),
   }
@@ -522,23 +844,34 @@ const connectorAdapters: Record<ClinicalConnectorId, ConnectorAdapter> = {
     enabled: () => true,
     search: clinicalTrialsConnector,
   },
-  scholar_gateway: createWebBackedAdapter(
-    "scholar_gateway",
-    "Scholar Gateway",
-    "scholarly evidence systematic review site:scholar.google.com"
-  ),
-  biorxiv: createWebBackedAdapter(
-    "biorxiv",
-    "bioRxiv",
-    "preprint site:biorxiv.org",
-    false
-  ),
-  biorender: createWebBackedAdapter(
-    "biorender",
-    "BioRender",
-    "scientific illustration template site:biorender.com",
-    false
-  ),
+  scholar_gateway: {
+    id: "scholar_gateway",
+    label: "Scholar Gateway",
+    licenseTier: "public",
+    enabled: () => true,
+    search: scholarGatewayConnector,
+  },
+  biorxiv: {
+    id: "biorxiv",
+    label: "bioRxiv",
+    licenseTier: "public",
+    enabled: () => true,
+    search: biorxivConnector,
+  },
+  biorender: {
+    id: "biorender",
+    label: "BioRender",
+    licenseTier: "public",
+    enabled: () => false,
+    search: async (input) =>
+      runDomainScopedWebConnector(
+        input,
+        "biorender",
+        "BioRender",
+        "scientific illustration template site:biorender.com",
+        false
+      ),
+  },
   npi_registry: {
     id: "npi_registry",
     label: "NPI Registry",
@@ -546,17 +879,27 @@ const connectorAdapters: Record<ClinicalConnectorId, ConnectorAdapter> = {
     enabled: () => true,
     search: npiRegistryConnector,
   },
-  synapse: createWebBackedAdapter(
-    "synapse",
-    "Synapse",
-    "scientific dataset metadata site:synapse.org",
-    false
-  ),
-  cms_coverage: createWebBackedAdapter(
-    "cms_coverage",
-    "CMS Coverage",
-    "coverage policy LCD NCD site:cms.gov"
-  ),
+  synapse: {
+    id: "synapse",
+    label: "Synapse",
+    licenseTier: "public",
+    enabled: () => false,
+    search: async (input) =>
+      runDomainScopedWebConnector(
+        input,
+        "synapse",
+        "Synapse",
+        "scientific dataset metadata site:synapse.org",
+        false
+      ),
+  },
+  cms_coverage: {
+    id: "cms_coverage",
+    label: "CMS Coverage",
+    licenseTier: "public",
+    enabled: () => true,
+    search: cmsCoverageConnector,
+  },
   chembl: {
     id: "chembl",
     label: "ChEMBL",
@@ -564,12 +907,20 @@ const connectorAdapters: Record<ClinicalConnectorId, ConnectorAdapter> = {
     enabled: () => true,
     search: chemblConnector,
   },
-  benchling: createWebBackedAdapter(
-    "benchling",
-    "Benchling",
-    "lab notebook protocol site:benchling.com",
-    false
-  ),
+  benchling: {
+    id: "benchling",
+    label: "Benchling",
+    licenseTier: "public",
+    enabled: () => false,
+    search: async (input) =>
+      runDomainScopedWebConnector(
+        input,
+        "benchling",
+        "Benchling",
+        "lab notebook protocol site:benchling.com",
+        false
+      ),
+  },
 }
 
 async function withReliabilityGuard(
@@ -588,33 +939,70 @@ async function withReliabilityGuard(
   }
 
   let lastError: unknown = null
+  let lastDegradedReason: string | null = null
   for (let attempt = 0; attempt <= CONNECTOR_RETRY_COUNT; attempt += 1) {
     try {
       const payload = await adapter.search(input)
-      connectorCircuitState.set(adapter.id, { failures: 0, openedUntil: 0 })
-      recordConnectorMetric(adapter.id, true)
-      return payload
+      const degradedState = isConnectorPayloadDegraded(payload)
+      if (!degradedState.degraded) {
+        connectorCircuitState.set(adapter.id, { failures: 0, degraded: 0, openedUntil: 0 })
+        recordConnectorMetric(adapter.id, "success", {
+          fallbackUsed: payload.metrics.fallbackUsed,
+          sourceCount: payload.results.length,
+        })
+        return payload
+      }
+
+      lastDegradedReason = degradedState.reason
+      if (attempt >= CONNECTOR_RETRY_COUNT) {
+        break
+      }
+      continue
     } catch (error) {
       lastError = error
       if (attempt >= CONNECTOR_RETRY_COUNT) break
     }
   }
 
-  const failures = (currentState?.failures || 0) + 1
-  const shouldOpenCircuit = failures >= CONNECTOR_CIRCUIT_FAIL_THRESHOLD
+  const nextFailures =
+    lastError != null ? (currentState?.failures || 0) + 1 : (currentState?.failures || 0)
+  const nextDegraded =
+    lastError == null ? (currentState?.degraded || 0) + 1 : (currentState?.degraded || 0)
+  const shouldOpenCircuit =
+    nextFailures >= CONNECTOR_CIRCUIT_FAIL_THRESHOLD ||
+    nextDegraded >= CONNECTOR_CIRCUIT_DEGRADED_THRESHOLD
   connectorCircuitState.set(adapter.id, {
-    failures,
+    failures: nextFailures,
+    degraded: nextDegraded,
     openedUntil: shouldOpenCircuit ? Date.now() + CONNECTOR_CIRCUIT_OPEN_MS : 0,
   })
-  recordConnectorMetric(adapter.id, false)
 
-  return emptyPayload(
+  if (lastError != null) {
+    recordConnectorMetric(adapter.id, "failure", {
+      sourceCount: 0,
+      reason: "exception",
+    })
+    return emptyPayload(
+      input,
+      adapter.id,
+      lastError instanceof Error ? lastError.message : `${adapter.label} connector failed.`,
+      CONNECTOR_RETRY_COUNT,
+      shouldOpenCircuit
+    )
+  }
+
+  recordConnectorMetric(adapter.id, "degraded", {
+    sourceCount: 0,
+    reason: lastDegradedReason || "degraded",
+  })
+  const degradedPayload = emptyPayload(
     input,
     adapter.id,
-    lastError instanceof Error ? lastError.message : `${adapter.label} connector failed.`,
+    `${adapter.label} connector returned low-utility results.`,
     CONNECTOR_RETRY_COUNT,
     shouldOpenCircuit
   )
+  return degradedPayload
 }
 
 export function getRegisteredConnectorIds(): ClinicalConnectorId[] {

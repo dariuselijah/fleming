@@ -49,20 +49,25 @@ function testServerTimelineEmission() {
     /wrapRuntimeToolWithLifecycle/,
     "Runtime tools should be wrapped to emit queued\/running\/completed\/failed states"
   )
-  assert.match(
+  assert.doesNotMatch(
     route,
     /generateDynamicActivityCopy\(/,
-    "Chat route should support low-latency dynamic intro\/reasoning generation"
+    "Chat route should avoid synthetic reasoning copy generation for user-facing reasoning"
   )
-  assert.match(
+  assert.doesNotMatch(
     route,
     /dynamicActivityCopyPromise/,
-    "Chat route should kick off dynamic activity copy generation in parallel"
+    "Chat route should not stream synthetic dynamic reasoning summaries"
   )
   assert.match(
     route,
-    /summary:\s*dynamicCopy\.reasoning/,
-    "Chat route should stream reasoning updates via langgraph-routing summary annotations"
+    /routingSummaryForStream/,
+    "Chat route should build deterministic routing summary metadata for timeline reasoning"
+  )
+  assert.match(
+    route,
+    /executeConnectorWithFallback\s*=\s*async/,
+    "Chat route should run connectors through deterministic fallback orchestration"
   )
 }
 
@@ -132,6 +137,16 @@ function testClientTimelineRendering() {
     "Timeline builder should normalize tool/upload/artifact events and routing annotations"
   )
   assert.match(
+    timelineBuilder,
+    /if \(type === "langgraph-routing"\) \{\s*return null/s,
+    "Timeline builder should suppress langgraph-routing annotations from user-visible reasoning"
+  )
+  assert.match(
+    timelineBuilder,
+    /extractReasoningText\(/,
+    "Timeline builder should normalize reasoning parts from both text and reasoning payload fields"
+  )
+  assert.match(
     messageAssistant,
     /splitTrailingSourceAppendix\(/,
     "Assistant renderer should split trailing source appendix from body text"
@@ -174,6 +189,11 @@ function testUploadParityAndClientIngestion() {
     /type === "tool-lifecycle"/,
     "Chat core should persist tool-lifecycle annotations in session snapshots"
   )
+  assert.match(
+    useChatCore,
+    /if \(type === "langgraph-routing"\) \{\s*return null/s,
+    "Chat core should avoid replaying langgraph-routing annotations in session snapshots"
+  )
 }
 
 function testQuizAndUploadSurfaceNormalization() {
@@ -214,10 +234,10 @@ function testQuizAndUploadSurfaceNormalization() {
     /setTimeout\(/,
     "Upload send activity should be status-driven and avoid timer-forced completion"
   )
-  assert.match(
+  assert.doesNotMatch(
     timelineBuilder,
-    /summarizeLangGraphTrace\(/,
-    "Routing annotations should be transformed into user-facing reasoning summaries"
+    /appendExecutionReasoning\(/,
+    "Timeline builder should not append synthetic execution prose to reasoning"
   )
 }
 

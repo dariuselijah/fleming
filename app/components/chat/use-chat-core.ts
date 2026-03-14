@@ -89,6 +89,17 @@ function compactSnapshotValue(value: unknown, depth = 0): unknown {
   return String(value)
 }
 
+function extractReasoningPartText(part: any): string | null {
+  if (!part || typeof part !== "object") return null
+  if (typeof part.text === "string" && part.text.trim().length > 0) {
+    return part.text.trim()
+  }
+  if (typeof part.reasoning === "string" && part.reasoning.trim().length > 0) {
+    return part.reasoning.trim()
+  }
+  return null
+}
+
 function extractSessionSafeMessageParts(message: Message): unknown[] | undefined {
   if (!Array.isArray(message.parts)) return undefined
   const refinedParts = message.parts
@@ -102,8 +113,8 @@ function extractSessionSafeMessageParts(message: Message): unknown[] | undefined
           text: truncateSnapshotString(trimmed, SESSION_SNAPSHOT_PART_TEXT_MAX_CHARS),
         }
       }
-      if (candidate?.type === "reasoning" && typeof candidate.text === "string") {
-        const trimmed = candidate.text.trim()
+      if (candidate?.type === "reasoning") {
+        const trimmed = extractReasoningPartText(candidate)
         if (!trimmed) return null
         return {
           type: "reasoning",
@@ -212,13 +223,7 @@ function extractSessionSafeAnnotations(message: Message): unknown[] | undefined 
         }
       }
       if (type === "langgraph-routing") {
-        return {
-          ...base,
-          type,
-          trace: compactSnapshotValue(candidate.trace),
-          summary: compactSnapshotValue(candidate.summary),
-          maxSteps: compactSnapshotValue(candidate.maxSteps),
-        }
+        return null
       }
       if (type === "tool-lifecycle") {
         return {

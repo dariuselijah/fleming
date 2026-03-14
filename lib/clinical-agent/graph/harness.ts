@@ -127,14 +127,22 @@ function buildFallbackOutput(input: ClinicalGraphInput): ClinicalGraphOutput {
   const selectedToolNames = input.supportsTools
     ? pickToolNames(connectorOrder, input.availableToolNames, input.artifactIntent)
     : []
+  const maxSteps = computeMaxSteps(intent, selectedToolNames.length, input.artifactIntent)
   return {
     intent,
     selectedConnectorIds: connectorOrder,
     selectedToolNames,
     modePolicy,
     systemPromptAdditions: buildPromptAdditions(intent, modePolicy, selectedToolNames),
-    maxSteps: computeMaxSteps(intent, selectedToolNames.length, input.artifactIntent),
+    maxSteps,
     trace: ["fallback_router"],
+    routingSummary: {
+      intent,
+      selectedConnectorIds: connectorOrder,
+      selectedToolNames,
+      modePolicy,
+      maxSteps,
+    },
   }
 }
 
@@ -237,6 +245,13 @@ export async function runClinicalAgentHarness(
       systemPromptAdditions: result.systemPromptAdditions,
       maxSteps: result.maxSteps,
       trace: result.trace,
+      routingSummary: {
+        intent: result.intent,
+        selectedConnectorIds: result.connectorOrder,
+        selectedToolNames: result.selectedToolNames,
+        modePolicy: result.modePolicy,
+        maxSteps: result.maxSteps,
+      },
     }
     recordHarnessRun(false)
     return payload

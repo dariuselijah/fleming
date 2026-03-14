@@ -91,13 +91,20 @@ export async function saveFinalAssistantMessage(
             },
           })
         } else if (part.type === "reasoning") {
+          const reasoningText =
+            typeof (part as any).text === "string" && (part as any).text.trim().length > 0
+              ? (part as any).text
+              : typeof (part as any).reasoning === "string" &&
+                  (part as any).reasoning.trim().length > 0
+                ? (part as any).reasoning
+                : ""
           parts.push({
             type: "reasoning",
-            reasoning: part.text || "",
+            reasoning: reasoningText,
             details: [
               {
                 type: "text",
-                text: part.text || "",
+                text: reasoningText,
               },
             ],
           })
