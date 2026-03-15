@@ -20,7 +20,6 @@ interface CitationMarkdownProps {
 function stripInternalCitationTokens(value: string): string {
   if (!value) return value
   return value
-    .replace(/\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/gi, "")
     .replace(/\[tool\s+[^\]]+\]/gi, "")
     .replace(/\[source\s+[^\]]+\]/gi, "")
     .replace(/\[doc\s+[^\]]+\]/gi, "")
@@ -423,7 +422,7 @@ export function CitationMarkdown({
 }: CitationMarkdownProps) {
   const sanitizedChildren = useMemo(
     () =>
-      stripInternalCitationTokens(String(children || ""))
+      stripInternalRuntimeTokensPreservePlaceholders(String(children || ""))
         .replace(/\n{3,}/g, "\n\n"),
     [children]
   )
@@ -489,6 +488,33 @@ export function CitationMarkdown({
 
     // Resolve PMID markers to evidence citation indices, e.g. [PMID: 37932704]
     if (evidenceCitationMap && evidenceCitationMap.size > 0) {
+      // Resolve synthesis placeholders (including bare forms), e.g.
+      // [CITE_PLACEHOLDER_0] or CITE_PLACEHOLDER_0.
+      const placeholderPattern = /\[?\s*CITE_PLACEHOLDER_(\d+)\s*\]?/gi
+      let placeholderMatch: RegExpExecArray | null
+      const sortedEvidenceIndices = Array.from(evidenceCitationMap.keys()).sort((a, b) => a - b)
+      while ((placeholderMatch = placeholderPattern.exec(sanitizedChildren)) !== null) {
+        const ordinal = Number.parseInt(placeholderMatch[1] || "", 10)
+        if (!Number.isFinite(ordinal) || ordinal < 0) continue
+        const resolvedIndex = sortedEvidenceIndices[ordinal]
+        if (typeof resolvedIndex !== "number") continue
+
+        const startIndex = placeholderMatch.index
+        const endIndex = placeholderMatch.index + placeholderMatch[0].length
+        const overlaps = result.some(
+          (existing) => startIndex < existing.endIndex && endIndex > existing.startIndex
+        )
+        if (overlaps) continue
+
+        result.push({
+          type: "numbered",
+          indices: [resolvedIndex],
+          startIndex,
+          endIndex,
+          fullMatch: placeholderMatch[0],
+        })
+      }
+
       const citationByPmid = new Map<string, number>()
       evidenceCitationMap.forEach((citation) => {
         const pmid = typeof citation.pmid === "string" ? citation.pmid.trim() : ""
@@ -740,8 +766,9 @@ function processText(
   const sanitizedText = stripInternalRuntimeTokensPreservePlaceholders(text)
   const parts: React.ReactNode[] = []
   let lastIndex = 0
-  // Match the placeholder format [CITE_PLACEHOLDER_0]
-  const placeholderRegex = /\[CITE_PLACEHOLDER_(\d+)\]/g
+  // Match synthesis placeholders in both forms:
+  // [CITE_PLACEHOLDER_0] and CITE_PLACEHOLDER_0
+  const placeholderRegex = /\[?\s*CITE_PLACEHOLDER_(\d+)\s*\]?/g
   let match: RegExpExecArray | null
   
   while ((match = placeholderRegex.exec(sanitizedText)) !== null) {
@@ -756,7 +783,8 @@ function processText(
     
     // Add citation component
     const placeholder = match[0]
-    const marker = markerMap.get(placeholder)
+    const canonicalPlaceholder = `[CITE_PLACEHOLDER_${match[1]}]`
+    const marker = markerMap.get(placeholder) || markerMap.get(canonicalPlaceholder)
     if (marker) {
       // If we have evidence citations, render EvidenceCitationPill for each
       if (evidenceCitationMap && evidenceCitationMap.size > 0) {

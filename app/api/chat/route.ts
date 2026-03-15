@@ -4758,6 +4758,38 @@ export async function POST(req: Request) {
         }
       : ({} as ToolSet)
 
+    const buildWebSearchCitations = (
+      response: Awaited<ReturnType<typeof searchWeb>>
+    ): EvidenceCitation[] => {
+      return response.results.map((result, index) => {
+        let journal = "Web"
+        try {
+          journal = new URL(result.url).hostname.replace(/^www\./i, "") || "Web"
+        } catch {
+          journal = "Web"
+        }
+        const yearMatch = result.publishedDate?.match(/\b(19|20)\d{2}\b/)
+        return {
+          index: index + 1,
+          pmid: null,
+          title: result.title || "Web search result",
+          journal,
+          year: yearMatch ? Number(yearMatch[0]) : null,
+          doi: null,
+          authors: [],
+          evidenceLevel: 4,
+          studyType: "Web search",
+          sampleSize: null,
+          meshTerms: [],
+          url: result.url || null,
+          snippet: result.snippet || "",
+          score: typeof result.score === "number" ? result.score : 0,
+          sourceType: "medical_evidence",
+          sourceLabel: "Web search",
+        } satisfies EvidenceCitation
+      })
+    }
+
     const webSearchRuntimeTools: ToolSet = shouldEnableWebSearchTool
       ? {
           webSearch: tool({
@@ -4785,6 +4817,7 @@ export async function POST(req: Request) {
                   warnings: [
                     "webSearch already executed twice for this response; reusing earlier web context.",
                   ],
+                  citations: [],
                   metrics: {
                     cacheHit: false,
                     elapsedMs: 0,
@@ -4808,7 +4841,10 @@ export async function POST(req: Request) {
                 webSearchCallCount === 1 &&
                 (firstAttempt.results.length === 0 || hasTimeoutWarning)
               if (!shouldRetryBroader) {
-                return firstAttempt
+                return {
+                  ...firstAttempt,
+                  citations: buildWebSearchCitations(firstAttempt),
+                }
               }
 
               const broaderQuery = query
@@ -4828,6 +4864,7 @@ export async function POST(req: Request) {
               if (secondAttempt.results.length > 0) {
                 return {
                   ...secondAttempt,
+                  citations: buildWebSearchCitations(secondAttempt),
                   warnings: [
                     ...secondAttempt.warnings,
                     "webSearch used broader-query retry after sparse/timeout first attempt.",
@@ -4836,6 +4873,7 @@ export async function POST(req: Request) {
               }
               return {
                 ...firstAttempt,
+                citations: buildWebSearchCitations(firstAttempt),
                 warnings: [
                   ...firstAttempt.warnings,
                   ...secondAttempt.warnings,
