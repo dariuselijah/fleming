@@ -84,7 +84,7 @@
     "dompurify": "^3.2.5",
     "dotenv": "^16.4.5",
     "exa-js": "^1.6.13",
-    "file-type": "^20.4.1",
+    "file-type": "^21.0.0",
     "idb-keyval": "^6.2.1",
     "image-size": "^2.0.2",
     "jsdom": "^26.0.0",
