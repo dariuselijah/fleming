@@ -497,6 +497,31 @@ export function CitationMarkdown({
         }
       })
 
+      // Resolve bare PMID patterns in text, e.g. "PMID: 37932704".
+      const barePmidPattern = /\bPMID\s*:\s*(\d{6,10})\b/gi
+      let barePmidMatch: RegExpExecArray | null
+      while ((barePmidMatch = barePmidPattern.exec(sanitizedChildren)) !== null) {
+        const pmid = barePmidMatch[1]?.trim()
+        if (!pmid) continue
+        const resolvedIndex = citationByPmid.get(pmid)
+        if (typeof resolvedIndex !== "number") continue
+
+        const startIndex = barePmidMatch.index
+        const endIndex = barePmidMatch.index + barePmidMatch[0].length
+        const overlaps = result.some(
+          (existing) => startIndex < existing.endIndex && endIndex > existing.startIndex
+        )
+        if (overlaps) continue
+
+        result.push({
+          type: "numbered",
+          indices: [resolvedIndex],
+          startIndex,
+          endIndex,
+          fullMatch: barePmidMatch[0],
+        })
+      }
+
       const pmidPattern = /\[PMID\s*:\s*(\d+)\]/gi
       let pmidMatch: RegExpExecArray | null
       while ((pmidMatch = pmidPattern.exec(sanitizedChildren)) !== null) {

@@ -43,7 +43,8 @@ function dedupeStrings(values: string[]): string[] {
 function pickToolNames(
   connectorOrder: ClinicalConnectorId[],
   availableToolNames: string[],
-  artifactIntent: ClinicalGraphInput["artifactIntent"]
+  artifactIntent: ClinicalGraphInput["artifactIntent"],
+  fanoutPreferred?: boolean
 ): string[] {
   const available = new Set(availableToolNames)
   const selected: string[] = []
@@ -82,11 +83,32 @@ function pickToolNames(
     }
   }
 
+  if (fanoutPreferred) {
+    const fanoutPreferredTools = [
+      "pubmedSearch",
+      "guidelineSearch",
+      "clinicalTrialsSearch",
+      "scholarGatewaySearch",
+      "bioRxivSearch",
+    ]
+    for (const toolName of fanoutPreferredTools) {
+      if (available.has(toolName)) {
+        selected.push(toolName)
+      }
+    }
+  }
+
   return dedupeStrings(selected)
 }
 
-function computeMaxSteps(intent: ClinicalIntentClass, toolCount: number, artifactIntent?: "none" | "quiz") {
+function computeMaxSteps(
+  intent: ClinicalIntentClass,
+  toolCount: number,
+  artifactIntent?: "none" | "quiz",
+  fanoutPreferred?: boolean
+) {
   if (artifactIntent === "quiz") return 2
+  if (fanoutPreferred) return 12
   if (toolCount <= 2) return 6
   if (intent === "clinical_evidence") return 10
   if (intent === "research_discovery") return 11
@@ -96,7 +118,8 @@ function computeMaxSteps(intent: ClinicalIntentClass, toolCount: number, artifac
 function buildPromptAdditions(
   intent: ClinicalIntentClass,
   modePolicy: ClinicalModePolicy,
-  selectedToolNames: string[]
+  selectedToolNames: string[],
+  fanoutPreferred?: boolean
 ): string[] {
   const additions: string[] = []
   additions.push(
@@ -117,6 +140,11 @@ function buildPromptAdditions(
       "Student mode guardrail: include concise teaching rationale and explain why the selected evidence is relevant."
     )
   }
+  if (fanoutPreferred) {
+    additions.push(
+      "Fan-out retrieval preferred: gather corroborating evidence from multiple distinct sources (target 4-6) before finalizing."
+    )
+  }
   return additions
 }
 
@@ -125,15 +153,30 @@ function buildFallbackOutput(input: ClinicalGraphInput): ClinicalGraphOutput {
   const connectorOrder = selectConnectorPriority(intent)
   const modePolicy = buildModePolicy(input.role, input.learningMode, input.clinicianMode)
   const selectedToolNames = input.supportsTools
-    ? pickToolNames(connectorOrder, input.availableToolNames, input.artifactIntent)
+    ? pickToolNames(
+        connectorOrder,
+        input.availableToolNames,
+        input.artifactIntent,
+        input.fanoutPreferred
+      )
     : []
-  const maxSteps = computeMaxSteps(intent, selectedToolNames.length, input.artifactIntent)
+  const maxSteps = computeMaxSteps(
+    intent,
+    selectedToolNames.length,
+    input.artifactIntent,
+    input.fanoutPreferred
+  )
   return {
     intent,
     selectedConnectorIds: connectorOrder,
     selectedToolNames,
     modePolicy,
-    systemPromptAdditions: buildPromptAdditions(intent, modePolicy, selectedToolNames),
+    systemPromptAdditions: buildPromptAdditions(
+      intent,
+      modePolicy,
+      selectedToolNames,
+      input.fanoutPreferred
+    ),
     maxSteps,
     trace: ["fallback_router"],
     routingSummary: {
@@ -181,13 +224,15 @@ function getCompiledHarness() {
         ? pickToolNames(
             state.connectorOrder,
             state.input.availableToolNames,
-            state.input.artifactIntent
+            state.input.artifactIntent,
+            state.input.fanoutPreferred
           )
         : []
       const systemPromptAdditions = buildPromptAdditions(
         state.intent,
         state.modePolicy,
-        selectedToolNames
+        selectedToolNames,
+        state.input.fanoutPreferred
       )
       return {
         selectedToolNames,
@@ -195,7 +240,8 @@ function getCompiledHarness() {
         maxSteps: computeMaxSteps(
           state.intent,
           selectedToolNames.length,
-          state.input.artifactIntent
+          state.input.artifactIntent,
+          state.input.fanoutPreferred
         ),
         trace: [
           ...state.trace,

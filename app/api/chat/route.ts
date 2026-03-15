@@ -792,6 +792,36 @@ function needsFreshEvidence(query: string): boolean {
   )
 }
 
+function hasExplicitScholarGatewayIntent(query: string): boolean {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return false
+  return (
+    /\b(use|run|try)\s+(the\s+)?scholar\s+gateway\b/i.test(normalized) ||
+    /\bscholar\s+gateway\b/i.test(normalized) ||
+    /\bopenalex\b/i.test(normalized) ||
+    /\beurope\s*pmc\b/i.test(normalized)
+  )
+}
+
+function shouldAllowScholarGatewayTool(options: {
+  queryText: string
+  finalEnableEvidence: boolean
+  citationCount: number
+  evidenceContextAvailable: boolean
+  sourceDiversityCount: number
+}): boolean {
+  if (hasExplicitScholarGatewayIntent(options.queryText)) return true
+  if (!options.finalEnableEvidence) return false
+  if (needsFreshEvidence(options.queryText)) return true
+  if (!options.evidenceContextAvailable) return true
+  // Allow Scholar Gateway as corroboration when current evidence is still
+  // monoculture (e.g., PubMed-only).
+  if (options.sourceDiversityCount < 2) {
+    return true
+  }
+  return options.citationCount < 4
+}
+
 type YouTubeIntentDecision = {
   shouldUse: boolean
   explicitRequest: boolean
@@ -884,26 +914,54 @@ const URGENT_CONTEXT_PATTERN =
   /\b(immediate|urgent|emergency|er|ed|call 911|wait until morning|send to the ed|when should.*ed)\b/i;
 
 function detectEmergencyEscalationNeed(query: string): {
-  shouldEscalate: boolean;
-  matchedSignals: string[];
+  shouldEscalate: boolean
+  matchedSignals: string[]
+  escalationLevel: "soft" | "hard"
 } {
-  const normalized = query.trim();
+  const normalized = query.trim()
   if (!normalized) {
-    return { shouldEscalate: false, matchedSignals: [] };
+    return { shouldEscalate: false, matchedSignals: [], escalationLevel: "soft" }
   }
 
   const matchedSignals = HIGH_RISK_EMERGENCY_PATTERNS
     .filter(({ pattern }) => pattern.test(normalized))
-    .map(({ label }) => label);
+    .map(({ label }) => label)
 
-  const hasUrgentContext = URGENT_CONTEXT_PATTERN.test(normalized);
-  const shouldEscalate = matchedSignals.length > 0 || (hasUrgentContext && /\b(pain|shock|stroke|sepsis|bleeding|abdominal|dyspnea|breath)\b/i.test(normalized));
+  const hasUrgentContext = URGENT_CONTEXT_PATTERN.test(normalized)
+  const hasSepsisSignal = matchedSignals.includes("sepsis")
+  const hasNonSepsisHighRiskSignal = matchedSignals.some((label) => label !== "sepsis")
+  const hasHardSepsisSignal = /\bseptic shock\b/i.test(normalized)
+  const symptomaticUrgentSignal =
+    hasUrgentContext &&
+    /\b(pain|shock|stroke|sepsis|bleeding|abdominal|dyspnea|breath)\b/i.test(normalized)
+  const shouldEscalate =
+    hasNonSepsisHighRiskSignal ||
+    hasHardSepsisSignal ||
+    (hasSepsisSignal && hasUrgentContext) ||
+    symptomaticUrgentSignal
+  const escalationLevel: "soft" | "hard" =
+    hasNonSepsisHighRiskSignal || hasHardSepsisSignal || symptomaticUrgentSignal
+      ? "hard"
+      : "soft"
 
-  return { shouldEscalate, matchedSignals };
+  return { shouldEscalate, matchedSignals, escalationLevel }
 }
 
-function buildEmergencyEscalationInstruction(matchedSignals: string[]): string {
-  const signalText = matchedSignals.length > 0 ? matchedSignals.join(", ") : "urgent red flags";
+function buildEmergencyEscalationInstruction(
+  matchedSignals: string[],
+  escalationLevel: "soft" | "hard"
+): string {
+  const signalText = matchedSignals.length > 0 ? matchedSignals.join(", ") : "urgent red flags"
+  if (escalationLevel === "soft") {
+    return `
+EMERGENCY SAFETY GUIDANCE:
+- Potential safety concern detected (${signalText}).
+- Use calm, non-alarmist wording.
+- Lead with a safety-first recommendation such as: "Given the risk profile, prompt in-person clinical assessment is recommended."
+- Reserve hard directives ("Call 911 now" / "Go to the emergency department immediately") for clear immediate-danger patterns.
+- Provide concise red-flag triggers for escalation and next-step stabilization priorities.
+`.trim()
+  }
   return `
 EMERGENCY ESCALATION OVERRIDE:
 - Emergency intent detected (${signalText}).
@@ -912,13 +970,21 @@ EMERGENCY ESCALATION OVERRIDE:
   - "Go to the emergency department immediately."
 - Keep escalation clinically specific and place it near the top of the response.
 - After escalation, provide concise stabilization priorities while deferring definitive care to in-person emergency evaluation.
-`.trim();
+`.trim()
 }
 
 const GUIDELINE_INTENT_PATTERN =
   /\b(guideline|guidelines|recommendation|consensus|position statement|evidence-based|first-line|society guidance|practice standard)\b/i
 const STRICT_MIN_CITATION_FLOOR = 8
 const STRICT_MIN_GUIDELINE_CITATIONS = 1
+const FANOUT_TARGET_SOURCES_BALANCED = 5
+const FANOUT_TARGET_SOURCES_FRESH = 6
+const FANOUT_SOURCE_DIVERSITY_FLOOR = 3
+const FANOUT_PER_TOOL_TIMEOUT_MS = 18_000
+const FANOUT_TOTAL_BUDGET_MS = 28_000
+const FANOUT_TOTAL_BUDGET_FRESH_MS = 34_000
+const FANOUT_MAX_TOOL_STEPS = 12
+const FANOUT_MAX_TOOL_STEPS_FRESH = 14
 
 function hasGuidelineIntent(query: string): boolean {
   const normalized = query.trim()
@@ -949,6 +1015,37 @@ function hasGuidelineCitationSignal(citations: EvidenceCitation[]): boolean {
       `${citation.title || ""} ${citation.journal || ""} ${citation.studyType || ""}`
     )
   )
+}
+
+function citationSourceKey(citation: EvidenceCitation): string {
+  let hostname = ""
+  if (citation.url) {
+    try {
+      hostname = new URL(citation.url).hostname
+    } catch {
+      hostname = citation.url
+    }
+  }
+  return (
+    citation.sourceType ||
+    citation.journal ||
+    hostname ||
+    "unknown"
+  )
+    .toString()
+    .toLowerCase()
+}
+
+function estimateCitationRecencyScore(citation: EvidenceCitation): number {
+  const nowYear = new Date().getUTCFullYear()
+  const yearValue = typeof citation.year === "number" ? citation.year : Number(citation.year)
+  if (!Number.isFinite(yearValue) || yearValue <= 1900) return 0
+  const age = Math.max(0, nowYear - yearValue)
+  if (age <= 1) return 1
+  if (age <= 3) return 0.75
+  if (age <= 5) return 0.45
+  if (age <= 8) return 0.25
+  return 0.1
 }
 
 function dedupeAndReindexCitations(citations: EvidenceCitation[]): EvidenceCitation[] {
@@ -993,6 +1090,7 @@ function rankCitationsForQuery(
   queryText: string,
   options?: {
     guidelinePriority?: boolean
+    recencyPriority?: boolean
   }
 ): EvidenceCitation[] {
   return citations
@@ -1009,7 +1107,8 @@ function rankCitationsForQuery(
           ? 0.45
           : 0.3
         : 0
-      const score = overlapScore * 0.7 + evidenceBoost + guidelineBoost
+      const recencyBoost = estimateCitationRecencyScore(citation) * (options?.recencyPriority ? 0.35 : 0.2)
+      const score = overlapScore * 0.65 + evidenceBoost + guidelineBoost + recencyBoost
       return { citation, score }
     })
     .sort((a, b) => b.score - a.score)
@@ -1058,6 +1157,43 @@ function ensureCitationFloor(
     }
   }
   return expanded
+}
+
+function ensureCitationSourceDiversity(
+  selected: EvidenceCitation[],
+  rankedPool: EvidenceCitation[],
+  minimumSources: number
+): EvidenceCitation[] {
+  if (minimumSources <= 1) return selected
+  const result = [...selected]
+  const selectedKeys = new Set(
+    result.map(
+      (citation) =>
+        citation.pmid ||
+        citation.doi ||
+        citation.url ||
+        `${citation.title || "untitled"}:${citation.journal || "unknown"}`
+    )
+  )
+  const sourceSet = new Set(result.map((citation) => citationSourceKey(citation)))
+  if (sourceSet.size >= minimumSources) return result
+
+  for (const citation of rankedPool) {
+    if (sourceSet.size >= minimumSources) break
+    const recordKey =
+      citation.pmid ||
+      citation.doi ||
+      citation.url ||
+      `${citation.title || "untitled"}:${citation.journal || "unknown"}`
+    if (selectedKeys.has(recordKey)) continue
+    const sourceKey = citationSourceKey(citation)
+    if (!sourceSet.has(sourceKey)) {
+      selectedKeys.add(recordKey)
+      sourceSet.add(sourceKey)
+      result.push(citation)
+    }
+  }
+  return result
 }
 
 function ensureGuidelineCitations(
@@ -2324,7 +2460,7 @@ const chatRequestSchema = z
     model: z.string().min(1),
     isAuthenticated: z.boolean(),
     systemPrompt: z.string(),
-    enableSearch: z.boolean(),
+    enableSearch: z.boolean().optional().default(true),
     enableEvidence: z.boolean().optional(),
     message_group_id: z.string().optional(),
     userRole: z.enum(["doctor", "general", "medical_student"]).optional(),
@@ -2618,11 +2754,12 @@ export async function POST(req: Request) {
     const clinicianRoleFromResolvedRole =
       effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
     const evidenceSeekingIntent = hasEvidenceSeekingIntent(queryText) || hasGuidelineIntent(queryText)
+    const freshEvidenceIntent = needsFreshEvidence(queryText)
     const finalEnableEvidence =
       enableEvidenceFromClient === true || clinicianRoleFromResolvedRole || evidenceSeekingIntent
     const finalEnableSearch =
       ENABLE_WEB_SEARCH_TOOL &&
-      enableSearchFromClient === true
+      enableSearchFromClient !== false
     const shouldRunWebSearchPreflight =
       finalEnableSearch && queryText.length > 0 && !shouldPreferUploadContext
     const minEvidenceLevelForQuery = clinicianRoleFromResolvedRole ? 3 : 5
@@ -2639,6 +2776,17 @@ export async function POST(req: Request) {
         shouldPreferUploadContext ||
         queryText.trim().length >= 40
       )
+    const shouldUseBroadEvidenceFanout =
+      finalEnableEvidence &&
+      queryText.length > 0 &&
+      !shouldPreferUploadContext &&
+      artifactIntent !== "quiz"
+    const targetFanoutSources = freshEvidenceIntent
+      ? FANOUT_TARGET_SOURCES_FRESH
+      : FANOUT_TARGET_SOURCES_BALANCED
+    const fanoutTotalBudgetMs = freshEvidenceIntent
+      ? FANOUT_TOTAL_BUDGET_FRESH_MS
+      : FANOUT_TOTAL_BUDGET_MS
     const isArtifactRequestForRetrievalBudget = artifactIntent === "quiz"
     const uploadContextMaxDurationMs = isArtifactRequestForRetrievalBudget ? 2400 : 1200
     const uploadContextTimeBudgetMs = isArtifactRequestForRetrievalBudget ? 2600 : 1500
@@ -2669,11 +2817,11 @@ export async function POST(req: Request) {
           async () =>
             searchWeb(queryText, {
               maxResults: 4,
-              timeoutMs: 800,
-              retries: 1,
+              timeoutMs: FANOUT_PER_TOOL_TIMEOUT_MS,
+              retries: 0,
               medicalOnly: clinicianRoleFromResolvedRole,
             }),
-          900,
+          Math.min(FANOUT_PER_TOOL_TIMEOUT_MS + 1_000, fanoutTotalBudgetMs),
           null
         )
       : Promise.resolve(null)
@@ -3344,6 +3492,7 @@ export async function POST(req: Request) {
       if (mergedCitations.length > 0) {
         const rankedPool = rankCitationsForQuery(mergedCitations, queryText, {
           guidelinePriority,
+          recencyPriority: freshEvidenceIntent,
         })
         let selected = filterLowRelevanceCitations(
           rankedPool,
@@ -3358,6 +3507,13 @@ export async function POST(req: Request) {
             selected,
             rankedPool,
             STRICT_MIN_GUIDELINE_CITATIONS
+          )
+        }
+        if (shouldUseBroadEvidenceFanout) {
+          selected = ensureCitationSourceDiversity(
+            selected,
+            rankedPool,
+            FANOUT_SOURCE_DIVERSITY_FLOOR
           )
         }
         const dedupedAndRanked = dedupeAndReindexCitations(selected).slice(0, 12)
@@ -3390,7 +3546,8 @@ export async function POST(req: Request) {
 
     if (emergencyEscalationIntent.shouldEscalate) {
       effectiveSystemPrompt += `\n\n${buildEmergencyEscalationInstruction(
-        emergencyEscalationIntent.matchedSignals
+        emergencyEscalationIntent.matchedSignals,
+        emergencyEscalationIntent.escalationLevel
       )}`
     }
 
@@ -3545,6 +3702,28 @@ export async function POST(req: Request) {
     
     // Optional live PubMed tools for freshness and sparse-corpus gaps
     const supportsTools = Boolean(modelConfig?.tools)
+    const citationCountForRouting =
+      capturedEvidenceContext?.context?.citations?.length ??
+      evidenceContextResult?.context?.citations?.length ??
+      0
+    const sourceDiversityForRouting = new Set(
+      (capturedEvidenceContext?.context?.citations || []).map((citation) => {
+        const sourceType =
+          typeof citation.sourceType === "string" ? citation.sourceType : ""
+        const sourceLabel =
+          typeof citation.sourceLabel === "string" ? citation.sourceLabel : ""
+        const journal = typeof citation.journal === "string" ? citation.journal : ""
+        return (sourceType || sourceLabel || journal || "unknown").toLowerCase()
+      })
+    ).size
+    const scholarGatewayExplicitIntent = hasExplicitScholarGatewayIntent(queryText)
+    const allowScholarGatewayTool = shouldAllowScholarGatewayTool({
+      queryText,
+      finalEnableEvidence,
+      citationCount: citationCountForRouting,
+      evidenceContextAvailable: Boolean(capturedEvidenceContext?.shouldUseEvidence),
+      sourceDiversityCount: sourceDiversityForRouting,
+    })
     const shouldEnableWebSearchTool =
       finalEnableSearch &&
       supportsTools &&
@@ -3556,6 +3735,7 @@ export async function POST(req: Request) {
       supportsTools &&
       queryText.length > 0 &&
       (
+        shouldUseBroadEvidenceFanout ||
         needsFreshEvidence(queryText) ||
         (capturedEvidenceContext?.context?.citations?.length ?? 0) < 4
       )
@@ -3778,7 +3958,7 @@ export async function POST(req: Request) {
       const webResponse = await searchWeb(`${query} ${scopeHint}`.trim(), {
         maxResults: Math.min(Math.max(maxResults, 1), 8),
         retries: 1,
-        timeoutMs: 5500,
+        timeoutMs: FANOUT_PER_TOOL_TIMEOUT_MS + 1_200,
         medicalOnly,
       })
       const records = webResponse.results.map((item, index) => ({
@@ -4598,12 +4778,12 @@ export async function POST(req: Request) {
             }),
             execute: async ({ query, maxResults, medicalOnly }) => {
               webSearchCallCount += 1
-              if (webSearchCallCount > 1) {
+              if (webSearchCallCount > 2) {
                 return {
                   query,
                   results: [],
                   warnings: [
-                    "webSearch already executed for this response; reusing earlier web context.",
+                    "webSearch already executed twice for this response; reusing earlier web context.",
                   ],
                   metrics: {
                     cacheHit: false,
@@ -4614,12 +4794,54 @@ export async function POST(req: Request) {
                 }
               }
 
-              return searchWeb(query, {
+              const firstAttempt = await searchWeb(query, {
                 maxResults,
-                timeoutMs: 1800,
-                retries: 1,
+                timeoutMs: FANOUT_PER_TOOL_TIMEOUT_MS,
+                retries: 0,
                 medicalOnly,
+                liveCrawl: "preferred",
               })
+              const hasTimeoutWarning = (firstAttempt.warnings || []).some((warning) =>
+                /timeout|failed|unavailable/i.test(warning)
+              )
+              const shouldRetryBroader =
+                webSearchCallCount === 1 &&
+                (firstAttempt.results.length === 0 || hasTimeoutWarning)
+              if (!shouldRetryBroader) {
+                return firstAttempt
+              }
+
+              const broaderQuery = query
+                .replace(/\bsite:[^\s]+/gi, "")
+                .replace(/\s+/g, " ")
+                .trim()
+              const secondAttempt = await searchWeb(
+                broaderQuery.length >= 3 ? broaderQuery : query,
+                {
+                  maxResults,
+                  timeoutMs: FANOUT_PER_TOOL_TIMEOUT_MS + 4_000,
+                  retries: 0,
+                  medicalOnly,
+                  liveCrawl: "preferred",
+                }
+              )
+              if (secondAttempt.results.length > 0) {
+                return {
+                  ...secondAttempt,
+                  warnings: [
+                    ...secondAttempt.warnings,
+                    "webSearch used broader-query retry after sparse/timeout first attempt.",
+                  ],
+                }
+              }
+              return {
+                ...firstAttempt,
+                warnings: [
+                  ...firstAttempt.warnings,
+                  ...secondAttempt.warnings,
+                  "webSearch retry did not improve retrieval.",
+                ],
+              }
             },
           }),
         }
@@ -4631,6 +4853,23 @@ export async function POST(req: Request) {
       ...connectorRuntimeTools,
       ...youtubeRuntimeTools,
     }
+    if (!allowScholarGatewayTool && "scholarGatewaySearch" in runtimeTools) {
+      const rest = { ...(runtimeTools as Record<string, unknown>) }
+      delete rest.scholarGatewaySearch
+      runtimeTools = rest as ToolSet
+      console.log(
+        `[ROUTING] Scholar Gateway gated off (explicit=${scholarGatewayExplicitIntent}, citations=${citationCountForRouting}, sourceDiversity=${sourceDiversityForRouting})`
+      )
+    }
+    const preferredFanoutToolNames = shouldUseBroadEvidenceFanout
+      ? [
+          "pubmedSearch",
+          "guidelineSearch",
+          "clinicalTrialsSearch",
+          ...(freshEvidenceIntent ? ["scholarGatewaySearch", "bioRxivSearch"] : ["scholarGatewaySearch"]),
+          ...(shouldEnableWebSearchTool ? ["webSearch"] : []),
+        ]
+      : []
 
     let langGraphPlan: Awaited<ReturnType<typeof runClinicalAgentHarness>> | null = null
     if (ENABLE_LANGGRAPH_HARNESS && supportsTools && queryText.trim().length > 0) {
@@ -4642,12 +4881,23 @@ export async function POST(req: Request) {
         artifactIntent: effectiveArtifactIntent,
         supportsTools,
         evidenceEnabled: finalEnableEvidence,
+        fanoutPreferred: shouldUseBroadEvidenceFanout,
         availableToolNames: Object.keys(runtimeTools),
       })
       langGraphHarnessTrace = langGraphPlan.trace
 
       if (langGraphPlan.selectedToolNames.length > 0) {
         const selectedToolNames = new Set(langGraphPlan.selectedToolNames)
+        if (!allowScholarGatewayTool) {
+          selectedToolNames.delete("scholarGatewaySearch")
+        }
+        if (preferredFanoutToolNames.length > 0) {
+          for (const toolName of preferredFanoutToolNames) {
+            if (toolName in runtimeTools) {
+              selectedToolNames.add(toolName)
+            }
+          }
+        }
         if (effectiveArtifactIntent === "quiz") {
           if (artifactWorkflowStage === "inspect") {
             selectedToolNames.add("inspectUploadStructure")
@@ -4750,6 +5000,8 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - ${ENABLE_CONNECTOR_REGISTRY ? "Use chemblSearch, synapseSearch, bioRenderSearch, and benchlingSearch only when the user intent explicitly needs molecular, dataset, visual, or lab-workflow context." : "Specialized connector tools are disabled."}
 - Use drugSafetyLookup for contraindications/interactions/renal dosing checks.
 - Use evidenceConflictCheck when sources disagree.
+- ${shouldUseBroadEvidenceFanout ? `For this turn, run a balanced multi-source fan-out: target ${targetFanoutSources} distinct sources (roughly 4-6) before finalizing unless tools are unavailable or exhausted.` : "Balanced fan-out is optional; use additional sources when confidence is weak or evidence is sparse."}
+- ${shouldUseBroadEvidenceFanout ? `Respect the balanced retrieval budget (${fanoutTotalBudgetMs} ms total; ~${FANOUT_PER_TOOL_TIMEOUT_MS} ms per retrieval call) and avoid looping the same source repeatedly.` : "Avoid repeated low-yield retries against the same source."}
 - IMPORTANT: Keep tool queries tightly aligned to the user question (specific condition/drug terms, not broad generic terms).
 - IMPORTANT: If a tool returns irrelevant records, explicitly discard them and retry with a narrower query before citing evidence.
 - IMPORTANT: Do not append manual references/bibliography sections; keep citations inline in the answer body only.
@@ -4849,7 +5101,15 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
           : undefined
     const resolvedMaxSteps =
       typeof langGraphPlan?.maxSteps === "number" && Number.isFinite(langGraphPlan.maxSteps)
-        ? Math.max(1, Math.min(langGraphPlan.maxSteps, 14))
+        ? Math.max(
+            1,
+            Math.min(
+              langGraphPlan.maxSteps,
+              shouldUseBroadEvidenceFanout && freshEvidenceIntent
+                ? FANOUT_MAX_TOOL_STEPS_FRESH
+                : FANOUT_MAX_TOOL_STEPS
+            )
+          )
         : artifactWorkflowStage === "inspect" && effectiveArtifactIntent === "quiz"
           ? 4
         : shouldEnableArtifactRefinementTool
@@ -4858,7 +5118,11 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             ? 2
             : shouldEnableYoutubeTool
               ? 4
-              : 10
+              : shouldUseBroadEvidenceFanout
+                ? freshEvidenceIntent
+                  ? FANOUT_MAX_TOOL_STEPS_FRESH
+                  : FANOUT_MAX_TOOL_STEPS
+                : 10
 
     const result = streamText({
       model: modelWithSearch,
@@ -5287,9 +5551,17 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
         ...runtimeEvidenceCitations,
       ]
       if (mergedStreamCitations.length) {
-        evidenceCitationsForStream = dedupeAndReindexCitations(
-          rankCitationsForQuery(mergedStreamCitations, queryText)
-        ).slice(0, 12)
+        const rankedStreamPool = rankCitationsForQuery(mergedStreamCitations, queryText, {
+          recencyPriority: freshEvidenceIntent,
+        })
+        const diversityAdjustedPool = shouldUseBroadEvidenceFanout
+          ? ensureCitationSourceDiversity(
+              rankedStreamPool,
+              rankedStreamPool,
+              FANOUT_SOURCE_DIVERSITY_FLOOR
+            )
+          : rankedStreamPool
+        evidenceCitationsForStream = dedupeAndReindexCitations(diversityAdjustedPool).slice(0, 12)
 
         const encodedHeader = encodeEvidenceCitationsHeader(evidenceCitationsForStream)
         if (encodedHeader) {

@@ -432,7 +432,7 @@ export function useChatCore({
   const router = useRouter()
   // State management
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [enableSearch, setEnableSearch] = useState(false)
+  const [enableSearch, setEnableSearch] = useState(true)
   const [enableEvidence, setEnableEvidence] = useState(true) // Enabled by default
   const [learningMode, setLearningModeState] =
     useState<MedicalStudentLearningMode>(

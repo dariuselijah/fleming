@@ -34,7 +34,7 @@ export type WebSearchOptions = {
 
 const DEFAULT_MAX_RESULTS = 6
 const MAX_RESULTS_LIMIT = 10
-const DEFAULT_TIMEOUT_MS = 1600
+const DEFAULT_TIMEOUT_MS = 15_000
 const DEFAULT_RETRIES = 1
 const CACHE_TTL_MS = 3 * 60 * 1000
 
@@ -188,7 +188,7 @@ export async function searchWeb(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const retries = clamp(options.retries ?? DEFAULT_RETRIES, 0, 3)
   const medicalOnly = options.medicalOnly ?? false
-  const liveCrawl = options.liveCrawl ?? "always"
+  const liveCrawl = options.liveCrawl ?? "preferred"
 
   if (!normalizedQuery) {
     return {

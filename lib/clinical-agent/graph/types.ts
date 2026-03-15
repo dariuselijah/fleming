@@ -36,6 +36,7 @@ export type ClinicalGraphInput = {
   artifactIntent?: "none" | "quiz"
   supportsTools: boolean
   evidenceEnabled: boolean
+  fanoutPreferred?: boolean
   availableToolNames: string[]
 }
 
