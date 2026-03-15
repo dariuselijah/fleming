@@ -3,6 +3,8 @@
 import { cn } from "@/lib/utils"
 import { useState, useRef, useEffect } from "react"
 import { CitationPopup, type CitationData } from "./citation-popup"
+import { GlobeHemisphereWest } from "@phosphor-icons/react"
+import { getFavicon } from "./utils"
 
 interface JournalCitationTagProps {
   citations: CitationData[]
@@ -55,6 +57,7 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
   const [isPopupOpen, setIsPopupOpen] = useState(false)
   const [activeCitationIndex, setActiveCitationIndex] = useState(0)
   const [isHovering, setIsHovering] = useState(false)
+  const [faviconFailed, setFaviconFailed] = useState(false)
   const anchorRef = useRef<HTMLElement>(null)
   
   if (citations.length === 0) return null
@@ -106,6 +109,8 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
   }
 
   const activeCitation = citations[activeCitationIndex]
+  const faviconUrl = getFavicon(firstCitation.url || null)
+  const showFavicon = Boolean(faviconUrl && !faviconFailed)
 
   // Get URL for first citation to make it clickable
   const citationUrl = firstCitation.url
@@ -119,11 +124,9 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
           rel="noopener noreferrer"
           ref={anchorRef as React.RefObject<HTMLAnchorElement>}
           className={cn(
-            "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200",
-            "hover:bg-green-200 dark:hover:bg-green-900/50",
-            "border border-green-300 dark:border-green-700",
-            "inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-all",
-            "relative z-10 shadow-sm no-underline",
+            "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+            "border-border/70 bg-muted/35 text-foreground/90 hover:bg-muted/60",
+            "relative z-10 no-underline",
             className
           )}
           onClick={(e) => {
@@ -134,6 +137,16 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
+          {showFavicon ? (
+            <img
+              src={faviconUrl || ""}
+              alt=""
+              className="h-3.5 w-3.5 rounded-sm object-contain"
+              onError={() => setFaviconFailed(true)}
+            />
+          ) : (
+            <GlobeHemisphereWest className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
           {journalAbbr}
           {additionalCount > 0 && ` +${additionalCount}`}
         </a>
@@ -141,11 +154,9 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
         <span
           ref={anchorRef}
           className={cn(
-            "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200",
-            "hover:bg-green-200 dark:hover:bg-green-900/50",
-            "border border-green-300 dark:border-green-700",
-            "inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-all",
-            "relative z-10 shadow-sm",
+            "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+            "border-border/70 bg-muted/35 text-foreground/90 hover:bg-muted/60",
+            "relative z-10",
             className
           )}
           onClick={(e) => {
@@ -156,6 +167,16 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
+          {showFavicon ? (
+            <img
+              src={faviconUrl || ""}
+              alt=""
+              className="h-3.5 w-3.5 rounded-sm object-contain"
+              onError={() => setFaviconFailed(true)}
+            />
+          ) : (
+            <GlobeHemisphereWest className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
           {journalAbbr}
           {additionalCount > 0 && ` +${additionalCount}`}
         </span>

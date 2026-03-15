@@ -2,6 +2,13 @@ import { buildProvenance, type SourceProvenance } from "./provenance";
 import { searchGuidelineAdapters } from "./guidelines/registry";
 import type { GuidelineRegion, GuidelineResult } from "./guidelines/types";
 
+const ENABLE_GUIDELINE_DIAGNOSTICS = process.env.GUIDELINE_DIAGNOSTICS === "true";
+
+function logGuidelineDiagnostics(event: string, payload: Record<string, unknown>) {
+  if (!ENABLE_GUIDELINE_DIAGNOSTICS) return;
+  console.log(`[GUIDELINE_DIAGNOSTICS] ${event}`, payload);
+}
+
 type ClinicalTrialResult = {
   nctId: string;
   title: string;
@@ -105,12 +112,20 @@ export async function searchGuidelines(
   maxResults: number = 6,
   regionPriority: GuidelineRegion = "US"
 ): Promise<{ results: GuidelineResult[]; sourcesUsed: string[]; provenance: SourceProvenance[] }> {
+  const startedAt = performance.now();
   const queryVariants = buildGuidelineQueryVariants(query);
   const regionsToTry: GuidelineRegion[] = Array.from(
     new Set<GuidelineRegion>([regionPriority, "US", "GLOBAL", "UK", "EU"])
   );
   const mergedByKey = new Map<string, GuidelineResult>();
   const sources = new Set<string>();
+  const diagnosticsSteps: Array<{
+    variant: string;
+    region: GuidelineRegion;
+    resultCount: number;
+    sourcesUsed: string[];
+    mergedCountAfterStep: number;
+  }> = [];
 
   for (const variant of queryVariants) {
     if (mergedByKey.size >= maxResults) break;
@@ -128,6 +143,13 @@ export async function searchGuidelines(
         if (!mergedByKey.has(key) && mergedByKey.size < maxResults) {
           mergedByKey.set(key, item);
         }
+      });
+      diagnosticsSteps.push({
+        variant,
+        region,
+        resultCount: results.length,
+        sourcesUsed,
+        mergedCountAfterStep: mergedByKey.size,
       });
     }
   }
@@ -150,6 +172,18 @@ export async function searchGuidelines(
       snippet: item.summary || "",
     })
   );
+
+  logGuidelineDiagnostics("search_guidelines", {
+    query,
+    maxResults,
+    regionPriority,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    queryVariants,
+    regionsToTry,
+    mergedCount: merged.length,
+    sourcesUsed: Array.from(sources),
+    steps: diagnosticsSteps,
+  });
 
   return { results: merged, sourcesUsed: Array.from(sources), provenance };
 }

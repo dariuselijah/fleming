@@ -44,6 +44,7 @@ export function ButtonSearch({
   return (
     <Button
       variant="secondary"
+      suppressHydrationWarning
       className={cn(
         "border-border dark:bg-secondary rounded-full border bg-transparent transition-all duration-150 has-[>svg]:px-1.75 md:has-[>svg]:px-3",
         isSelected &&

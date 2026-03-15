@@ -985,6 +985,12 @@ const FANOUT_TOTAL_BUDGET_MS = 28_000
 const FANOUT_TOTAL_BUDGET_FRESH_MS = 34_000
 const FANOUT_MAX_TOOL_STEPS = 12
 const FANOUT_MAX_TOOL_STEPS_FRESH = 14
+const ENABLE_GUIDELINE_DIAGNOSTICS = process.env.GUIDELINE_DIAGNOSTICS === "true"
+
+function logGuidelineDiagnostics(event: string, payload: Record<string, unknown>) {
+  if (!ENABLE_GUIDELINE_DIAGNOSTICS) return
+  console.log(`[GUIDELINE_DIAGNOSTICS] ${event}`, payload)
+}
 
 function hasGuidelineIntent(query: string): boolean {
   const normalized = query.trim()
@@ -1298,29 +1304,60 @@ async function fetchGuidelineFallbackCitations(
   queryText: string,
   maxResults: number
 ): Promise<EvidenceCitation[]> {
+  const startedAt = performance.now()
   const variants = buildGuidelineQueryVariants(queryText)
   const collected: EvidenceCitation[] = []
   const relaxedCollected: EvidenceCitation[] = []
+  const variantDiagnostics: Array<{
+    variant: string
+    rawProvenanceCount: number
+    qualityPassedCount: number
+    relevancePassedCount: number
+    rejectedByQualityReasons: string[]
+  }> = []
   for (const variant of variants) {
     const guidelineResult = await searchGuidelines(variant, maxResults, "US")
     if (!guidelineResult.provenance.length) continue
     relaxedCollected.push(
       ...guidelineResult.provenance.map((item, idx) => provenanceToEvidenceCitation(item, idx + 1))
     )
-    const filtered = guidelineResult.provenance
-      .filter((item) => evaluateProvenanceQuality(item, queryText).passed)
-      .filter((item) =>
-        isTextRelevantToClinicalQuery(
-          `${item.title || ""} ${item.journal || ""} ${item.snippet || ""}`,
-          queryText
-        )
+    const qualityEvaluations = guidelineResult.provenance.map((item) => ({
+      item,
+      quality: evaluateProvenanceQuality(item, queryText),
+    }))
+    const qualityPassed = qualityEvaluations.filter((entry) => entry.quality.passed)
+    const rejectedByQualityReasons = qualityEvaluations
+      .filter((entry) => !entry.quality.passed)
+      .flatMap((entry) => entry.quality.reasons || [])
+    const relevancePassed = qualityPassed.filter((entry) =>
+      isTextRelevantToClinicalQuery(
+        `${entry.item.title || ""} ${entry.item.journal || ""} ${entry.item.snippet || ""}`,
+        queryText
       )
+    )
+    const filtered = relevancePassed
+      .map((entry) => entry.item)
       .map((item, idx) => provenanceToEvidenceCitation(item, idx + 1))
+    variantDiagnostics.push({
+      variant,
+      rawProvenanceCount: guidelineResult.provenance.length,
+      qualityPassedCount: qualityPassed.length,
+      relevancePassedCount: relevancePassed.length,
+      rejectedByQualityReasons: Array.from(new Set(rejectedByQualityReasons)).slice(0, 8),
+    })
     if (filtered.length > 0) {
       collected.push(...filtered)
     }
     if (collected.length >= maxResults) break
   }
+  logGuidelineDiagnostics("guideline_fallback_citations", {
+    queryText,
+    maxResults,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    variants: variantDiagnostics,
+    strictCollectedCount: collected.length,
+    relaxedCollectedCount: relaxedCollected.length,
+  })
   if (collected.length > 0) {
     return dedupeAndReindexCitations(collected).slice(0, maxResults)
   }
@@ -2760,8 +2797,14 @@ export async function POST(req: Request) {
     const finalEnableSearch =
       ENABLE_WEB_SEARCH_TOOL &&
       enableSearchFromClient !== false
+    const webSearchConfigured = hasWebSearchConfigured()
+    const allowWebRetrieval =
+      finalEnableSearch &&
+      webSearchConfigured &&
+      queryText.length > 0 &&
+      !shouldPreferUploadContext
     const shouldRunWebSearchPreflight =
-      finalEnableSearch && queryText.length > 0 && !shouldPreferUploadContext
+      allowWebRetrieval
     const minEvidenceLevelForQuery = clinicianRoleFromResolvedRole ? 3 : 5
 
     const uploadSearchMode: UploadContextSearchMode =
@@ -3577,15 +3620,9 @@ export async function POST(req: Request) {
     }
 
     if (webSearchPreflight?.results?.length) {
-      const serializedResults = webSearchPreflight.results
-        .slice(0, 4)
-        .map(
-          (result, index) =>
-            `[WEB:${index + 1}] ${result.title}\nURL: ${result.url}\nSnippet: ${result.snippet}`
-        )
-        .join("\n\n")
-      effectiveSystemPrompt += `\n\nWEB SEARCH SNAPSHOT (latest web context from user-enabled search):\n${serializedResults}`
-    } else if (finalEnableSearch && !hasWebSearchConfigured()) {
+      effectiveSystemPrompt +=
+        `\n\nWeb preflight found ${webSearchPreflight.results.length} relevant sources. Use webSearch only if additional freshness or corroboration is needed.`
+    } else if (finalEnableSearch && !webSearchConfigured) {
       effectiveSystemPrompt +=
         "\n\nWeb search was requested but EXA_API_KEY is not configured, so continue without live web sources."
     }
@@ -3725,11 +3762,9 @@ export async function POST(req: Request) {
       sourceDiversityCount: sourceDiversityForRouting,
     })
     const shouldEnableWebSearchTool =
-      finalEnableSearch &&
+      allowWebRetrieval &&
       supportsTools &&
-      queryText.length > 0 &&
-      !shouldPreferUploadContext &&
-      hasWebSearchConfigured()
+      queryText.length > 0
     const shouldEnablePubMedTools =
       finalEnableEvidence &&
       supportsTools &&
@@ -4070,7 +4105,7 @@ export async function POST(req: Request) {
         }
       }
 
-      if (hasWebSearchConfigured()) {
+      if (allowWebRetrieval) {
         return buildWebFallbackPayload(
           params.connectorId,
           params.query,
@@ -4506,16 +4541,38 @@ export async function POST(req: Request) {
               const strictMaxResults = benchStrictMode
                 ? Math.max(maxResults, 8)
                 : maxResults
+              const startedAt = performance.now()
               const result = await searchGuidelines(query, strictMaxResults, "US")
+              logGuidelineDiagnostics("guideline_tool_execute", {
+                query,
+                strictMaxResults,
+                benchStrictMode,
+                phase: "primary",
+                resultCount: result.results.length,
+                sourcesUsed: result.sourcesUsed,
+                provenanceCount: result.provenance.length,
+                elapsedMs: Math.round(performance.now() - startedAt),
+              })
               if (result.results.length > 0 || !benchStrictMode) {
                 pushRuntimeEvidenceCitations(result)
                 return result
               }
+              const fallbackStartedAt = performance.now()
               const fallbackResult = await searchGuidelines(
                 `${query} guideline`,
                 strictMaxResults,
                 "GLOBAL"
               )
+              logGuidelineDiagnostics("guideline_tool_execute", {
+                query,
+                strictMaxResults,
+                benchStrictMode,
+                phase: "fallback_global",
+                resultCount: fallbackResult.results.length,
+                sourcesUsed: fallbackResult.sourcesUsed,
+                provenanceCount: fallbackResult.provenance.length,
+                elapsedMs: Math.round(performance.now() - fallbackStartedAt),
+              })
               pushRuntimeEvidenceCitations(fallbackResult)
               return fallbackResult
             },
@@ -5106,11 +5163,11 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - Keep output sleek and concise with real links only.`
     }
 
-    if (finalEnableSearch) {
+    if (shouldEnableWebSearchTool) {
       effectiveSystemPrompt += `\n\nWeb search is explicitly enabled by user toggle.
 - Use the webSearch tool when you need fresh or external sources.
 - Never claim web-browsing unless webSearch returns results.
-- Cite only URLs returned by webSearch or listed in WEB SEARCH SNAPSHOT context.
+- Cite only URLs returned by webSearch.
 - Prefer high-quality medical and institutional sources when clinical claims are involved.
 - If webSearch returns no relevant results, continue with internal reasoning and state that no strong fresh sources were found.`
     }

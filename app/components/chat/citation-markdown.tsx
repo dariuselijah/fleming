@@ -1,7 +1,6 @@
 "use client"
 
 import { parseCitationMarkers } from "@/lib/citations/parser"
-import { JournalCitationTag } from "./journal-citation-tag"
 import { EvidenceCitationPill } from "./evidence-citation-pill"
 import type { CitationData } from "./citation-popup"
 import type { EvidenceCitation } from "@/lib/evidence/types"
@@ -763,6 +762,31 @@ function processText(
   markerMap: Map<string, ReturnType<typeof parseCitationMarkers>[0]>,
   evidenceCitationMap: Map<number, EvidenceCitation> | null
 ): React.ReactNode {
+  const toEvidenceLikeCitation = (
+    citation: CitationData,
+    fallbackIndex: number
+  ): EvidenceCitation => {
+    const parsedYear = Number.parseInt(citation.year, 10)
+    return {
+      index: citation.index || fallbackIndex,
+      pmid: citation.pmid || null,
+      title: citation.title || `Citation ${fallbackIndex}`,
+      journal: citation.journal || "Source",
+      year: Number.isFinite(parsedYear) ? parsedYear : null,
+      doi: citation.doi || null,
+      authors: Array.isArray(citation.authors) ? citation.authors : [],
+      evidenceLevel: 3,
+      studyType: null,
+      sampleSize: null,
+      meshTerms: [],
+      url: citation.url || null,
+      snippet: "",
+      score: 0,
+      sourceType: "medical_evidence",
+      sourceLabel: citation.journal || "Source",
+    }
+  }
+
   const sanitizedText = stripInternalRuntimeTokensPreservePlaceholders(text)
   const parts: React.ReactNode[] = []
   let lastIndex = 0
@@ -835,33 +859,22 @@ function processText(
             .filter((c): c is CitationData => c !== undefined)
 
           if (namedCitations.length > 0) {
-            const journalGroups = new Map<string, CitationData[]>()
-            namedCitations.forEach((citation) => {
-              const journal = citation.journal || "Unknown"
-              if (!journalGroups.has(journal)) {
-                journalGroups.set(journal, [])
-              }
-              journalGroups.get(journal)!.push(citation)
-            })
+            const namedPills = namedCitations.map((citation, i) => (
+              <EvidenceCitationPill
+                key={`named-pill-${citation.index}-${matchIndex}-${i}`}
+                citation={toEvidenceLikeCitation(citation, citation.index || i + 1)}
+                size="sm"
+              />
+            ))
 
-            const journalTags: React.ReactNode[] = []
-            journalGroups.forEach((groupCitations, journal) => {
-              journalTags.push(
-                <JournalCitationTag
-                  key={`named-journal-${journal}-${matchIndex}`}
-                  citations={groupCitations}
-                />
-              )
-            })
-
-            if (journalTags.length > 1) {
+            if (namedPills.length > 1) {
               parts.push(
                 <span key={`named-citation-group-${matchIndex}`} className="inline-flex items-center gap-1">
-                  {journalTags}
+                  {namedPills}
                 </span>
               )
             } else {
-              parts.push(journalTags[0])
+              parts.push(namedPills[0])
             }
           }
 
@@ -869,42 +882,29 @@ function processText(
           continue
         }
 
-        // Fall back to JournalCitationTag for web search results
+        // Fall back to sleek citation pills for web/search results
         const markerCitations = marker.indices
           .map(idx => citations.get(idx))
           .filter((c): c is CitationData => c !== undefined)
         
         if (markerCitations.length > 0) {
-          // Group citations by journal
-          const journalGroups = new Map<string, CitationData[]>()
-          markerCitations.forEach(citation => {
-            const journal = citation.journal || 'Unknown'
-            if (!journalGroups.has(journal)) {
-              journalGroups.set(journal, [])
-            }
-            journalGroups.get(journal)!.push(citation)
-          })
-          
-          // Render journal tags for each group
-          const journalTags: React.ReactNode[] = []
-          journalGroups.forEach((groupCitations, journal) => {
-            journalTags.push(
-              <JournalCitationTag
-                key={`journal-${journal}-${matchIndex}`}
-                citations={groupCitations}
-              />
-            )
-          })
+          const citationPills = markerCitations.map((citation, i) => (
+            <EvidenceCitationPill
+              key={`citation-pill-${citation.index}-${matchIndex}-${i}`}
+              citation={toEvidenceLikeCitation(citation, citation.index || i + 1)}
+              size="sm"
+            />
+          ))
           
           // If we have multiple journal groups, wrap them
-          if (journalTags.length > 1) {
+          if (citationPills.length > 1) {
             parts.push(
               <span key={`citation-group-${matchIndex}`} className="inline-flex items-center gap-1">
-                {journalTags}
+                {citationPills}
               </span>
             )
-          } else if (journalTags.length === 1) {
-            parts.push(journalTags[0])
+          } else if (citationPills.length === 1) {
+            parts.push(citationPills[0])
           }
         }
       }
