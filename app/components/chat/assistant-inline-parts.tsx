@@ -4,11 +4,14 @@ import { MessageContent } from "@/components/prompt-kit/message"
 import { cn } from "@/lib/utils"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
 import type { ToolInvocationUIPart } from "@ai-sdk/ui-utils"
+import type { ChartDrilldownPayload } from "@/app/components/charts/chat-chart"
+import { ENABLE_CHART_DRILLDOWN_SUBLOOP } from "@/lib/config"
 import type { CitationData } from "./citation-popup"
 import { CitationMarkdown } from "./citation-markdown"
 import { Reasoning } from "./reasoning"
 import { ToolInvocation } from "./tool-invocation"
 import { WEB_ROLE_MARKDOWN_CLASSNAME } from "./markdown-styles"
+import { useCallback } from "react"
 
 type TextSegment = {
   type: "text"
@@ -40,6 +43,7 @@ type AssistantInlinePartsProps = {
   citations: Map<number, CitationData>
   evidenceCitations?: unknown[]
   streamIntroPreview?: string | null
+  onChartDrilldown?: (payload: ChartDrilldownPayload) => void
 }
 
 function sanitizeInlineAssistantText(text: string): string {
@@ -251,7 +255,16 @@ export function AssistantInlineParts({
   citations,
   evidenceCitations,
   streamIntroPreview,
+  onChartDrilldown,
 }: AssistantInlinePartsProps) {
+  const handleChartDrilldown = useCallback(
+    (payload: ChartDrilldownPayload) => {
+      if (!ENABLE_CHART_DRILLDOWN_SUBLOOP) return
+      if (!onChartDrilldown) return
+      onChartDrilldown(payload)
+    },
+    [onChartDrilldown]
+  )
   const segments = buildTimelineSegments(parts, fallbackText)
   const isStreamingWithoutSegments =
     status === "streaming" && segments.length === 0 && Boolean(streamIntroPreview)
@@ -307,6 +320,7 @@ export function AssistantInlineParts({
               className={cn(WEB_ROLE_MARKDOWN_CLASSNAME)}
               citations={citations}
               evidenceCitations={evidenceCitations as any}
+              onChartDrilldown={handleChartDrilldown}
             >
               {text}
             </CitationMarkdown>
@@ -318,6 +332,7 @@ export function AssistantInlineParts({
             key={segment.key}
             className={cn(WEB_ROLE_MARKDOWN_CLASSNAME)}
             markdown
+            onChartDrilldown={handleChartDrilldown}
           >
             {text}
           </MessageContent>

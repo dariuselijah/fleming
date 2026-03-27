@@ -7,6 +7,7 @@ import {
   FilePdf,
   FilePpt,
   FileText,
+  FileVideo,
   FolderOpen,
   ImageSquare,
   SpinnerGap,
@@ -170,6 +171,7 @@ export function ChatInput({
     if (kind === "docx") return FileDoc
     if (kind === "image") return ImageSquare
     if (kind === "text") return FileText
+    if (kind === "video") return FileVideo
     return FolderOpen
   }, [])
 

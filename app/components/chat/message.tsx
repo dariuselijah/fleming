@@ -2,8 +2,13 @@ import { Message as MessageType } from "@ai-sdk/react"
 import React, { useState, useCallback, useMemo } from "react"
 import { MessageAssistant } from "./message-assistant"
 import { MessageUser } from "./message-user"
+import type { ChartDrilldownPayload } from "@/app/components/charts/chat-chart"
 import { parseLearningCard } from "@/lib/medical-student-learning"
-import type { ReferencedUploadStatus } from "./activity/types"
+import type { EvidenceCitation } from "@/lib/evidence/types"
+import type {
+  OptimisticTaskBoardState,
+  ReferencedUploadStatus,
+} from "./activity/types"
 
 type MessageProps = {
   variant: MessageType["role"]
@@ -16,6 +21,14 @@ type MessageProps = {
   onReload: () => void
   onSuggestion?: (suggestion: string) => void
   onWorkflowSuggestion?: (suggestion: string) => void
+  onDrilldownInsightAdd?: (input: {
+    pointId: string
+    query: string
+    response: string
+    payload: ChartDrilldownPayload
+    citations: EvidenceCitation[]
+  }) => Promise<boolean> | boolean
+  discussionInsightCount?: number
   hasScrollAnchor?: boolean
   parts?: MessageType["parts"]
   annotations?: Array<{ type?: string; refinement?: unknown }>
@@ -25,6 +38,7 @@ type MessageProps = {
   contextPrompt?: string
   streamIntroPreview?: string | null
   referencedUploads?: ReferencedUploadStatus[]
+  optimisticTaskBoard?: OptimisticTaskBoardState | null
 }
 
 export function Message({
@@ -38,6 +52,8 @@ export function Message({
   onReload,
   onSuggestion,
   onWorkflowSuggestion,
+  onDrilldownInsightAdd,
+  discussionInsightCount = 0,
   hasScrollAnchor,
   parts,
   annotations,
@@ -47,6 +63,7 @@ export function Message({
   contextPrompt,
   streamIntroPreview,
   referencedUploads = [],
+  optimisticTaskBoard = null,
 }: MessageProps) {
   const [copied, setCopied] = useState(false)
   const clipboardText = useMemo(() => {
@@ -94,6 +111,8 @@ export function Message({
           onReload={memoizedOnReload}
           onSuggestion={onSuggestion}
           onWorkflowSuggestion={onWorkflowSuggestion}
+          onDrilldownInsightAdd={onDrilldownInsightAdd}
+          discussionInsightCount={discussionInsightCount}
           isLast={isLast}
           hasScrollAnchor={hasScrollAnchor}
           parts={parts}
@@ -104,6 +123,7 @@ export function Message({
           contextPrompt={contextPrompt}
           streamIntroPreview={streamIntroPreview}
           referencedUploads={referencedUploads}
+          optimisticTaskBoard={optimisticTaskBoard}
         >
           {children}
         </MessageAssistant>
@@ -120,6 +140,8 @@ export function Message({
     memoizedOnDelete,
     onSuggestion,
     onWorkflowSuggestion,
+    onDrilldownInsightAdd,
+    discussionInsightCount,
     id,
     hasScrollAnchor,
     attachments,
@@ -133,6 +155,7 @@ export function Message({
     contextPrompt,
     streamIntroPreview,
     referencedUploads,
+    optimisticTaskBoard,
   ])
 
   return messageContent

@@ -332,6 +332,78 @@ export type Database = {
           },
         ]
       }
+      evidence_visual_assets: {
+        Row: {
+          id: string
+          source_id: string
+          pmid: string | null
+          pmcid: string | null
+          doi: string | null
+          article_url: string | null
+          source_page_url: string | null
+          figure_key: string
+          asset_type: string
+          label: string | null
+          caption: string | null
+          license: string | null
+          storage_bucket: string
+          file_path: string
+          mime_type: string
+          width: number | null
+          height: number | null
+          sort_order: number
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          source_id: string
+          pmid?: string | null
+          pmcid?: string | null
+          doi?: string | null
+          article_url?: string | null
+          source_page_url?: string | null
+          figure_key: string
+          asset_type?: string
+          label?: string | null
+          caption?: string | null
+          license?: string | null
+          storage_bucket?: string
+          file_path: string
+          mime_type: string
+          width?: number | null
+          height?: number | null
+          sort_order?: number
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          source_id?: string
+          pmid?: string | null
+          pmcid?: string | null
+          doi?: string | null
+          article_url?: string | null
+          source_page_url?: string | null
+          figure_key?: string
+          asset_type?: string
+          label?: string | null
+          caption?: string | null
+          license?: string | null
+          storage_bucket?: string
+          file_path?: string
+          mime_type?: string
+          width?: number | null
+          height?: number | null
+          sort_order?: number
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_upload_chunk_assets: {
         Row: {
           chunk_id: string

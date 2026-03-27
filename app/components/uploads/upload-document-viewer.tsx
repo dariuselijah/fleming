@@ -66,6 +66,7 @@ export function UploadDocumentViewer({
   const startParam = toInt(params.get("start"))
   const endParam = toInt(params.get("end"))
   const searchParam = params.get("search")?.trim() || ""
+  const debugExtraction = params.get("debug") === "1"
   const returnToParam = params.get("returnTo")
 
   const closeViewer = useCallback(() => {
@@ -284,7 +285,7 @@ export function UploadDocumentViewer({
               ) : null}
             </div>
           </div>
-        ) : (
+        ) : debugExtraction ? (
           <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[1.25fr_0.9fr]">
             <section className="overflow-hidden rounded-3xl border border-border/60 bg-background shadow-xs">
               <div className="border-b border-border/60 px-4 py-3 text-sm font-medium">PDF page {pdfPage}</div>
@@ -301,7 +302,7 @@ export function UploadDocumentViewer({
               <div className="border-b border-border/60 px-4 py-3">
                 <p className="text-sm font-medium">Referenced context</p>
                 <p className="text-muted-foreground mt-0.5 text-xs">
-                  Click units to navigate. Highlight follows cited offsets.
+                  Debug mode. Click units to inspect extracted text and citation offsets.
                 </p>
               </div>
 
@@ -367,6 +368,24 @@ export function UploadDocumentViewer({
                     <p className="text-muted-foreground text-sm">No source unit available.</p>
                   )}
                 </div>
+              </div>
+            </section>
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 p-4">
+            <section className="h-full overflow-hidden rounded-3xl border border-border/60 bg-background shadow-xs">
+              <div className="border-b border-border/60 px-4 py-3 text-sm font-medium">
+                PDF page {pdfPage}
+                <span className="text-muted-foreground ml-2 text-xs">
+                  Add <code>?debug=1</code> to inspect extracted source text.
+                </span>
+              </div>
+              <div className="h-[calc(100%-49px)] min-h-[560px]">
+                <PdfTextLayerViewer
+                  fileUrl={upload?.originalFileUrl ?? null}
+                  pageNumber={pdfPage}
+                  highlightText={pdfHighlightText}
+                />
               </div>
             </section>
           </div>

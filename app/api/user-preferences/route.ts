@@ -28,6 +28,30 @@ function hasMissingOptionalColumnError(error: unknown): boolean {
   return OPTIONAL_ONBOARDING_COLUMNS.some((column) => message.includes(column))
 }
 
+function decryptHealthFieldsForResponse<T extends Record<string, any> | null | undefined>(row: T): T {
+  if (!row || !isEncryptionEnabled()) return row
+
+  const next = { ...row } as Record<string, any>
+  const fieldMappings: Array<{ key: string; ivKey: string }> = [
+    { key: "health_context", ivKey: "health_context_iv" },
+    { key: "health_conditions", ivKey: "health_conditions_iv" },
+    { key: "medications", ivKey: "medications_iv" },
+    { key: "allergies", ivKey: "allergies_iv" },
+    { key: "family_history", ivKey: "family_history_iv" },
+    { key: "lifestyle_factors", ivKey: "lifestyle_factors_iv" },
+  ]
+
+  for (const { key, ivKey } of fieldMappings) {
+    if (!next[key]) continue
+    const iv = next[ivKey]
+    if (typeof iv === "string" || Array.isArray(iv)) {
+      next[key] = decryptHealthData(next[key], iv)
+    }
+  }
+
+  return next as T
+}
+
 export async function GET(request: NextRequest) {
   console.log("GET /api/user-preferences called")
   
@@ -86,32 +110,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(convertToApiFormat(defaultPreferences))
     }
 
-    // Decrypt health data if encrypted
-    if (isEncryptionEnabled()) {
-      const prefs = preferences as any
-      if (prefs.health_context && prefs.health_context_iv) {
-        prefs.health_context = decryptHealthData(prefs.health_context, prefs.health_context_iv)
-      }
-      if (prefs.health_conditions && prefs.health_conditions_iv) {
-        prefs.health_conditions = decryptHealthData(prefs.health_conditions, prefs.health_conditions_iv)
-      }
-      if (prefs.medications && prefs.medications_iv) {
-        prefs.medications = decryptHealthData(prefs.medications, prefs.medications_iv)
-      }
-      if (prefs.allergies && prefs.allergies_iv) {
-        prefs.allergies = decryptHealthData(prefs.allergies, prefs.allergies_iv)
-      }
-      if (prefs.family_history && prefs.family_history_iv) {
-        prefs.family_history = decryptHealthData(prefs.family_history, prefs.family_history_iv)
-      }
-      if (prefs.lifestyle_factors && prefs.lifestyle_factors_iv) {
-        prefs.lifestyle_factors = decryptHealthData(prefs.lifestyle_factors, prefs.lifestyle_factors_iv)
-      }
-      console.log("🔓 Health data decrypted during retrieval")
-    }
-
-    console.log("Returning user preferences:", preferences)
-    return NextResponse.json(preferences)
+    const responsePreferences = decryptHealthFieldsForResponse(preferences as Record<string, any>)
+    console.log("Returning user preferences:", responsePreferences)
+    return NextResponse.json(responsePreferences)
   } catch (error) {
     console.error("Unexpected error in GET /api/user-preferences:", error)
     return NextResponse.json(
@@ -252,8 +253,9 @@ export async function PUT(request: NextRequest) {
             .single()
 
           if (!retry.error) {
-            console.log("Updated user preferences response after retry:", retry.data)
-            return NextResponse.json(retry.data)
+            const responseData = decryptHealthFieldsForResponse(retry.data as Record<string, any>)
+            console.log("Updated user preferences response after retry:", responseData)
+            return NextResponse.json(responseData)
           }
           console.error("Retry error updating user preferences:", retry.error)
         } else {
@@ -266,8 +268,9 @@ export async function PUT(request: NextRequest) {
         )
       }
 
-      console.log("Updated user preferences response:", data)
-      return NextResponse.json(data)
+      const responseData = decryptHealthFieldsForResponse(data as Record<string, any>)
+      console.log("Updated user preferences response:", responseData)
+      return NextResponse.json(responseData)
     } else {
       // Create new preferences
       console.log("Creating new user preferences:", apiData)
@@ -302,8 +305,9 @@ export async function PUT(request: NextRequest) {
             .single()
 
           if (!retry.error) {
-            console.log("Created user preferences response after retry:", retry.data)
-            return NextResponse.json(retry.data)
+            const responseData = decryptHealthFieldsForResponse(retry.data as Record<string, any>)
+            console.log("Created user preferences response after retry:", responseData)
+            return NextResponse.json(responseData)
           }
           console.error("Retry error creating user preferences:", retry.error)
         } else {
@@ -316,8 +320,9 @@ export async function PUT(request: NextRequest) {
         )
       }
 
-      console.log("Created user preferences response:", data)
-      return NextResponse.json(data)
+      const responseData = decryptHealthFieldsForResponse(data as Record<string, any>)
+      console.log("Created user preferences response:", responseData)
+      return NextResponse.json(responseData)
     }
   } catch (error) {
     console.error("Error in user-preferences PUT API:", error)

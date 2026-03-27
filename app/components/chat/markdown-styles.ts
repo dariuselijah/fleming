@@ -1,6 +1,6 @@
 export const WEB_ROLE_MARKDOWN_CLASSNAME =
-  "prose dark:prose-invert relative min-w-full bg-transparent p-0 " +
-  "prose-p:my-3 prose-p:leading-7 prose-li:my-1 prose-ul:my-3 prose-ol:my-3 " +
+  "prose dark:prose-invert relative min-w-full bg-transparent p-0 font-sans " +
+  "prose-p:my-3 prose-p:text-[15px] prose-p:leading-7 prose-li:my-1 prose-li:text-[15px] prose-ul:my-3 prose-ol:my-3 " +
   "prose-blockquote:my-4 prose-blockquote:border-l-4 prose-blockquote:pl-4 prose-blockquote:italic " +
   "prose-hr:my-6 prose-strong:font-semibold " +
   "prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold " +

@@ -11,6 +11,7 @@
     "test:chat-history": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-chat-history-regressions.ts",
     "test:upload-artifacts": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-upload-artifact-regressions.ts",
     "test:clinical-harness": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-clinical-harness-regressions.ts",
+    "test:agentic-orchestration": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-agentic-orchestration-regressions.ts",
     "test:chat-timeline": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-chat-activity-timeline-regressions.ts",
     "test:web-search": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-web-search-exa.ts",
     "test:guideline-search": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-guideline-search-diagnostics.ts",
@@ -42,7 +43,9 @@
     "benchmark:report": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/generate-benchmark-report.ts",
     "benchmark:release-check": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/check-release-benchmarks.ts",
     "benchmark:release": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts",
-    "benchmark:release:strict": "BENCH_STRICT_MODE=true npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts"
+    "benchmark:release:strict": "BENCH_STRICT_MODE=true npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts",
+    "test:lms-media-platform": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-lms-media-platform-regressions.ts",
+    "benchmark:lms-media": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/benchmark-lms-media-pipeline.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.10",
@@ -94,6 +97,7 @@
     "lucide-react": "^0.503.0",
     "mammoth": "^1.11.0",
     "marked": "^15.0.11",
+    "mermaid": "^11.13.0",
     "motion": "^12.6.3",
     "next": "^15.4.8",
     "next-themes": "^0.4.6",
@@ -104,6 +108,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.8.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "shiki": "^3.4.0",

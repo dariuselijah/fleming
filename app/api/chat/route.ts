@@ -5,6 +5,8 @@ import {
   ENABLE_UPLOAD_ARTIFACT_V2,
   ENABLE_YOUTUBE_TOOL,
   ENABLE_LANGGRAPH_HARNESS,
+  ENABLE_LANGCHAIN_SUPERVISOR,
+  ENABLE_COGNITIVE_ORCHESTRATION_FULL,
   ENABLE_CONNECTOR_REGISTRY,
   ENABLE_STRICT_CITATION_CONTRACT,
   NON_AUTH_HOURLY_ATTACHMENT_LIMIT,
@@ -14,7 +16,7 @@ import { getAllModels, getModelInfo } from "@/lib/models"
 import { getProviderForModel } from "@/lib/openproviders/provider-map"
 import type { SupportedModel } from "@/lib/openproviders/types"
 import type { ProviderWithoutOllama } from "@/lib/user-keys"
-import { searchPubMed, fetchPubMedArticle } from "@/lib/pubmed"
+import { searchPubMed, fetchPubMedArticle, searchPubMedByDOI, type PubMedArticle } from "@/lib/pubmed"
 import {
   searchGuidelines,
   searchClinicalTrials,
@@ -33,6 +35,7 @@ import { Attachment } from "@ai-sdk/ui-utils"
 import {
   Message as MessageAISDK,
   convertToCoreMessages,
+  generateText,
   streamText,
   ToolSet,
   tool,
@@ -56,12 +59,16 @@ import {
 import { integrateMedicalKnowledge } from "@/lib/models/medical-knowledge"
 import { anonymizeMessages } from "@/lib/anonymize"
 import {
+  searchMedicalEvidence,
+  resultsToCitations,
   synthesizeEvidence,
   buildEvidenceSystemPrompt,
   extractReferencedCitations,
   buildEvidenceContext,
+  buildEvidenceSourceId,
 } from "@/lib/evidence"
 import type { EvidenceCitation } from "@/lib/evidence"
+import { enrichEvidenceCitationsWithJournalVisuals } from "@/lib/evidence/journal-visuals"
 import {
   getLearningModeSystemInstructions,
   normalizeMedicalStudentLearningMode,
@@ -75,6 +82,10 @@ import {
 import { UserUploadService } from "@/lib/uploads/server"
 import type { UploadContextSearchMode, UploadTopicContext } from "@/lib/uploads/server"
 import type { UserUploadListItem } from "@/lib/uploads/types"
+import { summarizeTextForNotes } from "@/lib/media/pipeline"
+import { StudyGraphService } from "@/lib/student-workspace/study-graph"
+import { StudyPlannerService } from "@/lib/student-workspace/planner"
+import { StudyReviewService } from "@/lib/student-workspace/review"
 import {
   extractUploadReferenceIds,
   stripUploadReferenceTokens,
@@ -96,11 +107,19 @@ import {
 } from "@/lib/citations/formatters"
 import { runClinicalAgentHarness } from "@/lib/clinical-agent/graph"
 import { recordCitationContractViolation } from "@/lib/clinical-agent/telemetry"
+import type {
+  ClinicalIncompleteEvidencePolicy,
+  LmsContextSnapshot,
+  LmsProvider,
+} from "@/lib/clinical-agent/graph/types"
 import {
   runConnectorSearch,
   type ClinicalConnectorId,
   type ConnectorSearchPayload,
 } from "@/lib/evidence/connectors"
+import { runLangChainSupervisor } from "@/lib/clinical-agent/langchain"
+import { decryptHealthData, encryptHealthData, isEncryptionEnabled } from "@/lib/encryption"
+import { createClient } from "@/lib/supabase/server"
 
 export const maxDuration = 60
 const BENCH_STRICT_MODE = process.env.BENCH_STRICT_MODE === "true"
@@ -140,6 +159,107 @@ function detectImplicitUploadIntent(query: string): ImplicitUploadIntentSignal {
   }
 }
 
+const LMS_COURSES_TABLE = "student_lms_courses"
+const LMS_ARTIFACTS_TABLE = "student_lms_artifacts"
+const EDUCATIONAL_PROMPT_CUE_PATTERN =
+  /\b(curriculum|course|module|lecture|assignment|syllabus|learning objective|exam|osce|shelf|board|quiz|moodle|canvas|study plan|revision)\b/i
+
+function hasEducationalPromptCue(
+  query: string,
+  learningMode: MedicalStudentLearningMode
+): boolean {
+  if (learningMode !== "ask") return true
+  return EDUCATIONAL_PROMPT_CUE_PATTERN.test(query)
+}
+
+function isMissingLmsTableError(error: unknown): boolean {
+  const message = String((error as { message?: string } | undefined)?.message || "")
+  return /student_lms_courses|student_lms_artifacts|does not exist|42P01/i.test(message)
+}
+
+async function loadMinimalLmsContextSnapshot(input: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+}): Promise<LmsContextSnapshot | null> {
+  if (!input.supabase) return null
+  const coursesQuery = (input.supabase as any)
+    .from(LMS_COURSES_TABLE)
+    .select("provider, course_name, last_synced_at")
+    .eq("user_id", input.userId)
+    .order("last_synced_at", { ascending: false })
+    .limit(60)
+  const artifactsQuery = (input.supabase as any)
+    .from(LMS_ARTIFACTS_TABLE)
+    .select("provider, title, due_at, synced_at")
+    .eq("user_id", input.userId)
+    .order("synced_at", { ascending: false })
+    .limit(160)
+
+  const [coursesResult, artifactsResult] = await Promise.all([
+    coursesQuery,
+    artifactsQuery,
+  ])
+  if (coursesResult.error && !isMissingLmsTableError(coursesResult.error)) {
+    throw new Error(coursesResult.error.message || "Failed to load LMS courses")
+  }
+  if (artifactsResult.error && !isMissingLmsTableError(artifactsResult.error)) {
+    throw new Error(artifactsResult.error.message || "Failed to load LMS artifacts")
+  }
+
+  const courses = Array.isArray(coursesResult.data)
+    ? (coursesResult.data as Array<Record<string, unknown>>)
+    : []
+  const artifacts = Array.isArray(artifactsResult.data)
+    ? (artifactsResult.data as Array<Record<string, unknown>>)
+    : []
+  if (courses.length === 0 && artifacts.length === 0) return null
+
+  const providerSet = new Set<LmsProvider>()
+  const recentCourseNames: string[] = []
+  const seenCourseNames = new Set<string>()
+  courses.forEach((row) => {
+    const provider = row.provider === "canvas" ? "canvas" : "moodle"
+    providerSet.add(provider)
+    const courseName = typeof row.course_name === "string" ? row.course_name.trim() : ""
+    if (!courseName || seenCourseNames.has(courseName.toLowerCase())) return
+    seenCourseNames.add(courseName.toLowerCase())
+    if (recentCourseNames.length < 4) {
+      recentCourseNames.push(courseName)
+    }
+  })
+
+  const nowMs = Date.now()
+  const days45Ms = 45 * 24 * 60 * 60 * 1000
+  const upcomingDueTitles = artifacts
+    .map((row) => ({
+      title: typeof row.title === "string" ? row.title.trim() : "",
+      dueAt: typeof row.due_at === "string" ? row.due_at : null,
+      provider: row.provider === "canvas" ? "canvas" : "moodle",
+    }))
+    .filter((row) => {
+      if (!row.dueAt) return false
+      const dueMs = Date.parse(row.dueAt)
+      return Number.isFinite(dueMs) && dueMs >= nowMs && dueMs <= nowMs + days45Ms
+    })
+    .sort((left, right) => Date.parse(left.dueAt as string) - Date.parse(right.dueAt as string))
+    .slice(0, 4)
+    .map((row) => row.title)
+    .filter((title) => title.length > 0)
+
+  artifacts.forEach((row) => {
+    const provider = row.provider === "canvas" ? "canvas" : "moodle"
+    providerSet.add(provider)
+  })
+
+  return {
+    courseCount: courses.length,
+    artifactCount: artifacts.length,
+    providerIds: Array.from(providerSet),
+    recentCourseNames,
+    upcomingDueTitles,
+  }
+}
+
 function resolveAutoLatestUploadIds(
   uploads: UserUploadListItem[],
   intentSignal: ImplicitUploadIntentSignal,
@@ -147,8 +267,8 @@ function resolveAutoLatestUploadIds(
 ): string[] {
   if (!intentSignal.hasImplicitUploadIntent) return []
   const kindPriority = intentSignal.preferSlides
-    ? { pptx: 6, pdf: 5, docx: 4, text: 3, image: 1 }
-    : { pdf: 6, docx: 5, text: 4, pptx: 4, image: 1 }
+    ? { pptx: 6, pdf: 5, docx: 4, text: 3, video: 3, image: 1 }
+    : { pdf: 6, docx: 5, text: 4, pptx: 4, video: 4, image: 1 }
 
   return [...uploads]
     .filter((upload) => upload.status === "completed")
@@ -162,6 +282,120 @@ function resolveAutoLatestUploadIds(
     })
     .slice(0, maxCount)
     .map((upload) => upload.id)
+}
+
+type UploadReadinessSnapshot = {
+  uploadId: string
+  uploadTitle: string | null
+  status: "pending" | "processing" | "completed" | "failed"
+  progressStage: string | null
+  progressPercent: number | null
+  lastError: string | null
+}
+
+const UPLOAD_READY_GATE_MAX_WAIT_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.UPLOAD_READY_GATE_MAX_WAIT_MS || "45000", 10) || 45_000
+)
+const UPLOAD_READY_GATE_POLL_MS = Math.max(
+  500,
+  Number.parseInt(process.env.UPLOAD_READY_GATE_POLL_MS || "1500", 10) || 1_500
+)
+
+function normalizeRequestUploadIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(
+    new Set(
+      value
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter((entry) => entry.length > 0)
+    )
+  ).slice(0, 8)
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitForSelectedUploadsReady(input: {
+  uploadService: UserUploadService
+  userId: string
+  selectedUploadIds: string[]
+  timeoutMs?: number
+  pollMs?: number
+}): Promise<{
+  readyUploadIds: string[]
+  snapshots: UploadReadinessSnapshot[]
+  timedOut: boolean
+}> {
+  const timeoutMs = Math.max(2_000, input.timeoutMs ?? UPLOAD_READY_GATE_MAX_WAIT_MS)
+  const pollMs = Math.max(500, input.pollMs ?? UPLOAD_READY_GATE_POLL_MS)
+  const deadline = Date.now() + timeoutMs
+  let snapshots: UploadReadinessSnapshot[] = input.selectedUploadIds.map((uploadId) => ({
+    uploadId,
+    uploadTitle: null,
+    status: "pending",
+    progressStage: "queued",
+    progressPercent: 0,
+    lastError: null,
+  }))
+
+  while (Date.now() <= deadline) {
+    try {
+      const uploads = await input.uploadService.listUploads(input.userId)
+      const uploadById = new Map(uploads.map((upload) => [upload.id, upload]))
+      snapshots = input.selectedUploadIds.map((uploadId) => {
+        const upload = uploadById.get(uploadId)
+        if (!upload) {
+          return {
+            uploadId,
+            uploadTitle: null,
+            status: "pending",
+            progressStage: "queued",
+            progressPercent: 0,
+            lastError: null,
+          } satisfies UploadReadinessSnapshot
+        }
+        const status =
+          upload.status === "completed" || upload.status === "failed"
+            ? upload.status
+            : "processing"
+        return {
+          uploadId,
+          uploadTitle: upload.title || null,
+          status,
+          progressStage: upload.latestJob?.progressStage || null,
+          progressPercent:
+            typeof upload.latestJob?.progressPercent === "number"
+              ? upload.latestJob.progressPercent
+              : null,
+          lastError: upload.lastError || upload.latestJob?.errorMessage || null,
+        } satisfies UploadReadinessSnapshot
+      })
+      const readyUploadIds = snapshots
+        .filter((snapshot) => snapshot.status === "completed")
+        .map((snapshot) => snapshot.uploadId)
+      if (readyUploadIds.length === input.selectedUploadIds.length) {
+        return {
+          readyUploadIds,
+          snapshots,
+          timedOut: false,
+        }
+      }
+    } catch {
+      // Continue polling on transient failures.
+    }
+
+    await sleep(pollMs)
+  }
+
+  return {
+    readyUploadIds: snapshots
+      .filter((snapshot) => snapshot.status === "completed")
+      .map((snapshot) => snapshot.uploadId),
+    snapshots,
+    timedOut: true,
+  }
 }
 
 /**
@@ -382,6 +616,63 @@ function extractVisibleAssistantText(message: any): string {
     }
   }
   return text.trim()
+}
+
+function overwriteAssistantText(message: any, text: string): any {
+  if (!message || typeof message !== "object") return message
+  const nextMessage: any = { ...message }
+
+  if (typeof nextMessage.content === "string") {
+    nextMessage.content = text
+  } else if (Array.isArray(nextMessage.content)) {
+    const nonTextContent = nextMessage.content.filter(
+      (part: any) => !(part && typeof part === "object" && part.type === "text")
+    )
+    nextMessage.content = [{ type: "text", text }, ...nonTextContent]
+  } else {
+    nextMessage.content = text
+  }
+
+  if (Array.isArray(nextMessage.parts)) {
+    const nonTextParts = nextMessage.parts.filter(
+      (part: any) => !(part && typeof part === "object" && part.type === "text")
+    )
+    nextMessage.parts = [{ type: "text", text }, ...nonTextParts]
+  }
+
+  return nextMessage
+}
+
+function computeCitationUtilization(
+  allCitations: EvidenceCitation[],
+  referencedCitations: EvidenceCitation[]
+): {
+  totalUnique: number
+  referencedUnique: number
+  ratio: number
+  missingSourceIds: string[]
+} {
+  const allSourceIds = Array.from(
+    new Set(
+      allCitations
+        .map((citation) => buildEvidenceSourceId(citation))
+        .filter((sourceId) => typeof sourceId === "string" && sourceId.trim().length > 0)
+    )
+  )
+  const referencedSet = new Set(
+    referencedCitations
+      .map((citation) => buildEvidenceSourceId(citation))
+      .filter((sourceId) => typeof sourceId === "string" && sourceId.trim().length > 0)
+  )
+  const missingSourceIds = allSourceIds.filter((sourceId) => !referencedSet.has(sourceId))
+  const totalUnique = allSourceIds.length
+  const referencedUnique = totalUnique - missingSourceIds.length
+  return {
+    totalUnique,
+    referencedUnique,
+    ratio: totalUnique > 0 ? referencedUnique / totalUnique : 0,
+    missingSourceIds,
+  }
 }
 
 function ensureArtifactLeadInInMessages(messages: any[]): any[] {
@@ -611,6 +902,335 @@ function hasEvidenceSeekingIntent(query: string): boolean {
   return EVIDENCE_SEEKING_INTENT_PATTERN.test(normalized)
 }
 
+function wantsInlineEvidenceFigure(query: string): boolean {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return false
+  const visualIntent = /\b(figure|fig\.?|diagram|schema|algorithm|image|illustration|visual)\b/.test(
+    normalized
+  )
+  const inlineIntent = /\b(inline|show|include|render|display|embed)\b/.test(normalized)
+  return visualIntent && inlineIntent
+}
+
+function wantsPmcOpenAccessReview(query: string): boolean {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return false
+  const pmcIntent = /\b(pmc|pubmed central|open-access|open access|oa)\b/.test(normalized)
+  const reviewIntent = /\breview\b/.test(normalized)
+  return pmcIntent && reviewIntent
+}
+
+function extractPmcidFromValue(value: string | null | undefined): string | null {
+  if (!value) return null
+  const match = String(value).match(/\b(PMC\d+)\b/i)
+  return match?.[1]?.toUpperCase() || null
+}
+
+function buildPmcReviewSearchQueries(query: string): string[] {
+  const normalized = query.replace(/\s+/g, " ").trim().toLowerCase()
+  if (!normalized) return []
+
+  const terms = extractClinicalQueryTerms(normalized).filter(
+    (term) =>
+      ![
+        "pmc",
+        "pubmed",
+        "central",
+        "open",
+        "access",
+        "review",
+        "figure",
+        "caption",
+        "inline",
+        "article",
+        "articles",
+        "pick",
+        "yourself",
+        "include",
+        "using",
+        "comply",
+        "exact",
+        "constraint",
+        "clearly",
+        "requirement",
+      ].includes(term)
+  )
+
+  const compact = terms.slice(0, 4).join(" ").trim()
+  const hasPd1 = /\bpd[\s-]?1\b/.test(normalized)
+  const hasCtla4 = /\bctla[\s-]?4\b/.test(normalized)
+  const hasCheckpoint = /\bimmune checkpoint|checkpoint inhibitor|checkpoint\b/.test(normalized)
+  const hasCancer = /\bcancer|tumou?r|oncolog|melanoma|nsclc|lung\b/.test(normalized)
+
+  const strategies = new Set<string>()
+
+  if (hasPd1 && hasCtla4) {
+    strategies.add(`("PD-1" OR PD1) AND ("CTLA-4" OR CTLA4) AND review`)
+    strategies.add(`("PD-1" OR PD1) AND ("CTLA-4" OR CTLA4) AND ("immune checkpoint" OR immunotherapy) AND review`)
+  }
+
+  if (hasCheckpoint) {
+    strategies.add(`("immune checkpoint" OR "immune checkpoints") AND review`)
+  }
+
+  if (hasCancer) {
+    strategies.add(`("immune checkpoint" OR "immune checkpoints") AND cancer AND review`)
+  }
+
+  if (compact) {
+    strategies.add(`${compact} review`)
+    if (compact !== normalized) {
+      strategies.add(`"${compact}" review`)
+    }
+  }
+
+  return Array.from(strategies)
+    .map((candidate) => candidate.replace(/\s+/g, " ").trim())
+    .filter((candidate) => candidate.length > 0)
+    .slice(0, 6)
+}
+
+function pubMedArticleToEvidenceCitation(article: PubMedArticle): EvidenceCitation {
+  return {
+    index: 1,
+    sourceId: buildEvidenceSourceId({
+      pmid: article.pmid,
+      doi: article.doi,
+      url: article.url,
+      title: article.title,
+      journal: article.journal,
+    }),
+    pmid: article.pmid || null,
+    pmcid: article.pmcid || null,
+    title: article.title,
+    journal: article.journal || "PubMed",
+    year: article.year ? Number(article.year) || null : null,
+    doi: article.doi || null,
+    authors: article.authors || [],
+    evidenceLevel: 2,
+    studyType: "Literature record",
+    sampleSize: null,
+    meshTerms: [],
+    url: article.pmcid
+      ? `https://pmc.ncbi.nlm.nih.gov/articles/${article.pmcid}/`
+      : article.url || null,
+    snippet: (article.abstract || "").slice(0, 320),
+    score: 1,
+    sourceType: "medical_evidence",
+    sourceLabel: article.pmcid ? "PubMed Central" : "PubMed",
+  }
+}
+
+function extractExplicitReferenceSignals(query: string): {
+  pmids: string[]
+  pmcids: string[]
+  dois: string[]
+} {
+  const pmids = new Set<string>()
+  const pmcids = new Set<string>()
+  const dois = new Set<string>()
+
+  const pmidPattern = /\bPMID\s*[:#]?\s*(\d{6,10})\b/gi
+  let match: RegExpExecArray | null
+  while ((match = pmidPattern.exec(query)) !== null) {
+    if (match[1]) pmids.add(match[1].trim())
+  }
+
+  const pmcidPattern = /\b(PMC\d+)\b/gi
+  while ((match = pmcidPattern.exec(query)) !== null) {
+    if (match[1]) pmcids.add(match[1].trim().toUpperCase())
+  }
+
+  const doiPattern = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+\b/gi
+  while ((match = doiPattern.exec(query)) !== null) {
+    if (match[0]) dois.add(match[0].trim())
+  }
+
+  return {
+    pmids: Array.from(pmids),
+    pmcids: Array.from(pmcids),
+    dois: Array.from(dois),
+  }
+}
+
+async function fetchPubMedArticleByPmcid(
+  pmcid: string
+): Promise<Awaited<ReturnType<typeof fetchPubMedArticle>> | null> {
+  try {
+    const endpoint = new URL("https://www.ebi.ac.uk/europepmc/webservices/rest/search")
+    endpoint.searchParams.set("query", `PMCID:${pmcid}`)
+    endpoint.searchParams.set("format", "json")
+    endpoint.searchParams.set("resultType", "core")
+    endpoint.searchParams.set("pageSize", "1")
+    const response = await fetch(endpoint.toString(), {
+      headers: { Accept: "application/json" },
+      cache: "force-cache",
+    })
+    if (!response.ok) return null
+    const data = (await response.json()) as {
+      resultList?: { result?: Array<{ pmid?: string | null }> }
+    }
+    const pmid = data.resultList?.result?.[0]?.pmid
+    if (!pmid) return null
+    return fetchPubMedArticle(String(pmid))
+  } catch {
+    return null
+  }
+}
+
+async function fetchExplicitReferenceCitations(query: string): Promise<EvidenceCitation[]> {
+  const { pmids, pmcids, dois } = extractExplicitReferenceSignals(query)
+  if (pmids.length === 0 && pmcids.length === 0 && dois.length === 0) return []
+
+  const articles = new Map<string, Awaited<ReturnType<typeof fetchPubMedArticle>>>()
+
+  for (const pmid of pmids) {
+    const article = await fetchPubMedArticle(pmid)
+    if (article?.pmid) {
+      articles.set(`pmid:${article.pmid}`, article)
+    }
+  }
+
+  for (const doi of dois) {
+    const article = await searchPubMedByDOI(doi)
+    if (article?.pmid) {
+      articles.set(`pmid:${article.pmid}`, article)
+    } else if (article?.doi) {
+      articles.set(`doi:${article.doi.toLowerCase()}`, article)
+    }
+  }
+
+  for (const pmcid of pmcids) {
+    const article = await fetchPubMedArticleByPmcid(pmcid)
+    if (article?.pmid) {
+      articles.set(`pmid:${article.pmid}`, article)
+    }
+  }
+
+  return dedupeAndReindexCitations(
+    Array.from(articles.values())
+      .filter((article): article is NonNullable<typeof article> => Boolean(article))
+      .map((article) => pubMedArticleToEvidenceCitation(article))
+  )
+}
+
+async function fetchPmcOpenAccessReviewCitations(query: string): Promise<EvidenceCitation[]> {
+  if (!wantsPmcOpenAccessReview(query)) return []
+
+  const strategies = buildPmcReviewSearchQueries(query)
+  if (strategies.length === 0) return []
+
+  type EuropePmcReviewResult = {
+    id?: string
+    pmid?: string
+    pmcid?: string
+    doi?: string
+    title?: string
+    journalTitle?: string
+    pubYear?: string
+    abstractText?: string
+    authorString?: string
+    isOpenAccess?: string
+    pubType?: string | string[]
+  }
+
+  const collected = new Map<string, EvidenceCitation>()
+
+  for (const strategy of strategies) {
+    const endpoint = new URL("https://www.ebi.ac.uk/europepmc/webservices/rest/search")
+    endpoint.searchParams.set(
+      "query",
+      `(${strategy}) AND OPEN_ACCESS:y AND SRC:PMC`
+    )
+    endpoint.searchParams.set("format", "json")
+    endpoint.searchParams.set("resultType", "core")
+    endpoint.searchParams.set("pageSize", "8")
+
+    try {
+      const response = await fetch(endpoint.toString(), {
+        headers: { Accept: "application/json" },
+        cache: "force-cache",
+      })
+      if (!response.ok) continue
+
+      const data = (await response.json()) as {
+        resultList?: { result?: EuropePmcReviewResult[] }
+      }
+      const results = Array.isArray(data.resultList?.result) ? data.resultList.result : []
+
+      for (const article of results) {
+        const pmcid = extractPmcidFromValue(article.pmcid || article.id || null)
+        const title = typeof article.title === "string" ? article.title.trim() : ""
+        const abstractText =
+          typeof article.abstractText === "string" ? article.abstractText.trim() : ""
+        const pubTypes = Array.isArray(article.pubType)
+          ? article.pubType.join(" ").toLowerCase()
+          : String(article.pubType || "").toLowerCase()
+        const reviewLike =
+          /\breview\b/i.test(title) ||
+          /\breview\b/i.test(pubTypes) ||
+          /\breview article\b/i.test(abstractText) ||
+          /\boverview\b/i.test(title)
+
+        if (!pmcid || !title || !reviewLike) continue
+        const relevanceText = `${title} ${abstractText}`.toLowerCase()
+        const overlapTerms = extractClinicalQueryTerms(query).filter(
+          (term) => term.length >= 3 && relevanceText.includes(term)
+        )
+        if (overlapTerms.length === 0 && !/pd-?1|ctla-?4|checkpoint/i.test(relevanceText)) continue
+
+        const authors = typeof article.authorString === "string"
+          ? article.authorString
+              .split(/,|;/)
+              .map((author) => author.trim())
+              .filter(Boolean)
+              .slice(0, 8)
+          : []
+
+        const citation: EvidenceCitation = {
+          index: 1,
+          sourceId: buildEvidenceSourceId({
+            pmid: article.pmid || undefined,
+            doi: article.doi || undefined,
+            url: `https://pmc.ncbi.nlm.nih.gov/articles/${pmcid}/`,
+            title,
+            journal: article.journalTitle || "PubMed Central",
+          }),
+          pmid: article.pmid || null,
+          pmcid,
+          title,
+          journal: article.journalTitle || "PubMed Central",
+          year: article.pubYear ? Number(article.pubYear) || null : null,
+          doi: article.doi || null,
+          authors,
+          evidenceLevel: 2,
+          studyType: "Review article",
+          sampleSize: null,
+          meshTerms: [],
+          url: `https://pmc.ncbi.nlm.nih.gov/articles/${pmcid}/`,
+          snippet: abstractText.slice(0, 320),
+          score: 1,
+          sourceType: "medical_evidence",
+          sourceLabel: "PubMed Central",
+        }
+
+        collected.set(buildEvidenceSourceId(citation), citation)
+        if (collected.size >= 4) break
+      }
+    } catch {
+      continue
+    }
+
+    if (collected.size >= 2) break
+  }
+
+  console.log(
+    `📚 [PMC REVIEW RESOLVER] Queries=${strategies.length} candidates=${collected.size}`
+  )
+
+  return dedupeAndReindexCitations(Array.from(collected.values()))
+}
+
 async function runWithTimeBudget<T>(
   label: string,
   run: () => Promise<T>,
@@ -644,6 +1264,269 @@ async function runWithTimeBudget<T>(
     }
     console.warn(`⏱️ [${label}] failed, using fallback:`, error)
     return fallbackValue
+  }
+}
+
+type HealthPreferencePatch = {
+  healthContext?: string
+  healthConditions?: string[]
+  medications?: string[]
+  allergies?: string[]
+  familyHistory?: string
+  lifestyleFactors?: string
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function normalizeHealthText(value: string): string {
+  return value.replace(/\s+/g, " ").trim()
+}
+
+function splitHealthList(value: string): string[] {
+  const normalized = normalizeHealthText(value)
+  if (!normalized) return []
+  if (/^(none|n\/a|na|unknown|no known)$/i.test(normalized)) return []
+  return normalized
+    .split(/,|;|\band\b|\//i)
+    .map((item) => item.replace(/^[\s\-\*]+|[\s.]+$/g, "").trim())
+    .filter((item) => item.length > 0 && !/^(none|n\/a|na|unknown)$/i.test(item))
+}
+
+function extractLabeledValue(source: string, labels: string[]): string | undefined {
+  const labelPattern = labels.map(escapeRegex).join("|")
+  const pattern = new RegExp(`(?:^|\\n)\\s*(?:${labelPattern})\\s*:\\s*([^\\n]+)`, "i")
+  const match = source.match(pattern)
+  if (!match?.[1]) return undefined
+  const normalized = normalizeHealthText(match[1])
+  return normalized || undefined
+}
+
+function mergeDistinctHealthItems(existing: string[], incoming: string[]): string[] {
+  const seen = new Set<string>()
+  const merged: string[] = []
+  for (const value of [...existing, ...incoming]) {
+    const normalized = normalizeHealthText(value)
+    if (!normalized) continue
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(normalized)
+  }
+  return merged
+}
+
+function extractHealthPreferencePatchFromPrompts(
+  latestUserPrompt: string,
+  recentUserPrompts: string[]
+): HealthPreferencePatch {
+  const latestRaw = latestUserPrompt || ""
+  const latest = normalizeHealthText(latestRaw)
+  const combinedRaw = recentUserPrompts
+    .filter((value) => typeof value === "string" && value.trim().length > 0)
+    .slice(-8)
+    .join("\n")
+  const source = [latestRaw, combinedRaw].filter(Boolean).join("\n")
+  if (!source.trim()) return {}
+
+  const labeledHealthGoals = extractLabeledValue(source, [
+    "health goals",
+    "goals",
+    "health context",
+  ])
+  const labeledConditions = extractLabeledValue(source, [
+    "medical conditions",
+    "conditions",
+    "diagnoses",
+  ])
+  const labeledMedications = extractLabeledValue(source, ["medications", "meds"])
+  const labeledAllergies = extractLabeledValue(source, ["allergies", "allergy"])
+  const labeledFamilyHistory = extractLabeledValue(source, ["family history"])
+  const labeledLifestyle = extractLabeledValue(source, [
+    "lifestyle factors",
+    "lifestyle",
+  ])
+
+  const naturalHealthGoals =
+    latest.match(/\b(?:my\s+)?health\s+goals?\s*(?:are|:)\s*([^\n.]+)/i)?.[1] ||
+    latest.match(/\bmy\s+goal\s+is\s+to\s+([^\n.]+)/i)?.[1] ||
+    undefined
+  const naturalMedications =
+    latest.match(
+      /\b(?:i(?:'m| am)?\s+taking|i\s+take|my\s+medications?\s+(?:are|include)|medications?\s*:\s*)([^\n.]+)/i
+    )?.[1] || undefined
+  const naturalAllergies =
+    latest.match(
+      /\b(?:i(?:'m| am)?\s+allergic\s+to|allerg(?:y|ies)\s*(?:are|include|:)\s*)([^\n.]+)/i
+    )?.[1] || undefined
+  const naturalFamilyHistory =
+    latest.match(/\bfamily\s+history\s+(?:of|:)\s*([^\n.]+)/i)?.[1] || undefined
+  const naturalConditions =
+    latest.match(
+      /\b(?:medical\s+conditions?\s*(?:are|include|:)|diagnosed\s+with)\s*([^\n.]+)/i
+    )?.[1] || undefined
+
+  const healthContext = normalizeHealthText(labeledHealthGoals || naturalHealthGoals || "")
+  const conditions = splitHealthList(labeledConditions || naturalConditions || "")
+  const medications = splitHealthList(labeledMedications || naturalMedications || "")
+  const allergies = splitHealthList(labeledAllergies || naturalAllergies || "")
+  const familyHistory = normalizeHealthText(labeledFamilyHistory || naturalFamilyHistory || "")
+  const lifestyleFactors = normalizeHealthText(labeledLifestyle || "")
+
+  const patch: HealthPreferencePatch = {}
+  if (healthContext) patch.healthContext = healthContext
+  if (conditions.length > 0) patch.healthConditions = conditions
+  if (medications.length > 0) patch.medications = medications
+  if (allergies.length > 0) patch.allergies = allergies
+  if (familyHistory) patch.familyHistory = familyHistory
+  if (lifestyleFactors) patch.lifestyleFactors = lifestyleFactors
+  return patch
+}
+
+function hasHealthPreferencePatch(patch: HealthPreferencePatch): boolean {
+  return Boolean(
+    patch.healthContext ||
+      patch.familyHistory ||
+      patch.lifestyleFactors ||
+      (patch.healthConditions && patch.healthConditions.length > 0) ||
+      (patch.medications && patch.medications.length > 0) ||
+      (patch.allergies && patch.allergies.length > 0)
+  )
+}
+
+async function persistHealthMemoryPatchFromPrompts({
+  supabase,
+  userId,
+  latestUserPrompt,
+  recentUserPrompts,
+}: {
+  supabase: any
+  userId: string
+  latestUserPrompt: string
+  recentUserPrompts: string[]
+}): Promise<void> {
+  const patch = extractHealthPreferencePatchFromPrompts(latestUserPrompt, recentUserPrompts)
+  if (!hasHealthPreferencePatch(patch)) return
+
+  const { data: existing, error: existingError } = await supabase
+    .from("user_preferences")
+    .select(`
+      user_id,
+      health_context,
+      health_context_iv,
+      health_conditions,
+      health_conditions_iv,
+      medications,
+      medications_iv,
+      allergies,
+      allergies_iv,
+      family_history,
+      family_history_iv,
+      lifestyle_factors,
+      lifestyle_factors_iv
+    `)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (existingError) {
+    throw existingError
+  }
+
+  const current = { ...(existing || {}) } as Record<string, any>
+  if (isEncryptionEnabled()) {
+    const mappings: Array<{ key: string; ivKey: string }> = [
+      { key: "health_context", ivKey: "health_context_iv" },
+      { key: "health_conditions", ivKey: "health_conditions_iv" },
+      { key: "medications", ivKey: "medications_iv" },
+      { key: "allergies", ivKey: "allergies_iv" },
+      { key: "family_history", ivKey: "family_history_iv" },
+      { key: "lifestyle_factors", ivKey: "lifestyle_factors_iv" },
+    ]
+    for (const { key, ivKey } of mappings) {
+      const value = current[key]
+      const iv = current[ivKey]
+      if (!value) continue
+      if (typeof iv === "string" || Array.isArray(iv)) {
+        current[key] = decryptHealthData(value, iv)
+      }
+    }
+  }
+
+  const nextHealthConditions = patch.healthConditions
+    ? mergeDistinctHealthItems(current.health_conditions || [], patch.healthConditions)
+    : undefined
+  const nextMedications = patch.medications
+    ? mergeDistinctHealthItems(current.medications || [], patch.medications)
+    : undefined
+  const nextAllergies = patch.allergies
+    ? mergeDistinctHealthItems(current.allergies || [], patch.allergies)
+    : undefined
+
+  const updates: Record<string, any> = { updated_at: new Date().toISOString() }
+  let shouldPersist = false
+
+  if (patch.healthContext && patch.healthContext !== current.health_context) {
+    updates.health_context = patch.healthContext
+    shouldPersist = true
+  }
+  if (nextHealthConditions && JSON.stringify(nextHealthConditions) !== JSON.stringify(current.health_conditions || [])) {
+    updates.health_conditions = nextHealthConditions
+    shouldPersist = true
+  }
+  if (nextMedications && JSON.stringify(nextMedications) !== JSON.stringify(current.medications || [])) {
+    updates.medications = nextMedications
+    shouldPersist = true
+  }
+  if (nextAllergies && JSON.stringify(nextAllergies) !== JSON.stringify(current.allergies || [])) {
+    updates.allergies = nextAllergies
+    shouldPersist = true
+  }
+  if (patch.familyHistory && patch.familyHistory !== current.family_history) {
+    updates.family_history = patch.familyHistory
+    shouldPersist = true
+  }
+  if (patch.lifestyleFactors && patch.lifestyleFactors !== current.lifestyle_factors) {
+    updates.lifestyle_factors = patch.lifestyleFactors
+    shouldPersist = true
+  }
+
+  if (!shouldPersist) return
+
+  if (isEncryptionEnabled()) {
+    const encryptedUpdates: Record<string, any> = { updated_at: updates.updated_at }
+    const mappings: Array<{ key: string; ivKey: string }> = [
+      { key: "health_context", ivKey: "health_context_iv" },
+      { key: "health_conditions", ivKey: "health_conditions_iv" },
+      { key: "medications", ivKey: "medications_iv" },
+      { key: "allergies", ivKey: "allergies_iv" },
+      { key: "family_history", ivKey: "family_history_iv" },
+      { key: "lifestyle_factors", ivKey: "lifestyle_factors_iv" },
+    ]
+
+    for (const { key, ivKey } of mappings) {
+      if (!(key in updates)) continue
+      const encrypted = encryptHealthData(updates[key])
+      encryptedUpdates[key] = encrypted.encrypted
+      encryptedUpdates[ivKey] = encrypted.iv
+    }
+
+    if (existing?.user_id) {
+      await supabase.from("user_preferences").update(encryptedUpdates).eq("user_id", userId)
+    } else {
+      await supabase
+        .from("user_preferences")
+        .insert({ user_id: userId, ...encryptedUpdates, created_at: new Date().toISOString() })
+    }
+    return
+  }
+
+  if (existing?.user_id) {
+    await supabase.from("user_preferences").update(updates).eq("user_id", userId)
+  } else {
+    await supabase
+      .from("user_preferences")
+      .insert({ user_id: userId, ...updates, created_at: new Date().toISOString() })
   }
 }
 
@@ -1015,6 +1898,46 @@ function buildGuidelineQueryVariants(query: string): string[] {
   return Array.from(variants).slice(0, 4)
 }
 
+function buildGuidelineEscalationQueries(query: string): string[] {
+  const normalized = query.replace(/\s+/g, " ").trim()
+  if (!normalized) return []
+  const baseVariants = buildGuidelineQueryVariants(normalized)
+  const expanded = new Set<string>(baseVariants)
+
+  const acronymExpanded = normalized
+    .replace(/\bESC\b/gi, "European Society of Cardiology")
+    .replace(/\bNICE\b/gi, "National Institute for Health and Care Excellence")
+    .replace(/\bACC\b/gi, "American College of Cardiology")
+    .replace(/\bAHA\b/gi, "American Heart Association")
+    .replace(/\bHFpEF\b/gi, "heart failure with preserved ejection fraction")
+    .replace(/\bHFrEF\b/gi, "heart failure with reduced ejection fraction")
+    .replace(/\bSGLT2i\b/gi, "SGLT2 inhibitor")
+    .replace(/\bMI\b/gi, "myocardial infarction")
+  if (acronymExpanded !== normalized) {
+    expanded.add(acronymExpanded)
+    expanded.add(`${acronymExpanded} guideline`)
+  }
+
+  if (/\b(esc|european society of cardiology)\b/i.test(normalized)) {
+    expanded.add("European Society of Cardiology Heart Failure Guidelines 2024")
+  }
+  if (/\b(nice|national institute for health and care excellence)\b/i.test(normalized)) {
+    expanded.add("NICE heart failure guideline recommendations")
+  }
+  if (/\bheart failure|hfpef|hfr?ef\b/i.test(normalized)) {
+    expanded.add("heart failure clinical practice guideline recommendations")
+    expanded.add("SGLT2i heart failure recommendations")
+  }
+
+  expanded.add(`${normalized} guideline summary`)
+  expanded.add(`${normalized} society recommendations`)
+
+  return Array.from(expanded)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter((item, index, list) => item.length > 0 && list.indexOf(item) === index)
+    .slice(0, 8)
+}
+
 function hasGuidelineCitationSignal(citations: EvidenceCitation[]): boolean {
   return citations.some((citation) =>
     /\b(guideline|recommendation|consensus|practice guideline|position statement|uspstf|acc|aha|idsa|nccn|acog)\b/i.test(
@@ -1054,21 +1977,112 @@ function estimateCitationRecencyScore(citation: EvidenceCitation): number {
   return 0.1
 }
 
+function dedupeFigureReferences(
+  references: EvidenceCitation["figureReferences"]
+): EvidenceCitation["figureReferences"] {
+  if (!Array.isArray(references) || references.length === 0) return []
+  const byKey = new Map<string, NonNullable<EvidenceCitation["figureReferences"]>[number]>()
+  for (const reference of references) {
+    if (!reference) continue
+    const key =
+      reference.assetId ||
+      reference.filePath ||
+      `${reference.type || "figure"}:${reference.label || "asset"}`
+    const existing = byKey.get(key)
+    if (!existing) {
+      byKey.set(key, reference)
+      continue
+    }
+    byKey.set(key, {
+      ...existing,
+      ...reference,
+      signedUrl: reference.signedUrl || existing.signedUrl || null,
+      fullUrl: reference.fullUrl || existing.fullUrl || null,
+      filePath: reference.filePath || existing.filePath || null,
+      storageBucket: reference.storageBucket || existing.storageBucket || null,
+    })
+  }
+  return Array.from(byKey.values())
+}
+
+function mergeCitationVisuals(
+  existing: EvidenceCitation,
+  incoming: EvidenceCitation
+): Pick<EvidenceCitation, "previewReference" | "figureReferences"> {
+  const incomingPreview = incoming.previewReference
+  const existingPreview = existing.previewReference
+  const incomingHasPreviewSignal = Boolean(
+    incomingPreview?.filePath || incomingPreview?.signedUrl || incomingPreview?.assetId
+  )
+  const previewReference = incomingHasPreviewSignal
+    ? incomingPreview
+    : existingPreview || incomingPreview || null
+  const figureReferences = dedupeFigureReferences([
+    ...(existing.figureReferences || []),
+    ...(incoming.figureReferences || []),
+  ])
+  return {
+    previewReference,
+    figureReferences,
+  }
+}
+
 function dedupeAndReindexCitations(citations: EvidenceCitation[]): EvidenceCitation[] {
+  const citationMetadataScore = (citation: EvidenceCitation): number => {
+    let score = 0
+    if (citation.title?.trim()) score += 3
+    if (citation.journal?.trim()) score += 2
+    if (citation.url?.trim()) score += 3
+    if (citation.pmid?.trim()) score += 2
+    if (citation.doi?.trim()) score += 1
+    if (citation.sourceLabel?.trim()) score += 2
+    if (citation.sourceType?.trim()) score += 1
+    if (citation.studyType?.trim()) score += 1
+    if (citation.snippet?.trim()) score += 1
+    if (citation.sourceId?.trim()) score += 2
+    if (Array.isArray(citation.authors) && citation.authors.length > 0) score += 1
+    if (
+      citation.previewReference?.filePath ||
+      citation.previewReference?.signedUrl ||
+      citation.previewReference?.assetId
+    ) {
+      score += 3
+    }
+    if (Array.isArray(citation.figureReferences) && citation.figureReferences.length > 0) {
+      score += Math.min(4, citation.figureReferences.length)
+    }
+    return score
+  }
   const deduped = new Map<string, EvidenceCitation>()
   citations.forEach((citation) => {
+    const normalizedCitation: EvidenceCitation = {
+      ...citation,
+      sourceId: buildEvidenceSourceId(citation),
+    }
     const key =
-      citation.pmid ||
-      citation.doi ||
-      citation.url ||
-      `${citation.title || "untitled"}:${citation.journal || "unknown"}`
-    if (!deduped.has(key)) {
-      deduped.set(key, citation)
+      normalizedCitation.sourceId ||
+      normalizedCitation.pmid ||
+      normalizedCitation.doi ||
+      normalizedCitation.url ||
+      `${normalizedCitation.title || "untitled"}:${normalizedCitation.journal || "unknown"}`
+    const existing = deduped.get(key)
+    if (!existing) {
+      deduped.set(key, normalizedCitation)
+      return
+    }
+    const existingScore = citationMetadataScore(existing)
+    const incomingScore = citationMetadataScore(normalizedCitation)
+    const mergedVisuals = mergeCitationVisuals(existing, normalizedCitation)
+    if (incomingScore >= existingScore) {
+      deduped.set(key, { ...existing, ...normalizedCitation, ...mergedVisuals, sourceId: key })
+    } else {
+      deduped.set(key, { ...normalizedCitation, ...existing, ...mergedVisuals, sourceId: key })
     }
   })
   return Array.from(deduped.values()).map((citation, index) => ({
     ...citation,
     index: index + 1,
+    sourceId: buildEvidenceSourceId(citation),
   }))
 }
 
@@ -1087,6 +2101,9 @@ function citationsFromToolResult(result: unknown): EvidenceCitation[] {
   }
   if (Array.isArray(candidate.citations)) {
     return dedupeAndReindexCitations(candidate.citations as EvidenceCitation[])
+  }
+  if (Array.isArray(candidate.results)) {
+    return dedupeAndReindexCitations(candidate.results as EvidenceCitation[])
   }
   return []
 }
@@ -1258,9 +2275,30 @@ function encodeEvidenceCitationsHeader(
 ): string | null {
   if (!Array.isArray(citations) || citations.length === 0) return null
 
+  const compactVisualReference = (reference: EvidenceCitation["previewReference"]) => {
+    if (!reference) return null
+    return {
+      assetId: reference.assetId,
+      type: reference.type,
+      label: reference.label,
+      caption:
+        typeof reference.caption === "string" && reference.caption.length > 220
+          ? `${reference.caption.slice(0, 217)}...`
+          : reference.caption || null,
+      signedUrl: reference.signedUrl || null,
+      fullUrl: reference.fullUrl || null,
+      contentType: reference.contentType || null,
+      width: reference.width ?? null,
+      height: reference.height ?? null,
+      storageBucket: reference.storageBucket || null,
+      filePath: reference.filePath || null,
+    }
+  }
+
   const compact = (items: EvidenceCitation[]) =>
     items.map((citation) => ({
       index: citation.index,
+      sourceId: citation.sourceId,
       title: citation.title,
       journal: citation.journal,
       authors: Array.isArray(citation.authors) ? citation.authors : [],
@@ -1270,6 +2308,7 @@ function encodeEvidenceCitationsHeader(
       url: citation.url,
       doi: citation.doi,
       pmid: citation.pmid,
+      pmcid: citation.pmcid,
       meshTerms: Array.isArray(citation.meshTerms) ? citation.meshTerms : [],
       sourceType: citation.sourceType,
       sourceLabel: citation.sourceLabel,
@@ -1283,8 +2322,11 @@ function encodeEvidenceCitationsHeader(
       sourceOffsetEnd: citation.sourceOffsetEnd,
       snippet:
         typeof citation.snippet === "string" ? citation.snippet.slice(0, 220) : "",
-      previewReference: citation.previewReference || null,
-      figureReferences: citation.figureReferences || [],
+      previewReference: compactVisualReference(citation.previewReference || null),
+      figureReferences: (citation.figureReferences || [])
+        .slice(0, 2)
+        .map((reference) => compactVisualReference(reference))
+        .filter(Boolean),
     }))
 
   let candidate = [...citations]
@@ -1480,6 +2522,36 @@ function buildPubMedQueryStrategies(query: string): string[] {
 
   strategies.add(buildFocusedPubMedQuery(normalized))
   return Array.from(strategies).filter((candidate) => candidate.trim().length > 0).slice(0, 5)
+}
+
+function buildEvidenceParityQueries(query: string): string[] {
+  const normalized = query.replace(/\s+/g, " ").trim()
+  if (!normalized) return []
+
+  const compactTerms = extractClinicalQueryTerms(normalized)
+    .filter((term) => !term.includes("_") && /[a-z]/i.test(term))
+    .slice(0, 7)
+  const termDrivenQuery = compactTerms.join(" ").trim()
+  const baseQuery = termDrivenQuery.length >= 8 ? termDrivenQuery : normalized
+  const queries = new Set<string>([baseQuery])
+
+  queries.add(`${baseQuery} clinical trial evidence`)
+  queries.add(`${baseQuery} guideline summary`)
+
+  if (
+    !/\bclinical trial|randomized|guideline|meta-analysis|systematic review\b/i.test(baseQuery)
+  ) {
+    queries.add(`${baseQuery} randomized trial guideline`)
+  }
+
+  if (baseQuery !== normalized) {
+    queries.add(normalized)
+  }
+
+  return Array.from(queries)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter((item) => item.length > 0)
+    .slice(0, 5)
 }
 
 function computeKeywordOverlapScore(query: string, text: string): number {
@@ -2465,7 +3537,9 @@ type ChatRequest = {
   topicContext?: TopicContext
   artifactIntent?: "none" | "quiz"
   citationStyle?: CitationStyle
+  incompleteEvidencePolicy?: ClinicalIncompleteEvidencePolicy
   allowMultipleArtifacts?: boolean
+  selectedUploadIds?: string[]
 }
 
 const chatAttachmentRequestSchema = z
@@ -2511,6 +3585,10 @@ const chatRequestSchema = z
     topicContext: z.unknown().optional(),
     artifactIntent: z.enum(["none", "quiz"]).optional(),
     citationStyle: z.string().optional(),
+    selectedUploadIds: z.array(z.string()).optional(),
+    incompleteEvidencePolicy: z
+      .enum(["none", "balanced_conditional", "strict_blocking"])
+      .optional(),
     allowMultipleArtifacts: z.boolean().optional(),
   })
   .passthrough()
@@ -2551,6 +3629,8 @@ export async function POST(req: Request) {
       topicContext: topicContextFromRequest,
       artifactIntent: artifactIntentFromRequest,
       citationStyle: citationStyleFromRequest,
+      selectedUploadIds: selectedUploadIdsFromRequest,
+      incompleteEvidencePolicy: incompleteEvidencePolicyFromRequest,
       allowMultipleArtifacts: allowMultipleArtifactsFromRequest,
     } = parsedRequest.data as unknown as ChatRequest
 
@@ -2666,10 +3746,38 @@ export async function POST(req: Request) {
     const rawQueryText =
       typeof lastUserMessage?.content === "string" ? lastUserMessage.content : ""
     const queryText = decodeArtifactWorkflowInput(stripUploadReferenceTokens(rawQueryText))
+    const recentUserPrompts = messages
+      .filter(
+        (message): message is MessageAISDK & { content: string } =>
+          message.role === "user" && typeof message.content === "string"
+      )
+      .map((message) => decodeArtifactWorkflowInput(stripUploadReferenceTokens(message.content)))
+      .filter((content) => content.trim().length > 0)
+      .slice(-8)
+    const healthMemorySyncPromise =
+      isAuthenticated && userId !== "temp" && validatedSupabase
+        ? runWithTimeBudget(
+            "HEALTH_MEMORY_SYNC",
+            () =>
+              persistHealthMemoryPatchFromPrompts({
+                supabase: validatedSupabase,
+                userId,
+                latestUserPrompt: queryText,
+                recentUserPrompts,
+              }).catch((error) => {
+                console.warn("[HEALTH MEMORY SYNC] Failed to persist prompt-derived memory patch:", error)
+              }),
+            650,
+            undefined
+          )
+        : Promise.resolve(undefined)
     const implicitUploadIntentSignal = detectImplicitUploadIntent(queryText)
     const uploadService = new UserUploadService()
+    const selectedUploadIdsFromBody = normalizeRequestUploadIds(selectedUploadIdsFromRequest)
     const explicitSelectedUploadIds = extractUploadReferenceIds(rawQueryText)
-    let selectedUploadIds = explicitSelectedUploadIds
+    let selectedUploadIds = Array.from(
+      new Set([...selectedUploadIdsFromBody, ...explicitSelectedUploadIds])
+    )
     let autoSelectedUploadIds: string[] = []
     if (
       selectedUploadIds.length === 0 &&
@@ -2691,6 +3799,31 @@ export async function POST(req: Request) {
         )
       }
     }
+    const trackedUploadIds = [...selectedUploadIds]
+    let uploadReadinessSnapshots: UploadReadinessSnapshot[] = trackedUploadIds.map((uploadId) => ({
+      uploadId,
+      uploadTitle: null,
+      status: "pending",
+      progressStage: "queued",
+      progressPercent: 0,
+      lastError: null,
+    }))
+    let uploadReadinessTimedOut = false
+    if (
+      trackedUploadIds.length > 0 &&
+      isAuthenticated &&
+      userId !== "temp"
+    ) {
+      const readiness = await waitForSelectedUploadsReady({
+        uploadService,
+        userId,
+        selectedUploadIds: trackedUploadIds,
+      })
+      uploadReadinessSnapshots = readiness.snapshots
+      uploadReadinessTimedOut = readiness.timedOut
+      selectedUploadIds = readiness.readyUploadIds
+    }
+
     const selectedUploadIdHint = selectedUploadIds[0]
     const attachmentContextPromise = buildAttachmentContext(lastUserMessage)
     const persistedTopicContext = extractTopicContextFromMessages(messages)
@@ -2710,7 +3843,9 @@ export async function POST(req: Request) {
     const effectiveLearningMode = normalizeMedicalStudentLearningMode(learningMode)
     const effectiveClinicianMode = normalizeClinicianWorkflowMode(clinicianMode)
     const requestedArtifactIntent = artifactIntentFromRequest === "quiz" ? "quiz" : "none"
-    const hasUploadContextHint = Boolean(selectedUploadIdHint || effectiveTopicContext?.lastUploadId)
+    const hasUploadContextHint = Boolean(
+      selectedUploadIdHint || effectiveTopicContext?.lastUploadId || trackedUploadIds.length > 0
+    )
     const shouldPreferUploadContext =
       hasUploadContextHint ||
       implicitUploadIntentSignal.hasImplicitUploadIntent ||
@@ -2721,7 +3856,7 @@ export async function POST(req: Request) {
       /^\s*[A-Ea-e]\s*$/.test(queryText.trim())
     // Temporary hard-disable: quiz generation/refinement is turned off.
     const ENABLE_QUIZ_GENERATION = false
-    const artifactIntent: "none" | "quiz" =
+    const artifactIntent =
       ENABLE_QUIZ_GENERATION && (
         requestedArtifactIntent === "quiz" ||
         (hasUploadContextHint &&
@@ -2783,6 +3918,7 @@ export async function POST(req: Request) {
         const provider = getProviderForModel(effectiveModel)
         return (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) || undefined
       })(),
+      healthMemorySyncPromise,
     ])
     const resolvedProvider = getProviderForModel(effectiveModel)
     const embeddingApiKey = resolvedProvider === "openai" ? apiKey : undefined
@@ -2790,6 +3926,32 @@ export async function POST(req: Request) {
 
     const clinicianRoleFromResolvedRole =
       effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
+    const shouldLoadLmsContextForTurn =
+      isAuthenticated &&
+      userId !== "temp" &&
+      effectiveUserRole === "medical_student" &&
+      hasEducationalPromptCue(queryText, effectiveLearningMode)
+    const lmsContextPromise: Promise<LmsContextSnapshot | null> =
+      shouldLoadLmsContextForTurn
+        ? runWithTimeBudget(
+            "LMS_CONTEXT_PREFLIGHT",
+            async () => {
+              const supabase = validatedSupabase || (await createClient())
+              if (!supabase) return null
+              return loadMinimalLmsContextSnapshot({
+                supabase,
+                userId,
+              })
+            },
+            900,
+            null
+          )
+        : Promise.resolve(null)
+    const effectiveIncompleteEvidencePolicy: ClinicalIncompleteEvidencePolicy =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL
+        ? incompleteEvidencePolicyFromRequest ||
+          (clinicianRoleFromResolvedRole ? "balanced_conditional" : "none")
+        : "none"
     const evidenceSeekingIntent = hasEvidenceSeekingIntent(queryText) || hasGuidelineIntent(queryText)
     const freshEvidenceIntent = needsFreshEvidence(queryText)
     const finalEnableEvidence =
@@ -2854,6 +4016,14 @@ export async function POST(req: Request) {
           Awaited<ReturnType<UserUploadService["uploadContextSearch"]>> | null
         >(uploadContextPreflightCacheKey)
       : undefined
+    const shouldRunStudyGraphContext =
+      isAuthenticated &&
+      userId !== "temp" &&
+      queryText.length > 0 &&
+      shouldPreferUploadContext
+    const studyGraphService = new StudyGraphService()
+    const studyPlannerService = new StudyPlannerService()
+    const studyReviewService = new StudyReviewService()
     const webSearchPreflightPromise = shouldRunWebSearchPreflight
       ? runWithTimeBudget<Awaited<ReturnType<typeof searchWeb>> | null>(
           "WEB_SEARCH_PREFLIGHT",
@@ -2869,7 +4039,7 @@ export async function POST(req: Request) {
         )
       : Promise.resolve(null)
 
-    const [evidenceContextResult, uploadContextResult, webSearchPreflight] = await Promise.all([
+    const [evidenceContextResult, uploadContextResult, webSearchPreflight, studyGraphNodeContext] = await Promise.all([
       shouldRunEvidenceSynthesis
         ? runWithTimeBudget(
             "EVIDENCE_SYNTHESIS",
@@ -2887,7 +4057,7 @@ export async function POST(req: Request) {
                 console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", err)
                 return null
               }),
-            1200,
+            3500,
             null
           )
         : Promise.resolve(null),
@@ -2925,6 +4095,20 @@ export async function POST(req: Request) {
             })
         : Promise.resolve(null),
       webSearchPreflightPromise,
+      shouldRunStudyGraphContext
+        ? runWithTimeBudget(
+            "STUDY_GRAPH_CONTEXT",
+            async () =>
+              studyGraphService.searchNodes({
+                userId,
+                query: queryText,
+                uploadId: selectedUploadIdHint,
+                limit: 6,
+              }),
+            900,
+            []
+          )
+        : Promise.resolve([]),
     ])
 
     const uploadEvidenceCitations =
@@ -3495,6 +4679,43 @@ export async function POST(req: Request) {
     }
 
     let evidenceContext = evidenceContextResult
+    let retrievalGateSummary: {
+      enabled: boolean
+      status: "completed" | "failed" | "skipped"
+      detail: string
+      elapsedMs: number
+      addedCitations: number
+    } | null = null
+    let secondaryEvidenceFallbackSummary: {
+      active: boolean
+      sourceId: string | null
+      sourceLabel: string
+    } | null = null
+    const inlineEvidenceFigureRequested =
+      finalEnableEvidence && wantsInlineEvidenceFigure(queryText)
+    const explicitReferenceCitations =
+      finalEnableEvidence && queryText.length > 0
+        ? await runWithTimeBudget(
+            "EXPLICIT_REFERENCE_SEED",
+            () => fetchExplicitReferenceCitations(queryText),
+            1600,
+            [] as EvidenceCitation[]
+          )
+        : []
+    const pmcOpenAccessReviewCitations =
+      finalEnableEvidence && queryText.length > 0
+        ? await runWithTimeBudget(
+            "PMC_OPEN_ACCESS_REVIEW_SEED",
+            () => fetchPmcOpenAccessReviewCitations(queryText),
+            3800,
+            [] as EvidenceCitation[]
+          )
+        : []
+    const preferredInlineVisualSourceIds = new Set(
+      [...explicitReferenceCitations, ...pmcOpenAccessReviewCitations].map((citation) =>
+        buildEvidenceSourceId(citation)
+      )
+    )
     if (finalEnableEvidence && queryText.length > 0) {
       let mergedCitations = evidenceContextResult?.context?.citations
         ? [...evidenceContextResult.context.citations]
@@ -3502,8 +4723,16 @@ export async function POST(req: Request) {
       if (uploadEvidenceCitations.length > 0) {
         mergedCitations = [...mergedCitations, ...uploadEvidenceCitations]
       }
+      if (explicitReferenceCitations.length > 0) {
+        mergedCitations = [...mergedCitations, ...explicitReferenceCitations]
+      }
+      if (pmcOpenAccessReviewCitations.length > 0) {
+        mergedCitations = [...mergedCitations, ...pmcOpenAccessReviewCitations]
+      }
       const guidelinePriority = benchStrictMode || hasGuidelineIntent(queryText)
       const strictCitationFloor = benchStrictMode ? STRICT_MIN_CITATION_FLOOR : 6
+      const gateStartedAt = performance.now()
+      const citationsBeforeGate = mergedCitations.length
 
       if (guidelinePriority && !hasGuidelineCitationSignal(mergedCitations)) {
         try {
@@ -3532,7 +4761,110 @@ export async function POST(req: Request) {
         }
       }
 
+      // Hard retrieval gate: block final answer streaming until broadening retrieval completes.
+      const shouldRunBlockingBroadening =
+        !shouldPreferUploadContext &&
+        (shouldUseBroadEvidenceFanout ||
+          mergedCitations.length < 6 ||
+          (guidelinePriority && !hasGuidelineCitationSignal(mergedCitations)))
+
+      if (shouldRunBlockingBroadening) {
+        try {
+          const parityCitations = await runWithTimeBudget(
+            "EVIDENCE_PARITY_RETRIEVAL",
+            async () => {
+              const parityQueries = buildEvidenceParityQueries(queryText)
+              let candidates: EvidenceCitation[] = []
+              const minBlockingQueries = shouldUseBroadEvidenceFanout ? Math.min(3, parityQueries.length) : 1
+              for (const [parityIndex, parityQuery] of parityQueries.entries()) {
+                if (candidates.length >= 8) break
+                const results = await searchMedicalEvidence({
+                  query: parityQuery,
+                  maxResults: 8,
+                  minEvidenceLevel: Math.max(5, minEvidenceLevelForQuery),
+                })
+                candidates = dedupeAndReindexCitations([
+                  ...candidates,
+                  ...resultsToCitations(results),
+                ])
+                if (parityIndex + 1 >= minBlockingQueries && candidates.length >= 3) {
+                  break
+                }
+              }
+
+              if (candidates.length < 3) {
+                const fallbackSeed = parityQueries[0] || queryText
+                const expandedResults = await searchMedicalEvidence({
+                  query: `${fallbackSeed} clinical trial evidence guideline summaries`,
+                  maxResults: 8,
+                  minEvidenceLevel: Math.max(5, minEvidenceLevelForQuery),
+                })
+                candidates = dedupeAndReindexCitations([
+                  ...candidates,
+                  ...resultsToCitations(expandedResults),
+                ])
+              }
+
+              return dedupeAndReindexCitations(candidates).slice(0, 8)
+            },
+            shouldUseBroadEvidenceFanout ? 2600 : 1800,
+            [] as EvidenceCitation[]
+          )
+          if (parityCitations.length > 0) {
+            mergedCitations = [...mergedCitations, ...parityCitations]
+            console.log(
+              `📚 [EVIDENCE PARITY] Added ${parityCitations.length} supplemental citations`
+            )
+          }
+          retrievalGateSummary = {
+            enabled: true,
+            status: "completed",
+            detail:
+              parityCitations.length > 0
+                ? `Broadening search parameters completed before response synthesis (${parityCitations.length} supplemental citations).`
+                : "Broadening search parameters completed before response synthesis (no additional high-signal citations).",
+            elapsedMs: Math.round(performance.now() - gateStartedAt),
+            addedCitations: Math.max(0, mergedCitations.length - citationsBeforeGate),
+          }
+        } catch (error) {
+          console.warn("📚 [EVIDENCE PARITY] Failed:", error)
+          retrievalGateSummary = {
+            enabled: true,
+            status: "failed",
+            detail:
+              "Broadening search parameters encountered an error; proceeding with validated pre-gate evidence.",
+            elapsedMs: Math.round(performance.now() - gateStartedAt),
+            addedCitations: Math.max(0, mergedCitations.length - citationsBeforeGate),
+          }
+        }
+      } else {
+        retrievalGateSummary = {
+          enabled: false,
+          status: "skipped",
+          detail:
+            "Broadening search parameters not required for this turn; primary retrieval met evidence threshold.",
+          elapsedMs: Math.round(performance.now() - gateStartedAt),
+          addedCitations: Math.max(0, mergedCitations.length - citationsBeforeGate),
+        }
+      }
+
       if (mergedCitations.length > 0) {
+        const hasGuidelineSignalAfterBroadening = hasGuidelineCitationSignal(mergedCitations)
+        if (guidelinePriority && !hasGuidelineSignalAfterBroadening) {
+          const fallbackSource = mergedCitations[0]
+          if (fallbackSource) {
+            secondaryEvidenceFallbackSummary = {
+              active: true,
+              sourceId: buildEvidenceSourceId(fallbackSource),
+              sourceLabel:
+                fallbackSource.sourceLabel ||
+                fallbackSource.journal ||
+                fallbackSource.sourceType ||
+                "secondary clinical evidence",
+            }
+          }
+        }
+
         const rankedPool = rankCitationsForQuery(mergedCitations, queryText, {
           guidelinePriority,
           recencyPriority: freshEvidenceIntent,
@@ -3608,6 +4940,16 @@ export async function POST(req: Request) {
       effectiveSystemPrompt += isArtifactIntentSupported
         ? `\n\nUSER ATTACHMENT CONTEXT (preview only):\n${attachmentContext}\n\nThis preview may be incomplete for large PDFs. For document/quiz artifact generation, prefer upload tools (inspectUploadStructure, uploadContextSearch, generation tools) over direct preview text.`
         : `\n\nUSER ATTACHMENT CONTEXT (from uploaded document content):\n${attachmentContext}\n\nUse this attachment content directly when answering the user's question. If the user asks whether you can see/read the file, explicitly confirm and reference the attachment by name.`
+    }
+    if (Array.isArray(studyGraphNodeContext) && studyGraphNodeContext.length > 0) {
+      const studyGraphBlock = studyGraphNodeContext
+        .slice(0, 6)
+        .map((node: { nodeType: string; label: string; deadlineAt?: string | null }) => {
+          const deadline = node.deadlineAt ? ` | deadline ${node.deadlineAt.slice(0, 10)}` : ""
+          return `- ${node.nodeType}: ${node.label}${deadline}`
+        })
+        .join("\n")
+      effectiveSystemPrompt += `\n\nSTRUCTURED STUDY GRAPH CONTEXT (file-grounded):\n${studyGraphBlock}\n\nUse this as structured context alongside upload citations.`
     }
 
     if (benchStrictMode && finalEnableEvidence) {
@@ -4117,6 +5459,148 @@ export async function POST(req: Request) {
       return primary
     }
 
+    const RETRIEVAL_SIGNAL_TOOLS = new Set([
+      "guidelineSearch",
+      "pubmedSearch",
+      "pubmedLookup",
+      "clinicalTrialsSearch",
+      "scholarGatewaySearch",
+      "bioRxivSearch",
+      "webSearch",
+      "uploadContextSearch",
+    ])
+
+    const countToolResultRecords = (result: unknown): number => {
+      if (Array.isArray(result)) return result.length
+      if (!result || typeof result !== "object") return 0
+      const candidate = result as Record<string, unknown>
+      if (Array.isArray(candidate.results)) return candidate.results.length
+      if (Array.isArray(candidate.articles)) return candidate.articles.length
+      if (Array.isArray(candidate.trials)) return candidate.trials.length
+      if (Array.isArray(candidate.citations)) return candidate.citations.length
+      if (typeof candidate.totalResults === "number") return Math.max(0, candidate.totalResults)
+      if (typeof candidate.rawTotalResults === "number") return Math.max(0, candidate.rawTotalResults)
+      if (typeof candidate.found === "boolean") return candidate.found ? 1 : 0
+      if (candidate.article && typeof candidate.article === "object") return 1
+      return 0
+    }
+
+    const evaluateToolResultSignal = (
+      toolName: string,
+      result: unknown
+    ): {
+      shouldEvaluate: boolean
+      hasData: boolean
+      count: number
+      detail?: string
+    } => {
+      if (!RETRIEVAL_SIGNAL_TOOLS.has(toolName)) {
+        return {
+          shouldEvaluate: false,
+          hasData: true,
+          count: 0,
+        }
+      }
+      const sourceLabelByTool: Record<string, string> = {
+        guidelineSearch: "Guideline Index",
+        pubmedSearch: "PubMed",
+        pubmedLookup: "PubMed",
+        clinicalTrialsSearch: "ClinicalTrials.gov",
+        scholarGatewaySearch: "Scholar Gateway",
+        bioRxivSearch: "bioRxiv",
+        webSearch: "Web Search",
+        uploadContextSearch: "Upload Context",
+      }
+      const sourceLabel = sourceLabelByTool[toolName] || "primary source"
+      const noSignalReason = `No direct matches found in ${sourceLabel}. Attempting query expansion...`
+      const count = countToolResultRecords(result)
+      if (toolName === "guidelineSearch") {
+        const candidate =
+          result && typeof result === "object"
+            ? (result as Record<string, unknown>)
+            : null
+        const strategy =
+          candidate?.strategy && typeof candidate.strategy === "object"
+            ? (candidate.strategy as Record<string, unknown>)
+            : null
+        const directMatches =
+          strategy && typeof strategy.directMatches === "number"
+            ? strategy.directMatches
+            : count
+        const secondaryMatches =
+          strategy && typeof strategy.secondaryMatches === "number"
+            ? strategy.secondaryMatches
+            : 0
+        if (directMatches <= 0) {
+          if (count > 0 || secondaryMatches > 0) {
+            return {
+              shouldEvaluate: true,
+              hasData: true,
+              count: Math.max(count, secondaryMatches),
+              detail:
+                "No direct guideline PDF matches in current index; checking secondary medical databases.",
+            }
+          }
+          return {
+            shouldEvaluate: true,
+            hasData: false,
+            count: 0,
+            detail: noSignalReason,
+          }
+        }
+      }
+      if (count > 0) {
+        return {
+          shouldEvaluate: true,
+          hasData: true,
+          count,
+        }
+      }
+      return {
+        shouldEvaluate: true,
+        hasData: false,
+        count: 0,
+        detail: noSignalReason,
+      }
+    }
+
+    const resolveUploadRecordForChatTools = async (uploadId?: string) => {
+      const scopedUploadId =
+        typeof uploadId === "string" && isUuidLike(uploadId)
+          ? uploadId
+          : selectedUploadIdHint && isUuidLike(selectedUploadIdHint)
+            ? selectedUploadIdHint
+            : undefined
+      if (!scopedUploadId) return null
+      if (!isAuthenticated || userId === "temp") return null
+
+      let supabase = validatedSupabase
+      if (!supabase) {
+        supabase = await createClient()
+      }
+      if (!supabase) return null
+
+      const { data, error } = await (supabase as any)
+        .from("user_uploads")
+        .select("id, title, file_name, upload_kind, metadata")
+        .eq("id", scopedUploadId)
+        .eq("user_id", userId)
+        .maybeSingle()
+      if (error || !data) {
+        return null
+      }
+      return {
+        id: data.id as string,
+        title: (data.title as string | null) || (data.file_name as string | null) || "Uploaded material",
+        fileName: (data.file_name as string | null) || null,
+        uploadKind: (data.upload_kind as string | null) || "other",
+        metadata:
+          data.metadata && typeof data.metadata === "object"
+            ? (data.metadata as Record<string, unknown>)
+            : ({} as Record<string, unknown>),
+      }
+    }
+
     if (ENABLE_YOUTUBE_TOOL && supportsTools && queryText.length > 0) {
       console.log("[YOUTUBE INTENT]", {
         shouldEnableYoutubeTool,
@@ -4224,10 +5708,12 @@ export async function POST(req: Request) {
 
               return {
                 intent: result.intent,
+                citations: result.citations,
                 results: result.citations.map((citation) => ({
                   index: citation.index,
                   title: citation.title,
                   sourceLabel: citation.sourceLabel,
+                  pmcid: citation.pmcid,
                   uploadId: citation.uploadId,
                   sourceUnitId: citation.sourceUnitId,
                   sourceUnitType: citation.sourceUnitType,
@@ -4237,6 +5723,8 @@ export async function POST(req: Request) {
                   url: citation.url,
                   snippet: citation.snippet,
                   score: citation.score,
+                  previewReference: citation.previewReference || null,
+                  figureReferences: citation.figureReferences || [],
                 })),
                 pagesReturned: result.pagesReturned,
                 warnings: result.warnings,
@@ -4415,6 +5903,295 @@ export async function POST(req: Request) {
                 }),
               }
             : {}),
+          ...(shouldEnableEvidenceTools
+            ? {
+                generateTimetableFromUploads: tool({
+                  description:
+                    "Generate a study timetable/plan from uploaded materials and inferred timetable metadata.",
+                  parameters: z.object({
+                    title: z.string().min(1).max(120).optional(),
+                    uploadId: z.string().min(1).optional(),
+                    startDate: z
+                      .string()
+                      .regex(/^\d{4}-\d{2}-\d{2}$/)
+                      .optional()
+                      .describe("YYYY-MM-DD"),
+                    endDate: z
+                      .string()
+                      .regex(/^\d{4}-\d{2}-\d{2}$/)
+                      .optional()
+                      .describe("YYYY-MM-DD"),
+                    hoursPerDay: z.number().min(0.5).max(16).default(3),
+                  }),
+                  execute: async ({ title, uploadId, startDate, endDate, hoursPerDay }) => {
+                    if (!isAuthenticated || userId === "temp") {
+                      return {
+                        ok: false,
+                        error: "User must be authenticated to generate a timetable.",
+                      }
+                    }
+
+                    const uploadRecord = await resolveUploadRecordForChatTools(uploadId)
+                    const extraction =
+                      uploadRecord?.metadata?.studyExtraction &&
+                      typeof uploadRecord.metadata.studyExtraction === "object"
+                        ? (uploadRecord.metadata.studyExtraction as Record<string, unknown>)
+                        : null
+                    const timetableEntries = extraction?.timetableEntries
+                    const datedEntries = Array.isArray(timetableEntries)
+                      ? timetableEntries
+                          .map((entry) => {
+                            if (!entry || typeof entry !== "object") return null
+                            const date = typeof entry.date === "string" ? entry.date : null
+                            return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
+                          })
+                          .filter((item): item is string => Boolean(item))
+                      : []
+                    const sortedDates = [...datedEntries].sort((a, b) => a.localeCompare(b))
+
+                    const today = new Date().toISOString().slice(0, 10)
+                    const inferredStart = sortedDates[0] || today
+                    const inferredEnd =
+                      sortedDates.length > 1
+                        ? sortedDates[sortedDates.length - 1]
+                        : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+                            .toISOString()
+                            .slice(0, 10)
+
+                    const generated = await studyPlannerService.generatePlan({
+                      userId,
+                      title:
+                        title ||
+                        (uploadRecord ? `${uploadRecord.title} timetable` : "Study timetable"),
+                      startDate: startDate || inferredStart,
+                      endDate: endDate || inferredEnd,
+                      hoursPerDay: Math.max(0.5, Math.min(16, Number(hoursPerDay || 3))),
+                    })
+
+                    return {
+                      ok: true,
+                      sourceUploadId: uploadRecord?.id || null,
+                      sourceUploadTitle: uploadRecord?.title || null,
+                      inferredFromUploadDates: datedEntries.length > 0,
+                      plan: generated.plan,
+                      blockCount: generated.blocks.length,
+                      previewBlocks: generated.blocks.slice(0, 10).map((block) => ({
+                        id: block.id,
+                        title: block.title,
+                        startsAt: block.startAt,
+                        endsAt: block.endAt,
+                        status: block.status,
+                      })),
+                    }
+                  },
+                }),
+                rebuildStudyGraphFromUpload: tool({
+                  description:
+                    "Rebuild StudyGraph nodes/edges from a selected upload's extracted study metadata.",
+                  parameters: z.object({
+                    uploadId: z.string().min(1).optional(),
+                  }),
+                  execute: async ({ uploadId }) => {
+                    if (!isAuthenticated || userId === "temp") {
+                      return {
+                        ok: false,
+                        error: "User must be authenticated to rebuild StudyGraph.",
+                      }
+                    }
+                    const uploadRecord = await resolveUploadRecordForChatTools(uploadId)
+                    if (!uploadRecord) {
+                      return {
+                        ok: false,
+                        error: "No upload found. Provide uploadId or reference an upload in chat.",
+                      }
+                    }
+                    const extraction =
+                      uploadRecord.metadata.studyExtraction &&
+                      typeof uploadRecord.metadata.studyExtraction === "object"
+                        ? (uploadRecord.metadata.studyExtraction as Record<string, unknown>)
+                        : null
+                    if (!extraction) {
+                      return {
+                        ok: false,
+                        error:
+                          "This upload has no studyExtraction metadata yet. Reprocess the upload first.",
+                      }
+                    }
+                    const rebuilt = await studyGraphService.rebuildGraphFromUpload({
+                      userId,
+                      uploadId: uploadRecord.id,
+                      uploadTitle: uploadRecord.title,
+                      extraction: extraction as any,
+                    })
+                    return {
+                      ok: true,
+                      uploadId: uploadRecord.id,
+                      nodeCount: rebuilt.nodeCount,
+                      edgeCount: rebuilt.edgeCount,
+                    }
+                  },
+                }),
+                rebalanceTimetablePlan: tool({
+                  description: "Rebalance a generated timetable after missed or shifted blocks.",
+                  parameters: z.object({
+                    planId: z.string().min(1),
+                    missedBlockIds: z.array(z.string().min(1)).optional(),
+                  }),
+                  execute: async ({ planId, missedBlockIds }) => {
+                    if (!isAuthenticated || userId === "temp") {
+                      return {
+                        ok: false,
+                        error: "User must be authenticated to rebalance a timetable.",
+                      }
+                    }
+                    const result = await studyPlannerService.rebalancePlan({
+                      userId,
+                      planId,
+                      missedBlockIds,
+                    })
+                    if (!result) {
+                      return {
+                        ok: false,
+                        error: "Plan not found.",
+                      }
+                    }
+                    return {
+                      ok: true,
+                      planId: result.plan.id,
+                      movedBlockCount: result.blocks.length,
+                      previewBlocks: result.blocks.slice(0, 10).map((block) => ({
+                        id: block.id,
+                        title: block.title,
+                        startsAt: block.startAt,
+                        endsAt: block.endAt,
+                        status: block.status,
+                      })),
+                    }
+                  },
+                }),
+                createReviewQueueFromUploads: tool({
+                  description:
+                    "Generate and fetch a spaced-repetition review queue from uploaded study sources.",
+                  parameters: z.object({
+                    limit: z.number().int().min(1).max(80).default(24),
+                  }),
+                  execute: async ({ limit }) => {
+                    if (!isAuthenticated || userId === "temp") {
+                      return {
+                        ok: false,
+                        error: "User must be authenticated to create review queues.",
+                      }
+                    }
+                    const generatedItems = await studyReviewService.generateReviewItems({
+                      userId,
+                      limit,
+                    })
+                    const due = await studyReviewService.getDueQueue(userId, limit)
+                    return {
+                      ok: true,
+                      generatedCount: generatedItems.length,
+                      dueCount: due.due.length,
+                      duePreview: due.due.slice(0, 10).map((item) => ({
+                        id: item.id,
+                        prompt: item.prompt,
+                        topicLabel: item.topicLabel,
+                        dueAt: item.nextReviewAt,
+                        status: item.status,
+                      })),
+                    }
+                  },
+                }),
+                summarizeLectureUpload: tool({
+                  description:
+                    "Generate lecture notes, summary, and next actionables from an uploaded lecture video or document.",
+                  parameters: z.object({
+                    uploadId: z.string().min(1).optional(),
+                    includeActionables: z.boolean().default(true),
+                  }),
+                  execute: async ({ uploadId, includeActionables }) => {
+                    if (!isAuthenticated || userId === "temp") {
+                      return {
+                        ok: false,
+                        error: "User must be authenticated to summarize uploaded lectures.",
+                      }
+                    }
+
+                    const uploadRecord = await resolveUploadRecordForChatTools(uploadId)
+                    if (!uploadRecord) {
+                      return {
+                        ok: false,
+                        error:
+                          "No upload found. Provide an uploadId or reference an upload in chat first.",
+                      }
+                    }
+
+                    const extraction =
+                      uploadRecord.metadata.studyExtraction &&
+                      typeof uploadRecord.metadata.studyExtraction === "object"
+                        ? (uploadRecord.metadata.studyExtraction as Record<string, unknown>)
+                        : null
+                    const extractionSummary =
+                      extraction && typeof extraction.lectureSummary === "string"
+                        ? extraction.lectureSummary
+                        : null
+                    const extractionActionables =
+                      extraction && Array.isArray(extraction.actionables)
+                        ? extraction.actionables
+                            .map((item) => (typeof item === "string" ? item.trim() : ""))
+                            .filter((item): item is string => item.length > 0)
+                        : []
+                    const extractionTopics =
+                      extraction && Array.isArray(extraction.topicLabels)
+                        ? extraction.topicLabels
+                            .map((item) => (typeof item === "string" ? item.trim() : ""))
+                            .filter((item): item is string => item.length > 0)
+                        : []
+
+                    let summary = extractionSummary || ""
+                    let actionables = extractionActionables
+
+                    if (!summary) {
+                      try {
+                        const detail = await uploadService.getUploadDetail(
+                          userId,
+                          uploadRecord.id
+                        )
+                        if (detail) {
+                          const synthesized = summarizeTextForNotes(
+                            detail.sourceUnits.map((unit) => unit.extractedText || "").join("\n")
+                          )
+                          summary = synthesized.summary
+                          if (actionables.length === 0) {
+                            actionables = synthesized.actionables
+                          }
+                        }
+                      } catch {
+                        // fall through and return best-effort metadata summary
+                      }
+                    }
+
+                    const nextActions = [
+                      actionables[0] || "Ask chat to convert this lecture into a timed study block.",
+                      actionables[1] || "Generate a 10-question viva drill from these notes.",
+                      "Create a spaced-repetition queue from the lecture takeaways.",
+                    ]
+                      .filter((item): item is string => Boolean(item))
+                      .slice(0, 5)
+
+                    return {
+                      ok: true,
+                      uploadId: uploadRecord.id,
+                      uploadTitle: uploadRecord.title,
+                      uploadKind: uploadRecord.uploadKind,
+                      summary: summary || "No transcript summary available yet.",
+                      actionables: includeActionables ? actionables.slice(0, 12) : [],
+                      keyTopics: extractionTopics.slice(0, 12),
+                      nextActions,
+                    }
+                  },
+                }),
+              }
+            : {}),
           pubmedSearch: tool({
             description: "Search PubMed for recent or guideline-related medical literature.",
             parameters: z.object({
@@ -4542,39 +6319,180 @@ export async function POST(req: Request) {
                 ? Math.max(maxResults, 8)
                 : maxResults
               const startedAt = performance.now()
-              const result = await searchGuidelines(query, strictMaxResults, "US")
-              logGuidelineDiagnostics("guideline_tool_execute", {
-                query,
-                strictMaxResults,
-                benchStrictMode,
-                phase: "primary",
-                resultCount: result.results.length,
-                sourcesUsed: result.sourcesUsed,
-                provenanceCount: result.provenance.length,
-                elapsedMs: Math.round(performance.now() - startedAt),
-              })
-              if (result.results.length > 0 || !benchStrictMode) {
-                pushRuntimeEvidenceCitations(result)
-                return result
+              const mergedByKey = new Map<string, any>()
+              const mergedProvenanceByKey = new Map<string, SourceProvenance>()
+              const sourcesUsed = new Set<string>()
+              const attemptedQueries: string[] = []
+              const stepDiagnostics: Array<{
+                step: "specific_title" | "broader_semantic" | "secondary_repository"
+                query: string
+                source: string
+                resultCount: number
+              }> = []
+
+              const ingestGuidelinePayload = (
+                payload: {
+                  results: any[]
+                  provenance: SourceProvenance[]
+                  sourcesUsed: string[]
+                },
+                step: "specific_title" | "broader_semantic" | "secondary_repository",
+                queryUsed: string,
+                source: string
+              ) => {
+                attemptedQueries.push(queryUsed)
+                stepDiagnostics.push({
+                  step,
+                  query: queryUsed,
+                  source,
+                  resultCount: payload.results.length,
+                })
+                payload.sourcesUsed.forEach((item) => sourcesUsed.add(item))
+                payload.results.forEach((item) => {
+                  const key = `${item.url || ""}|${String(item.title || "").toLowerCase()}`
+                  if (!mergedByKey.has(key) && mergedByKey.size < strictMaxResults) {
+                    mergedByKey.set(key, item)
+                  }
+                })
+                payload.provenance.forEach((item) => {
+                  const key = item.id || `${item.url || ""}|${String(item.title || "").toLowerCase()}`
+                  if (!mergedProvenanceByKey.has(key)) {
+                    mergedProvenanceByKey.set(key, item)
+                  }
+                })
               }
-              const fallbackStartedAt = performance.now()
-              const fallbackResult = await searchGuidelines(
-                `${query} guideline`,
-                strictMaxResults,
-                "GLOBAL"
+
+              const toGuidelineLikeFromConnector = (payload: ConnectorSearchPayload) => {
+                const results = payload.results.map((record) => ({
+                  title: record.title,
+                  source: record.sourceLabel || "Secondary repository",
+                  region: null,
+                  date: record.publishedAt,
+                  url: record.url,
+                  summary: record.snippet,
+                  evidenceLevel:
+                    typeof record.metadata?.evidenceLevel === "number"
+                      ? (record.metadata.evidenceLevel as number)
+                      : 3,
+                  studyType:
+                    typeof record.metadata?.studyType === "string"
+                      ? (record.metadata.studyType as string)
+                      : "Guideline summary",
+                }))
+                return {
+                  results,
+                  provenance: payload.provenance,
+                  sourcesUsed: Array.from(new Set(results.map((item) => item.source))).filter(
+                    (item): item is string => Boolean(item)
+                  ),
+                }
+              }
+
+              // Step A: direct title/guideline search in primary index.
+              const primary = await searchGuidelines(query, strictMaxResults, "US")
+              ingestGuidelinePayload(primary, "specific_title", query, "guideline_index")
+              const directMatches = primary.results.length
+
+              // Step B: broader semantic expansion when direct search misses.
+              let broadenedMatches = 0
+              if (directMatches === 0) {
+                const expandedQueries = buildGuidelineEscalationQueries(query)
+                for (const expandedQuery of expandedQueries) {
+                  if (mergedByKey.size >= strictMaxResults) break
+                  if (!expandedQuery || expandedQuery.toLowerCase() === query.toLowerCase()) {
+                    continue
+                  }
+                  const expandedResult = await searchGuidelines(
+                    expandedQuery,
+                    strictMaxResults,
+                    "GLOBAL"
+                  )
+                  ingestGuidelinePayload(
+                    expandedResult,
+                    "broader_semantic",
+                    expandedQuery,
+                    "guideline_index"
+                  )
+                }
+                broadenedMatches = Math.max(0, mergedByKey.size - directMatches)
+              }
+
+              // Step C: secondary repositories for guideline summaries.
+              let secondaryMatches = 0
+              if (mergedByKey.size === 0) {
+                const secondarySummaryQuery = `${query} guideline summaries`
+                const scholarPayload = await executeConnectorWithFallback({
+                  connectorId: "scholar_gateway",
+                  query: secondarySummaryQuery,
+                  maxResults: strictMaxResults,
+                  medicalOnly: true,
+                })
+                const scholarGuidelineLike = toGuidelineLikeFromConnector(scholarPayload)
+                ingestGuidelinePayload(
+                  scholarGuidelineLike,
+                  "secondary_repository",
+                  secondarySummaryQuery,
+                  "scholar_gateway"
+                )
+
+                const pubmedPayload = await executeConnectorWithFallback({
+                  connectorId: "pubmed",
+                  query: secondarySummaryQuery,
+                  maxResults: strictMaxResults,
+                  medicalOnly: true,
+                })
+                const pubmedGuidelineLike = toGuidelineLikeFromConnector(pubmedPayload)
+                ingestGuidelinePayload(
+                  pubmedGuidelineLike,
+                  "secondary_repository",
+                  secondarySummaryQuery,
+                  "pubmed"
+                )
+                secondaryMatches = Math.max(0, mergedByKey.size)
+              } else {
+                secondaryMatches = Math.max(0, mergedByKey.size - directMatches - broadenedMatches)
+              }
+
+              const mergedResults = Array.from(mergedByKey.values()).slice(0, strictMaxResults)
+              const mergedProvenance = Array.from(mergedProvenanceByKey.values()).slice(
+                0,
+                strictMaxResults * 2
               )
+              const fallbackTriggered = directMatches === 0
+              const noSignalMessage =
+                "No direct guideline PDF matches in current index; checking secondary medical databases."
+              const warnings = [
+                ...(fallbackTriggered ? [noSignalMessage] : []),
+                ...(mergedResults.length === 0
+                  ? ["Guideline Search: No direct matches found; pivoting to clinical trials."]
+                  : []),
+              ]
+              const payload = {
+                results: mergedResults,
+                sourcesUsed: Array.from(sourcesUsed),
+                provenance: mergedProvenance,
+                warnings,
+                attemptedQueries: Array.from(new Set(attemptedQueries)),
+                strategy: {
+                  directMatches,
+                  broadenedMatches,
+                  secondaryMatches,
+                  fallbackTriggered,
+                },
+              }
               logGuidelineDiagnostics("guideline_tool_execute", {
                 query,
                 strictMaxResults,
                 benchStrictMode,
-                phase: "fallback_global",
-                resultCount: fallbackResult.results.length,
-                sourcesUsed: fallbackResult.sourcesUsed,
-                provenanceCount: fallbackResult.provenance.length,
-                elapsedMs: Math.round(performance.now() - fallbackStartedAt),
+                elapsedMs: Math.round(performance.now() - startedAt),
+                resultCount: payload.results.length,
+                provenanceCount: payload.provenance.length,
+                attemptedQueries: payload.attemptedQueries,
+                strategy: payload.strategy,
+                steps: stepDiagnostics,
               })
-              pushRuntimeEvidenceCitations(fallbackResult)
-              return fallbackResult
+              pushRuntimeEvidenceCitations(payload)
+              return payload
             },
           }),
           clinicalTrialsSearch: tool({
@@ -4966,27 +6884,65 @@ export async function POST(req: Request) {
         ]
       : []
 
-    let langGraphPlan: Awaited<ReturnType<typeof runClinicalAgentHarness>> | null = null
-    if (ENABLE_LANGGRAPH_HARNESS && supportsTools && queryText.trim().length > 0) {
-      langGraphPlan = await runClinicalAgentHarness({
-        query: queryText,
-        role: effectiveUserRole,
-        learningMode: effectiveLearningMode,
-        clinicianMode: effectiveClinicianMode,
-        artifactIntent: effectiveArtifactIntent,
-        supportsTools,
-        evidenceEnabled: finalEnableEvidence,
-        fanoutPreferred: shouldUseBroadEvidenceFanout,
-        availableToolNames: Object.keys(runtimeTools),
-      })
-      langGraphHarnessTrace = langGraphPlan.trace
+    let langGraphPlan:
+      | Awaited<ReturnType<typeof runClinicalAgentHarness>>
+      | Awaited<ReturnType<typeof runLangChainSupervisor>>
+      | null = null
+    const shouldUseLangChainSupervisor =
+      ENABLE_LANGCHAIN_SUPERVISOR &&
+      (effectiveUserRole === "medical_student" || effectiveUserRole === "doctor")
 
-      if (langGraphPlan.selectedToolNames.length > 0) {
-        const selectedToolNames = new Set(langGraphPlan.selectedToolNames)
+    if (supportsTools && queryText.trim().length > 0) {
+      const lmsContextForSupervisor = shouldUseLangChainSupervisor
+        ? await lmsContextPromise
+        : null
+      if (shouldUseLangChainSupervisor) {
+        try {
+          langGraphPlan = await runLangChainSupervisor({
+            query: queryText,
+            role: effectiveUserRole,
+            learningMode: effectiveLearningMode,
+            clinicianMode: effectiveClinicianMode,
+            lmsContext: lmsContextForSupervisor,
+            artifactIntent: effectiveArtifactIntent,
+            supportsTools,
+            evidenceEnabled: finalEnableEvidence,
+            fanoutPreferred: shouldUseBroadEvidenceFanout,
+            availableToolNames: Object.keys(runtimeTools),
+            incompleteEvidencePolicy: effectiveIncompleteEvidencePolicy,
+          })
+          langGraphHarnessTrace = langGraphPlan.trace
+        } catch (error) {
+          console.warn("[ROUTING] LangChain supervisor failed, attempting harness fallback:", error)
+        }
+      }
+
+      if (!langGraphPlan && ENABLE_LANGGRAPH_HARNESS) {
+        langGraphPlan = await runClinicalAgentHarness({
+          query: queryText,
+          role: effectiveUserRole,
+          learningMode: effectiveLearningMode,
+          clinicianMode: effectiveClinicianMode,
+          artifactIntent: effectiveArtifactIntent,
+          supportsTools,
+          evidenceEnabled: finalEnableEvidence,
+          fanoutPreferred: shouldUseBroadEvidenceFanout,
+          availableToolNames: Object.keys(runtimeTools),
+          incompleteEvidencePolicy: effectiveIncompleteEvidencePolicy,
+        })
+        langGraphHarnessTrace = langGraphPlan.trace
+      }
+
+      if (langGraphPlan) {
+        const selectedToolNames = new Set(langGraphPlan.selectedToolNames || [])
+        const isSupervisorPlan =
+          "orchestrationEngine" in langGraphPlan &&
+          langGraphPlan.orchestrationEngine === "langchain-supervisor"
+        const enforcePlannerLazySelection = isSupervisorPlan
         if (!allowScholarGatewayTool) {
           selectedToolNames.delete("scholarGatewaySearch")
         }
-        if (preferredFanoutToolNames.length > 0) {
+        if (!isSupervisorPlan && preferredFanoutToolNames.length > 0) {
           for (const toolName of preferredFanoutToolNames) {
             if (toolName in runtimeTools) {
               selectedToolNames.add(toolName)
@@ -5013,12 +6969,12 @@ export async function POST(req: Request) {
         const filteredEntries = Object.entries(runtimeTools).filter(([toolName]) =>
           selectedToolNames.has(toolName)
         )
-        if (filteredEntries.length > 0) {
+        if (filteredEntries.length > 0 || enforcePlannerLazySelection) {
           runtimeTools = Object.fromEntries(filteredEntries) as ToolSet
         }
       }
 
-      if (langGraphPlan.systemPromptAdditions.length > 0) {
+      if (langGraphPlan?.systemPromptAdditions.length) {
         effectiveSystemPrompt += `\n\n${langGraphPlan.systemPromptAdditions.join("\n")}`
       }
     }
@@ -5055,11 +7011,25 @@ export async function POST(req: Request) {
           })
           try {
             const result = await originalExecute(args, context)
-            emitToolLifecycleEvent({
-              toolName,
-              toolCallId,
-              lifecycle: "completed",
-            })
+            const signal = evaluateToolResultSignal(toolName, result)
+            if (!signal.shouldEvaluate || signal.hasData) {
+              emitToolLifecycleEvent({
+                toolName,
+                toolCallId,
+                lifecycle: "completed",
+                detail:
+                  signal.shouldEvaluate && signal.count > 0
+                    ? `${signal.count} record${signal.count === 1 ? "" : "s"} returned`
+                    : signal.detail,
+              })
+            } else {
+              emitToolLifecycleEvent({
+                toolName,
+                toolCallId,
+                lifecycle: "failed",
+                detail: signal.detail || "Tool returned no direct matches.",
+              })
+            }
             return result
           } catch (error) {
             emitToolLifecycleEvent({
@@ -5087,6 +7057,11 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - ${shouldEnableStructureInspectionTool ? "Use inspectUploadStructure for large uploads to map TOC/headings before generating study artifacts." : "Structure inspection tool is unavailable in this context."}
 - ${canUseArtifactTools ? "Use refineQuizRequirements before quiz generation when scope is broad or underspecified." : "Quiz refinement/generation tools are unavailable unless upload tools are enabled."}
 - ${canUseArtifactTools ? "Use generateQuizFromUpload only after refinement is complete for quiz intents." : "Quiz artifact generation is unavailable unless upload tools are enabled."}
+- Use generateTimetableFromUploads for study schedule/timetable generation directly from uploads or chat constraints.
+- Use rebuildStudyGraphFromUpload when the user asks to refresh topic/objective/deadline nodes from files.
+- Use rebalanceTimetablePlan when the user asks to shift missed blocks or rebalance a plan.
+- Use summarizeLectureUpload for uploaded lecture videos to return notes, summary, and next actionables.
+- Use createReviewQueueFromUploads to build revision queues from uploaded study materials.
 - Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.
 - Use guidelineSearch for formal recommendations and regional guidance.
 - Use clinicalTrialsSearch for ongoing/new evidence.
@@ -5100,11 +7075,15 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - IMPORTANT: Keep tool queries tightly aligned to the user question (specific condition/drug terms, not broad generic terms).
 - IMPORTANT: If a tool returns irrelevant records, explicitly discard them and retry with a narrower query before citing evidence.
 - IMPORTANT: Do not append manual references/bibliography sections; keep citations inline in the answer body only.
-- CITATION DENSITY: For medical content, place citations after each factual sentence whenever evidence exists; avoid bundling multiple distinct claims under one citation.`
+- CITATION DENSITY: For medical content, place citations after each factual sentence whenever evidence exists; avoid bundling multiple distinct claims under one citation.
+- CITATION FORMAT: Use canonical source-id citations in the form [CITE_<sourceId>] whenever possible (example: [CITE_pmid:1578956]). Source IDs are listed in the evidence context.
+- DIAGRAM/CODE CITATIONS: Never place citation markers inside fenced code blocks (including \`\`\`chart and \`\`\`mermaid). Put citations in surrounding prose only.
+- CHART OUTPUT: If you have structured numeric trend data (sleep stages, labs over time, activity, readiness, HR/HRV), include a fenced \`\`\`chart block containing JSON with this shape: { "type": "line|bar|area|stacked-bar|composed", "title": "...", "subtitle": "...", "source": "...", "xKey": "label", "series": [{ "key": "valueKey", "label": "Legend Label", "color": "#HEX" }], "data": [{ "label": "Mon", "valueKey": 7.2 }] }.
+- MULTI-CHART OUTPUT: If the data contains multiple distinct numeric groups/trajectories, emit either (a) multiple fenced \`\`\`chart blocks, or (b) one fenced \`\`\`chart block with JSON shape { "charts": [<chartSpec>, <chartSpec>, ...] }. Only emit charts when data quality is sufficient; otherwise provide normal text and call out missing structure.`
       if (benchStrictMode) {
         effectiveSystemPrompt += `\n- BENCH STRICT: If guideline evidence is requested or clinically relevant, run guidelineSearch before finalizing your answer.
 - BENCH STRICT: If a tool returns weakly relevant results, rerun once with a narrower query and cite only the focused result set.
-- BENCH STRICT: Do not emit bracketed PMID/DOI values as citations; use only [index] citations from provided evidence.
+- BENCH STRICT: Do not emit raw PMID/DOI values as citations; use [CITE_<sourceId>] tokens from provided evidence.
 - BENCH STRICT: Do not append manual references sections; keep citations inline only.`
       }
     } else if (shouldEnablePubMedTools) {
@@ -5114,8 +7093,50 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
     if (ENABLE_STRICT_CITATION_CONTRACT && finalEnableEvidence) {
       effectiveSystemPrompt += `\n\nSTRICT CITATION CONTRACT:
 - Never output unresolved placeholder tokens such as [CITE_PLACEHOLDER_0].
-- Only emit numeric bracket citations [n] when they map to returned evidence citations.
+- Use [CITE_<sourceId>] as the primary citation marker format.
+- Numeric bracket citations [n] are allowed only as compatibility fallback when source-id tokens are unavailable.
 - If no evidence citations are available for a claim, omit citation markers for that claim instead of fabricating references.`
+    }
+
+    if (finalEnableEvidence && explicitReferenceCitations.length > 0) {
+      const explicitSourceIds = explicitReferenceCitations
+        .map((citation) => `[CITE_${buildEvidenceSourceId(citation)}]`)
+        .join(", ")
+      effectiveSystemPrompt += `\n\nEXPLICIT SOURCE PRIORITY:
+- The user explicitly named one or more papers in the request.
+- You MUST prioritize the explicitly referenced source(s) when they are relevant: ${explicitSourceIds}.
+- Ground the answer in those source-id citations instead of falling back to naked URLs or saying the paper is unavailable if it appears in the provided evidence context.`
+    }
+
+    if (finalEnableEvidence && pmcOpenAccessReviewCitations.length > 0) {
+      const pmcReviewSourceIds = pmcOpenAccessReviewCitations
+        .map((citation) => `[CITE_${buildEvidenceSourceId(citation)}]`)
+        .join(", ")
+      effectiveSystemPrompt += `\n\nPMC OPEN-ACCESS REVIEW POLICY:
+- The user asked for a PMC/open-access review and suitable PMC-backed review evidence is available in the evidence context: ${pmcReviewSourceIds}.
+- If the user says to pick one, choose the best-matching PMC-backed review and proceed without asking for a PMCID.
+- Do not claim you cannot verify PMC/open-access availability when one of these citations is present in the evidence context.
+- If you name a specific review article, every claim about that review and any inline figure reference MUST use that exact source-id citation, not a different source.
+- Never describe a figure/caption from one article while citing a different article.`
+    }
+
+    if (inlineEvidenceFigureRequested) {
+      effectiveSystemPrompt += `\n\nINLINE EVIDENCE VISUAL POLICY:
+- If a cited evidence source includes a linked visual, the interface can render it automatically as a structured evidence visual.
+- Do not say you cannot include a figure inline solely because of copyright if the figure comes from the provided evidence context, especially for PMC-backed open-access sources.
+- Keep the answer grounded in the evidence and let the UI render the linked visual; if useful, briefly refer to it as an inline evidence visual.
+- Only mention a figure or caption when it belongs to the same cited source used for the surrounding explanation.
+- Prefer conceptual/schematic figures for mechanism or comparison questions; avoid statistical plots unless the user asked about outcomes, efficacy, or meta-analysis results.`
+    }
+
+    if (secondaryEvidenceFallbackSummary?.active) {
+      const fallbackMarker = secondaryEvidenceFallbackSummary.sourceId
+        ? `[CITE_${secondaryEvidenceFallbackSummary.sourceId}]`
+        : ""
+      effectiveSystemPrompt += `\n\nSECONDARY EVIDENCE FRAMING:
+- Primary guideline was not found in indexed guideline repositories for this turn.
+- You MUST state this explicitly in the answer: "Primary guideline not found; synthesis based on secondary clinical evidence from ${secondaryEvidenceFallbackSummary.sourceLabel}${fallbackMarker ? ` ${fallbackMarker}` : ""}."
+- Continue with concrete clinical synthesis from secondary evidence instead of saying information is unavailable.`
     }
 
     if (artifactWorkflowStage === "inspect" && effectiveArtifactIntent === "quiz") {
@@ -5377,6 +7398,22 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                 recordCitationContractViolation()
                 responseText = responseText.replace(/\[?\s*CITE_PLACEHOLDER_\d+\s*\]?/gi, "")
               }
+
+              if (secondaryEvidenceFallbackSummary?.active && responseText.trim().length > 0) {
+                const fallbackMarker = secondaryEvidenceFallbackSummary.sourceId
+                  ? `[CITE_${secondaryEvidenceFallbackSummary.sourceId}]`
+                  : ""
+                const fallbackSentence = `Primary guideline not found; synthesis based on secondary clinical evidence from ${secondaryEvidenceFallbackSummary.sourceLabel}${fallbackMarker ? ` ${fallbackMarker}` : ""}.`
+                const unavailablePattern = /this information is not available in the provided sources\.?/gi
+                if (unavailablePattern.test(responseText)) {
+                  responseText = responseText.replace(unavailablePattern, fallbackSentence)
+                }
+                if (!/primary guideline not found;/i.test(responseText)) {
+                  responseText = `${fallbackSentence}\n\n${responseText}`
+                }
+                sanitizedResponseMessages[sanitizedResponseMessages.length - 1] =
+                  overwriteAssistantText(assistantMessage, responseText)
+              }
               
               // Extract referenced citations from the response
               // CRITICAL: Only extract citations if evidence mode is enabled
@@ -5425,6 +7462,90 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                   } else if (contextToUse.context.citations.length > 0) {
                     console.warn(`📚 [CITATION EXTRACTION] ⚠️ No citation markers found in response despite ${contextToUse.context.citations.length} citations being provided`)
                     console.warn(`📚 [CITATION EXTRACTION] Response preview: ${responseText.substring(0, 300)}...`)
+                  }
+
+                  const utilization = computeCitationUtilization(
+                    contextToUse.context.citations,
+                    citationsToSave as EvidenceCitation[]
+                  )
+                  const shouldRunCoverageRefinement =
+                    utilization.totalUnique >= 4 &&
+                    utilization.ratio < 0.7 &&
+                    responseText.trim().length > 0
+
+                  if (shouldRunCoverageRefinement) {
+                    const uncoveredCitations = contextToUse.context.citations
+                      .filter((citation) =>
+                        utilization.missingSourceIds.includes(
+                          buildEvidenceSourceId(citation)
+                        )
+                      )
+                      .slice(0, 8)
+                    console.warn(
+                      `📚 [COVERAGE CHECK] Citation utilization ${Math.round(
+                        utilization.ratio * 100
+                      )}% (${utilization.referencedUnique}/${utilization.totalUnique}); running one refinement pass.`
+                    )
+                    try {
+                      const refinementText = await runWithTimeBudget(
+                        "CITATION_UTILIZATION_REFINEMENT",
+                        async () => {
+                          const uncoveredLines = uncoveredCitations
+                            .map(
+                              (citation, idx) =>
+                                `${idx + 1}. [CITE_${buildEvidenceSourceId(citation)}] ${citation.title} (${citation.journal || citation.sourceLabel || "Source"})`
+                            )
+                            .join("\n")
+                          const refinement = await generateText({
+                            model: modelWithSearch,
+                            system: `${effectiveSystemPrompt}
+
+Coverage policy for this pass:
+- You MUST integrate more of the uncovered evidence.
+- You MUST cite using [CITE_<sourceId>] immediately after factual claims.
+- Keep answer concise and clinically focused.
+- Do not include bibliography/reference list sections.`,
+                            prompt: `Revise this clinical answer to improve evidence utilization.
+
+Current answer:
+${responseText}
+
+Uncovered evidence that must be incorporated where clinically relevant:
+${uncoveredLines}
+
+Return only the revised answer body with inline citations.`,
+                          })
+                          return refinement.text?.trim() || ""
+                        },
+                        2600,
+                        ""
+                      )
+
+                      if (refinementText) {
+                        responseText = refinementText
+                        sanitizedResponseMessages[sanitizedResponseMessages.length - 1] =
+                          overwriteAssistantText(assistantMessage, refinementText)
+                        const refinedExtraction = extractReferencedCitations(
+                          refinementText,
+                          contextToUse.context.citations
+                        )
+                        citationsToSave = refinedExtraction.referencedCitations
+                        const refinedUtilization = computeCitationUtilization(
+                          contextToUse.context.citations,
+                          citationsToSave as EvidenceCitation[]
+                        )
+                        console.log(
+                          `📚 [COVERAGE CHECK] Post-refinement utilization ${Math.round(
+                            refinedUtilization.ratio * 100
+                          )}% (${refinedUtilization.referencedUnique}/${refinedUtilization.totalUnique})`
+                        )
+                      }
+                    } catch (refinementError) {
+                      console.warn(
+                        "📚 [COVERAGE CHECK] Refinement pass failed:",
+                        refinementError
+                      )
+                    }
                   }
                 } else {
                   console.warn(`📚 [CITATION EXTRACTION] ⚠️ Could not extract response text for citation parsing`)
@@ -5587,6 +7708,13 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
     let evidenceCitationsForStream: EvidenceCitation[] = []
     const artifactRuntimeWarningsForStream = Array.from(
       new Set([
+        ...(uploadReadinessTimedOut
+          ? [
+              selectedUploadIds.length > 0
+                ? "Some uploads were still indexing; retrieval used the completed subset."
+                : "Uploads are still indexing. Ask again in a moment for grounded citations.",
+            ]
+          : []),
         ...(uploadContextResult?.warnings ?? []).filter(
           (warning) =>
             !/embedding provider mismatch|key\/provider mismatch|lexical fallback/i.test(
@@ -5622,14 +7750,212 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
           )
         : null
     const selectedToolNamesForTurn = Object.keys(runtimeTools)
+    const normalizedQuerySnippet = queryText.trim().replace(/\s+/g, " ").slice(0, 140)
+    const orchestrationEngineForStream =
+      langGraphPlan && "orchestrationEngine" in langGraphPlan
+        ? langGraphPlan.orchestrationEngine
+        : langGraphPlan
+          ? "langgraph-harness"
+          : "none"
+    const dynamicChecklistForStream =
+      langGraphPlan &&
+      "dynamicChecklist" in langGraphPlan &&
+      Array.isArray(langGraphPlan.dynamicChecklist)
+        ? langGraphPlan.dynamicChecklist.slice(0, 12)
+        : []
+    const plannerRuntimeStepsForStream =
+      langGraphPlan &&
+      "runtimeSteps" in langGraphPlan &&
+      Array.isArray(langGraphPlan.runtimeSteps)
+        ? langGraphPlan.runtimeSteps.slice(0, 16)
+        : []
+    const retrievalGateRuntimeStep = retrievalGateSummary
+      ? [
+          {
+            id: "retrieval-gate-block",
+            label: "Awaiting broadened evidence",
+            status:
+              retrievalGateSummary.status === "failed"
+                ? "failed"
+                : retrievalGateSummary.status === "completed"
+                  ? "completed"
+                  : "completed",
+            detail: retrievalGateSummary.detail,
+            reasoning: `Hard retrieval gate completed in ${retrievalGateSummary.elapsedMs}ms before answer streaming.`,
+            phase: "retrieval",
+            isCritical: true,
+          },
+        ]
+      : []
+    const runtimeStepsForStream = [
+      ...plannerRuntimeStepsForStream,
+      ...retrievalGateRuntimeStep,
+    ].slice(0, 16)
+    const taskPlanForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "taskPlan" in langGraphPlan &&
+      Array.isArray(langGraphPlan.taskPlan)
+        ? langGraphPlan.taskPlan.slice(0, 16)
+        : []
+    const hasCurriculumAlignmentTaskForStream = taskPlanForStream.some(
+      (task: { taskName?: unknown }) =>
+        typeof task.taskName === "string" &&
+        /(curriculum alignment|cross-referencing .* learning objectives|institutional learning objectives)/i.test(
+          String(task.taskName)
+        )
+    )
+    const runtimeDagForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "runtimeDag" in langGraphPlan &&
+      Array.isArray(langGraphPlan.runtimeDag)
+        ? langGraphPlan.runtimeDag.slice(0, 20)
+        : []
+    const gatekeeperDecisionsForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "gatekeeperDecisions" in langGraphPlan &&
+      Array.isArray(langGraphPlan.gatekeeperDecisions)
+        ? langGraphPlan.gatekeeperDecisions.slice(0, 40)
+        : []
+    const loopTransitionsForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "loopTransitions" in langGraphPlan &&
+      Array.isArray(langGraphPlan.loopTransitions)
+        ? langGraphPlan.loopTransitions.slice(0, 12)
+        : []
+    const confidenceTransitionsForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "confidenceTransitions" in langGraphPlan &&
+      Array.isArray(langGraphPlan.confidenceTransitions)
+        ? langGraphPlan.confidenceTransitions.slice(0, 12)
+        : []
+    const missingVariablePromptsForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "missingVariablePrompts" in langGraphPlan &&
+      Array.isArray(langGraphPlan.missingVariablePrompts)
+        ? langGraphPlan.missingVariablePrompts.slice(0, 8)
+        : []
+    const plannerRetrievalNotesForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "retrievalNotes" in langGraphPlan &&
+      Array.isArray(langGraphPlan.retrievalNotes)
+        ? langGraphPlan.retrievalNotes.slice(0, 10)
+        : []
+    const retrievalGateOutcomeForStream =
+      retrievalGateSummary?.status === "failed"
+        ? "error"
+        : retrievalGateSummary?.status === "completed"
+          ? "fallback"
+          : "success"
+    const retrievalGateNoteForStream = retrievalGateSummary
+      ? [
+          {
+            id: "retrieval-gate-note",
+            connectorId: "retrieval_gate",
+            outcome: retrievalGateOutcomeForStream,
+            note: retrievalGateSummary.detail,
+            detail: `Gate time ${retrievalGateSummary.elapsedMs}ms • +${retrievalGateSummary.addedCitations} citations`,
+          },
+        ]
+      : []
+    const secondaryEvidenceNoteForStream = secondaryEvidenceFallbackSummary?.active
+      ? [
+          {
+            id: "secondary-evidence-framing",
+            connectorId: "guideline",
+            outcome: "fallback" as const,
+            note: `Primary guideline not found; using secondary clinical evidence from ${secondaryEvidenceFallbackSummary.sourceLabel}.`,
+            detail: secondaryEvidenceFallbackSummary.sourceId
+              ? `Primary evidence marker [CITE_${secondaryEvidenceFallbackSummary.sourceId}]`
+              : "Secondary evidence synthesized without canonical source marker.",
+          },
+        ]
+      : []
+    const retrievalNotesForStream = [
+      ...plannerRetrievalNotesForStream,
+      ...retrievalGateNoteForStream,
+      ...secondaryEvidenceNoteForStream,
+    ].slice(0, 10)
+    const incompleteEvidenceStateForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "incompleteEvidenceState" in langGraphPlan &&
+      typeof langGraphPlan.incompleteEvidenceState === "string"
+        ? langGraphPlan.incompleteEvidenceState
+        : undefined
+    const complexityModeForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "complexityMode" in langGraphPlan &&
+      typeof langGraphPlan.complexityMode === "string"
+        ? langGraphPlan.complexityMode
+        : undefined
+    const clinicalCompletenessForStream =
+      ENABLE_COGNITIVE_ORCHESTRATION_FULL &&
+      langGraphPlan &&
+      "clinicalCompleteness" in langGraphPlan &&
+      langGraphPlan.clinicalCompleteness &&
+      typeof langGraphPlan.clinicalCompleteness === "object"
+        ? langGraphPlan.clinicalCompleteness
+        : null
+    const chartPlanForStream =
+      langGraphPlan &&
+      "chartPlan" in langGraphPlan &&
+      langGraphPlan.chartPlan &&
+      typeof langGraphPlan.chartPlan === "object"
+        ? langGraphPlan.chartPlan
+        : null
+    const selectedConnectorIdsForRouting =
+      langGraphPlan?.routingSummary?.selectedConnectorIds ||
+      langGraphPlan?.selectedConnectorIds ||
+      []
+    const selectedToolNamesForRouting =
+      langGraphPlan?.routingSummary?.selectedToolNames ||
+      langGraphPlan?.selectedToolNames ||
+      selectedToolNamesForTurn
+    const routingSummaryText = [
+      `Focus: ${normalizedQuerySnippet || "general request"}.`,
+      `Intent ${langGraphPlan?.routingSummary?.intent || langGraphPlan?.intent || "general"}.`,
+      complexityModeForStream ? `Complexity ${complexityModeForStream}.` : null,
+      `Selected ${selectedConnectorIdsForRouting.length} connector${
+        selectedConnectorIdsForRouting.length === 1 ? "" : "s"
+      } and ${selectedToolNamesForRouting.length} tool${
+        selectedToolNamesForRouting.length === 1 ? "" : "s"
+      }.`,
+      taskPlanForStream.length > 0
+        ? `${taskPlanForStream.length} planner task${
+            taskPlanForStream.length === 1 ? "" : "s"
+          } active.`
+        : null,
+      hasCurriculumAlignmentTaskForStream
+        ? "Curriculum alignment active for this educational turn."
+        : null,
+      retrievalNotesForStream.length > 0 ? retrievalNotesForStream[0]?.note || null : null,
+      incompleteEvidenceStateForStream &&
+      incompleteEvidenceStateForStream !== "complete"
+        ? `Evidence state ${incompleteEvidenceStateForStream.replace(/_/g, " ")}.`
+        : null,
+    ]
+      .filter((item): item is string => Boolean(item))
+      .join(" ")
+    const taskBoardTitleForStream = normalizedQuerySnippet
+      ? `Agent Task Board - ${normalizedQuerySnippet.slice(0, 54)}${
+          normalizedQuerySnippet.length > 54 ? "..." : ""
+        }`
+      : "Agent Task Board"
     const routingSummaryForStream = {
       intent: langGraphPlan?.routingSummary?.intent || langGraphPlan?.intent || "general",
-      querySnippet: queryText.trim().replace(/\s+/g, " ").slice(0, 140),
-      selectedConnectorIds:
-        langGraphPlan?.routingSummary?.selectedConnectorIds ||
-        langGraphPlan?.selectedConnectorIds ||
-        [],
-      selectedToolNames: selectedToolNamesForTurn.slice(0, 24),
+      summary: routingSummaryText,
+      taskBoardTitle: taskBoardTitleForStream,
+      querySnippet: normalizedQuerySnippet,
+      selectedConnectorIds: selectedConnectorIdsForRouting,
+      selectedToolNames: selectedToolNamesForRouting.slice(0, 24),
       modePolicy:
         langGraphPlan?.routingSummary?.modePolicy ||
         langGraphPlan?.modePolicy ||
@@ -5638,6 +7964,38 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
       artifactWorkflowStage,
       learningMode: effectiveLearningMode,
       clinicianMode: effectiveClinicianMode,
+      orchestrationEngine: orchestrationEngineForStream,
+      loopIterations:
+        langGraphPlan &&
+        "loopIterations" in langGraphPlan &&
+        typeof langGraphPlan.loopIterations === "number"
+          ? langGraphPlan.loopIterations
+          : undefined,
+      confidence:
+        langGraphPlan &&
+        "confidence" in langGraphPlan &&
+        typeof langGraphPlan.confidence === "number"
+          ? langGraphPlan.confidence
+          : undefined,
+      sourceDiversity:
+        langGraphPlan &&
+        "sourceDiversity" in langGraphPlan &&
+        typeof langGraphPlan.sourceDiversity === "number"
+          ? langGraphPlan.sourceDiversity
+          : undefined,
+      complexityMode: complexityModeForStream,
+      clinicalCompleteness: clinicalCompletenessForStream,
+      incompleteEvidencePolicy: effectiveIncompleteEvidencePolicy,
+      incompleteEvidenceState: incompleteEvidenceStateForStream,
+      missingVariablePrompts: missingVariablePromptsForStream,
+      gatekeeperDecisions: gatekeeperDecisionsForStream,
+      loopTransitions: loopTransitionsForStream,
+      confidenceTransitions: confidenceTransitionsForStream,
+      taskPlan: taskPlanForStream,
+      retrievalNotes: retrievalNotesForStream,
+      runtimeSteps: runtimeStepsForStream,
+      runtimeDag: runtimeDagForStream,
+      chartPlan: chartPlanForStream,
     }
     if (finalEnableEvidence) {
       const contextForStream = capturedEvidenceContext || evidenceContext
@@ -5656,7 +8014,32 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
               FANOUT_SOURCE_DIVERSITY_FLOOR
             )
           : rankedStreamPool
-        evidenceCitationsForStream = dedupeAndReindexCitations(diversityAdjustedPool).slice(0, 12)
+        const streamPool = dedupeAndReindexCitations(diversityAdjustedPool)
+        const prioritizedStreamPool =
+          preferredInlineVisualSourceIds.size > 0
+            ? [...streamPool].sort((left, right) => {
+                const leftExplicit = preferredInlineVisualSourceIds.has(buildEvidenceSourceId(left)) ? 1 : 0
+                const rightExplicit = preferredInlineVisualSourceIds.has(buildEvidenceSourceId(right)) ? 1 : 0
+                return rightExplicit - leftExplicit
+              })
+            : streamPool
+        evidenceCitationsForStream = dedupeAndReindexCitations(prioritizedStreamPool).slice(0, 12)
+        const journalVisualTimeoutMs = inlineEvidenceFigureRequested ? 7000 : 2600
+        const maxCitationsToEnrich = inlineEvidenceFigureRequested
+          ? preferredInlineVisualSourceIds.size > 0
+            ? 1
+            : 2
+          : 4
+        evidenceCitationsForStream = await runWithTimeBudget(
+          "EVIDENCE_JOURNAL_VISUALS",
+          async () =>
+            enrichEvidenceCitationsWithJournalVisuals(evidenceCitationsForStream, {
+              queryText,
+              maxCitationsToEnrich,
+            }),
+          journalVisualTimeoutMs,
+          evidenceCitationsForStream
+        )
 
         const encodedHeader = encodeEvidenceCitationsHeader(evidenceCitationsForStream)
         if (encodedHeader) {
@@ -5670,6 +8053,41 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
     console.log(
       `[TTFT][server] response-ready ${Math.round(performance.now() - requestStartTime)}ms`
     )
+
+    const shouldEmitChecklistForStream =
+      taskPlanForStream.length === 0 &&
+      runtimeStepsForStream.length === 0 &&
+      runtimeDagForStream.length === 0
+    const checklistItemsForStream =
+      shouldEmitChecklistForStream && dynamicChecklistForStream.length > 0
+        ? dynamicChecklistForStream.map((item: {
+            id: string
+            label: string
+            status: "pending" | "running" | "completed" | "failed"
+          }) => ({
+            id: item.id,
+            label: item.label,
+            status:
+              item.status === "failed"
+                ? ("failed" as const)
+                : item.status === "running"
+                  ? ("running" as const)
+                  : item.status === "completed"
+                    ? ("completed" as const)
+                    : ("pending" as const),
+          }))
+          .filter(
+            (item: {
+              id: string
+              label: string
+              status: "pending" | "running" | "completed" | "failed"
+            }) => item.status !== "pending"
+          )
+        : null
+    const checklistTitleForStream =
+      checklistItemsForStream && checklistItemsForStream.length > 0
+        ? "Agentic orchestration loop"
+        : undefined
 
     return createDataStreamResponse({
       status: 200,
@@ -5690,29 +8108,51 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
           text: streamIntroPreview,
         })
 
-        if (selectedUploadIds.length > 0) {
+        if (checklistItemsForStream && checklistItemsForStream.length > 0) {
+          emitTimelineEvent({
+            kind: "checklist",
+            title: checklistTitleForStream,
+            items: checklistItemsForStream,
+          })
+        }
+
+        if (trackedUploadIds.length > 0) {
           const uploadTrackingSequence = nextTimelineSequence()
           const uploadTrackingCreatedAt = new Date().toISOString()
           writeStreamAnnotation({
             type: "upload-status-tracking",
             sequence: uploadTrackingSequence,
             createdAt: uploadTrackingCreatedAt,
-            uploadIds: selectedUploadIds,
+            uploadIds: trackedUploadIds,
           })
-          selectedUploadIds.forEach((uploadId) => {
+          const uploadSnapshotById = new Map(
+            uploadReadinessSnapshots.map((snapshot) => [snapshot.uploadId, snapshot])
+          )
+          trackedUploadIds.forEach((uploadId) => {
+            const snapshot = uploadSnapshotById.get(uploadId)
             emitTimelineEvent({
               kind: "upload-status",
               uploadId,
-              uploadTitle: null,
-              status: "pending",
-              progressStage: "queued",
-              progressPercent: 0,
-              lastError: null,
+              uploadTitle: snapshot?.uploadTitle || null,
+              status: snapshot?.status || "pending",
+              progressStage: snapshot?.progressStage || "queued",
+              progressPercent:
+                typeof snapshot?.progressPercent === "number" ? snapshot.progressPercent : 0,
+              lastError: snapshot?.lastError || null,
             })
           })
         }
 
-        if (langGraphHarnessTrace.length > 0) {
+        if (
+          langGraphPlan ||
+          langGraphHarnessTrace.length > 0 ||
+          runtimeDagForStream.length > 0 ||
+          gatekeeperDecisionsForStream.length > 0 ||
+          loopTransitionsForStream.length > 0 ||
+          confidenceTransitionsForStream.length > 0 ||
+          runtimeStepsForStream.length > 0 ||
+          routingSummaryForStream.selectedToolNames.length > 0
+        ) {
           writeStreamAnnotation({
             type: "langgraph-routing",
             sequence: nextTimelineSequence(),

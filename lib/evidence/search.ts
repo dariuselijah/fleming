@@ -11,6 +11,7 @@ import type {
   EvidenceSearchOptions,
   EvidenceContext 
 } from './types';
+import { buildEvidenceSourceId } from "./source-id";
 
 export type MedicalQuerySignal = {
   score: number;
@@ -402,6 +403,17 @@ export async function searchMedicalEvidence(
 export function resultsToCitations(results: MedicalEvidenceResult[]): EvidenceCitation[] {
   return results.map((result, index) => ({
     index: index + 1,
+    sourceId: buildEvidenceSourceId({
+      pmid: result.pmid,
+      doi: result.doi,
+      title: result.title,
+      journal: result.journal_name,
+      url: result.pmid
+        ? `https://pubmed.ncbi.nlm.nih.gov/${result.pmid}`
+        : result.doi
+          ? `https://doi.org/${result.doi}`
+          : null,
+    }),
     pmid: result.pmid,
     title: result.title,
     journal: result.journal_name,
@@ -440,6 +452,7 @@ export function buildEvidenceContext(citations: EvidenceCitation[]): EvidenceCon
       : `Evidence Level: ${c.evidenceLevel} (${getEvidenceLevelLabel(c.evidenceLevel)})`
     
     return `[${c.index}] ${c.title}
+Source ID: ${c.sourceId || `idx:${c.index}`}
 ${sourceLine}
 Authors: ${authorStr}
 ${evidenceLine}
@@ -478,17 +491,17 @@ You have access to ${citations.length} cited sources${hasUserUploads ? ", includ
 
 ### MANDATORY CITATION RULES:
 1. **EVERY factual medical claim MUST be followed by a citation in square brackets**
-   - Format: [1], [2], [3] for single citations
-   - Format: [1,2,3] for multiple citations supporting the same claim
-   - Format: [1-3] for ranges (use sparingly)
+   - Primary format: [CITE_<sourceId>] for single citations
+   - Multiple source IDs: [CITE_<sourceIdA>,<sourceIdB>,<sourceIdC>]
+   - Numeric [1], [2], [1,2] only as compatibility fallback when source IDs are unavailable
    - Citation density target: **at least one citation per factual sentence** whenever evidence is available
    
-2. **DO NOT make claims without citations** - If you cannot cite it, say "This information is not available in the provided sources"
+2. **DO NOT make claims without citations** - If evidence is limited, explicitly state uncertainty and use the strongest available evidence from the provided sources
 
 3. **CITE IMMEDIATELY after each claim**, not at the end of paragraphs
-   - ✅ CORRECT: "ACE inhibitors reduce mortality [1]. They are first-line therapy [2]."
-   - ❌ WRONG: "ACE inhibitors reduce mortality. They are first-line therapy. [1,2]"
-   - ❌ WRONG: "First-hour sepsis care includes blood cultures, lactate, broad-spectrum antibiotics, and fluids [1]" (multiple independent claims, only one citation)
+   - ✅ CORRECT: "ACE inhibitors reduce mortality [CITE_pmid:1578956]. They are first-line therapy [CITE_pmid:27195903]."
+   - ❌ WRONG: "ACE inhibitors reduce mortality. They are first-line therapy. [CITE_pmid:1578956,CITE_pmid:27195903]"
+   - ❌ WRONG: "First-hour sepsis care includes blood cultures, lactate, broad-spectrum antibiotics, and fluids [CITE_pmid:1578956]" (multiple independent claims, only one citation)
 
 4. **PRIORITIZE HIGH EVIDENCE**: Weight meta-analyses (Level 1) and RCTs (Level 2) more heavily than lower-quality studies, but you may also cite private uploads when they directly support the answer
 
@@ -499,9 +512,9 @@ You have access to ${citations.length} cited sources${hasUserUploads ? ", includ
 7. **FLAG CONFLICTS**: Note when sources disagree: "Some studies show X [1], while others show Y [2]"
 
 ### Citation Examples:
-- Single: "Hypertension affects 30% of adults [1]"
-- Multiple: "Blood pressure control improves outcomes [1,2,3]"
-- With context: "A meta-analysis of 50,000 patients found a 23% reduction in cardiovascular events [1]"
+- Single: "Hypertension affects 30% of adults [CITE_pmid:1578956]"
+- Multiple: "Blood pressure control improves outcomes [CITE_pmid:1578956,CITE_pmid:27195903,CITE_pmid:23480230]"
+- With context: "A meta-analysis of 50,000 patients found a 23% reduction in cardiovascular events [CITE_pmid:1578956]"
 
 ### Evidence Quality Indicators:
 - **Level 1** (Meta-Analysis/Systematic Review): Strongest evidence - prioritize these
@@ -513,16 +526,17 @@ You have access to ${citations.length} cited sources${hasUserUploads ? ", includ
 ### AVAILABLE EVIDENCE (YOU MUST USE THESE):
 ${citations.map(c => {
   if (c.sourceType === "user_upload") {
-    return `[${c.index}] ${c.title} (${c.sourceLabel || "Private upload"})${c.studyType ? ` - ${c.studyType}` : ''}`
+    return `[CITE_${c.sourceId || `idx:${c.index}`}] ${c.title} (${c.sourceLabel || "Private upload"})${c.studyType ? ` - ${c.studyType}` : ''}`
   }
-  return `[${c.index}] ${c.title} (${c.journal}, ${c.year || 'n.d.'}) - Level ${c.evidenceLevel}${c.studyType ? ` (${c.studyType})` : ''}`
+  return `[CITE_${c.sourceId || `idx:${c.index}`}] ${c.title} (${c.journal}, ${c.year || 'n.d.'}) - Level ${c.evidenceLevel}${c.studyType ? ` (${c.studyType})` : ''}`
 }).join('\n')}
 
 ### REMINDER: 
-- Every medical fact needs a citation [X]
-- Multiple facts need multiple citations [X,Y,Z]
+- Every medical fact needs a source-id citation [CITE_<sourceId>]
+- Multiple facts need multiple source-id citations [CITE_<sourceIdA>,<sourceIdB>]
 - If you make 5 factual claims, you should usually have ~5 citation placements
 - If you cannot cite it, say so explicitly
+- If primary guideline evidence is missing but secondary evidence exists, state that and continue synthesis from secondary sources
 - DO NOT invent citations or use citations that don't exist
 
 Now respond with a well-structured, evidence-based answer that properly cites every claim.`;

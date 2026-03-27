@@ -25,7 +25,9 @@ export interface MedicalEvidenceResult {
 
 export interface EvidenceCitation {
   index: number;
+  sourceId?: string | null;
   pmid: string | null;
+  pmcid?: string | null;
   title: string;
   journal: string;
   year: number | null;

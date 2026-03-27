@@ -30,6 +30,7 @@ import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
 import { PerformanceMonitor } from "./performance-monitor"
 import { OnboardingDialog } from "../onboarding/onboarding-dialog"
+import { HealthHomeSection } from "../health/health-home-section"
 
 const FeedbackWidget = dynamic(
   () => import("./feedback-widget").then((mod) => mod.FeedbackWidget),
@@ -152,6 +153,7 @@ export function Chat() {
     status,
     stop,
     streamIntroPreview,
+    optimisticTaskBoard,
     hasSentFirstMessageRef,
     isSubmitting,
     enableSearch,
@@ -167,11 +169,13 @@ export function Chat() {
     setArtifactIntent,
     setCitationStyle,
     evidenceCitations,
+    discussionInsights,
     submit,
     handleSuggestion,
     handleWorkflowSuggestion,
     handleReload,
     handleInputChange,
+    addDrilldownInsightToDiscussion,
   } = useChatCore({
     initialMessages,
     draftValue,
@@ -374,8 +378,11 @@ export function Chat() {
       onReload: handleReload,
       onSuggestion: handleSuggestion,
       onWorkflowSuggestion: handleWorkflowSuggestion,
+      onDrilldownInsightAdd: addDrilldownInsightToDiscussion,
+      discussionInsightCount: discussionInsights.length,
       evidenceCitations,
       streamIntroPreview,
+      optimisticTaskBoard,
     }),
     [
       messages,
@@ -386,8 +393,11 @@ export function Chat() {
       handleReload,
       handleSuggestion,
       handleWorkflowSuggestion,
+      addDrilldownInsightToDiscussion,
+      discussionInsights.length,
       evidenceCitations,
       streamIntroPreview,
+      optimisticTaskBoard,
     ]
   )
 
@@ -551,18 +561,27 @@ export function Chat() {
       <div className={cn(
         "relative flex h-full w-full flex-col",
         showOnboarding
-          ? "items-center justify-start px-2 pt-[calc(var(--spacing-app-header)+1rem)] sm:justify-center sm:px-0 sm:pt-0"
+          ? "items-center justify-start px-2 pt-[calc(var(--spacing-app-header)+0.75rem)] sm:px-0 sm:pt-4"
           : "justify-end"
       )}>
         {showOnboarding ? (
           <>
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-medium tracking-tight">
-                What&apos;s on your mind?
-              </h1>
-            </div>
-            <div className="w-full max-w-3xl">
-              <ChatInput {...chatInputProps} />
+            <div className="flex h-full w-full max-w-3xl min-h-0 flex-col pb-3 sm:pb-4">
+              <div className="text-center">
+                <h1 className="text-3xl font-medium tracking-tight">
+                  What&apos;s on your mind?
+                </h1>
+              </div>
+              <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1 sm:mt-5">
+                <HealthHomeSection
+                  onJourneyPrompt={handleSuggestion}
+                  userRole={preferences.userRole}
+                  showWorkspaceLink={false}
+                />
+              </div>
+              <div className="mt-4 sm:mt-5">
+                <ChatInput {...chatInputProps} hasSuggestions={false} />
+              </div>
             </div>
           </>
         ) : (

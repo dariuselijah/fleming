@@ -120,7 +120,7 @@ const STUDENT_WALKTHROUGH: WalkthroughSlide[] = [
   {
     id: "student-feature-map",
     kicker: "Feature map",
-    title: "Your med-student workspace",
+    title: "Your clinical learning experience",
     description:
       "You will get a full learning cockpit with focused modes, transparent tool outputs, and citation-aware answers.",
     bullets: [
@@ -642,7 +642,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                     <DialogTitle className="text-2xl font-semibold tracking-tight">
                       {selectedRole === "general" && "Your personalized experience"}
                       {selectedRole === "medical_student" &&
-                        "The super cool features for med students"}
+                        "Clinical learning features, step by step"}
                       {selectedRole === "doctor" &&
                         "Clinician features, tab by tab"}
                     </DialogTitle>

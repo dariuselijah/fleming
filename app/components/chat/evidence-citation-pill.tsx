@@ -17,7 +17,7 @@ import {
   Newspaper,
   BookOpen
 } from "@phosphor-icons/react"
-import type { EvidenceCitation } from "@/lib/evidence/types"
+import type { EvidenceCitation, UploadVisualReference } from "@/lib/evidence/types"
 import { 
   EVIDENCE_LEVEL_COLORS, 
   EVIDENCE_LEVEL_SHORT,
@@ -255,6 +255,50 @@ function getJournalFavicon(journal: string): string | null {
   return null
 }
 
+function getSourceDisplayFromUrl(url: string | null | undefined): {
+  label: string
+  faviconUrl: string | null
+} | null {
+  if (!url || typeof url !== "string") return null
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "")
+    if (host.includes("pubmed.ncbi.nlm.nih.gov") || host.includes("ncbi.nlm.nih.gov")) {
+      return { label: "PubMed", faviconUrl: "https://www.ncbi.nlm.nih.gov/favicon.ico" }
+    }
+    if (host.includes("clinicaltrials.gov")) {
+      return { label: "ClinicalTrials.gov", faviconUrl: "https://clinicaltrials.gov/favicon.ico" }
+    }
+    if (host.includes("nice.org.uk")) {
+      return { label: "NICE", faviconUrl: "https://www.nice.org.uk/favicon.ico" }
+    }
+    if (host.includes("who.int")) {
+      return { label: "WHO", faviconUrl: "https://www.who.int/favicon.ico" }
+    }
+    if (host.includes("cdc.gov")) {
+      return { label: "CDC", faviconUrl: "https://www.cdc.gov/favicon.ico" }
+    }
+    if (host.includes("fda.gov")) {
+      return { label: "FDA", faviconUrl: "https://www.fda.gov/favicon.ico" }
+    }
+    return { label: host, faviconUrl: `https://www.google.com/s2/favicons?sz=64&domain=${host}` }
+  } catch {
+    return null
+  }
+}
+
+function isGenericSourceLabel(value: string | null | undefined): boolean {
+  const normalized = (value || "").trim().toLowerCase()
+  return (
+    normalized.length === 0 ||
+    normalized === "source" ||
+    normalized === "trials" ||
+    normalized === "unknown" ||
+    normalized === "unknown source" ||
+    normalized === "medical evidence"
+  )
+}
+
 // Shorten journal name for display
 function shortenJournalName(journal: string, maxLength: number = 18): string {
   // Common abbreviations - order matters (more specific first)
@@ -414,19 +458,41 @@ export function EvidenceCitationPill({
   const isUploadCitation = citation.sourceType === "user_upload"
   const uploadDisplayName =
     citation.uploadFileName || citation.sourceLabel || citation.title || "Your upload"
-  const shortName = isUploadCitation
-    ? shortenJournalName(uploadDisplayName, 20)
-    : shortenJournalName(citation.journal)
+  const sourceFromUrl = isUploadCitation ? null : getSourceDisplayFromUrl(citation.url)
+  const inferredSourceFromPmid =
+    !isUploadCitation && !sourceFromUrl && citation.pmid ? "PubMed" : null
+  const effectiveSourceLabel = isUploadCitation
+    ? uploadDisplayName
+    : sourceFromUrl?.label ||
+      inferredSourceFromPmid ||
+      (!isGenericSourceLabel(citation.sourceLabel) ? citation.sourceLabel : null) ||
+      citation.journal ||
+      "Source"
+  const shortName = shortenJournalName(effectiveSourceLabel, 20)
+
+  const inlineVisuals: UploadVisualReference[] = (() => {
+    const out: UploadVisualReference[] = []
+    if (citation.previewReference?.signedUrl) {
+      out.push(citation.previewReference)
+    }
+    for (const fig of citation.figureReferences || []) {
+      if (fig?.signedUrl && out.length < 3) {
+        out.push(fig)
+      }
+    }
+    return out
+  })()
 
   // Try to get favicon - first from journal name, then from DOI domain
-  let faviconUrl = isUploadCitation ? null : getJournalFavicon(citation.journal)
+  let faviconUrl = isUploadCitation
+    ? null
+    : sourceFromUrl?.faviconUrl ||
+      (citation.pmid ? "https://www.ncbi.nlm.nih.gov/favicon.ico" : null) ||
+      getJournalFavicon(effectiveSourceLabel)
   
   // Fallback: try to extract favicon from DOI URL if available
   if (!faviconUrl && citation.doi) {
     try {
-      const doiUrl = `https://doi.org/${citation.doi}`
-      // Extract domain from DOI resolver
-      // Most DOIs resolve to publisher domains, we can try common ones
       if (citation.doi.includes('10.1016')) {
         faviconUrl = 'https://www.elsevier.com/favicon.ico'
       } else if (citation.doi.includes('10.1371')) {
@@ -447,37 +513,64 @@ export function EvidenceCitationPill({
   
   return (
     <>
-      <span
-        ref={anchorRef}
-        onClick={handleClick}
-        className={cn(
-          "inline-flex items-center gap-1.5 cursor-pointer transition-all duration-150",
-          "rounded-full px-2.5 py-1",
-          "bg-zinc-700/80 hover:bg-zinc-600/80",
-          "text-zinc-100",
-          "hover:scale-[1.02] active:scale-[0.98]",
-          "w-[120px] h-6", // Fixed width and height for consistent sizing
-          size === "sm" ? "text-xs" : "text-sm",
-          className
-        )}
-      >
-        {/* Favicon or fallback icon */}
-        {faviconUrl && !faviconError ? (
-          <img 
-            src={faviconUrl} 
-            alt=""
-            className="w-4 h-4 rounded-sm object-contain flex-shrink-0"
-            onError={() => setFaviconError(true)}
-          />
-        ) : (
-          // Use a more subtle fallback icon that matches the design
-          <BookOpen weight="fill" className="w-4 h-4 text-zinc-400 flex-shrink-0" />
-        )}
-        
-        {/* Journal name - truncate if too long */}
-        <span className="font-medium whitespace-nowrap overflow-hidden text-ellipsis min-w-0 flex-1">
-          {shortName}
+      <span className="inline-flex max-w-full items-center gap-1 align-baseline">
+        <span
+          ref={anchorRef}
+          onClick={handleClick}
+          className={cn(
+            "inline-flex cursor-pointer items-center gap-1 rounded-full",
+            "h-5 max-w-36 overflow-hidden py-0 pr-2 pl-1",
+            "bg-muted text-muted-foreground transition-colors duration-150",
+            "hover:bg-muted-foreground/20 hover:text-foreground",
+            size === "sm" ? "text-[11px]" : "text-xs",
+            className
+          )}
+        >
+          {/* Favicon or fallback icon */}
+          {faviconUrl && !faviconError ? (
+            <img 
+              src={faviconUrl} 
+              alt=""
+              className="size-3.5 rounded-full object-contain shrink-0"
+              onError={() => setFaviconError(true)}
+            />
+          ) : (
+            // Use a more subtle fallback icon that matches the design
+            <BookOpen weight="fill" className="size-3.5 shrink-0 text-muted-foreground/70" />
+          )}
+          
+          {/* Journal name - truncate if too long */}
+          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal">
+            {shortName}
+          </span>
         </span>
+
+        {inlineVisuals.length > 0 ? (
+          <span
+            className="inline-flex shrink-0 items-center gap-0.5"
+            aria-label="Linked figures from source"
+          >
+            {inlineVisuals.map((visual) => (
+              <button
+                key={visual.assetId}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleClick(e)
+                }}
+                className="ring-border hover:ring-primary/40 relative h-5 w-5 shrink-0 overflow-hidden rounded-md ring-1 transition ring-offset-1 ring-offset-background"
+                title={visual.caption || visual.label}
+              >
+                <img
+                  src={visual.signedUrl || ""}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              </button>
+            ))}
+          </span>
+        ) : null}
       </span>
 
       {/* Evidence Popup */}
@@ -508,6 +601,14 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
     citation.sourceType === "user_upload" &&
     typeof citation.url === "string" &&
     citation.url.startsWith("/uploads/")
+  const sourceFromUrl = getSourceDisplayFromUrl(citation.url)
+  const inferredSourceFromPmid = !sourceFromUrl && citation.pmid ? "PubMed" : null
+  const ctaSourceLabel =
+    sourceFromUrl?.label ||
+    inferredSourceFromPmid ||
+    (!isGenericSourceLabel(citation.sourceLabel) ? citation.sourceLabel : null) ||
+    citation.journal ||
+    "Source"
   const primaryHref = citation.url || "#"
   const primaryTarget = isUploadCitation ? undefined : "_blank"
   const primaryRel = isUploadCitation ? undefined : "noopener noreferrer"
@@ -660,7 +761,7 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
                   ) : (
                     <a
                       key={visual.assetId}
-                      href={visual.fullUrl || visual.signedUrl || primaryHref}
+                      href={primaryHref}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="group/visual shrink-0"
@@ -727,7 +828,7 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
                   rel={primaryRel}
                   className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
                 >
-                  View on PubMed
+                  {`View on ${ctaSourceLabel}`}
                   <CaretRight className="h-3 w-3" />
                 </a>
               )

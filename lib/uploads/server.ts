@@ -1,13 +1,22 @@
 import { createClient } from "@/lib/supabase/server"
+import { ENABLE_DOCLING_UPLOAD_PARSER } from "@/lib/config"
 import {
   formatBibliography,
   formatInlineCitation,
   normalizeCitationStyle,
   type CitationStyle,
 } from "@/lib/citations/formatters"
+import { deriveStudyExtractionMetadata } from "@/lib/student-workspace/parser"
+import { StudyGraphService } from "@/lib/student-workspace/study-graph"
 import type { EvidenceCitation, UploadVisualReference } from "@/lib/evidence/types"
 import {
+  buildImageDocumentFromMediaPipeline,
+  buildVideoDocumentFromMediaPipeline,
+} from "@/lib/media/pipeline"
+import { parseDocumentWithDocling } from "@/lib/media/docling-client"
+import {
   type OCRStatus,
+  type ParsedUploadAsset,
   type ParsedSourceUnit,
   type ParsedUploadDocument,
   type UploadDocumentKind,
@@ -23,7 +32,7 @@ import pdfParse from "pdf-parse/lib/pdf-parse.js"
 
 const USER_UPLOAD_BUCKET = "chat-attachments"
 const USER_UPLOAD_MAX_FILE_SIZE = 512 * 1024 * 1024
-const USER_UPLOAD_PARSER_VERSION = "2026-03-doc-no-preview-v5"
+const USER_UPLOAD_PARSER_VERSION = "2026-03-docling-assets-v1"
 const DEFAULT_CHUNK_SIZE = 1200
 const DEFAULT_CHUNK_OVERLAP = 180
 const DOCX_SECTION_PARAGRAPH_COUNT = 6
@@ -977,6 +986,8 @@ function getFileExtension(fileName: string): string {
 
 function detectUploadKind(fileName: string, mimeType: string): UploadDocumentKind {
   const ext = getFileExtension(fileName)
+  const normalizedMime = (mimeType || "").toLowerCase()
+  const videoExtensions = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi"])
   if (mimeType === "application/pdf" || ext === "pdf") return "pdf"
   if (
     mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
@@ -990,9 +1001,182 @@ function detectUploadKind(fileName: string, mimeType: string): UploadDocumentKin
   ) {
     return "docx"
   }
+  if (normalizedMime.startsWith("video/") || videoExtensions.has(ext)) return "video"
   if (mimeType.startsWith("image/")) return "image"
   if (mimeType.startsWith("text/") || ext === "md" || ext === "txt") return "text"
   return "other"
+}
+
+function extensionForMimeType(mimeType: string, fallback = "bin"): string {
+  const normalized = (mimeType || "").toLowerCase()
+  if (normalized === "image/png") return "png"
+  if (normalized === "image/jpeg") return "jpg"
+  if (normalized === "image/webp") return "webp"
+  if (normalized === "image/gif") return "gif"
+  if (normalized === "image/svg+xml") return "svg"
+  if (normalized === "application/pdf") return "pdf"
+  if (normalized.startsWith("text/")) return "txt"
+  const guessed = normalized.split("/")[1]?.split(";")[0]
+  if (guessed && /^[a-z0-9.+-]+$/i.test(guessed)) {
+    return guessed.replace("+xml", "").replace("jpeg", "jpg")
+  }
+  return fallback
+}
+
+type PersistedUploadAssetRow = {
+  id: string
+  source_unit_id: string | null
+  asset_type: "figure" | "preview"
+  sort_order: number
+  label: string | null
+  caption: string | null
+  storage_bucket: string
+  file_path: string
+  mime_type: string
+  width: number | null
+  height: number | null
+  metadata: Record<string, unknown> | null
+}
+
+function parseNumericMetadataValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function parseAssetOffsetRange(
+  metadata: Record<string, unknown> | null
+): { start: number; end: number } | null {
+  if (!metadata) return null
+  const directStart =
+    parseNumericMetadataValue(metadata.sourceOffsetStart) ??
+    parseNumericMetadataValue(metadata.offsetStart) ??
+    parseNumericMetadataValue(metadata.startOffset)
+  const directEnd =
+    parseNumericMetadataValue(metadata.sourceOffsetEnd) ??
+    parseNumericMetadataValue(metadata.offsetEnd) ??
+    parseNumericMetadataValue(metadata.endOffset)
+  if (directStart !== null && directEnd !== null && directEnd >= directStart) {
+    return {
+      start: Math.round(directStart),
+      end: Math.round(directEnd),
+    }
+  }
+
+  const nested = metadata.docling
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const nestedRecord = nested as Record<string, unknown>
+    const nestedStart =
+      parseNumericMetadataValue(nestedRecord.sourceOffsetStart) ??
+      parseNumericMetadataValue(nestedRecord.offsetStart) ??
+      parseNumericMetadataValue(nestedRecord.startOffset)
+    const nestedEnd =
+      parseNumericMetadataValue(nestedRecord.sourceOffsetEnd) ??
+      parseNumericMetadataValue(nestedRecord.offsetEnd) ??
+      parseNumericMetadataValue(nestedRecord.endOffset)
+    if (nestedStart !== null && nestedEnd !== null && nestedEnd >= nestedStart) {
+      return {
+        start: Math.round(nestedStart),
+        end: Math.round(nestedEnd),
+      }
+    }
+  }
+  return null
+}
+
+function tokenizeChunkTerms(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4)
+    .slice(0, 80)
+}
+
+function scoreChunkCaptionOverlap(chunkTerms: Set<string>, caption: string | null, label: string | null): number {
+  const source = `${caption || ""} ${label || ""}`.trim().toLowerCase()
+  if (!source || chunkTerms.size === 0) return 0
+  const terms = source
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4)
+  if (terms.length === 0) return 0
+  let matches = 0
+  for (const term of terms) {
+    if (chunkTerms.has(term)) matches += 1
+  }
+  return matches / terms.length
+}
+
+function selectChunkFigureAssetIds(input: {
+  chunkText: string
+  chunkStart: number | null
+  chunkEnd: number | null
+  candidateAssetIds: string[]
+  assetById: Map<string, PersistedUploadAssetRow>
+}): string[] {
+  const chunkTerms = new Set(tokenizeChunkTerms(input.chunkText))
+  const ranked = input.candidateAssetIds
+    .map((assetId, index) => {
+      const asset = input.assetById.get(assetId)
+      if (!asset) {
+        return {
+          assetId,
+          score: 0,
+          sortOrder: index,
+        }
+      }
+      const offsetRange = parseAssetOffsetRange(asset.metadata)
+      const chunkStart = input.chunkStart
+      const chunkEnd = input.chunkEnd
+
+      let offsetScore = 0
+      if (
+        offsetRange &&
+        typeof chunkStart === "number" &&
+        typeof chunkEnd === "number" &&
+        chunkEnd >= chunkStart
+      ) {
+        const overlapStart = Math.max(chunkStart, offsetRange.start)
+        const overlapEnd = Math.min(chunkEnd, offsetRange.end)
+        if (overlapEnd >= overlapStart) {
+          const overlap = overlapEnd - overlapStart + 1
+          const chunkSpan = Math.max(1, chunkEnd - chunkStart + 1)
+          offsetScore = Math.min(1, overlap / chunkSpan)
+        } else {
+          const distance = Math.min(
+            Math.abs(offsetRange.start - chunkEnd),
+            Math.abs(offsetRange.end - chunkStart)
+          )
+          offsetScore = Math.max(0, 1 - Math.min(1, distance / 1600))
+        }
+      }
+
+      const captionScore = scoreChunkCaptionOverlap(chunkTerms, asset.caption, asset.label)
+      const figureCueScore =
+        /\b(figure|fig\.|chart|diagram|table|panel)\b/i.test(input.chunkText) ? 0.08 : 0
+      const score = offsetScore * 0.7 + captionScore * 0.22 + figureCueScore
+
+      return {
+        assetId,
+        score,
+        sortOrder: asset.sort_order,
+      }
+    })
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score
+      return left.sortOrder - right.sortOrder
+    })
+
+  const selected = ranked
+    .filter((entry, index) => entry.score >= 0.18 || index === 0)
+    .slice(0, 3)
+    .map((entry) => entry.assetId)
+
+  return Array.from(new Set(selected))
 }
 
 function decodeXmlEntities(value: string): string {
@@ -1788,28 +1972,16 @@ async function extractDocxDocument(buffer: Buffer, title: string): Promise<Parse
 async function extractImageDocument(
   buffer: Buffer,
   title: string,
-  _mimeType: string
+  mimeType: string
 ): Promise<ParsedUploadDocument> {
   const dimensions = tryReadImageDimensions(buffer)
-
-  return {
-    kind: "image",
+  return buildImageDocumentFromMediaPipeline({
+    buffer,
     title,
-    metadata: {},
-    sourceUnits: [
-      {
-        unitType: "image",
-        unitNumber: 1,
-        title: "Image",
-        extractedText: "",
-        figures: [],
-        width: dimensions.width,
-        height: dimensions.height,
-        ocrStatus: "pending",
-        metadata: {},
-      },
-    ],
-  }
+    fileName: `${title || "image"}.bin`,
+    mimeType,
+    dimensions,
+  })
 }
 
 async function extractTextDocument(buffer: Buffer, title: string): Promise<ParsedUploadDocument> {
@@ -1832,6 +2004,58 @@ async function extractTextDocument(buffer: Buffer, title: string): Promise<Parse
   }
 }
 
+async function extractVideoDocument(
+  buffer: Buffer,
+  title: string,
+  fileName: string,
+  mimeType: string
+): Promise<ParsedUploadDocument> {
+  return buildVideoDocumentFromMediaPipeline({
+    buffer,
+    title,
+    fileName,
+    mimeType,
+  })
+}
+
+async function tryParseWithDocling(options: {
+  buffer: Buffer
+  title: string
+  fileName: string
+  mimeType: string
+  kind: UploadDocumentKind
+}): Promise<ParsedUploadDocument | null> {
+  if (!ENABLE_DOCLING_UPLOAD_PARSER) return null
+  if (
+    !(
+      options.kind === "pdf" ||
+      options.kind === "pptx" ||
+      options.kind === "docx" ||
+      options.kind === "image"
+    )
+  ) {
+    return null
+  }
+
+  const parsed = await parseDocumentWithDocling({
+    buffer: options.buffer,
+    title: options.title,
+    fileName: options.fileName,
+    mimeType: options.mimeType,
+    fallbackKind: options.kind,
+  })
+  if (!parsed) return null
+
+  return {
+    ...parsed,
+    metadata: {
+      ...(parsed.metadata || {}),
+      parserProvider: "docling",
+      parserVersion: USER_UPLOAD_PARSER_VERSION,
+    },
+  }
+}
+
 async function parseUploadDocument(options: {
   buffer: Buffer
   title: string
@@ -1839,6 +2063,16 @@ async function parseUploadDocument(options: {
   mimeType: string
 }): Promise<ParsedUploadDocument> {
   const kind = detectUploadKind(options.fileName, options.mimeType)
+  const doclingParsed = await tryParseWithDocling({
+    buffer: options.buffer,
+    title: options.title,
+    fileName: options.fileName,
+    mimeType: options.mimeType,
+    kind,
+  })
+  if (doclingParsed) {
+    return doclingParsed
+  }
   switch (kind) {
     case "pdf":
       return extractPdfDocument(options.buffer, options.title)
@@ -1850,6 +2084,13 @@ async function parseUploadDocument(options: {
       return extractImageDocument(options.buffer, options.title, options.mimeType)
     case "text":
       return extractTextDocument(options.buffer, options.title)
+    case "video":
+      return extractVideoDocument(
+        options.buffer,
+        options.title,
+        options.fileName,
+        options.mimeType
+      )
     default:
       throw new Error("Unsupported upload type")
   }
@@ -1886,8 +2127,10 @@ export class UserUploadService {
     }
 
     const uploadKind = detectUploadKind(fileName, mimeType)
-    if (!["pdf", "pptx", "docx", "image", "text"].includes(uploadKind)) {
-      throw new Error("Supported uploads are PDF, PPTX, DOCX, images, and text documents")
+    if (!["pdf", "pptx", "docx", "image", "text", "video"].includes(uploadKind)) {
+      throw new Error(
+        "Supported uploads are PDF, PPTX, DOCX, images, text documents, and lecture videos"
+      )
     }
     return uploadKind
   }
@@ -2801,13 +3044,62 @@ export class UserUploadService {
 
     const selectedUploadIds = [...new Set(selectedRows.map((item) => item.row.upload_id))]
     const selectedSourceUnitIds = [...new Set(selectedRows.map((item) => item.row.source_unit_id))]
-    const [uploadsResult, sourceUnitsResult] = await Promise.all([
+    const selectedChunkIds = [...new Set(selectedRows.map((item) => item.row.id))]
+    const [uploadsResult, sourceUnitsResult, assetsResult, chunkAssetLinksResult] = await Promise.all([
       (supabase as any).from("user_uploads").select("*").in("id", selectedUploadIds),
       (supabase as any).from("user_upload_source_units").select("*").in("id", selectedSourceUnitIds),
+      (supabase as any)
+        .from("user_upload_assets")
+        .select(
+          "id, source_unit_id, asset_type, sort_order, label, caption, storage_bucket, file_path, mime_type, width, height, metadata"
+        )
+        .in("source_unit_id", selectedSourceUnitIds)
+        .order("sort_order", { ascending: true }),
+      selectedChunkIds.length > 0
+        ? (supabase as any)
+            .from("user_upload_chunk_assets")
+            .select("chunk_id, asset_id")
+            .in("chunk_id", selectedChunkIds)
+        : Promise.resolve({ data: [], error: null }),
     ])
 
     const uploadMap = new Map<string, any>((uploadsResult.data ?? []).map((upload: any) => [upload.id, upload]))
     const sourceUnitMap = new Map<string, any>((sourceUnitsResult.data ?? []).map((unit: any) => [unit.id, unit]))
+    if (assetsResult.error) {
+      throw new Error(`Failed to load upload assets for retrieval: ${assetsResult.error.message}`)
+    }
+    if ((chunkAssetLinksResult as { error?: { message?: string } | null }).error) {
+      warnings.push("Chunk-level visual links are temporarily unavailable; falling back to source-unit visuals.")
+    }
+    const assetsBySourceUnitId = new Map<string, PersistedUploadAssetRow[]>()
+    const assetById = new Map<string, PersistedUploadAssetRow>()
+    for (const asset of (assetsResult.data ?? []) as PersistedUploadAssetRow[]) {
+      assetById.set(asset.id, asset)
+      if (!asset.source_unit_id) continue
+      const sourceUnitAssets = assetsBySourceUnitId.get(asset.source_unit_id) ?? []
+      sourceUnitAssets.push(asset)
+      assetsBySourceUnitId.set(asset.source_unit_id, sourceUnitAssets)
+    }
+    const linkedAssetIdsByChunkId = new Map<string, string[]>()
+    for (const row of (chunkAssetLinksResult.data ?? []) as Array<{ chunk_id: string; asset_id: string }>) {
+      const chunkAssets = linkedAssetIdsByChunkId.get(row.chunk_id) ?? []
+      chunkAssets.push(row.asset_id)
+      linkedAssetIdsByChunkId.set(row.chunk_id, chunkAssets)
+    }
+    const visualReferenceCache = new Map<string, UploadVisualReference | null>()
+
+    const resolveVisualReference = async (
+      asset: PersistedUploadAssetRow,
+      sourceUnit: any
+    ): Promise<UploadVisualReference | null> => {
+      const cacheKey = `${asset.id}:${sourceUnit.id}`
+      if (visualReferenceCache.has(cacheKey)) {
+        return visualReferenceCache.get(cacheKey) || null
+      }
+      const built = await this.buildVisualReference(asset, sourceUnit)
+      visualReferenceCache.set(cacheKey, built)
+      return built
+    }
 
     const citations: EvidenceCitation[] = []
     for (const [index, item] of selectedRows.entries()) {
@@ -2835,6 +3127,35 @@ export class UserUploadService {
         deepLinkParams.set("search", searchQuery.slice(0, 140))
       }
       const viewerUrl = `/uploads/${upload.id}?${deepLinkParams.toString()}`
+      const sourceAssets = (assetsBySourceUnitId.get(sourceUnit.id) ?? []).sort(
+        (left, right) => left.sort_order - right.sort_order
+      )
+      const linkedAssetIds = linkedAssetIdsByChunkId.get(row.id) ?? []
+      const linkedAssets = linkedAssetIds
+        .map((assetId) => assetById.get(assetId))
+        .filter((asset): asset is PersistedUploadAssetRow => Boolean(asset))
+
+      const linkedPreview = linkedAssets.find((asset) => asset.asset_type === "preview")
+      const fallbackPreview = sourceAssets.find((asset) => asset.asset_type === "preview")
+      const previewAsset = linkedPreview || fallbackPreview || null
+
+      const linkedFigures = linkedAssets.filter((asset) => asset.asset_type === "figure")
+      const fallbackFigures = sourceAssets.filter((asset) => asset.asset_type === "figure")
+      const figureAssets =
+        linkedFigures.length > 0 ? linkedFigures : fallbackFigures
+      const uniqueFigureAssets = figureAssets
+        .filter(
+          (asset, figureIndex, collection) =>
+            collection.findIndex((candidate) => candidate.id === asset.id) === figureIndex
+        )
+        .slice(0, 3)
+
+      const previewReference = previewAsset
+        ? await resolveVisualReference(previewAsset, sourceUnit)
+        : null
+      const figureReferences = (
+        await Promise.all(uniqueFigureAssets.map((asset) => resolveVisualReference(asset, sourceUnit)))
+      ).filter((reference): reference is UploadVisualReference => Boolean(reference))
 
       citations.push({
         index: index + 1,
@@ -2864,8 +3185,8 @@ export class UserUploadService {
         uploadFileName: upload.file_name,
         pageLabel: formatSourceLabel(sourceUnit.unit_type, sourceUnit.unit_number),
         snippetOrigin: sourceUnit.title,
-        previewReference: null,
-        figureReferences: [],
+        previewReference,
+        figureReferences,
       })
     }
 
@@ -4211,7 +4532,6 @@ export class UserUploadService {
       const shouldReset = options?.reprocess === true && options?.resume !== true
       if (shouldReset) {
         await Promise.all([
-          (supabase as any).from("user_upload_chunk_assets").delete().eq("chunk_id", "__never__"),
           (supabase as any).from("user_upload_chunks").delete().eq("upload_id", uploadId),
           (supabase as any).from("user_upload_assets").delete().eq("upload_id", uploadId),
           (supabase as any).from("user_upload_source_units").delete().eq("upload_id", uploadId),
@@ -4224,6 +4544,15 @@ export class UserUploadService {
         fileName: upload.file_name,
         mimeType: upload.mime_type,
       })
+      const studyExtraction = deriveStudyExtractionMetadata({
+        uploadTitle: upload.title,
+        uploadKind: parsed.kind,
+        sourceUnits: parsed.sourceUnits,
+      })
+      parsed.metadata = {
+        ...parsed.metadata,
+        studyExtraction,
+      }
 
       await this.updateJobProgress(jobId, "chunking", 34, {
         kind: parsed.kind,
@@ -4302,6 +4631,165 @@ export class UserUploadService {
         sourceUnitCount: createdSourceUnits.length,
       })
 
+      const { error: staleAssetCleanupError } = await (supabase as any)
+        .from("user_upload_assets")
+        .delete()
+        .eq("upload_id", uploadId)
+      if (staleAssetCleanupError) {
+        throw new Error(`Failed to clear stale upload assets: ${staleAssetCleanupError.message}`)
+      }
+
+      const persistedAssetById = new Map<string, PersistedUploadAssetRow>()
+      const assetInsertRows: Array<{
+        upload_id: string
+        user_id: string
+        source_unit_id: string
+        asset_type: "figure" | "preview"
+        label: string
+        caption: string | null
+        storage_bucket: string
+        file_path: string
+        mime_type: string
+        width: number | null
+        height: number | null
+        sort_order: number
+        metadata: Record<string, unknown>
+      }> = []
+
+      for (const createdUnit of createdSourceUnits) {
+        const unitFolder = `${createdUnit.unit.unitType}-${String(createdUnit.unit.unitNumber).padStart(4, "0")}`
+        const assetsForUnit: Array<{
+          assetType: "figure" | "preview"
+          sortOrder: number
+          asset: ParsedUploadAsset
+        }> = []
+        if (createdUnit.unit.preview) {
+          assetsForUnit.push({
+            assetType: "preview",
+            sortOrder: 0,
+            asset: createdUnit.unit.preview,
+          })
+        }
+        createdUnit.unit.figures.forEach((figure, figureIndex) => {
+          assetsForUnit.push({
+            assetType: "figure",
+            sortOrder: figureIndex,
+            asset: figure,
+          })
+        })
+
+        for (const item of assetsForUnit) {
+          if (!item.asset.buffer || item.asset.buffer.length === 0) continue
+          const assetLabel =
+            sanitizeFileName(item.asset.label || `${item.assetType}-${item.sortOrder + 1}`) ||
+            `${item.assetType}-${item.sortOrder + 1}`
+          const assetExtension = extensionForMimeType(
+            item.asset.mimeType || "",
+            item.assetType === "preview" ? "png" : "jpg"
+          )
+          const filePath =
+            `user-uploads/${upload.user_id}/${uploadId}/assets/${unitFolder}/` +
+            `${item.assetType}-${String(item.sortOrder + 1).padStart(3, "0")}-${assetLabel}.${assetExtension}`
+
+          const { error: assetUploadError } = await supabase.storage
+            .from(USER_UPLOAD_BUCKET)
+            .upload(filePath, item.asset.buffer, {
+              contentType: item.asset.mimeType || "application/octet-stream",
+              upsert: true,
+            })
+          if (assetUploadError) {
+            throw new Error(`Failed to upload ${item.assetType} asset: ${assetUploadError.message}`)
+          }
+
+          assetInsertRows.push({
+            upload_id: uploadId,
+            user_id: upload.user_id,
+            source_unit_id: createdUnit.id,
+            asset_type: item.assetType,
+            label: item.asset.label || `${item.assetType === "preview" ? "Preview" : "Figure"} ${item.sortOrder + 1}`,
+            caption: item.asset.caption || null,
+            storage_bucket: USER_UPLOAD_BUCKET,
+            file_path: filePath,
+            mime_type: item.asset.mimeType || "application/octet-stream",
+            width: item.asset.width ?? null,
+            height: item.asset.height ?? null,
+            sort_order: item.sortOrder,
+            metadata: item.asset.metadata || {},
+          })
+        }
+      }
+
+      if (assetInsertRows.length > 0) {
+        await this.updateJobProgress(jobId, "chunking", 72, {
+          kind: parsed.kind,
+          sourceUnitCount: createdSourceUnits.length,
+          assetCount: assetInsertRows.length,
+        })
+
+        const insertedAssets: PersistedUploadAssetRow[] = []
+        const assetBatchSize = 100
+        for (let start = 0; start < assetInsertRows.length; start += assetBatchSize) {
+          const end = Math.min(start + assetBatchSize, assetInsertRows.length)
+          const batch = assetInsertRows.slice(start, end)
+          const { data: insertedBatch, error: insertAssetError } = await (supabase as any)
+            .from("user_upload_assets")
+            .insert(batch)
+            .select(
+              "id, source_unit_id, asset_type, sort_order, label, caption, storage_bucket, file_path, mime_type, width, height, metadata"
+            )
+          if (insertAssetError || !Array.isArray(insertedBatch)) {
+            throw new Error(
+              `Failed to persist parsed assets: ${insertAssetError?.message ?? "Unknown asset insert error"}`
+            )
+          }
+          insertedAssets.push(...(insertedBatch as PersistedUploadAssetRow[]))
+        }
+
+        const previewAssetByUnitId = new Map<string, PersistedUploadAssetRow>()
+        const figureAssetsByUnitId = new Map<string, PersistedUploadAssetRow[]>()
+        for (const asset of insertedAssets) {
+          persistedAssetById.set(asset.id, asset)
+          const sourceUnitId = asset.source_unit_id
+          if (!sourceUnitId) continue
+          if (asset.asset_type === "preview") {
+            const existingPreview = previewAssetByUnitId.get(sourceUnitId)
+            if (!existingPreview || asset.sort_order < existingPreview.sort_order) {
+              previewAssetByUnitId.set(sourceUnitId, asset)
+            }
+          } else if (asset.asset_type === "figure") {
+            const currentFigures = figureAssetsByUnitId.get(sourceUnitId) ?? []
+            currentFigures.push(asset)
+            figureAssetsByUnitId.set(sourceUnitId, currentFigures)
+          }
+        }
+
+        for (const createdUnit of createdSourceUnits) {
+          const previewAsset = previewAssetByUnitId.get(createdUnit.id)
+          const figureAssets = (figureAssetsByUnitId.get(createdUnit.id) ?? []).sort(
+            (left, right) => left.sort_order - right.sort_order
+          )
+          createdUnit.previewAssetId = previewAsset?.id ?? null
+          createdUnit.figureAssetIds = figureAssets.map((figure) => figure.id)
+        }
+
+        for (const createdUnit of createdSourceUnits) {
+          if (!createdUnit.previewAssetId) continue
+          const previewAsset = persistedAssetById.get(createdUnit.previewAssetId)
+          if (!previewAsset) continue
+          const { error: previewUpdateError } = await (supabase as any)
+            .from("user_upload_source_units")
+            .update({
+              preview_bucket: previewAsset.storage_bucket,
+              preview_path: previewAsset.file_path,
+              preview_mime_type: previewAsset.mime_type,
+            })
+            .eq("id", createdUnit.id)
+          if (previewUpdateError) {
+            throw new Error(`Failed to update source-unit preview metadata: ${previewUpdateError.message}`)
+          }
+        }
+      }
+
       let globalChunkIndex = 0
       const chunkSeed = createdSourceUnits.flatMap(({ id, unit, previewAssetId, figureAssetIds }) => {
         const candidates = chunkText(unit.extractedText).map((chunk) => ({
@@ -4318,25 +4806,39 @@ export class UserUploadService {
                 .slice(0, Math.min(4, candidates.length))
         const fallbackSelected = selected.length > 0 ? selected : candidates.slice(0, Math.min(1, candidates.length))
 
-        return fallbackSelected.map(({ chunk, quality }, index) => ({
-          upload_id: uploadId,
-          user_id: upload.user_id,
-          source_unit_id: id,
-          preview_asset_id: previewAssetId,
-          chunk_index: globalChunkIndex++,
-          chunk_text: chunk.text,
-          source_offset_start: chunk.start,
-          source_offset_end: chunk.end,
-          metadata: {
-            unitType: unit.unitType,
-            unitNumber: unit.unitNumber,
-            unitChunkIndex: index,
-            figureAssetIds,
-            chunkQualityScore: quality.score,
-            chunkQuality: quality,
-          },
-          figureAssetIds,
-        }))
+        return fallbackSelected.map(({ chunk, quality }, index) => {
+          const linkedFigureAssetIds =
+            figureAssetIds.length > 0
+              ? selectChunkFigureAssetIds({
+                  chunkText: chunk.text,
+                  chunkStart: chunk.start,
+                  chunkEnd: chunk.end,
+                  candidateAssetIds: figureAssetIds,
+                  assetById: persistedAssetById,
+                })
+              : []
+
+          return {
+            upload_id: uploadId,
+            user_id: upload.user_id,
+            source_unit_id: id,
+            preview_asset_id: previewAssetId,
+            chunk_index: globalChunkIndex++,
+            chunk_text: chunk.text,
+            source_offset_start: chunk.start,
+            source_offset_end: chunk.end,
+            metadata: {
+              unitType: unit.unitType,
+              unitNumber: unit.unitNumber,
+              unitChunkIndex: index,
+              figureAssetIds: linkedFigureAssetIds,
+              chunkQualityScore: quality.score,
+              chunkQuality: quality,
+              figureLinkStrategy: "offset_bbox_v1",
+            },
+            figureAssetIds: linkedFigureAssetIds,
+          }
+        })
       })
 
       const embeddings: Array<number[] | null> = new Array(chunkSeed.length).fill(null)
@@ -4380,7 +4882,7 @@ export class UserUploadService {
           upload_id: chunk.upload_id,
           user_id: chunk.user_id,
           source_unit_id: chunk.source_unit_id,
-          preview_asset_id: null,
+          preview_asset_id: chunk.preview_asset_id,
           chunk_index: chunk.chunk_index,
           chunk_text: chunk.chunk_text,
           source_offset_start: chunk.source_offset_start,
@@ -4435,6 +4937,77 @@ export class UserUploadService {
         .eq("upload_id", uploadId)
         .gte("chunk_index", chunkSeed.length)
 
+      const chunkSeedWithFigures = chunkSeed
+        .map((chunk) => ({
+          chunkIndex: chunk.chunk_index,
+          figureAssetIds: Array.from(new Set(chunk.figureAssetIds || [])),
+        }))
+        .filter((entry) => entry.figureAssetIds.length > 0)
+      let chunkAssetLinkCount = 0
+
+      if (chunkSeed.length > 0) {
+        const chunkIdByIndex = new Map<number, string>()
+        const chunkIndexes = chunkSeed.map((chunk) => chunk.chunk_index)
+        const chunkLookupBatchSize = 350
+        for (let start = 0; start < chunkIndexes.length; start += chunkLookupBatchSize) {
+          const end = Math.min(start + chunkLookupBatchSize, chunkIndexes.length)
+          const chunkIndexBatch = chunkIndexes.slice(start, end)
+          const { data: chunkRows, error: chunkRowsError } = await (supabase as any)
+            .from("user_upload_chunks")
+            .select("id, chunk_index")
+            .eq("upload_id", uploadId)
+            .in("chunk_index", chunkIndexBatch)
+          if (chunkRowsError || !Array.isArray(chunkRows)) {
+            throw new Error(
+              `Failed to resolve chunk IDs for asset linking: ${chunkRowsError?.message ?? "Unknown error"}`
+            )
+          }
+          for (const row of chunkRows as Array<{ id: string; chunk_index: number }>) {
+            chunkIdByIndex.set(row.chunk_index, row.id)
+          }
+        }
+
+        const allChunkIds = Array.from(new Set(chunkSeed.map((chunk) => chunkIdByIndex.get(chunk.chunk_index)).filter(
+          (value): value is string => typeof value === "string" && value.length > 0
+        )))
+        const chunkCleanupBatchSize = 350
+        for (let start = 0; start < allChunkIds.length; start += chunkCleanupBatchSize) {
+          const end = Math.min(start + chunkCleanupBatchSize, allChunkIds.length)
+          const chunkIdBatch = allChunkIds.slice(start, end)
+          await (supabase as any)
+            .from("user_upload_chunk_assets")
+            .delete()
+            .in("chunk_id", chunkIdBatch)
+        }
+
+        const chunkAssetInsertRows: Array<{ chunk_id: string; asset_id: string }> = []
+        for (const entry of chunkSeedWithFigures) {
+          const chunkId = chunkIdByIndex.get(entry.chunkIndex)
+          if (!chunkId) continue
+          for (const assetId of entry.figureAssetIds) {
+            chunkAssetInsertRows.push({
+              chunk_id: chunkId,
+              asset_id: assetId,
+            })
+          }
+        }
+
+        if (chunkAssetInsertRows.length > 0) {
+          chunkAssetLinkCount = chunkAssetInsertRows.length
+          const linkBatchSize = 450
+          for (let start = 0; start < chunkAssetInsertRows.length; start += linkBatchSize) {
+            const end = Math.min(start + linkBatchSize, chunkAssetInsertRows.length)
+            const linkBatch = chunkAssetInsertRows.slice(start, end)
+            const { error: chunkAssetInsertError } = await (supabase as any)
+              .from("user_upload_chunk_assets")
+              .upsert(linkBatch, { onConflict: "chunk_id,asset_id" })
+            if (chunkAssetInsertError) {
+              throw new Error(`Failed to persist chunk-asset links: ${chunkAssetInsertError.message}`)
+            }
+          }
+        }
+      }
+
       await Promise.all([
         (supabase as any)
           .from("user_uploads")
@@ -4443,7 +5016,12 @@ export class UserUploadService {
             last_error: null,
             last_ingested_at: new Date().toISOString(),
             parser_version: USER_UPLOAD_PARSER_VERSION,
-            metadata: parsed.metadata,
+            metadata: {
+              ...((upload.metadata as Record<string, unknown> | null) || {}),
+              ...parsed.metadata,
+              uploadAssetCount: assetInsertRows.length,
+              chunkAssetLinkCount,
+            },
           })
           .eq("id", uploadId),
         (supabase as any)
@@ -4456,10 +5034,30 @@ export class UserUploadService {
               progressPercent: 100,
               sourceUnitCount: parsed.sourceUnits.length,
               chunkCount: chunkSeed.length,
+              assetCount: assetInsertRows.length,
+              chunkAssetLinkCount,
             },
           })
           .eq("id", jobId),
       ])
+      try {
+        const studyGraphService = new StudyGraphService(supabase)
+        await studyGraphService.rebuildGraphFromUpload({
+          userId: upload.user_id,
+          uploadId,
+          uploadTitle: upload.title,
+          extraction: studyExtraction,
+          sourceMetadata:
+            upload.metadata && typeof upload.metadata === "object"
+              ? (upload.metadata as Record<string, unknown>)
+              : {},
+        })
+      } catch (studyGraphError) {
+        console.warn(
+          "[Uploads] Study graph refresh skipped:",
+          studyGraphError instanceof Error ? studyGraphError.message : studyGraphError
+        )
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown ingestion error"
       await Promise.all([

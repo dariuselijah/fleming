@@ -2,18 +2,105 @@ import {
   ChatContainerContent,
   ChatContainerRoot,
 } from "@/components/prompt-kit/chat-container"
+import type { ChartDrilldownPayload } from "@/app/components/charts/chat-chart"
 import { ProcessingLoader } from "@/components/prompt-kit/processing-loader"
 import { ScrollButton } from "@/components/prompt-kit/scroll-button"
 import { isArtifactWorkflowInput } from "@/lib/chat/artifact-workflow"
 import { ENABLE_CHAT_ACTIVITY_TIMELINE_V2 } from "@/lib/config"
 import { Message as MessageType } from "@ai-sdk/react"
 import { useRef, useMemo, useCallback } from "react"
-import type { ReferencedUploadStatus } from "./activity/types"
+import type {
+  OptimisticTaskBoardState,
+  ReferencedUploadStatus,
+} from "./activity/types"
 import { Message } from "./message"
 import {
   extractReferencedUploadIdsFromMessage,
   useReferencedUploadStatus,
 } from "./use-referenced-upload-status"
+import { buildEvidenceSourceId } from "@/lib/evidence/source-id"
+
+function citationMetadataScore(citation: any): number {
+  if (!citation || typeof citation !== "object") return 0
+  let score = 0
+  if (typeof citation.title === "string" && citation.title.trim().length > 0) score += 3
+  if (typeof citation.journal === "string" && citation.journal.trim().length > 0) score += 2
+  if (Array.isArray(citation.authors) && citation.authors.length > 0) score += 1
+  if (typeof citation.url === "string" && citation.url.trim().length > 0) score += 3
+  if (typeof citation.sourceId === "string" && citation.sourceId.trim().length > 0) score += 2
+  if (typeof citation.pmid === "string" && citation.pmid.trim().length > 0) score += 2
+  if (typeof citation.doi === "string" && citation.doi.trim().length > 0) score += 1
+  if (typeof citation.sourceLabel === "string" && citation.sourceLabel.trim().length > 0) score += 2
+  if (typeof citation.sourceType === "string" && citation.sourceType.trim().length > 0) score += 1
+  if (typeof citation.studyType === "string" && citation.studyType.trim().length > 0) score += 1
+  if (typeof citation.snippet === "string" && citation.snippet.trim().length > 0) score += 1
+  return score
+}
+
+function citationSetScore(citations: any[]): number {
+  return citations.reduce((total, citation) => total + citationMetadataScore(citation), 0)
+}
+
+function pickRicherCitationSet(primary: any[], secondary: any[]): any[] {
+  if (!Array.isArray(primary) || primary.length === 0) return secondary || []
+  if (!Array.isArray(secondary) || secondary.length === 0) return primary
+  const primaryScore = citationSetScore(primary)
+  const secondaryScore = citationSetScore(secondary)
+  if (secondaryScore > primaryScore + 1) return secondary
+  if (secondaryScore >= primaryScore && secondary.length > primary.length) return secondary
+  return primary
+}
+
+function mergeAnnotationEvidenceCitations(annotations: any[] | undefined): any[] {
+  if (!Array.isArray(annotations) || annotations.length === 0) return []
+
+  const mergedBySourceId = new Map<string, any>()
+  const order: string[] = []
+
+  annotations.forEach((annotation) => {
+    if (annotation?.type !== "evidence-citations" || !Array.isArray(annotation?.citations)) {
+      return
+    }
+
+    annotation.citations.forEach((citation: any, idx: number) => {
+      if (!citation || typeof citation !== "object") return
+      const normalized = {
+        ...citation,
+        sourceId: buildEvidenceSourceId(citation),
+      }
+      const key = normalized.sourceId || `idx:${idx}`
+      const existing = mergedBySourceId.get(key)
+      if (!existing) {
+        mergedBySourceId.set(key, normalized)
+        order.push(key)
+        return
+      }
+      const existingScore = citationMetadataScore(existing)
+      const incomingScore = citationMetadataScore(normalized)
+      mergedBySourceId.set(
+        key,
+        incomingScore >= existingScore
+          ? { ...existing, ...normalized, sourceId: key }
+          : { ...normalized, ...existing, sourceId: key }
+      )
+    })
+  })
+
+  return order
+    .map((key) => mergedBySourceId.get(key))
+    .filter(Boolean)
+    .map((citation, index) => ({
+      ...citation,
+      index:
+        typeof citation.index === "number" && Number.isFinite(citation.index)
+          ? citation.index
+          : index + 1,
+      sourceId:
+        typeof citation.sourceId === "string" && citation.sourceId.trim().length > 0
+          ? citation.sourceId
+          : buildEvidenceSourceId(citation),
+    }))
+}
 
 type ConversationProps = {
   messages: MessageType[]
@@ -24,8 +111,17 @@ type ConversationProps = {
   onReload: () => void
   onSuggestion?: (suggestion: string) => void
   onWorkflowSuggestion?: (suggestion: string) => void
+  onDrilldownInsightAdd?: (input: {
+    pointId: string
+    query: string
+    response: string
+    payload: ChartDrilldownPayload
+    citations: any[]
+  }) => Promise<boolean> | boolean
+  discussionInsightCount?: number
   evidenceCitations?: any[]
   streamIntroPreview?: string | null
+  optimisticTaskBoard?: OptimisticTaskBoardState | null
 }
 
 export function Conversation({
@@ -37,8 +133,11 @@ export function Conversation({
   onReload,
   onSuggestion,
   onWorkflowSuggestion,
+  onDrilldownInsightAdd,
+  discussionInsightCount = 0,
   evidenceCitations = [],
   streamIntroPreview = null,
+  optimisticTaskBoard = null,
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
   const { uploadsById } = useReferencedUploadStatus({
@@ -74,22 +173,35 @@ export function Conversation({
       // 2. For loaded messages, use citations from the message's evidenceCitations field (from DB)
       // 3. Also check message.parts for metadata containing evidence citations
       let messageEvidenceCitations: any[] = []
+      let persistedEvidenceCitations: any[] = []
+      let metadataEvidenceCitations: any[] = []
       
       // Priority 1: For last message during streaming/ready, use props citations
       if (isLast && evidenceCitations.length > 0) {
         messageEvidenceCitations = evidenceCitations
-      } 
+      }
       // Priority 2: Check if message has evidenceCitations field (added by getMessagesFromDb)
-      else if ((message as any).evidenceCitations && Array.isArray((message as any).evidenceCitations)) {
-        messageEvidenceCitations = (message as any).evidenceCitations
+      if ((message as any).evidenceCitations && Array.isArray((message as any).evidenceCitations)) {
+        persistedEvidenceCitations = (message as any).evidenceCitations
       }
       // Priority 3: Extract from message.parts metadata (fallback)
-      else if (message.parts && Array.isArray(message.parts)) {
+      if (message.parts && Array.isArray(message.parts)) {
         const metadataPart = message.parts.find((p: any) => p.type === "metadata" && p.metadata?.evidenceCitations)
         if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
-          messageEvidenceCitations = (metadataPart as any).metadata.evidenceCitations
+          metadataEvidenceCitations = (metadataPart as any).metadata.evidenceCitations
         }
       }
+      // Priority 4: Extract from message annotations evidence-citations (stream/runtime fallback)
+      const annotationEvidenceCitations = mergeAnnotationEvidenceCitations(
+        (message as any).annotations
+      )
+      messageEvidenceCitations = pickRicherCitationSet(
+        pickRicherCitationSet(
+          pickRicherCitationSet(messageEvidenceCitations, persistedEvidenceCitations),
+          metadataEvidenceCitations
+        ),
+        annotationEvidenceCitations
+      )
 
       const previousUserMessage = [...uniqueMessages.slice(0, index)]
         .reverse()
@@ -120,6 +232,8 @@ export function Conversation({
           onReload={onReload}
           onSuggestion={onSuggestion}
           onWorkflowSuggestion={onWorkflowSuggestion}
+          onDrilldownInsightAdd={onDrilldownInsightAdd}
+          discussionInsightCount={discussionInsightCount}
           hasScrollAnchor={hasScrollAnchor}
           parts={message.parts}
           annotations={(message as any).annotations}
@@ -131,6 +245,11 @@ export function Conversation({
             message.role === "assistant" && isLast && status === "streaming"
               ? streamIntroPreview
               : undefined
+          }
+          optimisticTaskBoard={
+            message.role === "assistant" && isLast && status === "streaming"
+              ? optimisticTaskBoard
+              : null
           }
         >
           {message.content}
@@ -145,8 +264,11 @@ export function Conversation({
     onReload,
     onSuggestion,
     onWorkflowSuggestion,
+    onDrilldownInsightAdd,
+    discussionInsightCount,
     evidenceCitations,
     uploadsById,
+    optimisticTaskBoard,
   ])
 
   // Memoize handlers to prevent unnecessary re-renders

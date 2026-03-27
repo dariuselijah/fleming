@@ -66,6 +66,36 @@ function testServerTimelineEmission() {
   )
   assert.match(
     route,
+    /summary:\s*routingSummaryText/,
+    "Chat route should include a human-readable summary in routing metadata"
+  )
+  assert.match(
+    route,
+    /taskPlanForStream/,
+    "Chat route should stream planner task plan metadata"
+  )
+  assert.match(
+    route,
+    /retrievalNotesForStream/,
+    "Chat route should stream retrieval fallback note metadata"
+  )
+  assert.match(
+    route,
+    /taskBoardTitleForStream/,
+    "Chat route should provide task board title context per turn"
+  )
+  assert.match(
+    route,
+    /hasCurriculumAlignmentTaskForStream/,
+    "Chat route should surface curriculum-alignment state in routing summaries when planner emits it"
+  )
+  assert.match(
+    route,
+    /DIAGRAM\/CODE CITATIONS:/,
+    "Chat route prompt guard should keep citations outside chart and mermaid fenced blocks"
+  )
+  assert.match(
+    route,
     /executeConnectorWithFallback\s*=\s*async/,
     "Chat route should run connectors through deterministic fallback orchestration"
   )
@@ -75,6 +105,7 @@ function testClientTimelineRendering() {
   const messageAssistant = read("app/components/chat/message-assistant.tsx")
   const activityTimeline = read("app/components/chat/activity/activity-timeline.tsx")
   const timelineBuilder = read("app/components/chat/activity/build-timeline.ts")
+  const citationMarkdown = read("app/components/chat/citation-markdown.tsx")
 
   assert.match(
     messageAssistant,
@@ -113,8 +144,13 @@ function testClientTimelineRendering() {
   )
   assert.match(
     activityTimeline,
-    /activityRows\.map\(\(row\) => renderRow\(row\)\)/,
-    "Activity rail should render before answer rail"
+    /taskBoardRows\.map\(\(row\) => renderRow\(row\)\)/,
+    "Task board rail should render before answer rail"
+  )
+  assert.match(
+    activityTimeline,
+    /nonTaskActivityRows\.map\(\(row\) => renderRow\(row\)\)/,
+    "Non-task activity rail should render after the compact task board"
   )
   assert.match(
     activityTimeline,
@@ -132,6 +168,16 @@ function testClientTimelineRendering() {
     "Grouped tool cards should show completed result payload sections"
   )
   assert.match(
+    activityTimeline,
+    /item\.reasoning/,
+    "Task board rows should preserve task reasoning in compact task text"
+  )
+  assert.doesNotMatch(
+    activityTimeline,
+    /Execution details/,
+    "Task board should not render execution-details disclosure when simplified mode is active"
+  )
+  assert.match(
     timelineBuilder,
     /kind:\s*"tool-result"|kind:\s*"upload-status"|kind:\s*"artifact"|type === "langgraph-routing"/,
     "Timeline builder should normalize tool/upload/artifact events and routing annotations"
@@ -140,6 +186,56 @@ function testClientTimelineRendering() {
     timelineBuilder,
     /if \(type === "langgraph-routing"\) \{\s*return null/s,
     "Timeline builder should suppress langgraph-routing annotations from user-visible reasoning"
+  )
+  assert.match(
+    timelineBuilder,
+    /taskPlanItems/,
+    "Timeline builder should prefer planner task-plan rows when available"
+  )
+  assert.match(
+    timelineBuilder,
+    /retrievalNotes/,
+    "Timeline builder should parse retrieval fallback notes from routing snapshots"
+  )
+  assert.match(
+    timelineBuilder,
+    /taskBoardTitle/,
+    "Timeline builder should parse task board title metadata from routing snapshots"
+  )
+  assert.doesNotMatch(
+    activityTimeline,
+    /item\.id !== "task-finalize"/,
+    "Task board normalization should not rely on a hardcoded task-finalize template id"
+  )
+  assert.match(
+    citationMarkdown,
+    /collectFencedCodeRanges\(/,
+    "Citation markdown should detect fenced code ranges before citation parsing"
+  )
+  assert.match(
+    citationMarkdown,
+    /maskRangesWithSpaces\(/,
+    "Citation markdown should mask fenced blocks so marker parsing stays prose-only"
+  )
+  assert.match(
+    citationMarkdown,
+    /elementType === "code" \|\| elementType === "pre"/,
+    "Citation markdown should skip recursive citation processing inside code and pre elements"
+  )
+  assert.match(
+    citationMarkdown,
+    /remapMarkerSourceIds\(/,
+    "Citation markdown should remap canonical source-id markers into citation indices"
+  )
+  assert.match(
+    citationMarkdown,
+    /sourceIds|CITE_|sourceIdPattern/,
+    "Citation markdown/parser path should support canonical [CITE_<sourceId>] markers"
+  )
+  assert.doesNotMatch(
+    citationMarkdown,
+    /code:\s*\(\{/,
+    "Citation markdown should not override the markdown code component and must preserve chart/mermaid block renderers"
   )
   assert.match(
     timelineBuilder,
@@ -191,8 +287,8 @@ function testUploadParityAndClientIngestion() {
   )
   assert.match(
     useChatCore,
-    /if \(type === "langgraph-routing"\) \{\s*return null/s,
-    "Chat core should avoid replaying langgraph-routing annotations in session snapshots"
+    /type === "langgraph-routing"/,
+    "Chat core should persist langgraph-routing annotations for reload-safe dynamic task boards"
   )
 }
 
@@ -255,6 +351,11 @@ function testUnifiedSourcesWiring() {
     messageAssistant,
     /<ReferencesSection citations={sourcesCitations} title="Sources"/,
     "Assistant renderer should show one unified Sources section"
+  )
+  assert.doesNotMatch(
+    messageAssistant,
+    /showSourcesSection[\s\S]*!hasEvidenceCitations/s,
+    "Sources section should not be hidden when evidence citations are present"
   )
   assert.doesNotMatch(
     messageAssistant,

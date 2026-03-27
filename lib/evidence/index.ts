@@ -32,6 +32,10 @@ export {
   computeProvenanceConfidence,
   provenanceToEvidenceCitation,
 } from './provenance';
+export {
+  buildEvidenceSourceId,
+  normalizeEvidenceSourceId,
+} from "./source-id";
 export type {
   SourceProvenance,
   ProvenanceSourceType,

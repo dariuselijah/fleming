@@ -186,12 +186,12 @@ function testUploadIntentRoutingAndCaching() {
   )
   assert.match(
     useChatCore,
-    /const imageFiles = currentFiles\.filter\(\(file\) => isImageAttachment\(file\.type\)\)/,
+    /const originalImageFiles = currentFiles\.filter\(\(file\) => isImageAttachment\(file\.type\)\)[\s\S]*const nonImageFiles = currentFiles\.filter\(\(file\) => !isImageAttachment\(file\.type\)\)/,
     "Chat submit should keep only images in inline attachment path"
   )
   assert.match(
     useChatCore,
-    /buildUploadReferenceTokens\(uploadReferenceIds\)/,
+    /buildUploadReferenceTokens\(selectedUploadReferenceIds\)/,
     "Chat submit should inject upload reference tokens for routed non-image files"
   )
   assert.match(
@@ -329,6 +329,53 @@ function testEmbeddingProviderSafety() {
   )
 }
 
+function testDoclingVisualAssetPipeline() {
+  const uploadServer = read("lib/uploads/server.ts")
+  const chatRoute = read("app/api/chat/route.ts")
+  const doclingClient = read("lib/media/docling-client.ts")
+
+  assert.match(
+    uploadServer,
+    /ENABLE_DOCLING_UPLOAD_PARSER[\s\S]*parseDocumentWithDocling/,
+    "Upload parser should gate Docling-first extraction behind an explicit feature flag"
+  )
+  assert.match(
+    doclingClient,
+    /contentBase64[\s\S]*extractFigures[\s\S]*extractPreview/,
+    "Docling client should request figure and preview extraction payloads"
+  )
+  assert.match(
+    uploadServer,
+    /from\("user_upload_assets"\)[\s\S]*insert\(/,
+    "Ingestion should persist parsed preview/figure assets into user_upload_assets"
+  )
+  assert.match(
+    uploadServer,
+    /selectChunkFigureAssetIds\(/,
+    "Chunk ingestion should perform offset-aware figure linking"
+  )
+  assert.match(
+    uploadServer,
+    /from\("user_upload_chunk_assets"\)[\s\S]*upsert\(/,
+    "Chunk-to-asset links should be persisted in user_upload_chunk_assets"
+  )
+  assert.match(
+    uploadServer,
+    /linkedAssetIdsByChunkId[\s\S]*previewReference[\s\S]*figureReferences/,
+    "Upload retrieval should hydrate preview and figure references from persisted assets"
+  )
+  assert.match(
+    chatRoute,
+    /citations:\s*result\.citations/,
+    "uploadContextSearch tool output should include citations for runtime propagation"
+  )
+  assert.match(
+    chatRoute,
+    /Array\.isArray\(candidate\.results\)/,
+    "Citation extraction should support tool results payload fallback"
+  )
+}
+
 function run() {
   testRouteClarificationGuards()
   testUploadServerStructureAndSynthesis()
@@ -337,6 +384,7 @@ function run() {
   testEvidenceAndPubMedRebuild()
   testAgenticQuizFlowAndUi()
   testEmbeddingProviderSafety()
+  testDoclingVisualAssetPipeline()
   console.log("upload artifact regression checks passed")
 }
 

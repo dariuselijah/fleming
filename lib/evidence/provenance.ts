@@ -1,4 +1,5 @@
 import type { EvidenceCitation } from "./types";
+import { buildEvidenceSourceId } from "./source-id";
 
 export type ProvenanceSourceType =
   | "pubmed"
@@ -238,6 +239,14 @@ export function provenanceToEvidenceCitation(provenance: SourceProvenance, index
 
   return {
     index,
+    sourceId: buildEvidenceSourceId({
+      pmid: provenance.pmid,
+      doi: provenance.doi,
+      url: provenance.url,
+      title: provenance.title,
+      journal,
+      sourceLabel: provenance.sourceName,
+    }),
     pmid: provenance.pmid,
     title: provenance.title,
     journal,

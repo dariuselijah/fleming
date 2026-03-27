@@ -21,6 +21,7 @@ import {
   FilePdf,
   FilePpt,
   FileText,
+  FileVideo,
   FolderOpen,
   ImageSquare,
   SpinnerGap,
@@ -41,6 +42,14 @@ const ACCEPTED_KNOWLEDGE_UPLOADS = [
   "image/png",
   "image/webp",
   "image/gif",
+  ".mp4",
+  ".mov",
+  ".m4v",
+  ".webm",
+  ".mkv",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
 ].join(",")
 
 const PIPELINE_STAGE_SEQUENCE: Array<{
@@ -76,6 +85,7 @@ function fileIcon(kind: UserUploadListItem["uploadKind"]) {
   if (kind === "docx") return FileDoc
   if (kind === "image") return ImageSquare
   if (kind === "text") return FileText
+  if (kind === "video") return FileVideo
   return FolderOpen
 }
 
@@ -178,7 +188,7 @@ function UploadPipelineCard({ state }: { state: ActiveUploadState }) {
   )
 }
 
-export function UploadsWorkspace() {
+export function UploadsWorkspace({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useUser()
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -400,7 +410,13 @@ export function UploadsWorkspace() {
   )
 
   return (
-    <div className="mx-auto mt-16 w-full max-w-7xl px-4 pb-8 sm:px-6">
+    <div
+      className={
+        embedded
+          ? "w-full"
+          : "mx-auto mt-16 w-full max-w-7xl px-4 pb-8 sm:px-6"
+      }
+    >
       <div className="rounded-3xl border border-border/60 bg-background p-6 shadow-xs sm:p-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>

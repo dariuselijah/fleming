@@ -1,17 +1,24 @@
 "use client"
 
 import { MessageContent } from "@/components/prompt-kit/message"
+import type { ChartDrilldownPayload } from "@/app/components/charts/chat-chart"
+import { ENABLE_CHART_DRILLDOWN_SUBLOOP } from "@/lib/config"
 import { cn } from "@/lib/utils"
+import type { EvidenceCitation } from "@/lib/evidence/types"
 import type { DocumentArtifact } from "@/lib/uploads/artifacts"
 import { getUploadProgressStageLabel, getUploadStatusLabel } from "@/lib/uploads/status-label"
 import {
   CaretDown,
+  Circle,
   CheckCircle,
+  Flask,
   SpinnerGap,
   WarningCircle,
   Wrench,
+  XCircle,
 } from "@phosphor-icons/react"
-import { useMemo, useState } from "react"
+// Intentionally keeping activity transitions minimal/static for a calmer UI.
+import { useCallback, useMemo, useState } from "react"
 import type { CitationData } from "../citation-popup"
 import { CitationMarkdown } from "../citation-markdown"
 import {
@@ -29,9 +36,11 @@ type ActivityTimelineProps = {
   status?: "streaming" | "ready" | "submitted" | "error"
   onSuggestion?: (suggestion: string) => void
   onWorkflowSuggestion?: (suggestion: string) => void
+  onChartDrilldown?: (payload: ChartDrilldownPayload) => void
+  isDrilldownModeActive?: boolean
   shouldShowCitations: boolean
   citations: Map<number, CitationData>
-  evidenceCitations?: unknown[]
+  evidenceCitations?: EvidenceCitation[]
   onExportDocument: (artifact: DocumentArtifact, format: "pdf" | "docx") => void
   exportingArtifactId: string | null
 }
@@ -54,6 +63,7 @@ function uploadStatusTone(status: "pending" | "processing" | "completed" | "fail
 
 type ToolEvent = Extract<TimelineEvent, { kind: "tool-lifecycle" | "tool-result" }>
 type ToolResultPart = Extract<TimelineEvent, { kind: "tool-result" }>["part"]
+type TaskBoardEvent = Extract<TimelineEvent, { kind: "task-board" }>
 
 type ToolFamily = {
   key: string
@@ -138,9 +148,12 @@ function stateFromToolEvent(event: ToolEvent): ToolCallState {
 }
 
 function aggregateGroupState(rows: ToolCallRow[]): ToolCallState {
-  if (rows.some((row) => row.state === "failed")) return "failed"
-  if (rows.every((row) => row.state === "completed")) return "completed"
-  if (rows.some((row) => row.state === "running")) return "running"
+  const hasRunning = rows.some((row) => row.state === "running")
+  const hasCompleted = rows.some((row) => row.state === "completed")
+  const hasFailed = rows.some((row) => row.state === "failed")
+  if (hasRunning) return "running"
+  if (hasCompleted) return "completed"
+  if (hasFailed) return "failed"
   return "queued"
 }
 
@@ -341,139 +354,459 @@ function toolStateLabel(state: ToolCallState): string {
   return "Failed"
 }
 
-function GroupedToolActivityCard({ group }: { group: ToolGroupRow }) {
-  const [isExpanded, setIsExpanded] = useState(group.aggregateState !== "completed")
-  const [expandedCalls, setExpandedCalls] = useState<Record<string, boolean>>({})
-  const aggregateLabel = toolStateLabel(group.aggregateState)
-  const callCount = group.callRows.length
+function toolStateDotClass(state: ToolCallState): string {
+  if (state === "completed") return "bg-emerald-500"
+  if (state === "failed") return "bg-red-400"
+  if (state === "running") return "bg-amber-400"
+  return "bg-muted-foreground/35"
+}
 
-  const toggleCall = (callId: string) => {
-    setExpandedCalls((prev) => ({
-      ...prev,
-      [callId]: !prev[callId],
-    }))
+function taskStatusSegmentClass(state: TaskBoardEvent["items"][number]["status"]): string {
+  if (state === "completed") return "bg-emerald-500/80"
+  if (state === "failed") return "bg-red-400/80"
+  if (state === "running") return "bg-amber-400/90"
+  return "bg-muted-foreground/30"
+}
+
+function renderStateIcon(state: ToolCallState) {
+  if (state === "completed") {
+    return <CheckCircle className="size-3.5 text-foreground/70" weight="fill" />
+  }
+  if (state === "failed") {
+    return <XCircle className="size-3.5 text-red-400" weight="fill" />
+  }
+  if (state === "running") {
+    return <SpinnerGap className="size-3.5 animate-spin text-foreground/75" />
+  }
+  return <Circle className="size-3 text-muted-foreground" />
+}
+
+function humanizeToken(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function extractActiveThought(events: TimelineEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event.kind === "tool-lifecycle" && event.lifecycle === "running") {
+      const detail = event.detail?.trim()
+      if (detail && detail !== event.toolCallId) {
+        return detail
+      }
+      return `Running ${humanizeToken(event.toolName)}...`
+    }
   }
 
-  return (
-    <ActivityCard
-      icon={
-        group.aggregateState === "running" ? (
-          <SpinnerGap className="size-4 animate-spin" />
-        ) : group.aggregateState === "completed" ? (
-          <CheckCircle className="size-4" />
-        ) : group.aggregateState === "failed" ? (
-          <WarningCircle className="size-4" />
-        ) : (
-          <Wrench className="size-4" />
-        )
-      }
-      title={`${group.family.label} activity`}
-      subtitle={`${callCount} call${callCount === 1 ? "" : "s"}`}
-      status={<ActivityStatusChip label={aggregateLabel} tone={toolLifecycleTone(group.aggregateState)} />}
-    >
-      <button
-        type="button"
-        onClick={() => setIsExpanded((prev) => !prev)}
-        className="flex w-full items-center justify-between rounded-lg border border-border/70 bg-muted/30 px-2 py-1 text-left text-xs text-muted-foreground transition hover:bg-muted/45"
-      >
-        <span>View call details</span>
-        <CaretDown className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")} />
-      </button>
-      {isExpanded ? (
-        <div className="mt-2 space-y-1.5">
-          {group.callRows.map((row) => {
-            const hasPayload =
-              typeof row.args !== "undefined" || typeof row.result !== "undefined"
-            const isCallExpanded = Boolean(expandedCalls[row.toolCallId])
-            const resultHighlights = extractResultHighlights(row.result)
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event.kind !== "task-board") continue
+    const runningTask = [...event.items].reverse().find((item) => item.status === "running")
+    if (!runningTask) continue
+    return runningTask.detail || runningTask.reasoning || `${runningTask.label}...`
+  }
 
-            return (
-              <div
-                key={row.toolCallId}
-                className="rounded-lg border border-border/70 bg-background px-2.5 py-1.5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-medium">{row.toolName}</p>
-                    <p className="truncate text-[11px] text-muted-foreground">
-                      {row.detail || row.toolCallId}
-                    </p>
-                    {resultHighlights.length > 0 ? (
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        {resultHighlights.join(" • ")}
-                      </p>
+  return null
+}
+
+function normalizeTaskStatusForMessage(
+  event: TaskBoardEvent,
+  messageStatus: ActivityTimelineProps["status"]
+): TaskBoardEvent["items"] {
+  const withErrorNormalization =
+    messageStatus !== "error"
+      ? event.items
+      : event.items.map((item) =>
+    item.status === "running"
+      ? {
+          ...item,
+          status: "failed" as const,
+          detail: item.detail || "Task interrupted due to response error.",
+        }
+      : item
+        )
+  // Keep the board focused on actually executed work.
+  return withErrorNormalization.filter((item) => item.status !== "pending")
+}
+
+function aggregateTaskStatus(items: TaskBoardEvent["items"]): "running" | "success" | "error" {
+  if (items.length === 0) return "running"
+  if (items.some((item) => item.status === "failed")) return "error"
+  if (items.some((item) => item.status === "running")) return "running"
+  return "success"
+}
+
+function TaskBoardCard({
+  event,
+  status,
+}: {
+  event: TaskBoardEvent
+  status: ActivityTimelineProps["status"]
+}) {
+  const [showSequence, setShowSequence] = useState(false)
+  const normalizedItems = normalizeTaskStatusForMessage(event, status)
+  const completedCount = normalizedItems.filter((item) => item.status === "completed").length
+  const activeTask = normalizedItems.find((item) => item.status === "running") || null
+  const lastCompletedTask =
+    [...normalizedItems].reverse().find((item) => item.status === "completed") || null
+  const compactTaskIds = new Set<string>()
+  if (lastCompletedTask) compactTaskIds.add(lastCompletedTask.id)
+  if (activeTask) compactTaskIds.add(activeTask.id)
+  const compactTasks =
+    compactTaskIds.size > 0
+      ? normalizedItems.filter((item) => compactTaskIds.has(item.id))
+      : normalizedItems.slice(0, 2)
+  const visibleTasks = showSequence ? normalizedItems : compactTasks
+  const tone = aggregateTaskStatus(normalizedItems)
+  const toneLabel = tone === "success" ? "Ready" : tone === "error" ? "Warning" : "Active"
+  const totalTaskCount = Math.max(1, normalizedItems.length)
+  const completionLabel = `${completedCount}/${totalTaskCount}`
+
+  return (
+    <div className="rounded-xl border border-border/35 bg-zinc-50/50 px-3.5 py-2.5 backdrop-blur-md dark:bg-zinc-900/50">
+      <div className="mb-2 flex items-center gap-1">
+        {normalizedItems.length > 0 ? (
+          normalizedItems.map((item) => (
+            <span
+              key={`segment-${item.id}`}
+              className={cn(
+                "h-[2px] flex-1 rounded-full transition",
+                taskStatusSegmentClass(item.status)
+              )}
+            />
+          ))
+        ) : (
+          <span className="h-[2px] flex-1 rounded-full bg-muted-foreground/25" />
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          {tone === "running" ? (
+            <span className="h-[5px] w-7 overflow-hidden rounded-full bg-foreground/15">
+              <span className="block h-full w-1/2 rounded-full bg-foreground/65" />
+            </span>
+          ) : tone === "success" ? (
+            <CheckCircle className="size-4 text-emerald-600" weight="fill" />
+          ) : tone === "error" ? (
+            <Circle className="size-3 fill-red-400 text-red-400" weight="fill" />
+          ) : (
+            <Wrench className="size-4 text-foreground/70" weight="fill" />
+          )}
+          <p className="truncate text-[14px] font-medium">
+            {event.title}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="rounded-full border border-border/50 px-1.5 py-px text-[11px] text-muted-foreground">
+            {completionLabel}
+          </span>
+          <span className="hidden items-center gap-1 text-[11px] text-muted-foreground sm:inline-flex">
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                tone === "success"
+                  ? "bg-emerald-500"
+                  : tone === "error"
+                    ? "bg-amber-500"
+                    : "bg-zinc-400"
+              )}
+            />
+            {toneLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowSequence((prev) => !prev)}
+            className="inline-flex items-center gap-1 rounded-md border border-border/70 px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/45"
+            aria-label={showSequence ? "Hide sequence" : "Show sequence"}
+          >
+            <span className="hidden sm:inline">{showSequence ? "Hide Sequence" : "Show Sequence"}</span>
+            <CaretDown className="size-3.5" />
+          </button>
+        </div>
+      </div>
+      {visibleTasks.length > 0 ? (
+        <div className="overflow-hidden">
+            <div className="mt-2 space-y-1">
+              {visibleTasks.map((item, index) => (
+                <div
+                  key={item.id}
+                  className="relative flex items-start justify-between gap-2 rounded-md border border-border/35 bg-zinc-100/40 px-2 py-1.5 text-[13px] backdrop-blur-sm dark:bg-zinc-900/35"
+                >
+                  <div className="absolute top-0 bottom-0 left-[7px]">
+                    {index < visibleTasks.length - 1 ? (
+                      <span className="block h-full w-px bg-border/60" />
                     ) : null}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <ActivityStatusChip
-                      label={toolStateLabel(row.state)}
-                      tone={toolLifecycleTone(row.state)}
-                    />
-                    {hasPayload ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleCall(row.toolCallId)}
-                        className="rounded-md border border-border/70 bg-muted/30 p-1 text-muted-foreground transition hover:bg-muted/45"
-                        aria-label="Toggle call response details"
-                      >
-                        <CaretDown
-                          className={cn(
-                            "size-3.5 transition-transform",
-                            isCallExpanded && "rotate-180"
-                          )}
-                        />
-                      </button>
+                  <div className="relative mt-0.5 flex w-4 shrink-0 items-center justify-center">
+                    {item.status === "completed" ? (
+                      <CheckCircle className="size-3.5 text-foreground/70" weight="fill" />
+                    ) : item.status === "running" ? (
+                      <span className="h-[4px] w-7 overflow-hidden rounded-full bg-foreground/15">
+                        <span className="block h-full w-1/2 rounded-full bg-foreground/65" />
+                      </span>
+                    ) : item.status === "failed" ? (
+                      <Circle className="size-2.5 fill-red-400 text-red-400" weight="fill" />
+                    ) : (
+                      <Circle className="size-2.5 fill-amber-400 text-amber-400" weight="fill" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={cn(
+                        "truncate font-medium",
+                        item.status === "running" && "text-foreground/85"
+                      )}
+                    >
+                      {item.label}
+                    </p>
+                    {item.description ? (
+                      <p className="truncate text-[12px] text-muted-foreground">{item.description}</p>
+                    ) : item.detail ? (
+                      <p className="truncate text-[12px] text-muted-foreground">{item.detail}</p>
+                    ) : null}
+                    {item.reasoning ? (
+                      <p className="truncate text-[12px] text-muted-foreground/90">{item.reasoning}</p>
                     ) : null}
                   </div>
                 </div>
-                {hasPayload && isCallExpanded ? (
-                  <div className="mt-2 space-y-2 rounded-md border border-border/70 bg-muted/15 p-2">
-                    {typeof row.args !== "undefined" ? (
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Arguments
-                        </p>
-                        <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/70 bg-background p-2 text-[11px] leading-5">
-                          {formatPayload(row.args)}
-                        </pre>
-                      </div>
-                    ) : null}
-                    {typeof row.result !== "undefined" ? (
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Response
-                        </p>
-                        <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/70 bg-background p-2 text-[11px] leading-5">
-                          {formatPayload(row.result)}
-                        </pre>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            )
-          })}
+              ))}
+            </div>
         </div>
       ) : null}
-    </ActivityCard>
+    </div>
   )
 }
 
-export function ActivityTimeline({
-  events,
-  status,
-  onSuggestion,
-  onWorkflowSuggestion,
-  shouldShowCitations,
-  citations,
-  evidenceCitations,
-  onExportDocument,
-  exportingArtifactId,
-}: ActivityTimelineProps) {
+function GroupedToolActivityCard({ group }: { group: ToolGroupRow }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [selectedCallId, setSelectedCallId] = useState<string | null>(null)
+  const aggregateLabel = toolStateLabel(group.aggregateState)
+  const callCount = group.callRows.length
+  const completedCallCount = group.callRows.filter((row) => row.state === "completed").length
+  const failedCallCount = group.callRows.filter((row) => row.state === "failed").length
+  const callSummary = `${callCount} attempt${callCount === 1 ? "" : "s"}`
+
+  return (
+    <div>
+      <div className="rounded-lg border border-border/35 bg-zinc-100/40 px-2.5 py-1.5 backdrop-blur-sm dark:bg-zinc-900/40">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <p className="truncate text-[13px] font-medium">{group.family.label} Activity</p>
+              <span className="text-[11px] text-muted-foreground">{callSummary}</span>
+              {completedCallCount > 0 ? (
+                <span className="text-[10px] text-muted-foreground">
+                  ({completedCallCount} successful)
+                </span>
+              ) : null}
+              {failedCallCount > 0 && completedCallCount === 0 ? (
+                <span className="text-[10px] text-muted-foreground">({failedCallCount} failed)</span>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <ActivityStatusChip
+              label={aggregateLabel}
+              tone={toolLifecycleTone(group.aggregateState)}
+              iconOnly
+            />
+            <button
+              type="button"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              className="rounded-md border border-border/50 px-1.5 py-0.5 text-[11px] text-muted-foreground transition hover:bg-zinc-100/60 dark:hover:bg-zinc-900/60"
+            >
+              Deep Dive
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              className="rounded-md border border-border/50 p-1 text-muted-foreground transition hover:bg-zinc-100/60 dark:hover:bg-zinc-900/60"
+              aria-label={isExpanded ? "Hide call details" : "View call details"}
+            >
+              <CaretDown
+                className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")}
+              />
+            </button>
+          </div>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-0.5">
+          {group.callRows.map((row, index) => {
+            const active = selectedCallId === row.toolCallId
+            return (
+              <button
+                key={`${row.toolCallId}-${index}`}
+                type="button"
+                onClick={() => {
+                  setIsExpanded(true)
+                  setSelectedCallId((previous) =>
+                    previous === row.toolCallId ? null : row.toolCallId
+                  )
+                }}
+                title={row.detail || `${row.toolName} attempt ${index + 1}`}
+                aria-label={`${row.toolName} attempt ${index + 1}`}
+                className={cn(
+                  "size-1.5 rounded-full transition",
+                  toolStateDotClass(row.state),
+                  active && "ring-1 ring-foreground/35 ring-offset-1 ring-offset-background"
+                )}
+              />
+            )
+          })}
+        </div>
+        {isExpanded ? (
+          <div className="overflow-hidden">
+              <div className="mt-1.5 max-h-48 space-y-1 overflow-y-auto pr-1">
+                {group.callRows.map((row) => {
+                  const hasPayload =
+                    typeof row.args !== "undefined" || typeof row.result !== "undefined"
+                  const isCallExpanded = selectedCallId === row.toolCallId
+                  const resultHighlights = extractResultHighlights(row.result)
+
+                  return (
+                    <div
+                      key={row.toolCallId}
+                      onClick={() =>
+                        setSelectedCallId((previous) =>
+                          previous === row.toolCallId ? null : row.toolCallId
+                        )
+                      }
+                      className={cn(
+                        "cursor-pointer rounded-lg border border-border/40 bg-zinc-100/45 px-2 py-1.5 backdrop-blur-sm dark:bg-zinc-900/45",
+                        isCallExpanded && "border-primary/25"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] font-medium">{row.toolName}</p>
+                          <p className="truncate text-[11px] text-muted-foreground">
+                            {row.detail || row.toolCallId}
+                          </p>
+                          {resultHighlights.length > 0 ? (
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                              {resultHighlights.join(" • ")}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {renderStateIcon(row.state)}
+                          {hasPayload ? (
+                            <CaretDown
+                              className={cn(
+                                "size-3.5 text-muted-foreground transition-transform",
+                                isCallExpanded && "rotate-180"
+                              )}
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                      {hasPayload && isCallExpanded ? (
+                        <div className="mt-2 space-y-2 rounded-md border border-border/40 bg-zinc-100/45 p-2 backdrop-blur-sm dark:bg-zinc-900/45">
+                          {typeof row.args !== "undefined" ? (
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Arguments
+                              </p>
+                              <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/40 bg-zinc-100/55 p-2 text-[12px] leading-5 dark:bg-zinc-900/55">
+                                {formatPayload(row.args)}
+                              </pre>
+                            </div>
+                          ) : null}
+                          {typeof row.result !== "undefined" ? (
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Response
+                              </p>
+                              <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/40 bg-zinc-100/55 p-2 text-[12px] leading-5 dark:bg-zinc-900/55">
+                                {formatPayload(row.result)}
+                              </pre>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function GhostActivityTray({ activeThought }: { activeThought: string }) {
+  return (
+    <div className="rounded-lg border border-white/15 bg-white/8 px-3 py-1.5 backdrop-blur-[12px] dark:bg-white/4">
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/60" />
+        <p className="truncate text-[12px]">{activeThought}</p>
+      </div>
+    </div>
+  )
+}
+
+export function ActivityTimeline(props: ActivityTimelineProps) {
+  const {
+    events,
+    status,
+    onChartDrilldown,
+    isDrilldownModeActive = false,
+    shouldShowCitations,
+    citations,
+    evidenceCitations,
+    onExportDocument,
+    exportingArtifactId,
+  } = props
+  const handleChartDrilldown = useCallback(
+    (payload: ChartDrilldownPayload) => {
+      if (!ENABLE_CHART_DRILLDOWN_SUBLOOP) return
+      if (!onChartDrilldown) return
+      onChartDrilldown(payload)
+    },
+    [onChartDrilldown]
+  )
   const renderRows = useMemo(() => buildRenderableRows(events), [events])
+  const rowsForRender = useMemo(
+    () =>
+      isDrilldownModeActive
+        ? renderRows.filter(
+            (row) => !(row.type === "event" && row.event.kind === "task-board")
+          )
+        : renderRows,
+    [isDrilldownModeActive, renderRows]
+  )
   const { activityRows, answerRows } = useMemo(
-    () => splitRowsByRail(renderRows),
-    [renderRows]
+    () => splitRowsByRail(rowsForRender),
+    [rowsForRender]
+  )
+  const hasTaskBoard = useMemo(
+    () =>
+      rowsForRender.some(
+        (row) =>
+          row.type === "event" &&
+          row.event.kind === "task-board" &&
+          row.event.items.length > 0
+      ),
+    [rowsForRender]
+  )
+  const activeThought = useMemo(
+    () => (status === "streaming" ? extractActiveThought(events) : null),
+    [events, status]
+  )
+  const taskBoardRows = useMemo(
+    () =>
+      activityRows.filter(
+        (row) => row.type === "event" && row.event.kind === "task-board"
+      ),
+    [activityRows]
+  )
+  const nonTaskActivityRows = useMemo(
+    () =>
+      activityRows.filter(
+        (row) => !(row.type === "event" && row.event.kind === "task-board")
+      ),
+    [activityRows]
   )
 
   const renderRow = (row: RenderRow) => {
@@ -482,7 +815,13 @@ export function ActivityTimeline({
     }
 
     const event = row.event
+    if (event.kind === "task-board") {
+      if (event.items.length === 0) return null
+      return <TaskBoardCard key={event.id} event={event} status={status} />
+    }
+
     if (event.kind === "system-intro") {
+      if (hasTaskBoard) return null
       return (
         <div key={event.id} className="text-sm text-muted-foreground">
           {event.text}
@@ -497,7 +836,8 @@ export function ActivityTimeline({
             key={event.id}
             className={cn(WEB_ROLE_MARKDOWN_CLASSNAME)}
             citations={citations}
-            evidenceCitations={evidenceCitations as any}
+            evidenceCitations={evidenceCitations}
+            onChartDrilldown={handleChartDrilldown}
           >
             {event.text}
           </CitationMarkdown>
@@ -508,6 +848,7 @@ export function ActivityTimeline({
           key={event.id}
           className={cn(WEB_ROLE_MARKDOWN_CLASSNAME)}
           markdown
+            onChartDrilldown={handleChartDrilldown}
         >
           {event.text}
         </MessageContent>
@@ -521,6 +862,48 @@ export function ActivityTimeline({
           reasoning={event.text}
           isStreaming={status === "streaming"}
         />
+      )
+    }
+
+    if (event.kind === "checklist") {
+      if (hasTaskBoard) return null
+      const completedCount = event.items.filter((item) => item.status === "completed").length
+      return (
+        <div key={event.id}>
+          <ActivityCard
+            icon={<Circle className="size-4" />}
+            title={event.title || "Running tasks in parallel"}
+            subtitle={`${completedCount}/${event.items.length} completed`}
+            status={
+              <ActivityStatusChip
+                label={completedCount === event.items.length ? "Done" : "In progress"}
+                tone={completedCount === event.items.length ? "success" : "running"}
+              />
+            }
+          >
+            <div className="space-y-1.5">
+              {event.items.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-2 rounded-md border border-transparent px-1.5 py-1 text-sm transition-colors hover:border-border/60 hover:bg-muted/20"
+                >
+                  {item.status === "completed" ? (
+                    <CheckCircle className="size-4 text-emerald-500" weight="fill" />
+                  ) : item.status === "failed" ? (
+                    <WarningCircle className="size-4 text-red-500" weight="fill" />
+                  ) : item.status === "running" ? (
+                    <SpinnerGap className="size-4 animate-spin text-primary" />
+                  ) : (
+                    <Circle className="size-4 text-muted-foreground" />
+                  )}
+                  <span className={cn(item.status === "completed" && "text-muted-foreground")}>
+                    {item.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </ActivityCard>
+        </div>
       )
     }
 
@@ -638,14 +1021,30 @@ export function ActivityTimeline({
   }
 
   return (
-    <div className="space-y-3">
-      {activityRows.length > 0 ? (
-        <div className="space-y-2.5">
-          {activityRows.map((row) => renderRow(row))}
+    <div className="space-y-2 font-sans">
+      {isDrilldownModeActive ? (
+        <ActivityCard
+          icon={<Flask className="size-4" />}
+          title="Drill-down mode active"
+          subtitle="Main task board is minimized while the side-panel micro-agent runs."
+          status={<ActivityStatusChip label="Isolated run" tone="info" />}
+        />
+      ) : null}
+      {taskBoardRows.length > 0 ? (
+        <div className="space-y-1.5">
+          {taskBoardRows.map((row) => renderRow(row))}
+        </div>
+      ) : null}
+      {activeThought ? (
+        <GhostActivityTray activeThought={activeThought} />
+      ) : null}
+      {nonTaskActivityRows.length > 0 ? (
+        <div className="space-y-1.5">
+          {nonTaskActivityRows.map((row) => renderRow(row))}
         </div>
       ) : null}
       {answerRows.length > 0 ? (
-        <div className="space-y-2.5">
+        <div className="space-y-1.5">
           {answerRows.map((row) => renderRow(row))}
         </div>
       ) : null}

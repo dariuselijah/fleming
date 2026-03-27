@@ -58,6 +58,33 @@ function toIsoDateCandidate(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
+function buildGuidelineFallbackQueries(query: string): string[] {
+  const normalized = query.replace(/\s+/g, " ").trim()
+  if (!normalized) return []
+  const variants = new Set<string>([normalized])
+
+  const expanded = normalized
+    .replace(/\bESC\b/gi, "European Society of Cardiology")
+    .replace(/\bNICE\b/gi, "National Institute for Health and Care Excellence")
+    .replace(/\bACC\b/gi, "American College of Cardiology")
+    .replace(/\bAHA\b/gi, "American Heart Association")
+    .replace(/\bHFpEF\b/gi, "heart failure with preserved ejection fraction")
+    .replace(/\bHFrEF\b/gi, "heart failure with reduced ejection fraction")
+    .replace(/\bSGLT2i\b/gi, "SGLT2 inhibitor")
+  if (expanded !== normalized) {
+    variants.add(expanded)
+  }
+  variants.add(`${expanded} guideline`)
+  variants.add(`${expanded} guideline summary`)
+  variants.add(`${expanded} recommendations`)
+  variants.add("European Society of Cardiology guidelines SGLT2i")
+
+  return Array.from(variants)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
 function scoreFromResultCount(count: number): number {
   if (count <= 0) return 0.2
   if (count < 3) return 0.55
@@ -348,21 +375,101 @@ async function pubmedConnector(input: ConnectorSearchInput): Promise<ConnectorSe
 async function guidelineConnector(input: ConnectorSearchInput): Promise<ConnectorSearchPayload> {
   const startedAt = performance.now()
   const maxResults = Math.min(Math.max(input.maxResults ?? 6, 1), 10)
-  const result = await searchGuidelines(input.query, maxResults, "US")
-  const records: ConnectorSearchRecord[] = result.results.map((item, index) => ({
-    id: `guideline_${index + 1}`,
-    title: item.title,
-    snippet: item.summary || "",
-    url: item.url || null,
-    publishedAt: toIsoDateCandidate(item.date),
-    sourceLabel: item.source,
-    metadata: {
-      evidenceLevel: item.evidenceLevel ?? 3,
-      studyType: item.studyType || "Guideline",
-    },
-  }))
-  const warnings =
-    records.length === 0 ? ["Guideline connector returned no matching records."] : []
+  const mergedByKey = new Map<string, ConnectorSearchRecord>()
+  const mergedProvenance = new Map<string, ReturnType<typeof buildProvenance>>()
+  const attemptedQueries: string[] = []
+  const warnings: string[] = []
+
+  const ingestGuidelineResult = (
+    result: Awaited<ReturnType<typeof searchGuidelines>>,
+    queryUsed: string
+  ) => {
+    attemptedQueries.push(queryUsed)
+    result.results.forEach((item, index) => {
+      const record: ConnectorSearchRecord = {
+        id: `guideline_${index + 1}_${queryUsed.slice(0, 24)}`,
+        title: item.title,
+        snippet: item.summary || "",
+        url: item.url || null,
+        publishedAt: toIsoDateCandidate(item.date),
+        sourceLabel: item.source,
+        metadata: {
+          evidenceLevel: item.evidenceLevel ?? 3,
+          studyType: item.studyType || "Guideline",
+        },
+      }
+      const key = `${record.url || ""}|${record.title.toLowerCase()}`
+      if (!mergedByKey.has(key) && mergedByKey.size < maxResults) {
+        mergedByKey.set(key, record)
+      }
+    })
+    result.provenance.forEach((item) => {
+      const key = item.id || `${item.url || ""}|${String(item.title || "").toLowerCase()}`
+      if (!mergedProvenance.has(key)) {
+        mergedProvenance.set(key, item)
+      }
+    })
+  }
+
+  // Tier 1: Exact/primary match.
+  const primary = await searchGuidelines(input.query, maxResults, "US")
+  ingestGuidelineResult(primary, input.query)
+  const directMatches = primary.results.length
+
+  // Tier 2: semantic expansion.
+  if (directMatches === 0) {
+    const expandedQueries = buildGuidelineFallbackQueries(input.query)
+    for (const expandedQuery of expandedQueries) {
+      if (mergedByKey.size >= maxResults) break
+      if (expandedQuery.toLowerCase() === input.query.toLowerCase()) continue
+      const expanded = await searchGuidelines(expandedQuery, maxResults, "GLOBAL")
+      ingestGuidelineResult(expanded, expandedQuery)
+    }
+  }
+
+  // Tier 3: broad scholarly guideline summaries.
+  if (mergedByKey.size === 0) {
+    const scholarQuery = `${input.query} Guideline Summaries`
+    attemptedQueries.push(scholarQuery)
+    try {
+      const scholar = await searchScholarApi(scholarQuery, {
+        maxResults,
+      })
+      scholar.records.forEach((record) => {
+        const key = `${record.url || ""}|${record.title.toLowerCase()}`
+        if (!mergedByKey.has(key) && mergedByKey.size < maxResults) {
+          mergedByKey.set(key, {
+            ...record,
+            sourceLabel: record.sourceLabel || "Scholar Gateway",
+            metadata: {
+              ...(record.metadata || {}),
+              studyType:
+                typeof record.metadata?.studyType === "string"
+                  ? (record.metadata.studyType as string)
+                  : "Guideline summary",
+            },
+          })
+        }
+      })
+      warnings.push(...scholar.warnings)
+    } catch (error) {
+      warnings.push(
+        `Scholar Gateway fallback failed: ${error instanceof Error ? error.message : "unknown error"}`
+      )
+    }
+  }
+
+  const records = Array.from(mergedByKey.values()).slice(0, maxResults)
+  if (records.length === 0) {
+    warnings.push("No direct matches found in Guideline Index. Attempting query expansion...")
+  } else if (directMatches === 0) {
+    warnings.push("No direct matches found in Guideline Index. Attempting query expansion...")
+  }
+  if (attemptedQueries.length > 1) {
+    warnings.push(
+      `Guideline recursive retrieval attempted ${attemptedQueries.length} query variants.`
+    )
+  }
   const payload = normalizeConnectorPayload(
     input,
     "guideline",
@@ -374,7 +481,7 @@ async function guidelineConnector(input: ConnectorSearchInput): Promise<Connecto
     "mixed"
   )
   // Preserve adapter-provided provenance details when available.
-  payload.provenance = result.provenance
+  payload.provenance = Array.from(mergedProvenance.values())
   return payload
 }
 

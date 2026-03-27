@@ -6,7 +6,6 @@ import {
 import { Button } from "@/components/ui/button"
 import {
   Popover,
-  PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
 import {
@@ -14,7 +13,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { getModelInfo } from "@/lib/models"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { cn } from "@/lib/utils"
 import { getChatAttachmentSizeLimitLabel } from "@/lib/chat-attachments/constants"
@@ -32,44 +30,12 @@ type ButtonFileUploadProps = {
 export function ButtonFileUpload({
   onFileUpload,
   isUserAuthenticated,
-  model,
+  model: _model,
 }: ButtonFileUploadProps) {
   const supportedImageAccept = CHAT_ALLOWED_IMAGE_MIME_TYPES.join(",")
 
   if (!isSupabaseEnabled) {
     return null
-  }
-
-  const isFileUploadAvailable = getModelInfo(model)?.vision
-
-  if (!isFileUploadAvailable) {
-    return (
-      <Popover>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
-                size="sm"
-                variant="secondary"
-                className="border-border dark:bg-secondary size-9 rounded-full border bg-transparent"
-                type="button"
-                aria-label="Add files"
-              >
-                <Paperclip className="size-4" />
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent>Add files</TooltipContent>
-        </Tooltip>
-        <PopoverContent className="p-2">
-          <div className="text-secondary-foreground text-sm">
-            This model does not support file uploads.
-            <br />
-            Please select another model.
-          </div>
-        </PopoverContent>
-      </Popover>
-    )
   }
 
   if (!isUserAuthenticated) {
@@ -101,7 +67,7 @@ export function ButtonFileUpload({
       onFilesAdded={onFileUpload}
       multiple
       disabled={!isUserAuthenticated}
-      accept={`.txt,.md,.pdf,.pptx,.docx,${supportedImageAccept}`}
+      accept={`.txt,.md,.pdf,.pptx,.docx,.mp4,.mov,.m4v,.webm,.mkv,video/mp4,video/quicktime,video/webm,${supportedImageAccept}`}
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -128,10 +94,10 @@ export function ButtonFileUpload({
           <FileArrowUp className="text-muted-foreground size-8" />
           <span className="mt-4 mb-1 text-lg font-medium">Drop files here</span>
           <span className="text-muted-foreground text-sm">
-            Drop images or documents here (up to {getChatAttachmentSizeLimitLabel("image/png")} for
-            images; supported image types: JPEG, PNG, WEBP, GIF; {getChatAttachmentSizeLimitLabel(
-              "application/pdf"
-            )} for documents)
+            Drop images, documents, or lecture videos here (up to{" "}
+            {getChatAttachmentSizeLimitLabel("image/png")} for images; supported image types: JPEG,
+            PNG, WEBP, GIF; {getChatAttachmentSizeLimitLabel("application/pdf")} for documents and
+            videos)
           </span>
         </div>
       </FileUploadContent>

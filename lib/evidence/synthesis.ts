@@ -16,6 +16,7 @@ import type {
   EvidenceSearchOptions,
   EvidenceContext 
 } from './types';
+import { buildEvidenceSourceId } from "./source-id";
 
 export interface SynthesisOptions extends EvidenceSearchOptions {
   includeContext?: boolean;
@@ -139,6 +140,25 @@ export function parseCitationMarkers(
 
   // Extract all cited indices
   const citedIndices = new Set<number>();
+  const citationBySourceId = new Map<string, EvidenceCitation>();
+  citations.forEach((citation) => {
+    citationBySourceId.set(buildEvidenceSourceId(citation).toLowerCase(), citation);
+  });
+
+  // Source-id citations [CITE_<sourceId>] / [CITE_<sourceId1>,<sourceId2>]
+  const sourceIdMatches = response.matchAll(/\[CITE_([A-Za-z0-9:._\/-]+(?:\s*,\s*[A-Za-z0-9:._\/-]+)*)\]/g);
+  for (const match of sourceIdMatches) {
+    const values = match[1]
+      .split(/\s*,\s*/)
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+    values.forEach((sourceId) => {
+      const citation = citationBySourceId.get(sourceId);
+      if (citation) {
+        citedIndices.add(citation.index);
+      }
+    });
+  }
   
   // Simple numeric citations [1], [1,2]
   const simpleMatches = response.matchAll(/\[(\d+(?:,\s*\d+)*)\]/g);

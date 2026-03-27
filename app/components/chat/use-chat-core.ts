@@ -5,8 +5,17 @@ import { getOrCreateGuestUserId } from "@/lib/api"
 import { MESSAGE_MAX_LENGTH, getSystemPromptByRole } from "@/lib/config"
 import { encodeArtifactWorkflowInput } from "@/lib/chat/artifact-workflow"
 import { Attachment } from "@/lib/file-handling"
+import {
+  initKnowledgeUpload,
+  startKnowledgeIngest,
+  uploadKnowledgeFileData,
+  type PendingKnowledgeUpload,
+} from "@/lib/uploads/api"
 import { buildUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
+import type { ChartDrilldownPayload } from "@/app/components/charts/chat-chart"
 import { isImageAttachment } from "@/lib/chat-attachments/constants"
+import type { EvidenceCitation } from "@/lib/evidence/types"
+import { buildEvidenceSourceId } from "@/lib/evidence/source-id"
 import {
   DEFAULT_MEDICAL_STUDENT_LEARNING_MODE,
   normalizeMedicalStudentLearningMode,
@@ -18,6 +27,11 @@ import {
   type ClinicianWorkflowMode,
 } from "@/lib/clinician-mode"
 import { normalizeCitationStyle, type CitationStyle } from "@/lib/citations/formatters"
+import {
+  markDrilldownEntryAdded,
+  setDrilldownCacheEntry,
+} from "./drilldown-cache-store"
+import type { OptimisticTaskBoardState, TaskBoardItem } from "./activity/types"
 import { resolveScopedSessionMessages } from "@/lib/chat-store/messages/session-restore"
 import { API_ROUTE_CHAT } from "@/lib/routes"
 import { getModelInfo } from "@/lib/models"
@@ -40,6 +54,16 @@ const SESSION_SNAPSHOT_LATEST_MAX_MESSAGES = 8
 const SESSION_SNAPSHOT_PART_TEXT_MAX_CHARS = 800
 const INSTANT_STREAM_INTRO = "Working on your request..."
 const IMAGE_UPLOAD_PREP_BUDGET_MS = 1200
+
+export type DiscussionDrilldownInsight = {
+  pointId: string
+  query: string
+  response: string
+  payload: ChartDrilldownPayload
+  citations: EvidenceCitation[]
+  addedAt: string
+  isAddedToDiscussion: boolean
+}
 
 function createEphemeralChatId() {
   return `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
@@ -223,7 +247,27 @@ function extractSessionSafeAnnotations(message: Message): unknown[] | undefined 
         }
       }
       if (type === "langgraph-routing") {
-        return null
+        return {
+          ...base,
+          type,
+          summary: compactSnapshotValue(candidate.summary),
+          querySnippet: compactSnapshotValue(candidate.querySnippet),
+          taskBoardTitle: compactSnapshotValue(candidate.taskBoardTitle),
+          selectedConnectorIds: compactSnapshotValue(candidate.selectedConnectorIds),
+          selectedToolNames: compactSnapshotValue(candidate.selectedToolNames),
+          confidence: compactSnapshotValue(candidate.confidence),
+          sourceDiversity: compactSnapshotValue(candidate.sourceDiversity),
+          loopIterations: compactSnapshotValue(candidate.loopIterations),
+          complexityMode: compactSnapshotValue(candidate.complexityMode),
+          incompleteEvidenceState: compactSnapshotValue(candidate.incompleteEvidenceState),
+          clinicalCompleteness: compactSnapshotValue(candidate.clinicalCompleteness),
+          gatekeeperDecisions: compactSnapshotValue(candidate.gatekeeperDecisions),
+          retrievalNotes: compactSnapshotValue(candidate.retrievalNotes),
+          taskPlan: compactSnapshotValue(candidate.taskPlan),
+          runtimeSteps: compactSnapshotValue(candidate.runtimeSteps),
+          runtimeDag: compactSnapshotValue(candidate.runtimeDag),
+          chartPlan: compactSnapshotValue(candidate.chartPlan),
+        }
       }
       if (type === "tool-lifecycle") {
         return {
@@ -322,27 +366,82 @@ function mergeEvidenceCitationAnnotations(
   annotations: Array<{ type?: string; citations?: unknown[] }> | undefined
 ) {
   if (!Array.isArray(annotations)) return []
-  const merged: any[] = []
-  const seenKeys = new Set<string>()
+  const mergedByKey = new Map<string, any>()
+  const keyOrder: string[] = []
+  const citationIdentityKey = (citation: any) =>
+    citation && typeof citation === "object" ? buildEvidenceSourceId(citation) : "unknown"
   annotations.forEach((annotation) => {
     if (annotation?.type !== "evidence-citations" || !Array.isArray(annotation.citations)) {
       return
     }
     annotation.citations.forEach((citation: any) => {
-      const key =
-        citation?.pmid ||
-        citation?.doi ||
-        citation?.url ||
-        `${citation?.title || "untitled"}:${citation?.journal || "unknown"}`
-      if (seenKeys.has(key)) return
-      seenKeys.add(key)
-      merged.push(citation)
+      const normalizedCitation =
+        citation && typeof citation === "object"
+          ? {
+              ...citation,
+              sourceId: buildEvidenceSourceId(citation),
+            }
+          : citation
+      const key = citationIdentityKey(normalizedCitation)
+      const existing = mergedByKey.get(key)
+      if (!existing) {
+        keyOrder.push(key)
+        mergedByKey.set(key, normalizedCitation)
+        return
+      }
+      const existingScore = citationMetadataScore(existing)
+      const incomingScore = citationMetadataScore(normalizedCitation)
+      // Prefer richer citation metadata to avoid post-stream UI degradation.
+      if (incomingScore >= existingScore) {
+        mergedByKey.set(key, { ...existing, ...normalizedCitation, sourceId: key })
+      } else {
+        mergedByKey.set(key, { ...normalizedCitation, ...existing, sourceId: key })
+      }
     })
   })
+  const merged = keyOrder
+    .map((key) => mergedByKey.get(key))
+    .filter((citation) => Boolean(citation))
   return merged.map((citation, index) => ({
     ...citation,
     index: index + 1,
+    sourceId:
+      typeof citation?.sourceId === "string" && citation.sourceId.trim().length > 0
+        ? citation.sourceId
+        : buildEvidenceSourceId(citation),
   }))
+}
+
+function citationMetadataScore(citation: any): number {
+  if (!citation || typeof citation !== "object") return 0
+  let score = 0
+  if (typeof citation.title === "string" && citation.title.trim().length > 0) score += 3
+  if (typeof citation.journal === "string" && citation.journal.trim().length > 0) score += 2
+  if (Array.isArray(citation.authors) && citation.authors.length > 0) score += 1
+  if (typeof citation.url === "string" && citation.url.trim().length > 0) score += 3
+  if (typeof citation.sourceId === "string" && citation.sourceId.trim().length > 0) score += 2
+  if (typeof citation.pmid === "string" && citation.pmid.trim().length > 0) score += 2
+  if (typeof citation.doi === "string" && citation.doi.trim().length > 0) score += 1
+  if (typeof citation.sourceLabel === "string" && citation.sourceLabel.trim().length > 0) score += 2
+  if (typeof citation.sourceType === "string" && citation.sourceType.trim().length > 0) score += 1
+  if (typeof citation.studyType === "string" && citation.studyType.trim().length > 0) score += 1
+  if (typeof citation.snippet === "string" && citation.snippet.trim().length > 0) score += 1
+  return score
+}
+
+function citationSetMetadataScore(citations: any[]): number {
+  if (!Array.isArray(citations) || citations.length === 0) return 0
+  return citations.reduce((total, citation) => total + citationMetadataScore(citation), 0)
+}
+
+function shouldApplyAnnotationCitationSet(existing: any[], incoming: any[]): boolean {
+  if (!Array.isArray(incoming) || incoming.length === 0) return false
+  if (!Array.isArray(existing) || existing.length === 0) return true
+  const existingScore = citationSetMetadataScore(existing)
+  const incomingScore = citationSetMetadataScore(incoming)
+  if (incomingScore > existingScore + 2) return true
+  if (incomingScore >= existingScore && incoming.length > existing.length) return true
+  return false
 }
 
 function mergeMessageAnnotations(
@@ -448,7 +547,10 @@ export function useChatCore({
   const evidenceCitationsRef = useRef<any[]>([])
   const [evidenceCitations, setEvidenceCitationsState] = useState<any[]>([])
   const topicContextRef = useRef<any | null>(null)
+  const [discussionInsights, setDiscussionInsights] = useState<DiscussionDrilldownInsight[]>([])
   const [streamIntroPreview, setStreamIntroPreview] = useState<string | null>(null)
+  const [optimisticTaskBoard, setOptimisticTaskBoard] =
+    useState<OptimisticTaskBoardState | null>(null)
   const pendingHeaderTimelineAnnotationsRef = useRef<
     Array<Record<string, unknown>>
   >([])
@@ -497,16 +599,31 @@ export function useChatCore({
   
   // Wrapper to update both state, ref, and sessionStorage
   const setEvidenceCitations = useCallback((citations: any[]) => {
-    console.log('📚 [EVIDENCE] Setting evidence citations:', citations.length)
-    evidenceCitationsRef.current = citations
-    setEvidenceCitationsState(citations)
+    const normalizedCitations = Array.isArray(citations)
+      ? citations.map((citation, index) => {
+          if (!citation || typeof citation !== "object") return citation
+          const sourceId = buildEvidenceSourceId(citation)
+          const nextIndex =
+            typeof (citation as { index?: unknown }).index === "number"
+              ? ((citation as { index: number }).index as number)
+              : index + 1
+          return {
+            ...citation,
+            index: nextIndex,
+            sourceId,
+          }
+        })
+      : []
+    console.log('📚 [EVIDENCE] Setting evidence citations:', normalizedCitations.length)
+    evidenceCitationsRef.current = normalizedCitations
+    setEvidenceCitationsState(normalizedCitations)
     
     // Store in sessionStorage for persistence across restores
-    if (typeof window !== 'undefined' && citations.length > 0) {
+    if (typeof window !== 'undefined' && normalizedCitations.length > 0) {
       const key = chatId || 'pending'
       try {
-        sessionStorage.setItem(`evidenceCitations:${key}`, JSON.stringify(citations))
-        sessionStorage.setItem('evidenceCitations:latest', JSON.stringify({ chatId: key, citations, timestamp: Date.now() }))
+        sessionStorage.setItem(`evidenceCitations:${key}`, JSON.stringify(normalizedCitations))
+        sessionStorage.setItem('evidenceCitations:latest', JSON.stringify({ chatId: key, citations: normalizedCitations, timestamp: Date.now() }))
         console.log('📚 [EVIDENCE] Stored citations to sessionStorage for key:', key)
       } catch (e) {
         console.error('📚 [EVIDENCE] Failed to store citations to sessionStorage:', e)
@@ -519,8 +636,86 @@ export function useChatCore({
     setEvidenceCitationsState([])
   }, [])
 
+  const clearOptimisticTaskBoard = useCallback(() => {
+    setOptimisticTaskBoard(null)
+  }, [])
+
+  const startOptimisticTaskBoard = useCallback(
+    (rawQuery: string) => {
+      const condensedQuery = rawQuery.replace(/\s+/g, " ").trim()
+      const querySnippet =
+        condensedQuery.length > 120
+          ? `${condensedQuery.slice(0, 117)}...`
+          : condensedQuery
+
+      const items: TaskBoardItem[] = [
+        {
+          id: "optimistic-intake",
+          label: "Understand request",
+          status: "running",
+          detail: "Analyzing intent and response strategy.",
+          phase: "planning",
+        },
+        {
+          id: "optimistic-retrieval",
+          label: enableEvidence ? "Gather evidence and context" : "Gather context",
+          status: "pending",
+          detail: enableSearch
+            ? "Preparing retrieval sources and tools."
+            : "Preparing model context and constraints.",
+          phase: "retrieval",
+        },
+        {
+          id: "optimistic-compose",
+          label: "Compose response",
+          status: "pending",
+          detail: "Drafting and formatting answer.",
+          phase: "synthesis",
+        },
+      ]
+
+      setOptimisticTaskBoard({
+        title: "Agent Task Board",
+        summary: "Workflow selected and orchestration started.",
+        querySnippet,
+        items,
+        createdAt: new Date().toISOString(),
+      })
+    },
+    [enableEvidence, enableSearch]
+  )
+
   const setTopicContext = useCallback((topicContext: any | null) => {
     topicContextRef.current = topicContext
+    const inferredInsights = Array.isArray(topicContext?.drilldownInsights)
+      ? (topicContext.drilldownInsights as DiscussionDrilldownInsight[]).filter(
+          (item) =>
+            Boolean(
+              item &&
+                typeof item === "object" &&
+                typeof item.pointId === "string" &&
+                typeof item.query === "string" &&
+                typeof item.response === "string" &&
+                item.payload &&
+                typeof item.payload === "object"
+            )
+        )
+      : []
+    setDiscussionInsights(inferredInsights)
+    inferredInsights.forEach((insight) => {
+      setDrilldownCacheEntry({
+        pointId: insight.pointId,
+        payload: insight.payload,
+        query: insight.query,
+        response: insight.response,
+        citations: Array.isArray(insight.citations) ? insight.citations : [],
+        cachedAt: Date.now(),
+        isAddedToDiscussion: insight.isAddedToDiscussion !== false,
+      })
+      if (insight.isAddedToDiscussion !== false) {
+        markDrilldownEntryAdded(insight.pointId, true)
+      }
+    })
     if (typeof window !== "undefined" && chatId && topicContext) {
       try {
         sessionStorage.setItem(`topicContext:${chatId}`, JSON.stringify(topicContext))
@@ -529,6 +724,50 @@ export function useChatCore({
       }
     }
   }, [chatId])
+
+  const addDrilldownInsightToDiscussion = useCallback(
+    (input: {
+      pointId: string
+      query: string
+      response: string
+      payload: ChartDrilldownPayload
+      citations: EvidenceCitation[]
+    }): boolean => {
+      if (!input.pointId || !input.response.trim()) return false
+      const currentTopicContext =
+        topicContextRef.current && typeof topicContextRef.current === "object"
+          ? topicContextRef.current
+          : {}
+      const existingInsights = Array.isArray(currentTopicContext.drilldownInsights)
+        ? (currentTopicContext.drilldownInsights as DiscussionDrilldownInsight[])
+        : []
+      const nextInsight: DiscussionDrilldownInsight = {
+        pointId: input.pointId,
+        query: input.query,
+        response: input.response.trim(),
+        payload: input.payload,
+        citations: Array.isArray(input.citations) ? input.citations : [],
+        addedAt: new Date().toISOString(),
+        isAddedToDiscussion: true,
+      }
+      const deduped = [
+        nextInsight,
+        ...existingInsights.filter((insight) => insight.pointId !== nextInsight.pointId),
+      ].slice(0, 12)
+      const nextTopicContext = {
+        ...currentTopicContext,
+        drilldownInsights: deduped,
+      }
+      setTopicContext(nextTopicContext)
+      toast({
+        title: "Insight Added",
+        description: "Added to discussion context without restarting the agent loop.",
+        status: "success",
+      })
+      return true
+    },
+    [setTopicContext]
+  )
   
   // Track which chatId we've already restored citations for to prevent duplicate restores
   const restoredChatIdRef = useRef<string | null>(null)
@@ -950,6 +1189,7 @@ export function useChatCore({
       // CRITICAL: Reset submitting state on error
       setIsSubmitting(false)
       setStreamIntroPreview(null)
+      clearOptimisticTaskBoard()
       finishSubmitTelemetry()
       handleError(error)
     },
@@ -983,9 +1223,16 @@ export function useChatCore({
         const citations = mergeEvidenceCitationAnnotations(
           annotations as Array<{ type?: string; citations?: unknown[] }>
         )
-        if (citations.length > 0) {
+        if (
+          citations.length > 0 &&
+          shouldApplyAnnotationCitationSet(evidenceCitationsRef.current, citations)
+        ) {
           setEvidenceCitations(citations)
           console.log(`📚 [EVIDENCE] Restored ${citations.length} citations from stream body (message.annotations)`)
+        } else if (citations.length > 0) {
+          console.log(
+            `📚 [EVIDENCE] Preserving richer header citations (${evidenceCitationsRef.current.length}); skipped annotation override`
+          )
         }
         const topicContextPart = annotations.find((a: any) => a?.type === "topic-context" && a?.topicContext)
         if (topicContextPart?.topicContext) {
@@ -1331,13 +1578,14 @@ export function useChatCore({
   useEffect(() => {
     if (status === 'ready' || status === 'error') {
       setIsSubmitting(false)
+      clearOptimisticTaskBoard()
       finishSubmitTelemetry()
       // CRITICAL: Reset streaming ref when status becomes ready
       isStreamingRef.current = false
     } else if (status === 'streaming' || status === 'submitted') {
       isStreamingRef.current = true
     }
-  }, [status, finishSubmitTelemetry])
+  }, [status, clearOptimisticTaskBoard, finishSubmitTelemetry])
   
   // CRITICAL: Clear sessionStorage and reset state when navigating to home page
   useEffect(() => {
@@ -1848,6 +2096,7 @@ export function useChatCore({
     startSubmitTelemetry("submit")
     setIsSubmitting(true)
     setStreamIntroPreview(INSTANT_STREAM_INTRO)
+    startOptimisticTaskBoard(resolvedInput || "New request")
     pendingHeaderTimelineAnnotationsRef.current = []
     headerTimelineSequenceRef.current = 0
     clearEvidenceCitations()
@@ -1927,6 +2176,8 @@ export function useChatCore({
     let preparedUid: string | null = null
     let preparedAllowed: boolean | null = null
     let hasPreparedUploadReferences = false
+    let selectedUploadReferenceIds: string[] = []
+    let pendingKnowledgeUploads: Array<{ pending: PendingKnowledgeUpload; file: File }> = []
 
     if (nonImageFiles.length > 0 && optimisticChatId) {
       const [resolvedUid, resolvedAllowed] = await Promise.all([
@@ -1955,21 +2206,31 @@ export function useChatCore({
 
       const uploadPreparationToastId = toast({
         title: `Preparing ${nonImageFiles.length} document${nonImageFiles.length > 1 ? "s" : ""}...`,
-        description: "Large files are routed through uploads for reliable retrieval.",
+        description: "Allocating upload references so we can stream progress immediately.",
         status: "info",
       })
-      const processedNonImageAttachments = await handleFileUploads(
-        preparedUid,
-        optimisticChatId,
-        !!user?.id,
-        nonImageFiles
+
+      const initializedUploads = await Promise.all(
+        nonImageFiles.map(async (file) => {
+          try {
+            const pending = await initKnowledgeUpload(file, file.name)
+            return { pending, file }
+          } catch (error) {
+            console.error("[UPLOAD INIT] Failed:", file.name, error)
+            return null
+          }
+        })
       )
       sonnerToast.dismiss(uploadPreparationToastId)
-      const uploadReferenceIds = (processedNonImageAttachments ?? [])
-        .map((attachment) => attachment.uploadId)
+
+      pendingKnowledgeUploads = initializedUploads.filter(
+        (entry): entry is { pending: PendingKnowledgeUpload; file: File } => Boolean(entry)
+      )
+      selectedUploadReferenceIds = pendingKnowledgeUploads
+        .map((entry) => entry.pending.uploadId)
         .filter((id): id is string => typeof id === "string" && id.length > 0)
 
-      if (uploadReferenceIds.length === 0) {
+      if (selectedUploadReferenceIds.length === 0) {
         setIsSubmitting(false)
         restoreComposerState()
         setStreamIntroPreview(null)
@@ -1982,11 +2243,10 @@ export function useChatCore({
         return
       }
 
-      const uploadLabelLine = `Selected uploads: ${(processedNonImageAttachments ?? [])
-        .filter((attachment) => typeof attachment.uploadId === "string")
-        .map((attachment) => attachment.name || "Upload")
+      const uploadLabelLine = `Selected uploads: ${pendingKnowledgeUploads
+        .map((entry) => entry.file.name || "Upload")
         .join(", ")}`
-      const tokenString = buildUploadReferenceTokens(uploadReferenceIds)
+      const tokenString = buildUploadReferenceTokens(selectedUploadReferenceIds)
       hasPreparedUploadReferences = true
       const trimmedBaseInput = currentInput.trim()
       finalUserInput =
@@ -2033,14 +2293,15 @@ export function useChatCore({
       }
     }
 
-    const nonImageUploadState = hasPreparedUploadReferences ? "completed" : "processing"
+    const nonImageUploadState = hasPreparedUploadReferences ? "processing" : "sending"
     const nonImageUploadMessage = hasPreparedUploadReferences
-      ? "Routed to uploads"
-      : "Sending to uploads"
-    const optimisticNonImageAttachments: Attachment[] = nonImageFiles.map((file) => ({
+      ? "Uploading and indexing in background"
+      : "Preparing uploads"
+    const optimisticNonImageAttachments: Attachment[] = nonImageFiles.map((file, index) => ({
       name: file.name,
       contentType: file.type || "application/octet-stream",
       url: "",
+      uploadId: selectedUploadReferenceIds[index],
       uploadState: nonImageUploadState,
       uploadMessage: nonImageUploadMessage,
     })) as Attachment[]
@@ -2098,6 +2359,7 @@ export function useChatCore({
         topicContext: topicContextRef.current || undefined,
         artifactIntent,
         citationStyle,
+        selectedUploadIds: selectedUploadReferenceIds,
       },
     }
 
@@ -2189,6 +2451,54 @@ export function useChatCore({
           }
         })
       }
+
+      if (pendingKnowledgeUploads.length > 0 && currentChatId) {
+        Promise.resolve().then(async () => {
+          const uploadToastId = toast({
+            title: `Indexing ${pendingKnowledgeUploads.length} upload${
+              pendingKnowledgeUploads.length > 1 ? "s" : ""
+            }...`,
+            description: "Your message is already sent; retrieval starts when indexing completes.",
+            status: "info",
+          })
+          try {
+            const results = await Promise.allSettled(
+              pendingKnowledgeUploads.map(async ({ pending, file }) => {
+                await uploadKnowledgeFileData(pending, file)
+                await startKnowledgeIngest(pending.uploadId)
+                return pending.uploadId
+              })
+            )
+            const succeeded = results.filter((result) => result.status === "fulfilled").length
+            const failed = results.length - succeeded
+            sonnerToast.dismiss(uploadToastId)
+            if (succeeded > 0) {
+              toast({
+                title: `Indexed ${succeeded} upload${succeeded > 1 ? "s" : ""}`,
+                description:
+                  failed > 0
+                    ? `${failed} upload${failed > 1 ? "s" : ""} failed to index.`
+                    : "Grounded retrieval is now available.",
+                status: failed > 0 ? "warning" : "success",
+              })
+            } else {
+              toast({
+                title: "Upload indexing failed",
+                description: "Please retry the file upload.",
+                status: "error",
+              })
+            }
+          } catch (error) {
+            sonnerToast.dismiss(uploadToastId)
+            console.error("[UPLOAD INDEXING] Background flow failed:", error)
+            toast({
+              title: "Upload indexing failed",
+              description: "Your message was sent, but document indexing did not finish.",
+              status: "warning",
+            })
+          }
+        })
+      }
     } catch (error) {
       console.error("Error in submit:", error)
       restoreComposerState()
@@ -2218,6 +2528,7 @@ export function useChatCore({
     artifactIntent,
     citationStyle,
     clearEvidenceCitations,
+    startOptimisticTaskBoard,
     clearDraft,
     setHasDialogAuth,
     setInput,
@@ -2263,6 +2574,7 @@ export function useChatCore({
       startSubmitTelemetry("suggestion")
       setIsSubmitting(true)
       setStreamIntroPreview(INSTANT_STREAM_INTRO)
+      startOptimisticTaskBoard(suggestion || "Suggested request")
       pendingHeaderTimelineAnnotationsRef.current = []
       headerTimelineSequenceRef.current = 0
       clearEvidenceCitations()
@@ -2384,6 +2696,7 @@ export function useChatCore({
       artifactIntent,
       citationStyle,
       clearEvidenceCitations,
+      startOptimisticTaskBoard,
       setArtifactIntent,
       pushHeaderTimelineAnnotation,
       startSubmitTelemetry,
@@ -2411,6 +2724,12 @@ export function useChatCore({
 
     setIsSubmitting(true)
     setStreamIntroPreview(INSTANT_STREAM_INTRO)
+    const latestUserPrompt =
+      [...messagesRef.current]
+        .reverse()
+        .find((message) => message.role === "user" && typeof message.content === "string")
+        ?.content || "Regenerate previous response"
+    startOptimisticTaskBoard(latestUserPrompt)
     clearEvidenceCitations()
     pendingHeaderTimelineAnnotationsRef.current = []
     headerTimelineSequenceRef.current = 0
@@ -2453,6 +2772,7 @@ export function useChatCore({
     artifactIntent,
     citationStyle,
     clearEvidenceCitations,
+    startOptimisticTaskBoard,
     finishSubmitTelemetry,
     pushHeaderTimelineAnnotation,
     reload,
@@ -2477,6 +2797,7 @@ export function useChatCore({
     status,
     error,
     streamIntroPreview,
+    optimisticTaskBoard,
     reload,
     stop,
     setMessages,
@@ -2504,6 +2825,7 @@ export function useChatCore({
     
     // Evidence citations from medical evidence database
     evidenceCitations,
+    discussionInsights,
 
     // Actions
     submit,
@@ -2511,5 +2833,6 @@ export function useChatCore({
     handleWorkflowSuggestion,
     handleReload,
     handleInputChange,
+    addDrilldownInsightToDiscussion,
   }
 }

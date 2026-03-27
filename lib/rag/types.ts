@@ -10,7 +10,7 @@ export type CitationType = 'direct_quote' | 'paraphrase' | 'reference' | 'backgr
 export type VerificationMethod = 'embedding_similarity' | 'manual' | 'llm_check' | 'quote_match'
 
 export type ProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed'
-export type UploadDocumentKind = 'pdf' | 'pptx' | 'docx' | 'image' | 'text' | 'other'
+export type UploadDocumentKind = 'pdf' | 'pptx' | 'docx' | 'image' | 'text' | 'video' | 'other'
 export type UploadSourceUnitType = 'page' | 'slide' | 'image' | 'section'
 export type UploadAssetType = 'figure' | 'preview'
 export type OCRStatus = 'not_required' | 'pending' | 'completed' | 'failed'
