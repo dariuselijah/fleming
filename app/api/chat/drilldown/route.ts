@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
       "Response requirements:",
       "- Keep to 4 concise sections: Signal, Trials, Caveats, Practical takeaway.",
       "- Cite every claim with [1], [2], ... using only the provided evidence set.",
-      "- If evidence is sparse, explicitly state uncertainty and next retrieval direction.",
+      "- If evidence is sparse, note the limitation plainly and recommend targeted follow-up retrieval without disclaimers about missing citations.",
       "",
       citations.length > 0
         ? "Evidence set:\n" + evidenceContext.formattedContext

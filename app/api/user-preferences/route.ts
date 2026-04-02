@@ -53,11 +53,8 @@ function decryptHealthFieldsForResponse<T extends Record<string, any> | null | u
 }
 
 export async function GET(request: NextRequest) {
-  console.log("GET /api/user-preferences called")
-  
   try {
     const supabase = await createClient()
-    console.log("Supabase client created:", !!supabase)
 
     if (!supabase) {
       console.error("Database connection failed")
@@ -73,8 +70,6 @@ export async function GET(request: NextRequest) {
       error: authError,
     } = await supabase.auth.getUser()
 
-    console.log("Auth result:", { user: !!user, authError, userId: user?.id })
-
     if (authError) {
       console.error("Auth error:", authError)
       return NextResponse.json({ error: "Authentication error" }, { status: 401 })
@@ -85,17 +80,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    console.log("User authenticated:", user.id)
-
     // Fetch user preferences from database (including IV columns for encrypted data)
     const { data: preferences, error } = await supabase
       .from("user_preferences")
       .select("*")
       .eq("user_id", user.id)
       .single()
-
-    console.log("Fetched preferences:", preferences)
-    console.log("Fetch error:", error)
 
     if (error && error.code !== "PGRST116") {
       console.error("Error fetching user preferences:", error)
@@ -106,12 +96,10 @@ export async function GET(request: NextRequest) {
     }
 
     if (!preferences) {
-      console.log("No preferences found, returning defaults")
       return NextResponse.json(convertToApiFormat(defaultPreferences))
     }
 
     const responsePreferences = decryptHealthFieldsForResponse(preferences as Record<string, any>)
-    console.log("Returning user preferences:", responsePreferences)
     return NextResponse.json(responsePreferences)
   } catch (error) {
     console.error("Unexpected error in GET /api/user-preferences:", error)
@@ -123,12 +111,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  console.log("PUT /api/user-preferences called")
-  console.log("Request headers:", Object.fromEntries(request.headers.entries()))
-  
   try {
     const supabase = await createClient()
-    console.log("Supabase client created:", !!supabase)
 
     if (!supabase) {
       console.error("Database connection failed - Supabase not enabled or misconfigured")
@@ -144,8 +128,6 @@ export async function PUT(request: NextRequest) {
       error: authError,
     } = await supabase.auth.getUser()
 
-    console.log("Auth result:", { user: !!user, authError, userId: user?.id })
-
     if (authError) {
       console.error("Auth error:", authError)
       return NextResponse.json({ error: "Authentication error" }, { status: 401 })
@@ -156,14 +138,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    console.log("User authenticated:", user.id)
-
     // Parse the request body
     const body = await request.json()
-    console.log("PUT request body received:", body)
     let apiData = body
-    console.log("API data received:", apiData)
-    console.log("User role being set to:", apiData.user_role)
 
     // Encrypt health data before storing (if encryption is enabled)
     if (isEncryptionEnabled()) {
@@ -199,9 +176,7 @@ export async function PUT(request: NextRequest) {
         encryptedData.lifestyle_factors = encrypted.encrypted
         encryptedData.lifestyle_factors_iv = encrypted.iv
       }
-      
       apiData = encryptedData
-      console.log("🔒 Health data encrypted before storage")
     }
 
     // Check if preferences exist
@@ -210,8 +185,6 @@ export async function PUT(request: NextRequest) {
       .select("user_id, user_role")
       .eq("user_id", user.id)
       .single()
-
-    console.log("Existing preferences check:", { existingPreferences, checkError })
 
     if (checkError && checkError.code !== "PGRST116") {
       console.error("Error checking existing preferences:", checkError)
@@ -223,7 +196,6 @@ export async function PUT(request: NextRequest) {
 
     if (existingPreferences) {
       // Update existing preferences
-      console.log("Updating user preferences:", apiData)
       const { data, error } = await supabase
         .from("user_preferences")
         .update({
@@ -233,8 +205,6 @@ export async function PUT(request: NextRequest) {
         .eq("user_id", user.id)
         .select()
         .single()
-
-      console.log("Update result:", { data, error })
 
       if (error) {
         const stripped = stripOptionalOnboardingColumns(apiData as Record<string, unknown>)
@@ -254,7 +224,6 @@ export async function PUT(request: NextRequest) {
 
           if (!retry.error) {
             const responseData = decryptHealthFieldsForResponse(retry.data as Record<string, any>)
-            console.log("Updated user preferences response after retry:", responseData)
             return NextResponse.json(responseData)
           }
           console.error("Retry error updating user preferences:", retry.error)
@@ -269,11 +238,9 @@ export async function PUT(request: NextRequest) {
       }
 
       const responseData = decryptHealthFieldsForResponse(data as Record<string, any>)
-      console.log("Updated user preferences response:", responseData)
       return NextResponse.json(responseData)
     } else {
       // Create new preferences
-      console.log("Creating new user preferences:", apiData)
       const { data, error } = await supabase
         .from("user_preferences")
         .insert({
@@ -284,8 +251,6 @@ export async function PUT(request: NextRequest) {
         })
         .select()
         .single()
-
-      console.log("Create result:", { data, error })
 
       if (error) {
         const stripped = stripOptionalOnboardingColumns(apiData as Record<string, unknown>)
@@ -306,7 +271,6 @@ export async function PUT(request: NextRequest) {
 
           if (!retry.error) {
             const responseData = decryptHealthFieldsForResponse(retry.data as Record<string, any>)
-            console.log("Created user preferences response after retry:", responseData)
             return NextResponse.json(responseData)
           }
           console.error("Retry error creating user preferences:", retry.error)
@@ -321,7 +285,6 @@ export async function PUT(request: NextRequest) {
       }
 
       const responseData = decryptHealthFieldsForResponse(data as Record<string, any>)
-      console.log("Created user preferences response:", responseData)
       return NextResponse.json(responseData)
     }
   } catch (error) {

@@ -12,7 +12,8 @@ const DOCLING_DEFAULT_MAX_FIGURES_PER_UNIT = 4
 const DOCLING_MAX_INLINE_BYTES = 80 * 1024 * 1024
 
 type DoclingParseInput = {
-  buffer: Buffer
+  buffer?: Buffer | null
+  fileUrl?: string | null
   title: string
   fileName: string
   mimeType: string
@@ -405,17 +406,25 @@ function buildDoclingRequestHeaders(): Record<string, string> {
   return headers
 }
 
+const DOCLING_MAX_RETRIES = 2
+const DOCLING_RETRY_BACKOFF_MS = 2_000
+
 export async function parseDocumentWithDocling(
   input: DoclingParseInput
 ): Promise<ParsedUploadDocument | null> {
   const serviceUrl = resolveDoclingServiceUrl()
   if (!serviceUrl) return null
-  if (input.buffer.length === 0 || input.buffer.length > DOCLING_MAX_INLINE_BYTES) return null
+  const hasInlineBuffer = Boolean(input.buffer && input.buffer.length > 0)
+  const hasRemoteFileUrl = typeof input.fileUrl === "string" && input.fileUrl.trim().length > 0
+  if (!hasInlineBuffer && !hasRemoteFileUrl) return null
+  if (hasInlineBuffer && input.buffer && input.buffer.length > DOCLING_MAX_INLINE_BYTES && !hasRemoteFileUrl) {
+    return null
+  }
 
   const endpoint = resolveDoclingEndpoint(serviceUrl)
   if (!endpoint) return null
 
-  const timeoutMs = clampInteger(
+  const baseTimeoutMs = clampInteger(
     process.env.DOCLING_TIMEOUT_MS,
     DOCLING_DEFAULT_TIMEOUT_MS,
     2_000,
@@ -428,64 +437,108 @@ export async function parseDocumentWithDocling(
     12
   )
 
-  const controller = new AbortController()
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs)
+  const requestBody = JSON.stringify({
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    ...(hasRemoteFileUrl ? { fileUrl: input.fileUrl } : {}),
+    ...(hasInlineBuffer && input.buffer && input.buffer.length <= DOCLING_MAX_INLINE_BYTES
+      ? { contentBase64: input.buffer.toString("base64") }
+      : {}),
+    options: {
+      extractFigures: true,
+      extractPreview: true,
+      includeCaptions: true,
+      maxFiguresPerUnit,
+    },
+  })
+
   const startedAt = Date.now()
+  let lastError: unknown = null
 
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: buildDoclingRequestHeaders(),
-      body: JSON.stringify({
-        fileName: input.fileName,
-        mimeType: input.mimeType,
-        contentBase64: input.buffer.toString("base64"),
-        options: {
-          extractFigures: true,
-          extractPreview: true,
-          includeCaptions: true,
-          maxFiguresPerUnit,
+  for (let attempt = 0; attempt <= DOCLING_MAX_RETRIES; attempt++) {
+    // Escalate timeout on retries (1x, 1.5x, 2x)
+    const timeoutMs = Math.round(baseTimeoutMs * (1 + attempt * 0.5))
+    const controller = new AbortController()
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: buildDoclingRequestHeaders(),
+        body: requestBody,
+        signal: controller.signal,
+      })
+
+      if (response.status >= 500 && attempt < DOCLING_MAX_RETRIES) {
+        lastError = new Error(`Docling server error: ${response.status}`)
+        clearTimeout(timeoutHandle)
+        await new Promise((r) => setTimeout(r, DOCLING_RETRY_BACKOFF_MS * (attempt + 1)))
+        continue
+      }
+
+      if (!response.ok) {
+        clearTimeout(timeoutHandle)
+        return null
+      }
+
+      const payload = asRecord(await response.json())
+      clearTimeout(timeoutHandle)
+
+      if (!payload) return null
+
+      const units = resolveSourceUnits(payload)
+        .map((rawUnit, index) =>
+          normalizeSourceUnit(rawUnit, index, input.fallbackKind, maxFiguresPerUnit)
+        )
+        .sort((left, right) => left.unitNumber - right.unitNumber)
+      if (units.length === 0) return null
+
+      const figureCount = units.reduce((sum, unit) => sum + unit.figures.length, 0)
+      const previewCount = units.filter((unit) => Boolean(unit.preview)).length
+      const parsedKind = normalizeUploadKind(payload.kind || payload.documentKind, input.fallbackKind)
+      const payloadMetadata = asRecord(payload.metadata) || {}
+
+      return {
+        kind: parsedKind,
+        title: input.title,
+        metadata: {
+          provider: "docling",
+          doclingEnabled: true,
+          doclingEndpoint: endpoint,
+          doclingElapsedMs: Date.now() - startedAt,
+          doclingFigureCount: figureCount,
+          doclingPreviewCount: previewCount,
+          doclingRetries: attempt,
+          ...payloadMetadata,
         },
-      }),
-      signal: controller.signal,
-    })
-    if (!response.ok) return null
+        sourceUnits: units,
+      }
+    } catch (error) {
+      clearTimeout(timeoutHandle)
+      lastError = error
 
-    const payload = asRecord(await response.json())
-    if (!payload) return null
-
-    const units = resolveSourceUnits(payload)
-      .map((rawUnit, index) =>
-        normalizeSourceUnit(rawUnit, index, input.fallbackKind, maxFiguresPerUnit)
+      const isAbort = error instanceof Error && error.name === "AbortError"
+      const isNetwork = error instanceof Error && (
+        error.message.includes("fetch failed") ||
+        error.message.includes("ECONNREFUSED") ||
+        error.message.includes("ETIMEDOUT")
       )
-      .sort((left, right) => left.unitNumber - right.unitNumber)
-    if (units.length === 0) return null
 
-    const figureCount = units.reduce((sum, unit) => sum + unit.figures.length, 0)
-    const previewCount = units.filter((unit) => Boolean(unit.preview)).length
-    const parsedKind = normalizeUploadKind(payload.kind || payload.documentKind, input.fallbackKind)
-    const payloadMetadata = asRecord(payload.metadata) || {}
+      if ((isAbort || isNetwork) && attempt < DOCLING_MAX_RETRIES) {
+        console.warn(
+          `[Uploads] Docling attempt ${attempt + 1} failed (${isAbort ? "timeout" : "network"}), retrying...`
+        )
+        await new Promise((r) => setTimeout(r, DOCLING_RETRY_BACKOFF_MS * (attempt + 1)))
+        continue
+      }
 
-    return {
-      kind: parsedKind,
-      title: input.title,
-      metadata: {
-        provider: "docling",
-        doclingEnabled: true,
-        doclingEndpoint: endpoint,
-        doclingElapsedMs: Date.now() - startedAt,
-        doclingFigureCount: figureCount,
-        doclingPreviewCount: previewCount,
-        ...payloadMetadata,
-      },
-      sourceUnits: units,
+      if (!isAbort) {
+        console.warn("[Uploads] Docling parse failed:", error instanceof Error ? error.message : error)
+      }
+      return null
     }
-  } catch (error) {
-    if (!(error instanceof Error && error.name === "AbortError")) {
-      console.warn("[Uploads] Docling parse failed:", error instanceof Error ? error.message : error)
-    }
-    return null
-  } finally {
-    clearTimeout(timeoutHandle)
   }
+
+  console.warn("[Uploads] Docling exhausted retries:", lastError instanceof Error ? lastError.message : lastError)
+  return null
 }

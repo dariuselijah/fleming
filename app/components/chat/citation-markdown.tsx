@@ -77,6 +77,14 @@ function stripInternalRuntimeTokensPreservePlaceholders(value: string): string {
     .replace(/\[doc\s+[^\]]+\]/gi, "")
 }
 
+function normalizeInlineSourceIdToken(value: string): string {
+  return value
+    .trim()
+    .replace(/^CITE[_:]/i, "")
+    .replace(/^["']|["']$/g, "")
+    .toLowerCase()
+}
+
 function inferSourceLabelFromUrl(url: string | undefined): string | null {
   if (!url || typeof url !== "string") return null
   try {
@@ -123,15 +131,46 @@ function extractPmcidToken(value: string | null | undefined): string | null {
   return match?.[1]?.toUpperCase() || null
 }
 
+function extractUuidSegments(value: string): string[] {
+  const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
+  const matches = value.match(uuidPattern)
+  return matches ? matches.map((m) => m.toLowerCase()) : []
+}
+
 function buildEvidenceSourceAliases(
   candidate: EvidenceCitation | CitationData
 ): Set<string> {
   const aliases = new Set<string>()
   aliases.add(buildEvidenceSourceId(candidate).toLowerCase())
+  if (typeof candidate.sourceId === "string" && candidate.sourceId.trim().length > 0) {
+    aliases.add(normalizeEvidenceSourceId(candidate.sourceId))
+    // Also add any UUID segments from sourceId (LLM sometimes drops prefix)
+    for (const uuid of extractUuidSegments(candidate.sourceId)) {
+      aliases.add(uuid)
+    }
+  }
+  if (typeof candidate.pmid === "string" && /^\d{6,10}$/.test(candidate.pmid.trim())) {
+    aliases.add(normalizeEvidenceSourceId(`pmid:${candidate.pmid.trim()}`))
+  }
+  if (typeof candidate.doi === "string" && candidate.doi.trim().length > 0) {
+    aliases.add(
+      normalizeEvidenceSourceId(
+        `doi:${candidate.doi
+          .trim()
+          .toLowerCase()
+          .replace(/^https?:\/\/(dx\.)?doi\.org\//, "")
+          .replace(/^doi:/, "")}`
+      )
+    )
+  }
 
   if (typeof candidate.url === "string" && candidate.url.trim().length > 0) {
     const normalizedUrlId = normalizeUrlSourceId(candidate.url)
     if (normalizedUrlId) aliases.add(normalizedUrlId)
+    // Also add UUID segments extracted from URL paths (LLM often drops the host prefix)
+    for (const uuid of extractUuidSegments(candidate.url)) {
+      aliases.add(uuid)
+    }
   }
 
   const pmcid = extractPmcidToken(
@@ -155,7 +194,21 @@ function sourceIdsMatchCitation(
 ): boolean {
   if (sourceIds.length === 0) return false
   const aliases = buildEvidenceSourceAliases(candidate)
-  return sourceIds.some((sourceId) => aliases.has(normalizeEvidenceSourceId(sourceId)))
+  const normalizedIds = sourceIds.map((s) => normalizeEvidenceSourceId(s))
+
+  // Exact alias match (fast path)
+  if (normalizedIds.some((id) => aliases.has(id))) return true
+
+  // Substring fallback: if the marker looks like a UUID or partial sourceId,
+  // check if any alias contains it or vice versa. This handles LLM abbreviation
+  // (e.g., outputting just the UUID portion of a url:host/uuid sourceId).
+  const aliasArr = Array.from(aliases)
+  return normalizedIds.some((id) => {
+    if (id.length < 8) return false
+    return aliasArr.some(
+      (alias) => alias.includes(id) || id.includes(alias)
+    )
+  })
 }
 
 function resolveNamedMarkerIndices(
@@ -324,6 +377,17 @@ function resolveSymbolicEvidenceMarkerIndices(
   )
   if (allCitations.length === 0) return []
 
+  // When the number looks like a PMID (too large to be a positional index),
+  // resolve by matching the PMID directly against citations.
+  if (ordinal > allCitations.length) {
+    const pmidStr = String(ordinal)
+    const byPmid = allCitations.find(
+      (c) => c.pmid === pmidStr || (c.url || "").includes(pmidStr)
+    )
+    if (byPmid) return [byPmid.index]
+    return []
+  }
+
   const filtered = allCitations.filter((citation) => {
     const journal = (citation.journal || "").toLowerCase()
     const title = (citation.title || "").toLowerCase()
@@ -457,6 +521,15 @@ function resolveSymbolicCitationIndices(
 
   const allCitations = Array.from(citations.values()).sort((left, right) => left.index - right.index)
   if (allCitations.length === 0) return []
+
+  if (ordinal > allCitations.length) {
+    const pmidStr = String(ordinal)
+    const byPmid = allCitations.find(
+      (c) => c.pmid === pmidStr || (c.url || "").includes(pmidStr)
+    )
+    if (byPmid) return [byPmid.index]
+    return []
+  }
 
   const filtered = allCitations.filter((citation) => {
     const title = (citation.title || "").toLowerCase()
@@ -672,8 +745,9 @@ export function CitationMarkdown({
     if (evidenceCitationMap && evidenceCitationMap.size > 0) {
       const sourceIdToIndex = new Map<string, number>()
       evidenceCitationMap.forEach((citation) => {
-        const sourceId = buildEvidenceSourceId(citation).toLowerCase()
-        sourceIdToIndex.set(sourceId, citation.index)
+        buildEvidenceSourceAliases(citation).forEach((sourceId) => {
+          sourceIdToIndex.set(sourceId, citation.index)
+        })
       })
       result = remapMarkerSourceIds(result, sourceIdToIndex)
 
@@ -711,6 +785,48 @@ export function CitationMarkdown({
           citationByPmid.set(pmid, citation.index)
         }
       })
+
+      // Also build a URL-fragment lookup for PMIDs embedded in URLs
+      const citationByUrlFragment = new Map<string, number>()
+      evidenceCitationMap.forEach((citation) => {
+        const url = citation.url || ""
+        const urlPmidMatch = url.match(/\/(\d{6,10})\/?$/)
+        if (urlPmidMatch?.[1]) {
+          citationByUrlFragment.set(urlPmidMatch[1], citation.index)
+        }
+      })
+
+      // Resolve [pubmed_XXXXX] and [pubmed_XXXXX, pubmed_YYYYY] patterns.
+      // The LLM sometimes outputs these instead of numeric [1] markers.
+      const pubmedUnderscorePattern = /\[(pubmed[_\s]+\d+(?:\s*,\s*pubmed[_\s]+\d+)*)\]/gi
+      let pubmedUsMatch: RegExpExecArray | null
+      while ((pubmedUsMatch = pubmedUnderscorePattern.exec(citationSearchText)) !== null) {
+        const inner = pubmedUsMatch[1] || ""
+        const pmidNumbers = Array.from(inner.matchAll(/pubmed[_\s]+(\d+)/gi))
+          .map((m) => m[1])
+          .filter(Boolean)
+        const resolvedIndices: number[] = []
+        for (const pmidStr of pmidNumbers) {
+          const idx = citationByPmid.get(pmidStr) ?? citationByUrlFragment.get(pmidStr)
+          if (typeof idx === "number") resolvedIndices.push(idx)
+        }
+        if (resolvedIndices.length === 0) continue
+
+        const startIndex = pubmedUsMatch.index
+        const endIndex = pubmedUsMatch.index + pubmedUsMatch[0].length
+        const overlaps = result.some(
+          (existing) => startIndex < existing.endIndex && endIndex > existing.startIndex
+        )
+        if (overlaps) continue
+
+        result.push({
+          type: "numbered",
+          indices: Array.from(new Set(resolvedIndices)),
+          startIndex,
+          endIndex,
+          fullMatch: pubmedUsMatch[0],
+        })
+      }
 
       // Resolve bare PMID patterns in text, e.g. "PMID: 37932704".
       const barePmidPattern = /\bPMID\s*:\s*(\d{6,10})\b/gi
@@ -832,8 +948,9 @@ export function CitationMarkdown({
           typeof citation.index === "number" && Number.isFinite(citation.index)
             ? citation.index
             : mapIndex
-        const sourceId = buildEvidenceSourceId(citation).toLowerCase()
-        sourceIdToIndex.set(sourceId, resolvedIndex)
+        buildEvidenceSourceAliases(citation).forEach((sourceId) => {
+          sourceIdToIndex.set(sourceId, resolvedIndex)
+        })
       })
       result = remapMarkerSourceIds(result, sourceIdToIndex)
 
@@ -1092,7 +1209,7 @@ function resolveIndicesFromSourceIds(
   citations: Map<number, CitationData>,
   evidenceCitationMap: Map<number, EvidenceCitation> | null
 ): number[] {
-  const wanted = sourceIds.map((sourceId) => sourceId.toLowerCase())
+  const wanted = sourceIds.map((sourceId) => normalizeInlineSourceIdToken(sourceId))
   const resolved = new Set<number>()
 
   if (evidenceCitationMap) {
@@ -1280,7 +1397,7 @@ function processText(
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   const placeholderRegex =
-    /\[INLINE_VISUAL_([A-Za-z0-9:._\/-]+)\]|\[?\s*CITE_PLACEHOLDER_(\d+)\s*\]?|\[CITE_([A-Za-z0-9:._\/-]+(?:\s*,\s*[A-Za-z0-9:._\/-]+)*)\]/g
+    /\[INLINE_VISUAL_([A-Za-z0-9:._\/-]+)\]|\[?\s*CITE_PLACEHOLDER_(\d+)\s*\]?|\[CITE[_:]([^\]]+)\]/gi
   let match: RegExpExecArray | null
   
   while ((match = placeholderRegex.exec(sanitizedText)) !== null) {
@@ -1328,7 +1445,7 @@ function processText(
       typeof match[3] === "string" && match[3].trim().length > 0
         ? match[3]
             .split(/\s*,\s*/)
-            .map((sourceId) => sourceId.trim().toLowerCase())
+            .map((sourceId) => normalizeInlineSourceIdToken(sourceId))
             .filter(Boolean)
         : []
     const canonicalPlaceholder = match[2] ? `[CITE_PLACEHOLDER_${match[2]}]` : ""
@@ -1348,19 +1465,32 @@ function processText(
     if (marker) {
       // If we have evidence citations, render EvidenceCitationPill for each
       if (evidenceCitationMap && evidenceCitationMap.size > 0) {
-        const allIndicesResolvable = marker.indices.every((idx) =>
+        const markerWithResolvedIndices =
+          marker.indices.length === 0 &&
+          Array.isArray(marker.sourceIds) &&
+          marker.sourceIds.length > 0
+            ? {
+                ...marker,
+                indices: resolveIndicesFromSourceIds(
+                  marker.sourceIds,
+                  citations,
+                  evidenceCitationMap
+                ),
+              }
+            : marker
+        const allIndicesResolvable = markerWithResolvedIndices.indices.every((idx) =>
           evidenceCitationMap.has(idx)
         )
         if (!allIndicesResolvable) {
           // Never swallow marker text if mapping fails.
-          parts.push(marker.fullMatch)
+          parts.push(markerWithResolvedIndices.fullMatch)
           lastIndex = matchIndex + matchLength
           continue
         }
 
         const evidencePills: React.ReactNode[] = []
         
-        marker.indices.forEach((idx) => {
+        markerWithResolvedIndices.indices.forEach((idx) => {
           if (evidenceCitationMap.get(idx)) {
             evidencePills.push(
               <ResolvedCitationPill
@@ -1390,7 +1520,7 @@ function processText(
           }
         } else {
           // Preserve original marker if nothing was resolvable.
-          parts.push(marker.fullMatch)
+          parts.push(markerWithResolvedIndices.fullMatch)
         }
       } else {
         if (marker.type === "named") {

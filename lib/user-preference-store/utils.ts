@@ -86,8 +86,7 @@ export const defaultPreferences: UserPreferences = {
 
 // Helper functions to convert between API format (snake_case) and frontend format (camelCase)
 export function convertFromApiFormat(apiData: any): UserPreferences {
-  console.log("Converting from API format:", apiData)
-  const result = {
+  return {
     layout: apiData.layout || "fullscreen",
     promptSuggestions: apiData.prompt_suggestions ?? true,
     showToolInvocations: apiData.show_tool_invocations ?? true,
@@ -117,12 +116,9 @@ export function convertFromApiFormat(apiData: any): UserPreferences {
     // Onboarding
     onboardingCompleted: apiData.onboarding_completed ?? false,
   }
-  console.log("Converted to frontend format:", result)
-  return result
 }
 
 export function convertToApiFormat(preferences: Partial<UserPreferences>) {
-  console.log("Converting to API format:", preferences)
   const apiData: any = {}
   if (preferences.layout !== undefined) apiData.layout = preferences.layout
   if (preferences.promptSuggestions !== undefined)
@@ -171,6 +167,5 @@ export function convertToApiFormat(preferences: Partial<UserPreferences>) {
   if (preferences.onboardingCompleted !== undefined)
     apiData.onboarding_completed = preferences.onboardingCompleted
   
-  console.log("Converted API data:", apiData)
   return apiData
 }

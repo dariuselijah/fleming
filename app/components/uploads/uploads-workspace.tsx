@@ -9,6 +9,7 @@ import {
   listUserUploads,
   reprocessKnowledgeFile,
   uploadKnowledgeFile,
+  uploadKnowledgeFilesBatch,
 } from "@/lib/uploads/api"
 import { buildUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
 import type { UploadProgressStage, UserUploadListItem } from "@/lib/uploads/types"
@@ -277,8 +278,46 @@ export function UploadsWorkspace({ embedded = false }: { embedded?: boolean } = 
 
   const handleFileSelection = async (files: FileList | null) => {
     if (!files || files.length === 0) return
+    const selectedFiles = Array.from(files)
 
-    for (const file of Array.from(files)) {
+    if (selectedFiles.length > 1) {
+      try {
+        setActiveUpload({
+          name: `${selectedFiles.length} files`,
+          size: selectedFiles.reduce((sum, file) => sum + file.size, 0),
+          uploadProgress: 0,
+          stage: "uploading",
+          ingestProgress: 72,
+        })
+
+        await uploadKnowledgeFilesBatch(selectedFiles, {
+          onProgress: (payload) => {
+            const activeFile = selectedFiles.find((file) => file.name === payload.fileName)
+            setActiveUpload({
+              name: payload.fileName,
+              size: activeFile?.size ?? 0,
+              uploadProgress: payload.overallProgress,
+              stage: payload.overallProgress >= 100 ? "extracting_pages" : "uploading",
+              ingestProgress: payload.overallProgress >= 100 ? 72 : payload.overallProgress,
+            })
+          },
+        })
+        await refreshUploads()
+      } catch (error) {
+        toast({
+          title: error instanceof Error ? error.message : "Failed to upload files",
+          status: "error",
+        })
+      } finally {
+        setActiveUpload(null)
+        if (inputRef.current) {
+          inputRef.current.value = ""
+        }
+      }
+      return
+    }
+
+    for (const file of selectedFiles) {
       let uploadFailed = false
       try {
         setActiveUpload({

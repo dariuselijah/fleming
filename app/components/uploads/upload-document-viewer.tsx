@@ -374,18 +374,38 @@ export function UploadDocumentViewer({
         ) : (
           <div className="min-h-0 flex-1 p-4">
             <section className="h-full overflow-hidden rounded-3xl border border-border/60 bg-background shadow-xs">
-              <div className="border-b border-border/60 px-4 py-3 text-sm font-medium">
-                PDF page {pdfPage}
-                <span className="text-muted-foreground ml-2 text-xs">
-                  Add <code>?debug=1</code> to inspect extracted source text.
-                </span>
+              <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Document viewer</p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    Opens to page {pdfPage}. Add <code>?debug=1</code> for extraction diagnostics.
+                  </p>
+                </div>
+                {upload.originalFileUrl ? (
+                  <a
+                    href={upload.originalFileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex shrink-0 rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent/60"
+                  >
+                    Open in new tab
+                  </a>
+                ) : null}
               </div>
-              <div className="h-[calc(100%-49px)] min-h-[560px]">
-                <PdfTextLayerViewer
-                  fileUrl={upload?.originalFileUrl ?? null}
-                  pageNumber={pdfPage}
-                  highlightText={pdfHighlightText}
-                />
+              <div className="h-[calc(100%-57px)] min-h-[560px] bg-muted/15">
+                {upload.originalFileUrl ? (
+                  <iframe
+                    title={upload.title || upload.fileName}
+                    src={`${upload.originalFileUrl}#page=${pdfPage}&view=FitH`}
+                    className="h-full w-full"
+                  />
+                ) : (
+                  <PdfTextLayerViewer
+                    fileUrl={upload?.originalFileUrl ?? null}
+                    pageNumber={pdfPage}
+                    highlightText={pdfHighlightText}
+                  />
+                )}
               </div>
             </section>
           </div>

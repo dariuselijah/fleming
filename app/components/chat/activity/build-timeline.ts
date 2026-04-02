@@ -90,6 +90,8 @@ const RETRIEVAL_TOOL_NAMES = new Set([
   "bioRxivSearch",
   "webSearch",
   "uploadContextSearch",
+  "rxnormInteractionSearch",
+  "openfdaDrugLabelSearch",
 ])
 
 const SECONDARY_RETRIEVAL_TOOL_NAMES = new Set([
@@ -879,6 +881,8 @@ function summarizeToolExecutionTruth(events: TimelineEvent[]): {
     bioRxivSearch: "bioRxiv",
     webSearch: "Web Search",
     uploadContextSearch: "Upload Context",
+    rxnormInteractionSearch: "RxNorm DDI",
+    openfdaDrugLabelSearch: "FDA Drug Labels",
   }
 
   events.forEach((event) => {

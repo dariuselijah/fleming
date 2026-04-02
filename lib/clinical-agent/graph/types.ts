@@ -10,6 +10,8 @@ export type ClinicalConnectorId =
   | "cms_coverage"
   | "chembl"
   | "benchling"
+  | "rxnorm"
+  | "openfda"
 
 export type ClinicalIntentClass =
   | "clinical_evidence"
@@ -212,4 +214,6 @@ export const CONNECTOR_TOOL_NAME_MAP: Record<ClinicalConnectorId, string[]> = {
   cms_coverage: ["cmsCoverageSearch"],
   chembl: ["chemblSearch"],
   benchling: ["benchlingSearch"],
+  rxnorm: ["rxnormInteractionSearch"],
+  openfda: ["openfdaDrugLabelSearch"],
 }

@@ -17,6 +17,8 @@ import type {
 import { searchBiorxivApi } from "./biorxiv-api"
 import { searchScholarApi } from "./scholar-api"
 import { searchCmsCoverageApi } from "./cms-coverage-api"
+import { searchDrugInteractions } from "./rxnorm-api"
+import { searchDrugLabels } from "./openfda-api"
 
 const CONNECTOR_RETRY_COUNT = 1
 const CONNECTOR_CIRCUIT_FAIL_THRESHOLD = 3
@@ -169,6 +171,8 @@ function sourceTypeForConnector(connectorId: ClinicalConnectorId): ProvenanceSou
     cms_coverage: "coverage_policy",
     chembl: "chemical_database",
     benchling: "lab_workflow",
+    rxnorm: "rxnorm",
+    openfda: "openfda",
   }
   return map[connectorId]
 }
@@ -499,8 +503,8 @@ async function clinicalTrialsConnector(input: ConnectorSearchInput): Promise<Con
     publishedAt: null,
     sourceLabel: "ClinicalTrials.gov",
     metadata: {
-      evidenceLevel: 3,
-      studyType: trial.phase || "Clinical trial",
+      evidenceLevel: 5,
+      studyType: trial.phase ? `${trial.phase} (registry)` : "Trial registration",
     },
   }))
   const warnings =
@@ -913,6 +917,140 @@ async function cmsCoverageConnector(input: ConnectorSearchInput): Promise<Connec
   }
 }
 
+async function rxnormConnector(
+  input: ConnectorSearchInput
+): Promise<ConnectorSearchPayload> {
+  const t0 = Date.now()
+  try {
+    const result = await searchDrugInteractions(input.query, input.maxResults ?? 10)
+    if (!result || result.interactions.length === 0) {
+      return emptyPayload(input, "rxnorm", "No drug interactions found for this query.")
+    }
+    const records: ConnectorSearchRecord[] = result.interactions.map((ix, i) => ({
+      id: `rxnorm:${result.rxcui}:${i}`,
+      title: `${ix.drug1} ↔ ${ix.drug2} interaction (${ix.severity})`,
+      snippet: ix.description,
+      url: `https://mor.nlm.nih.gov/RxNav/search?searchBy=RXCUI&searchTerm=${result.rxcui.split(",")[0]}`,
+      publishedAt: null,
+      sourceLabel: ix.source,
+      metadata: { severity: ix.severity },
+    }))
+    return {
+      connectorId: "rxnorm",
+      query: input.query,
+      results: records,
+      warnings: [],
+      provenance: records.map((r) =>
+        buildProvenance({
+          id: r.id,
+          sourceType: "rxnorm" as ProvenanceSourceType,
+          sourceName: "RxNorm",
+          url: r.url,
+          title: r.title,
+          publishedAt: null,
+          region: null,
+          journal: null,
+          doi: null,
+          pmid: null,
+          evidenceLevel: null,
+          studyType: "Drug Interaction",
+          snippet: r.snippet.slice(0, 300),
+        })
+      ),
+      confidence: Math.min(0.85, 0.5 + records.length * 0.08),
+      licenseTier: "public",
+      metrics: {
+        elapsedMs: Date.now() - t0,
+        retriesUsed: 0,
+        sourceCount: records.length,
+        fallbackUsed: false,
+        cacheHit: false,
+        circuitOpen: false,
+        degraded: false,
+        qualityScore: computeQualityScore(records, [], false),
+      },
+    }
+  } catch (err) {
+    return emptyPayload(input, "rxnorm", err instanceof Error ? err.message : "RxNorm lookup failed.")
+  }
+}
+
+async function openfdaConnector(
+  input: ConnectorSearchInput
+): Promise<ConnectorSearchPayload> {
+  const t0 = Date.now()
+  try {
+    const labels = await searchDrugLabels(input.query, input.maxResults ?? 5)
+    if (labels.length === 0) {
+      return emptyPayload(input, "openfda", "No FDA drug labels found for this query.")
+    }
+    const records: ConnectorSearchRecord[] = labels.map((lbl) => {
+      const parts = [
+        lbl.indications && `Indications: ${lbl.indications}`,
+        lbl.dosage && `Dosage: ${lbl.dosage}`,
+        lbl.contraindications && `Contraindications: ${lbl.contraindications}`,
+        lbl.warnings && `Warnings: ${lbl.warnings}`,
+        lbl.drugInteractions && `Drug Interactions: ${lbl.drugInteractions}`,
+        lbl.boxedWarning && `⚠ BOXED WARNING: ${lbl.boxedWarning}`,
+      ].filter(Boolean)
+
+      return {
+        id: `openfda:${lbl.setId}`,
+        title: `${lbl.brandName || lbl.genericName} (${lbl.manufacturer || "FDA"})`,
+        snippet: parts.join(" | ").slice(0, 1200),
+        url: lbl.setId
+          ? `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${lbl.setId}`
+          : null,
+        publishedAt: null,
+        sourceLabel: "OpenFDA / DailyMed",
+        metadata: {
+          genericName: lbl.genericName,
+          route: lbl.route,
+          hasBoxedWarning: Boolean(lbl.boxedWarning),
+        },
+      }
+    })
+
+    return {
+      connectorId: "openfda",
+      query: input.query,
+      results: records,
+      warnings: [],
+      provenance: records.map((r) =>
+        buildProvenance({
+          id: r.id,
+          sourceType: "openfda" as ProvenanceSourceType,
+          sourceName: "OpenFDA",
+          url: r.url,
+          title: r.title,
+          publishedAt: null,
+          region: "US",
+          journal: null,
+          doi: null,
+          pmid: null,
+          evidenceLevel: null,
+          studyType: "Drug Label",
+          snippet: r.snippet.slice(0, 300),
+        })
+      ),
+      confidence: Math.min(0.88, 0.55 + records.length * 0.1),
+      licenseTier: "public",
+      metrics: {
+        elapsedMs: Date.now() - t0,
+        retriesUsed: 0,
+        sourceCount: records.length,
+        fallbackUsed: false,
+        cacheHit: false,
+        circuitOpen: false,
+        degraded: false,
+        qualityScore: computeQualityScore(records, [], false),
+      },
+    }
+  } catch (err) {
+    return emptyPayload(input, "openfda", err instanceof Error ? err.message : "OpenFDA lookup failed.")
+  }
+}
+
 function createWebBackedAdapter(
   id: ClinicalConnectorId,
   label: string,
@@ -1027,6 +1165,20 @@ const connectorAdapters: Record<ClinicalConnectorId, ConnectorAdapter> = {
         "lab notebook protocol site:benchling.com",
         false
       ),
+  },
+  rxnorm: {
+    id: "rxnorm",
+    label: "RxNorm Drug Interactions",
+    licenseTier: "public",
+    enabled: () => true,
+    search: rxnormConnector,
+  },
+  openfda: {
+    id: "openfda",
+    label: "OpenFDA Drug Labels",
+    licenseTier: "public",
+    enabled: () => true,
+    search: openfdaConnector,
   },
 }
 

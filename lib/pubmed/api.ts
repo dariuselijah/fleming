@@ -3,6 +3,12 @@
  * Uses NCBI E-utilities API
  */
 
+import {
+  getPubMedCache,
+  setPubMedCache,
+  type PubMedCacheEntry,
+} from "../cache/retrieval-cache"
+
 export interface PubMedArticle {
   pmid: string
   pmcid?: string
@@ -93,12 +99,40 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// ── NCBI Request Queue ─────────────────────────────────────────────────────
+// Rate-limits outbound calls: 3 req/sec with API key, 1 req/sec without.
+const NCBI_MAX_CONCURRENT = getNcbiApiKey() ? 3 : 1
+const NCBI_MIN_INTERVAL_MS = getNcbiApiKey() ? 340 : 1050
+
+let ncbiInFlight = 0
+let ncbiLastRequestTime = 0
+const ncbiQueue: Array<{ resolve: () => void }> = []
+
+async function acquireNcbiSlot(): Promise<void> {
+  while (ncbiInFlight >= NCBI_MAX_CONCURRENT) {
+    await new Promise<void>((resolve) => ncbiQueue.push({ resolve }))
+  }
+  const elapsed = Date.now() - ncbiLastRequestTime
+  if (elapsed < NCBI_MIN_INTERVAL_MS) {
+    await sleep(NCBI_MIN_INTERVAL_MS - elapsed)
+  }
+  ncbiInFlight++
+  ncbiLastRequestTime = Date.now()
+}
+
+function releaseNcbiSlot(): void {
+  ncbiInFlight--
+  const next = ncbiQueue.shift()
+  if (next) next.resolve()
+}
+
 async function safeFetch(
   url: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   retries = PUBMED_MAX_RETRIES
 ): Promise<Response | null> {
   for (let attempt = 0; attempt <= retries; attempt += 1) {
+    await acquireNcbiSlot()
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
@@ -109,11 +143,13 @@ async function safeFetch(
       if (attempt >= retries) return null
     } finally {
       clearTimeout(timer)
+      releaseNcbiSlot()
     }
 
-    const jitterMs = Math.floor(Math.random() * 125)
-    const backoffMs = RETRY_BASE_DELAY_MS * 2 ** attempt + jitterMs
-    await sleep(backoffMs)
+    // Exponential backoff with full jitter: random(0, base * 2^attempt)
+    const maxDelayMs = Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, 8000)
+    const jitteredMs = Math.floor(Math.random() * maxDelayMs)
+    await sleep(jitteredMs)
   }
   return null
 }
@@ -125,14 +161,29 @@ export async function searchPubMed(
   query: string,
   maxResults: number = 10
 ): Promise<PubMedSearchResult> {
+  // L0: in-process Map cache (fastest)
   const cacheKey = buildCacheKeyForSearch(query, maxResults)
   const cached = getFromCache(searchCache, cacheKey)
   if (cached.hit && cached.value) {
     return clonePubMedSearchResult(cached.value)
   }
 
+  // L2: Redis cache (survives restarts, shared across instances)
   try {
-    // Step 1: Search for article IDs
+    const redisEntry = await getPubMedCache(query, maxResults)
+    if (redisEntry && redisEntry.articles.length > 0) {
+      const restored: PubMedSearchResult = {
+        articles: redisEntry.articles as PubMedArticle[],
+        totalResults: redisEntry.totalResults,
+      }
+      setCache(searchCache, cacheKey, clonePubMedSearchResult(restored), SEARCH_CACHE_TTL_MS)
+      return restored
+    }
+  } catch {
+    // Redis miss or error – proceed to live fetch
+  }
+
+  try {
     const searchUrl = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi")
     searchUrl.searchParams.set("db", "pubmed")
     searchUrl.searchParams.set("term", query)
@@ -153,14 +204,21 @@ export async function searchPubMed(
       return { articles: [], totalResults: 0 }
     }
     
-    // Step 2: Fetch article details
     const articles = await fetchPubMedArticles(pmids)
 
-    const result = {
+    const result: PubMedSearchResult = {
       articles,
       totalResults: parseInt(searchData.esearchresult?.count || '0', 10)
     }
+
+    // Populate both cache tiers
     setCache(searchCache, cacheKey, clonePubMedSearchResult(result), SEARCH_CACHE_TTL_MS)
+    setPubMedCache(query, maxResults, {
+      pmids,
+      totalResults: result.totalResults,
+      articles: result.articles,
+    }).catch(() => {})
+
     return result
   } catch {
     return { articles: [], totalResults: 0 }

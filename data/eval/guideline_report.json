@@ -1,0 +1,248 @@
+{
+  "createdAt": "2026-04-02T09:59:58.787Z",
+  "queries": [
+    "acute abdominal pain diagnostic workup guideline adults",
+    "hypertension first line treatment adults guideline",
+    "sepsis initial management adult emergency guideline",
+    "acetaminophen paracetamol overdose guideline",
+    "acute coronary syndrome chest pain emergency guideline",
+    "acute ischemic stroke thrombolysis thrombectomy guideline",
+    "anaphylaxis emergency management adults guideline",
+    "septic shock vasopressor escalation guideline",
+    "heart failure reduced ejection fraction guideline directed medical therapy",
+    "atrial fibrillation anticoagulation CHA2DS2 VASc guideline",
+    "diabetes chronic kidney disease SGLT2 GLP1 guideline",
+    "lipid management secondary prevention statin guideline",
+    "community acquired pneumonia outpatient treatment by comorbidity guideline",
+    "copd exacerbation steroid antibiotic oxygen guideline",
+    "asthma stepwise controller escalation adults guideline",
+    "cystitis uncomplicated women first line antibiotic guideline",
+    "warfarin high risk interactions INR monitoring guideline",
+    "chronic kidney disease medication dose adjustment eGFR guidance",
+    "polypharmacy deprescribing older adults guideline",
+    "direct oral anticoagulant renal dosing guidance"
+  ],
+  "selectedWaves": [],
+  "region": "US",
+  "totalRecords": 76,
+  "uniqueSources": [
+    "PubMed"
+  ],
+  "qualityGates": {
+    "minResultsPerQuery": 2,
+    "minSourcesPerRun": 2,
+    "failures": [
+      "results_per_query gate failed for 7 query(s): \"sepsis initial management adult emergency guideline\"(1), \"septic shock vasopressor escalation guideline\"(0), \"community acquired pneumonia outpatient treatment by comorbidity guideline\"(1), \"copd exacerbation steroid antibiotic oxygen guideline\"(0), \"asthma stepwise controller escalation adults guideline\"(0), \"warfarin high risk interactions INR monitoring guideline\"(0), \"chronic kidney disease medication dose adjustment eGFR guidance\"(1)",
+      "source_diversity gate failed: 1 < 2"
+    ]
+  },
+  "perQueryStats": [
+    {
+      "query": "acute abdominal pain diagnostic workup guideline adults",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "hypertension first line treatment adults guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "sepsis initial management adult emergency guideline",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acetaminophen paracetamol overdose guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute coronary syndrome chest pain emergency guideline",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute ischemic stroke thrombolysis thrombectomy guideline",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "anaphylaxis emergency management adults guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "septic shock vasopressor escalation guideline",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "heart failure reduced ejection fraction guideline directed medical therapy",
+      "count": 9,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "atrial fibrillation anticoagulation CHA2DS2 VASc guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "diabetes chronic kidney disease SGLT2 GLP1 guideline",
+      "count": 9,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "lipid management secondary prevention statin guideline",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "community acquired pneumonia outpatient treatment by comorbidity guideline",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "copd exacerbation steroid antibiotic oxygen guideline",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "asthma stepwise controller escalation adults guideline",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "cystitis uncomplicated women first line antibiotic guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "warfarin high risk interactions INR monitoring guideline",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "chronic kidney disease medication dose adjustment eGFR guidance",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "polypharmacy deprescribing older adults guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "direct oral anticoagulant renal dosing guidance",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    }
+  ],
+  "bySource": {
+    "PubMed": 76
+  },
+  "sampleRecords": [
+    {
+      "source": "PubMed",
+      "title": "CAR/CETARS/CSAR Practice Guideline on Imaging the Adult Patient With Right Lower Quadrant Pain.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/39066632/",
+      "date": "2025",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "AGA Clinical Practice Update on Diagnosis and Management of Acute Hepatic Porphyrias: Expert Review.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/36642627/",
+      "date": "2023",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "[Guideline 'Diagnostics in acute abdominal pain in adults'].",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/24893814/",
+      "date": "2014",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "American Association of Clinical Endocrinology Consensus Statement: Algorithm for Management of Adults With Type 2 Diabetes - 2026 Update.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/41842862/",
+      "date": "2026",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "Revised European Society of Endocrinology Clinical Practice Guideline: Treatment of Chronic Hypoparathyroidism in Adults.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/41231236/",
+      "date": "2025",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "Lifestyle Interventions for Treatment and Remission of Type 2 Diabetes and Prediabetes in Adults: A Clinical Practice Guideline From the American College of Lifestyle Medicine.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/40546761/",
+      "date": "2025",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "American Association of Clinical Endocrinology Consensus Statement: Comprehensive Type 2 Diabetes Management Algorithm - 2023 Update.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/37150579/",
+      "date": "2023",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "2019 ACC/AHA Guideline on the Primary Prevention of Cardiovascular Disease: Executive Summary: A Report of the American College of Cardiology/American Heart Association Task Force on Clinical Practice Guidelines.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/30879339/",
+      "date": "2020",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "Systematic Review for the 2017 ACC/AHA/AAPA/ABC/ACPM/AGS/APhA/ASH/ASPC/NMA/PCNA Guideline for the Prevention, Detection, Evaluation, and Management of High Blood Pressure in Adults: A Report of the American College of Cardiology/American Heart Association Task Force on Clinical Practice Guidelines.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/30354656/",
+      "date": "2019",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "The Japanese Clinical Practice Guidelines for Management of Sepsis and Septic Shock 2024.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/39996161/",
+      "date": "2025",
+      "region": "GLOBAL"
+    }
+  ]
+}

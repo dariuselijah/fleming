@@ -11,7 +11,7 @@ import {
   ENABLE_CHART_DRILLDOWN_SUBLOOP,
 } from "@/lib/config"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
-import { ArrowClockwise, Check, Copy } from "@phosphor-icons/react"
+import { ArrowClockwise, Check, Copy, ClipboardText } from "@phosphor-icons/react"
 import type { ChartDrilldownPayload } from "../charts/chat-chart"
 import { AssistantInlineParts } from "./assistant-inline-parts"
 import { ActivityTimeline } from "./activity/activity-timeline"
@@ -246,6 +246,56 @@ function toCitationDataFromEvidence(citation: EvidenceCitation): CitationData {
   } as CitationData
 }
 
+function isPlaceholderCitationLabel(value: string | null | undefined): boolean {
+  const normalized = (value || "").trim()
+  if (!normalized) return true
+  return /^Citation\s+\d+$/i.test(normalized) || /^Source$/i.test(normalized)
+}
+
+function isMeaningfulEvidenceCitation(citation: EvidenceCitation): boolean {
+  const hasStableLocator = Boolean(
+    citation.sourceId?.trim() ||
+      citation.pmid?.trim() ||
+      citation.doi?.trim() ||
+      citation.url?.trim() ||
+      citation.uploadId?.trim() ||
+      citation.sourceUnitId?.trim()
+  )
+  const hasNamedSource =
+    !isPlaceholderCitationLabel(citation.title) ||
+    !isPlaceholderCitationLabel(citation.journal) ||
+    !isPlaceholderCitationLabel(citation.sourceLabel)
+  const hasContext =
+    Boolean(citation.snippet?.trim()) ||
+    (Array.isArray(citation.authors) && citation.authors.length > 0) ||
+    typeof citation.year === "number" ||
+    Boolean(citation.studyType?.trim())
+
+  return hasStableLocator || (hasNamedSource && hasContext)
+}
+
+function isMeaningfulCitationData(citation: CitationData): boolean {
+  const extendedCitation = citation as CitationData & {
+    studyType?: string
+    snippet?: string
+  }
+  const hasStableLocator = Boolean(
+    citation.sourceId?.trim() ||
+      citation.pmid?.trim() ||
+      citation.doi?.trim() ||
+      citation.url?.trim()
+  )
+  const hasNamedSource =
+    !isPlaceholderCitationLabel(citation.title) || !isPlaceholderCitationLabel(citation.journal)
+  const hasContext =
+    (Array.isArray(citation.authors) && citation.authors.length > 0) ||
+    Boolean(citation.year?.trim()) ||
+    Boolean(extendedCitation.studyType?.trim()) ||
+    Boolean(extendedCitation.snippet?.trim())
+
+  return hasStableLocator || (hasNamedSource && hasContext)
+}
+
 function evidenceCitationMetadataScore(citation: EvidenceCitation): number {
   let score = 0
   if (citation.title?.trim()) score += 3
@@ -450,12 +500,18 @@ function extractInlinePmidCandidates(text: string): string[] {
 function extractInlineSourceIdCandidates(text: string): string[] {
   if (!text) return []
   const sourceIds = new Set<string>()
-  const sourceIdPattern = /\[CITE_([A-Za-z0-9:._\/-]+(?:\s*,\s*[A-Za-z0-9:._\/-]+)*)\]/g
+  const sourceIdPattern = /\[CITE[_:]([^\]]+)\]/gi
   let match: RegExpExecArray | null
   while ((match = sourceIdPattern.exec(text)) !== null) {
     const values = (match[1] || "")
       .split(/\s*,\s*/)
-      .map((value) => value.trim().toLowerCase())
+      .map((value) =>
+        value
+          .trim()
+          .replace(/^CITE[_:]/i, "")
+          .replace(/^["']|["']$/g, "")
+          .toLowerCase()
+      )
       .filter(Boolean)
     values.forEach((value) => sourceIds.add(value))
   }
@@ -565,7 +621,11 @@ export function MessageAssistant({
         : effectiveEvidenceCitations,
     [effectiveEvidenceCitations, referencedEvidenceCitations]
   )
-  const hasEvidenceCitations = displayEvidenceCitations.length > 0
+  const meaningfulEvidenceCitations = useMemo(
+    () => displayEvidenceCitations.filter(isMeaningfulEvidenceCitation),
+    [displayEvidenceCitations]
+  )
+  const hasEvidenceCitations = meaningfulEvidenceCitations.length > 0
   const artifactRefinement = useMemo(
     () => parseArtifactRefinementPayload(annotations),
     [annotations]
@@ -930,7 +990,7 @@ export function MessageAssistant({
       contentToRender &&
       (/\[\d+\]/.test(contentToRender) ||
         /\[PMID\s*:\s*\d+\]/i.test(contentToRender) ||
-        /\[CITE_[A-Za-z0-9:._\/-]+(?:\s*,\s*[A-Za-z0-9:._\/-]+)*\]/.test(contentToRender))
+        /\[CITE[_:][^\]]+\]/i.test(contentToRender))
     const hasCITATIONMarkers =
       contentToRender && /\[CITATION:\d+/.test(contentToRender)
     
@@ -1222,13 +1282,22 @@ export function MessageAssistant({
     () => mergeEvidenceIntoCitations(mergedCitations, displayEvidenceCitations),
     [displayEvidenceCitations, mergedCitations]
   )
+  const meaningfulSourcesCitations = useMemo(() => {
+    const filtered = new Map<number, CitationData>()
+    sourcesCitations.forEach((citation, index) => {
+      if (isMeaningfulCitationData(citation)) {
+        filtered.set(index, citation)
+      }
+    })
+    return filtered
+  }, [sourcesCitations])
 
   // Hide dedicated sources section when all fallback entries
   // are placeholders like "Citation 1" with no real metadata.
   const hasOnlyPlaceholderCitations = useMemo(() => {
-    if (sourcesCitations.size === 0) return false
+    if (meaningfulSourcesCitations.size === 0) return false
 
-    return Array.from(sourcesCitations.values()).every((citation) => {
+    return Array.from(meaningfulSourcesCitations.values()).every((citation) => {
       const title = (citation.title || "").trim()
       const journal = (citation.journal || "").trim()
       const placeholderPattern = /^Citation\s+\d+$/i
@@ -1237,7 +1306,7 @@ export function MessageAssistant({
         placeholderPattern.test(journal)
       )
     })
-  }, [sourcesCitations])
+  }, [meaningfulSourcesCitations])
   
   // Check if message has citations or sources
   const hasCitations = activeCitations.size > 0
@@ -1248,12 +1317,12 @@ export function MessageAssistant({
     (/\[CITATION:\d+/.test(contentToRender) ||
       /\[\d+\]/.test(contentToRender) ||
       /\[PMID\s*:\s*\d+\]/i.test(contentToRender) ||
-      /\[CITE_[A-Za-z0-9:._\/-]+(?:\s*,\s*[A-Za-z0-9:._\/-]+)*\]/.test(contentToRender))
+      /\[CITE[_:][^\]]+\]/i.test(contentToRender))
   // Show citations if we have them, have sources, or have citation markers in text
   const shouldShowCitations = hasCitations || hasSources || hasCitationMarkers
   const showSourcesSection =
     status === "ready" &&
-    sourcesCitations.size > 0 &&
+    meaningfulSourcesCitations.size > 0 &&
     !isLastStreaming &&
     !hasOnlyPlaceholderCitations
   const showTrustSummary =
@@ -1505,6 +1574,56 @@ export function MessageAssistant({
     if (copyToClipboard) copyToClipboard()
   }, [copyToClipboard])
 
+  const [fullAnalysisCopied, setFullAnalysisCopied] = useState(false)
+  const handleCopyFullAnalysis = useCallback(() => {
+    const citations = displayEvidenceCitations.length > 0 ? displayEvidenceCitations : []
+    // Build an index mapping from original citation index to sequential number
+    const indexMap = new Map<number, number>()
+    const sortedCitations = [...citations].sort((a, b) => a.index - b.index)
+    sortedCitations.forEach((c, i) => indexMap.set(c.index, i + 1))
+
+    // Remap citation markers in response text to sequential numbering
+    let responseText = contentToRender || children || ""
+    indexMap.forEach((newIdx, oldIdx) => {
+      responseText = responseText.replace(
+        new RegExp(`\\[${oldIdx}\\]`, "g"),
+        `[__SEQ_${newIdx}__]`
+      )
+    })
+    responseText = responseText.replace(/__SEQ_(\d+)__/g, "$1")
+
+    const lines: string[] = []
+    lines.push("=== FLEMING FULL RESPONSE ===\n")
+    lines.push(responseText)
+    lines.push("\n\n=== EVIDENCE SOURCES (" + sortedCitations.length + ") ===\n")
+    sortedCitations.forEach((c, i) => {
+      const seqNum = i + 1
+      lines.push(`[${seqNum}] ${c.title || "Untitled"}`)
+      const meta: string[] = []
+      if (c.journal) meta.push(`Journal: ${c.journal}`)
+      if (c.year) meta.push(`Year: ${c.year}`)
+      if (c.evidenceLevel) meta.push(`Evidence Level: L${c.evidenceLevel}`)
+      if (c.studyType) meta.push(`Study Type: ${c.studyType}`)
+      if (c.pmid) meta.push(`PMID: ${c.pmid}`)
+      if (c.doi) meta.push(`DOI: ${c.doi}`)
+      if (c.url) meta.push(`URL: ${c.url}`)
+      if (c.sourceId) meta.push(`Source ID: ${c.sourceId}`)
+      if (c.sourceType) meta.push(`Source Type: ${c.sourceType}`)
+      if (c.sourceLabel) meta.push(`Source Label: ${c.sourceLabel}`)
+      if (Array.isArray(c.authors) && c.authors.length > 0) meta.push(`Authors: ${c.authors.join(", ")}`)
+      if (c.sampleSize) meta.push(`Sample Size: ${c.sampleSize}`)
+      if (Array.isArray(c.meshTerms) && c.meshTerms.length > 0) meta.push(`MeSH: ${c.meshTerms.join(", ")}`)
+      if (c.snippet) meta.push(`Snippet: ${c.snippet.slice(0, 200)}`)
+      if (meta.length > 0) lines.push("  " + meta.join(" | "))
+      lines.push("")
+    })
+    lines.push("=== END ===")
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setFullAnalysisCopied(true)
+      setTimeout(() => setFullAnalysisCopied(false), 2000)
+    })
+  }, [contentToRender, children, displayEvidenceCitations])
+
   const memoizedOnReload = useCallback(() => {
     if (onReload) onReload()
   }, [onReload])
@@ -1740,12 +1859,12 @@ export function MessageAssistant({
         {showTrustSummary && (
           <TrustSummaryCard
             content={contentToRender}
-            citations={displayEvidenceCitations}
+            citations={meaningfulEvidenceCitations}
             prompt={contextPrompt}
           />
         )}
         {showSourcesSection && (
-          <ReferencesSection citations={sourcesCitations} title="Sources" />
+          <ReferencesSection citations={meaningfulSourcesCitations} title="Sources" />
         )}
 
         {Boolean(isLastStreaming || contentNullOrEmpty) ? null : (
@@ -1771,6 +1890,25 @@ export function MessageAssistant({
                 )}
               </button>
             </MessageAction>
+            {hasEvidenceCitations && (
+              <MessageAction
+                tooltip={fullAnalysisCopied ? "Copied with sources!" : "Copy with all sources"}
+                side="bottom"
+              >
+                <button
+                  className="hover:bg-accent/60 text-muted-foreground hover:text-foreground flex size-7.5 items-center justify-center rounded-full bg-transparent transition"
+                  aria-label="Copy full analysis with sources"
+                  onClick={handleCopyFullAnalysis}
+                  type="button"
+                >
+                  {fullAnalysisCopied ? (
+                    <Check className="size-4 text-emerald-500" />
+                  ) : (
+                    <ClipboardText className="size-4" />
+                  )}
+                </button>
+              </MessageAction>
+            )}
             {isLast ? (
               <MessageAction
                 tooltip="Regenerate"

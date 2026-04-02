@@ -120,6 +120,7 @@ import {
 import { runLangChainSupervisor } from "@/lib/clinical-agent/langchain"
 import { decryptHealthData, encryptHealthData, isEncryptionEnabled } from "@/lib/encryption"
 import { createClient } from "@/lib/supabase/server"
+import { getAnswerCache, setAnswerCache } from "@/lib/cache/retrieval-cache"
 
 export const maxDuration = 60
 const BENCH_STRICT_MODE = process.env.BENCH_STRICT_MODE === "true"
@@ -1863,11 +1864,11 @@ const STRICT_MIN_GUIDELINE_CITATIONS = 1
 const FANOUT_TARGET_SOURCES_BALANCED = 5
 const FANOUT_TARGET_SOURCES_FRESH = 6
 const FANOUT_SOURCE_DIVERSITY_FLOOR = 3
-const FANOUT_PER_TOOL_TIMEOUT_MS = 18_000
-const FANOUT_TOTAL_BUDGET_MS = 28_000
-const FANOUT_TOTAL_BUDGET_FRESH_MS = 34_000
-const FANOUT_MAX_TOOL_STEPS = 12
-const FANOUT_MAX_TOOL_STEPS_FRESH = 14
+const FANOUT_PER_TOOL_TIMEOUT_MS = 8_000
+const FANOUT_TOTAL_BUDGET_MS = 14_000
+const FANOUT_TOTAL_BUDGET_FRESH_MS = 18_000
+const FANOUT_MAX_TOOL_STEPS = 6
+const FANOUT_MAX_TOOL_STEPS_FRESH = 8
 const ENABLE_GUIDELINE_DIAGNOSTICS = process.env.GUIDELINE_DIAGNOSTICS === "true"
 
 function logGuidelineDiagnostics(event: string, payload: Record<string, unknown>) {
@@ -2027,6 +2028,30 @@ function mergeCitationVisuals(
   }
 }
 
+function normalizeTitleForDedup(title: string | undefined | null): string {
+  if (!title) return ""
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
+}
+
+function titleSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0
+  const na = normalizeTitleForDedup(a)
+  const nb = normalizeTitleForDedup(b)
+  if (na === nb) return 1
+  if (na.length === 0 || nb.length === 0) return 0
+  const tokensA = new Set(na.split(" ").filter(t => t.length > 2))
+  const tokensB = new Set(nb.split(" ").filter(t => t.length > 2))
+  if (tokensA.size === 0 || tokensB.size === 0) return 0
+  let overlap = 0
+  for (const t of tokensA) if (tokensB.has(t)) overlap++
+  return (2 * overlap) / (tokensA.size + tokensB.size)
+}
+
 function dedupeAndReindexCitations(citations: EvidenceCitation[]): EvidenceCitation[] {
   const citationMetadataScore = (citation: EvidenceCitation): number => {
     let score = 0
@@ -2053,18 +2078,12 @@ function dedupeAndReindexCitations(citations: EvidenceCitation[]): EvidenceCitat
     }
     return score
   }
+
   const deduped = new Map<string, EvidenceCitation>()
-  citations.forEach((citation) => {
-    const normalizedCitation: EvidenceCitation = {
-      ...citation,
-      sourceId: buildEvidenceSourceId(citation),
-    }
-    const key =
-      normalizedCitation.sourceId ||
-      normalizedCitation.pmid ||
-      normalizedCitation.doi ||
-      normalizedCitation.url ||
-      `${normalizedCitation.title || "untitled"}:${normalizedCitation.journal || "unknown"}`
+  const doiIndex = new Map<string, string>()
+  const titleIndex = new Map<string, string>()
+
+  const mergeInto = (key: string, normalizedCitation: EvidenceCitation) => {
     const existing = deduped.get(key)
     if (!existing) {
       deduped.set(key, normalizedCitation)
@@ -2078,6 +2097,44 @@ function dedupeAndReindexCitations(citations: EvidenceCitation[]): EvidenceCitat
     } else {
       deduped.set(key, { ...normalizedCitation, ...existing, ...mergedVisuals, sourceId: key })
     }
+  }
+
+  citations.forEach((citation) => {
+    const normalizedCitation: EvidenceCitation = {
+      ...citation,
+      sourceId: buildEvidenceSourceId(citation),
+    }
+    const key =
+      normalizedCitation.sourceId ||
+      normalizedCitation.pmid ||
+      normalizedCitation.doi ||
+      normalizedCitation.url ||
+      `${normalizedCitation.title || "untitled"}:${normalizedCitation.journal || "unknown"}`
+
+    // DOI-based dedup: merge if same DOI already seen under a different key
+    const doi = normalizedCitation.doi?.trim().toLowerCase()
+    if (doi) {
+      const existingKeyForDoi = doiIndex.get(doi)
+      if (existingKeyForDoi && existingKeyForDoi !== key) {
+        mergeInto(existingKeyForDoi, normalizedCitation)
+        return
+      }
+      doiIndex.set(doi, key)
+    }
+
+    // Title similarity dedup: merge if a very similar title exists
+    const normTitle = normalizeTitleForDedup(normalizedCitation.title)
+    if (normTitle.length > 20) {
+      for (const [existingTitle, existingKey] of titleIndex) {
+        if (existingKey !== key && titleSimilarity(normTitle, existingTitle) > 0.85) {
+          mergeInto(existingKey, normalizedCitation)
+          return
+        }
+      }
+      titleIndex.set(normTitle, key)
+    }
+
+    mergeInto(key, normalizedCitation)
   })
   return Array.from(deduped.values()).map((citation, index) => ({
     ...citation,
@@ -2271,7 +2328,7 @@ function ensureGuidelineCitations(
 
 function encodeEvidenceCitationsHeader(
   citations: EvidenceCitation[],
-  maxEncodedLength: number = 12000
+  maxEncodedLength: number = 20000
 ): string | null {
   if (!Array.isArray(citations) || citations.length === 0) return null
 
@@ -4024,20 +4081,26 @@ export async function POST(req: Request) {
     const studyGraphService = new StudyGraphService()
     const studyPlannerService = new StudyPlannerService()
     const studyReviewService = new StudyReviewService()
-    const webSearchPreflightPromise = shouldRunWebSearchPreflight
-      ? runWithTimeBudget<Awaited<ReturnType<typeof searchWeb>> | null>(
-          "WEB_SEARCH_PREFLIGHT",
-          async () =>
-            searchWeb(queryText, {
-              maxResults: 4,
-              timeoutMs: FANOUT_PER_TOOL_TIMEOUT_MS,
-              retries: 0,
-              medicalOnly: clinicianRoleFromResolvedRole,
-            }),
-          Math.min(FANOUT_PER_TOOL_TIMEOUT_MS + 1_000, fanoutTotalBudgetMs),
-          null
-        )
-      : Promise.resolve(null)
+    // L3 answer cache: short-circuit if we have a recent answer for this exact query
+    let l3CacheHit: { answer: string; citations: EvidenceCitation[] } | null = null
+    if (shouldRunEvidenceSynthesis && queryText.length > 0) {
+      try {
+        const cachedAnswer = await getAnswerCache(queryText, effectiveModel)
+        if (cachedAnswer && cachedAnswer.answer && cachedAnswer.answer.length > 80) {
+          const ageMs = Date.now() - (cachedAnswer.cachedAt || 0)
+          if (ageMs < 18 * 60 * 60 * 1000) {
+            l3CacheHit = {
+              answer: cachedAnswer.answer,
+              citations: (cachedAnswer.citations || []) as EvidenceCitation[],
+            }
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Let the model invoke web search lazily during streaming instead of
+    // blocking the initial response on a speculative preflight crawl.
+    const webSearchPreflightPromise = Promise.resolve<Awaited<ReturnType<typeof searchWeb>> | null>(null)
 
     const [evidenceContextResult, uploadContextResult, webSearchPreflight, studyGraphNodeContext] = await Promise.all([
       shouldRunEvidenceSynthesis
@@ -4046,18 +4109,19 @@ export async function POST(req: Request) {
             async () =>
               synthesizeEvidence({
                 query: queryText,
-                maxResults: 12,
+                maxResults: 20,
                 minEvidenceLevel: minEvidenceLevelForQuery,
-                candidateMultiplier: 6,
+                candidateMultiplier: 4,
                 enableRerank: true,
                 queryExpansion: true,
                 minMedicalConfidence: 0.25,
-                forceEvidence: queryText.trim().length >= 8,
+                forceEvidence:
+                  evidenceSeekingIntent || freshEvidenceIntent || Boolean(clinicianRoleFromResolvedRole),
               }).catch((err) => {
                 console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", err)
                 return null
               }),
-            3500,
+            1800,
             null
           )
         : Promise.resolve(null),
@@ -4693,24 +4757,23 @@ export async function POST(req: Request) {
     } | null = null
     const inlineEvidenceFigureRequested =
       finalEnableEvidence && wantsInlineEvidenceFigure(queryText)
-    const explicitReferenceCitations =
+    const [explicitReferenceCitations, pmcOpenAccessReviewCitations] =
       finalEnableEvidence && queryText.length > 0
-        ? await runWithTimeBudget(
-            "EXPLICIT_REFERENCE_SEED",
-            () => fetchExplicitReferenceCitations(queryText),
-            1600,
-            [] as EvidenceCitation[]
-          )
-        : []
-    const pmcOpenAccessReviewCitations =
-      finalEnableEvidence && queryText.length > 0
-        ? await runWithTimeBudget(
-            "PMC_OPEN_ACCESS_REVIEW_SEED",
-            () => fetchPmcOpenAccessReviewCitations(queryText),
-            3800,
-            [] as EvidenceCitation[]
-          )
-        : []
+        ? await Promise.all([
+            runWithTimeBudget(
+              "EXPLICIT_REFERENCE_SEED",
+              () => fetchExplicitReferenceCitations(queryText),
+              1200,
+              [] as EvidenceCitation[]
+            ),
+            runWithTimeBudget(
+              "PMC_OPEN_ACCESS_REVIEW_SEED",
+              () => fetchPmcOpenAccessReviewCitations(queryText),
+              1800,
+              [] as EvidenceCitation[]
+            ),
+          ])
+        : [[] as EvidenceCitation[], [] as EvidenceCitation[]]
     const preferredInlineVisualSourceIds = new Set(
       [...explicitReferenceCitations, ...pmcOpenAccessReviewCitations].map((citation) =>
         buildEvidenceSourceId(citation)
@@ -4777,10 +4840,10 @@ export async function POST(req: Request) {
               let candidates: EvidenceCitation[] = []
               const minBlockingQueries = shouldUseBroadEvidenceFanout ? Math.min(3, parityQueries.length) : 1
               for (const [parityIndex, parityQuery] of parityQueries.entries()) {
-                if (candidates.length >= 8) break
+                if (candidates.length >= 14) break
                 const results = await searchMedicalEvidence({
                   query: parityQuery,
-                  maxResults: 8,
+                  maxResults: 14,
                   minEvidenceLevel: Math.max(5, minEvidenceLevelForQuery),
                 })
                 candidates = dedupeAndReindexCitations([
@@ -4796,7 +4859,7 @@ export async function POST(req: Request) {
                 const fallbackSeed = parityQueries[0] || queryText
                 const expandedResults = await searchMedicalEvidence({
                   query: `${fallbackSeed} clinical trial evidence guideline summaries`,
-                  maxResults: 8,
+                  maxResults: 14,
                   minEvidenceLevel: Math.max(5, minEvidenceLevelForQuery),
                 })
                 candidates = dedupeAndReindexCitations([
@@ -4929,6 +4992,19 @@ export async function POST(req: Request) {
     if (evidenceContext?.shouldUseEvidence && evidenceContext.context.citations.length > 0) {
       effectiveSystemPrompt = buildEvidenceSystemPrompt(effectiveSystemPrompt, evidenceContext.context)
     }
+
+    // Patient context: extract demographics and clinical details from conversation
+    try {
+      const { extractPatientContext, buildPatientContextPrompt } = await import("@/lib/patient-context")
+      const patientMsgs = messages
+        .filter(m => typeof m.content === "string")
+        .map(m => ({ role: m.role, content: m.content as string }))
+      const patientCtx = extractPatientContext(patientMsgs)
+      const patientPrompt = buildPatientContextPrompt(patientCtx)
+      if (patientPrompt) {
+        effectiveSystemPrompt += patientPrompt
+      }
+    } catch { /* non-fatal */ }
 
     const attachmentContext = await runWithTimeBudget(
       "ATTACHMENT_CONTEXT_PREVIEW",
@@ -5272,14 +5348,16 @@ export async function POST(req: Request) {
       chembl: ["pubmed", "scholar_gateway"],
       biorxiv: ["pubmed", "scholar_gateway"],
       scholar_gateway: ["pubmed", "guideline"],
-      guideline: ["pubmed", "clinical_trials"],
+      guideline: ["pubmed"],
       clinical_trials: ["pubmed", "guideline"],
       synapse: ["scholar_gateway", "pubmed"],
       benchling: ["scholar_gateway", "pubmed"],
       biorender: ["scholar_gateway", "pubmed"],
       cms_coverage: ["guideline", "pubmed"],
       npi_registry: ["cms_coverage", "pubmed"],
-      pubmed: ["guideline", "clinical_trials"],
+      pubmed: ["guideline"],
+      rxnorm: ["openfda", "pubmed"],
+      openfda: ["rxnorm", "pubmed"],
     }
 
     const CONNECTOR_WEB_SCOPE_HINT: Partial<Record<ClinicalConnectorId, string>> = {
@@ -5311,6 +5389,8 @@ export async function POST(req: Request) {
         cms_coverage: "coverage_policy",
         chembl: "chemical_database",
         benchling: "lab_workflow",
+        rxnorm: "rxnorm",
+        openfda: "openfda",
       }
       return map[connectorId]
     }
@@ -5468,6 +5548,8 @@ export async function POST(req: Request) {
       "bioRxivSearch",
       "webSearch",
       "uploadContextSearch",
+      "rxnormInteractionSearch",
+      "openfdaDrugLabelSearch",
     ])
 
     const countToolResultRecords = (result: unknown): number => {
@@ -5510,6 +5592,8 @@ export async function POST(req: Request) {
         bioRxivSearch: "bioRxiv",
         webSearch: "Web Search",
         uploadContextSearch: "Upload Context",
+        rxnormInteractionSearch: "RxNorm Interactions",
+        openfdaDrugLabelSearch: "OpenFDA Drug Labels",
       }
       const sourceLabel = sourceLabelByTool[toolName] || "primary source"
       const noSignalReason = `No direct matches found in ${sourceLabel}. Attempting query expansion...`
@@ -5624,7 +5708,10 @@ export async function POST(req: Request) {
             description:
               "Search user-uploaded documents with page-aware and topic-aware retrieval modes.",
             parameters: z.object({
-              query: z.string().min(1).describe("Query to search within uploaded documents"),
+              query: z
+                .string()
+                .default("")
+                .describe("Optional query to search within uploaded documents. May be empty for page/range lookups."),
               // Accepts either a UUID or a human label; non-UUID values are safely ignored.
               uploadId: z.string().min(1).optional().describe("Optional upload identifier to scope retrieval"),
               mode: z
@@ -6309,7 +6396,7 @@ export async function POST(req: Request) {
             },
           }),
           guidelineSearch: tool({
-            description: "Search guideline-like sources (NICE if configured, plus Europe PMC guideline records).",
+            description: "Search guideline-like sources from the pre-indexed local corpus and live adapters.",
             parameters: z.object({
               query: z.string().min(3).describe("Clinical guideline query"),
               maxResults: z.number().int().min(1).max(10).default(6),
@@ -6319,165 +6406,156 @@ export async function POST(req: Request) {
                 ? Math.max(maxResults, 8)
                 : maxResults
               const startedAt = performance.now()
+
+              // Fast path: search local pre-indexed guideline corpus first.
+              // This avoids the slow live-adapter cascade (4 variants × 5 regions × adapters = 60 calls).
+              let localResults: any[] = []
+              try {
+                const { searchMedicalEvidence } = await import("@/lib/evidence/search")
+                const localEvidence = await searchMedicalEvidence({
+                  query: query.includes("guideline") ? query : `${query} guideline`,
+                  maxResults: strictMaxResults,
+                  studyTypes: ["Guideline", "Practice Guideline", "Consensus"],
+                  enableRerank: true,
+                  queryExpansion: true,
+                })
+                localResults = localEvidence
+                  .filter((r) =>
+                    /guideline|consensus|recommendation|statement|practice/i.test(
+                      `${r.title || ""} ${r.study_type || ""} ${r.content || ""}`
+                    )
+                  )
+                  .slice(0, strictMaxResults)
+              } catch {
+                // Local search failed; continue to live fallback
+              }
+
+              const localMs = Math.round(performance.now() - startedAt)
+
+              // If local corpus delivered enough guideline results, return immediately
+              if (localResults.length >= 2) {
+                const results = localResults.map((r) => ({
+                  title: r.title || "Untitled guideline",
+                  source: r.journal_name || "Medical Evidence Index",
+                  region: null,
+                  date: r.publication_year ? String(r.publication_year) : null,
+                  url: r.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${r.pmid}` : null,
+                  summary: (r.content || "").slice(0, 400),
+                  evidenceLevel: r.evidence_level ?? 2,
+                  studyType: r.study_type || "Guideline",
+                }))
+                const provenance = localResults.map((r) =>
+                  buildProvenance({
+                    id: r.id || `local:${r.pmid || r.title}`,
+                    sourceType: "guideline" as any,
+                    sourceName: r.journal_name || "Local Guideline Index",
+                    title: r.title || "",
+                    url: r.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${r.pmid}` : null,
+                    publishedAt: r.publication_year ? `${r.publication_year}-01-01` : null,
+                    region: null,
+                    journal: r.journal_name || null,
+                    doi: r.doi || null,
+                    pmid: r.pmid || null,
+                    evidenceLevel: r.evidence_level ?? 2,
+                    studyType: r.study_type || "Guideline",
+                    snippet: (r.content || "").slice(0, 300),
+                  })
+                )
+                const payload = {
+                  results,
+                  sourcesUsed: ["Local Guideline Index"],
+                  provenance,
+                  warnings: [] as string[],
+                  attemptedQueries: [query],
+                  strategy: {
+                    directMatches: results.length,
+                    broadenedMatches: 0,
+                    secondaryMatches: 0,
+                    fallbackTriggered: false,
+                    localFastPath: true,
+                    localMs,
+                  },
+                }
+                logGuidelineDiagnostics("guideline_tool_execute", {
+                  query,
+                  strictMaxResults,
+                  benchStrictMode,
+                  elapsedMs: localMs,
+                  resultCount: results.length,
+                  provenanceCount: provenance.length,
+                  strategy: payload.strategy,
+                  steps: [{ step: "local_fast_path", query, source: "medical_evidence", resultCount: results.length }],
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              }
+
+              // Slow path: live adapter cascade (only when local corpus has <2 guideline results)
               const mergedByKey = new Map<string, any>()
               const mergedProvenanceByKey = new Map<string, SourceProvenance>()
               const sourcesUsed = new Set<string>()
               const attemptedQueries: string[] = []
-              const stepDiagnostics: Array<{
-                step: "specific_title" | "broader_semantic" | "secondary_repository"
-                query: string
-                source: string
-                resultCount: number
-              }> = []
 
-              const ingestGuidelinePayload = (
-                payload: {
-                  results: any[]
-                  provenance: SourceProvenance[]
-                  sourcesUsed: string[]
-                },
-                step: "specific_title" | "broader_semantic" | "secondary_repository",
-                queryUsed: string,
-                source: string
-              ) => {
-                attemptedQueries.push(queryUsed)
-                stepDiagnostics.push({
-                  step,
-                  query: queryUsed,
-                  source,
-                  resultCount: payload.results.length,
-                })
-                payload.sourcesUsed.forEach((item) => sourcesUsed.add(item))
-                payload.results.forEach((item) => {
-                  const key = `${item.url || ""}|${String(item.title || "").toLowerCase()}`
-                  if (!mergedByKey.has(key) && mergedByKey.size < strictMaxResults) {
-                    mergedByKey.set(key, item)
-                  }
-                })
-                payload.provenance.forEach((item) => {
-                  const key = item.id || `${item.url || ""}|${String(item.title || "").toLowerCase()}`
-                  if (!mergedProvenanceByKey.has(key)) {
-                    mergedProvenanceByKey.set(key, item)
-                  }
-                })
-              }
-
-              const toGuidelineLikeFromConnector = (payload: ConnectorSearchPayload) => {
-                const results = payload.results.map((record) => ({
-                  title: record.title,
-                  source: record.sourceLabel || "Secondary repository",
-                  region: null,
-                  date: record.publishedAt,
-                  url: record.url,
-                  summary: record.snippet,
-                  evidenceLevel:
-                    typeof record.metadata?.evidenceLevel === "number"
-                      ? (record.metadata.evidenceLevel as number)
-                      : 3,
-                  studyType:
-                    typeof record.metadata?.studyType === "string"
-                      ? (record.metadata.studyType as string)
-                      : "Guideline summary",
-                }))
-                return {
-                  results,
-                  provenance: payload.provenance,
-                  sourcesUsed: Array.from(new Set(results.map((item) => item.source))).filter(
-                    (item): item is string => Boolean(item)
-                  ),
+              // Seed with any local results we did find
+              localResults.forEach((r) => {
+                const key = `${r.pmid || ""}|${(r.title || "").toLowerCase()}`
+                if (!mergedByKey.has(key)) {
+                  mergedByKey.set(key, {
+                    title: r.title || "",
+                    source: r.journal_name || "Local Index",
+                    region: null,
+                    date: r.publication_year ? String(r.publication_year) : null,
+                    url: r.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${r.pmid}` : null,
+                    summary: (r.content || "").slice(0, 400),
+                    evidenceLevel: r.evidence_level ?? 2,
+                    studyType: r.study_type || "Guideline",
+                  })
+                  sourcesUsed.add("Local Guideline Index")
                 }
-              }
+              })
 
-              // Step A: direct title/guideline search in primary index.
-              const primary = await searchGuidelines(query, strictMaxResults, "US")
-              ingestGuidelinePayload(primary, "specific_title", query, "guideline_index")
-              const directMatches = primary.results.length
-
-              // Step B: broader semantic expansion when direct search misses.
-              let broadenedMatches = 0
-              if (directMatches === 0) {
-                const expandedQueries = buildGuidelineEscalationQueries(query)
-                for (const expandedQuery of expandedQueries) {
-                  if (mergedByKey.size >= strictMaxResults) break
-                  if (!expandedQuery || expandedQuery.toLowerCase() === query.toLowerCase()) {
-                    continue
-                  }
-                  const expandedResult = await searchGuidelines(
-                    expandedQuery,
-                    strictMaxResults,
-                    "GLOBAL"
-                  )
-                  ingestGuidelinePayload(
-                    expandedResult,
-                    "broader_semantic",
-                    expandedQuery,
-                    "guideline_index"
-                  )
-                }
-                broadenedMatches = Math.max(0, mergedByKey.size - directMatches)
-              }
-
-              // Step C: secondary repositories for guideline summaries.
-              let secondaryMatches = 0
-              if (mergedByKey.size === 0) {
-                const secondarySummaryQuery = `${query} guideline summaries`
-                const scholarPayload = await executeConnectorWithFallback({
-                  connectorId: "scholar_gateway",
-                  query: secondarySummaryQuery,
-                  maxResults: strictMaxResults,
-                  medicalOnly: true,
-                })
-                const scholarGuidelineLike = toGuidelineLikeFromConnector(scholarPayload)
-                ingestGuidelinePayload(
-                  scholarGuidelineLike,
-                  "secondary_repository",
-                  secondarySummaryQuery,
-                  "scholar_gateway"
+              // Run live search with a tight 8s timeout — single variant, single region
+              try {
+                const timeoutPromise = new Promise<void>((_, reject) =>
+                  setTimeout(() => reject(new Error("guideline_live_timeout")), 8_000)
                 )
-
-                const pubmedPayload = await executeConnectorWithFallback({
-                  connectorId: "pubmed",
-                  query: secondarySummaryQuery,
-                  maxResults: strictMaxResults,
-                  medicalOnly: true,
-                })
-                const pubmedGuidelineLike = toGuidelineLikeFromConnector(pubmedPayload)
-                ingestGuidelinePayload(
-                  pubmedGuidelineLike,
-                  "secondary_repository",
-                  secondarySummaryQuery,
-                  "pubmed"
-                )
-                secondaryMatches = Math.max(0, mergedByKey.size)
-              } else {
-                secondaryMatches = Math.max(0, mergedByKey.size - directMatches - broadenedMatches)
+                const livePromise = (async () => {
+                  const primary = await searchGuidelines(query, strictMaxResults, "US")
+                  attemptedQueries.push(query)
+                  primary.sourcesUsed.forEach((s) => sourcesUsed.add(s))
+                  primary.results.forEach((item) => {
+                    const key = `${item.url || ""}|${String(item.title || "").toLowerCase()}`
+                    if (!mergedByKey.has(key) && mergedByKey.size < strictMaxResults) {
+                      mergedByKey.set(key, item)
+                    }
+                  })
+                  primary.provenance.forEach((item) => {
+                    const key = item.id || `${item.url || ""}|${String(item.title || "").toLowerCase()}`
+                    if (!mergedProvenanceByKey.has(key)) mergedProvenanceByKey.set(key, item)
+                  })
+                })()
+                await Promise.race([livePromise, timeoutPromise])
+              } catch {
+                // Live search timed out or failed — we still have local results
               }
 
               const mergedResults = Array.from(mergedByKey.values()).slice(0, strictMaxResults)
-              const mergedProvenance = Array.from(mergedProvenanceByKey.values()).slice(
-                0,
-                strictMaxResults * 2
-              )
-              const fallbackTriggered = directMatches === 0
-              const noSignalMessage =
-                "No direct guideline PDF matches in current index; checking secondary medical databases."
-              const warnings = [
-                ...(fallbackTriggered ? [noSignalMessage] : []),
-                ...(mergedResults.length === 0
-                  ? ["Guideline Search: No direct matches found; pivoting to clinical trials."]
-                  : []),
-              ]
+              const mergedProvenance = Array.from(mergedProvenanceByKey.values()).slice(0, strictMaxResults * 2)
               const payload = {
                 results: mergedResults,
                 sourcesUsed: Array.from(sourcesUsed),
                 provenance: mergedProvenance,
-                warnings,
+                warnings: mergedResults.length === 0
+                  ? ["Guideline Search: No matches found in local corpus or live sources."]
+                  : [],
                 attemptedQueries: Array.from(new Set(attemptedQueries)),
                 strategy: {
-                  directMatches,
-                  broadenedMatches,
-                  secondaryMatches,
-                  fallbackTriggered,
+                  directMatches: mergedResults.length,
+                  broadenedMatches: 0,
+                  secondaryMatches: 0,
+                  fallbackTriggered: localResults.length < 2,
+                  localFastPath: false,
+                  localMs,
                 },
               }
               logGuidelineDiagnostics("guideline_tool_execute", {
@@ -6487,9 +6565,7 @@ export async function POST(req: Request) {
                 elapsedMs: Math.round(performance.now() - startedAt),
                 resultCount: payload.results.length,
                 provenanceCount: payload.provenance.length,
-                attemptedQueries: payload.attemptedQueries,
                 strategy: payload.strategy,
-                steps: stepDiagnostics,
               })
               pushRuntimeEvidenceCitations(payload)
               return payload
@@ -6671,6 +6747,42 @@ export async function POST(req: Request) {
                   query,
                   maxResults,
                   medicalOnly: false,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            rxnormInteractionSearch: tool({
+              description:
+                "Look up drug-drug interactions using the NIH RxNorm/DrugBank database. Use when asked about medication interactions, DDIs, or drug safety between multiple medications.",
+              parameters: z.object({
+                query: z.string().min(2).describe("Drug name(s) to check interactions for, e.g. 'warfarin and aspirin'"),
+                maxResults: z.number().int().min(1).max(15).default(10),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await executeConnectorWithFallback({
+                  connectorId: "rxnorm",
+                  query,
+                  maxResults,
+                  medicalOnly: true,
+                })
+                pushRuntimeEvidenceCitations(payload)
+                return payload
+              },
+            }),
+            openfdaDrugLabelSearch: tool({
+              description:
+                "Search FDA-approved drug labels for prescribing information including indications, dosage, contraindications, boxed warnings, and adverse reactions. Use for drug prescribing questions.",
+              parameters: z.object({
+                query: z.string().min(2).describe("Drug name to look up FDA label for"),
+                maxResults: z.number().int().min(1).max(5).default(3),
+              }),
+              execute: async ({ query, maxResults }) => {
+                const payload = await executeConnectorWithFallback({
+                  connectorId: "openfda",
+                  query,
+                  maxResults,
+                  medicalOnly: true,
                 })
                 pushRuntimeEvidenceCitations(payload)
                 return payload
@@ -7076,7 +7188,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 - IMPORTANT: If a tool returns irrelevant records, explicitly discard them and retry with a narrower query before citing evidence.
 - IMPORTANT: Do not append manual references/bibliography sections; keep citations inline in the answer body only.
 - CITATION DENSITY: For medical content, place citations after each factual sentence whenever evidence exists; avoid bundling multiple distinct claims under one citation.
-- CITATION FORMAT: Use canonical source-id citations in the form [CITE_<sourceId>] whenever possible (example: [CITE_pmid:1578956]). Source IDs are listed in the evidence context.
+- CITATION FORMAT: Preferred format is numeric bracket [n] matching the evidence index (e.g. [1], [2,3]). Alternative: [CITE_<sourceId>] using the EXACT sourceId from the evidence list. Do NOT abbreviate or truncate sourceId strings.
 - DIAGRAM/CODE CITATIONS: Never place citation markers inside fenced code blocks (including \`\`\`chart and \`\`\`mermaid). Put citations in surrounding prose only.
 - CHART OUTPUT: If you have structured numeric trend data (sleep stages, labs over time, activity, readiness, HR/HRV), include a fenced \`\`\`chart block containing JSON with this shape: { "type": "line|bar|area|stacked-bar|composed", "title": "...", "subtitle": "...", "source": "...", "xKey": "label", "series": [{ "key": "valueKey", "label": "Legend Label", "color": "#HEX" }], "data": [{ "label": "Mon", "valueKey": 7.2 }] }.
 - MULTI-CHART OUTPUT: If the data contains multiple distinct numeric groups/trajectories, emit either (a) multiple fenced \`\`\`chart blocks, or (b) one fenced \`\`\`chart block with JSON shape { "charts": [<chartSpec>, <chartSpec>, ...] }. Only emit charts when data quality is sufficient; otherwise provide normal text and call out missing structure.`
@@ -7093,9 +7205,9 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
     if (ENABLE_STRICT_CITATION_CONTRACT && finalEnableEvidence) {
       effectiveSystemPrompt += `\n\nSTRICT CITATION CONTRACT:
 - Never output unresolved placeholder tokens such as [CITE_PLACEHOLDER_0].
-- Use [CITE_<sourceId>] as the primary citation marker format.
-- Numeric bracket citations [n] are allowed only as compatibility fallback when source-id tokens are unavailable.
-- If no evidence citations are available for a claim, omit citation markers for that claim instead of fabricating references.`
+- Preferred citation format: numeric bracket [n] matching the evidence index (e.g. [1], [2,3]). Alternative: [CITE_<sourceId>] using the EXACT sourceId string from the evidence list.
+- If you lack evidence for a claim, rewrite it using the closest available evidence or state it as clinical context without a citation marker. NEVER add disclaimers like "(no citation in provided sources)" or "(not directly addressed in provided sources)".
+- DO NOT fabricate citations or reference sources not in the provided evidence list.`
     }
 
     if (finalEnableEvidence && explicitReferenceCitations.length > 0) {
@@ -7606,6 +7718,22 @@ Return only the revised answer body with inline citations.`,
                 console.log(`📚 [CITATION] Temp chat - ${citationsToSave.length} citations extracted but not saved to DB`)
               }
 
+              // L3 answer cache: write-behind for repeat queries
+              if (
+                shouldRunEvidenceSynthesis &&
+                citationsToSave.length > 0 &&
+                responseText?.trim().length > 80
+              ) {
+                setAnswerCache(queryText, effectiveModel, {
+                  answer: responseText,
+                  citations: citationsToSave,
+                  modelId: effectiveModel,
+                  cachedAt: Date.now(),
+                }).catch((cacheErr) =>
+                  console.warn("[L3 CACHE] Write failed:", cacheErr)
+                )
+              }
+
               // Increment message count after successful save
               try {
                 await incrementMessageCount({ supabase, userId })
@@ -8023,13 +8151,13 @@ Return only the revised answer body with inline citations.`,
                 return rightExplicit - leftExplicit
               })
             : streamPool
-        evidenceCitationsForStream = dedupeAndReindexCitations(prioritizedStreamPool).slice(0, 12)
+        evidenceCitationsForStream = dedupeAndReindexCitations(prioritizedStreamPool).slice(0, 20)
         const journalVisualTimeoutMs = inlineEvidenceFigureRequested ? 7000 : 2600
         const maxCitationsToEnrich = inlineEvidenceFigureRequested
           ? preferredInlineVisualSourceIds.size > 0
-            ? 1
-            : 2
-          : 4
+            ? 2
+            : 3
+          : 6
         evidenceCitationsForStream = await runWithTimeBudget(
           "EVIDENCE_JOURNAL_VISUALS",
           async () =>

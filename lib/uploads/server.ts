@@ -171,6 +171,10 @@ const DEFAULT_UPLOAD_CONTEXT_NEIGHBORS = 1
 const DEFAULT_UPLOAD_CONTEXT_BUDGET_MS = 2200
 const QUERY_EMBEDDING_TIMEOUT_MS = 900
 const MAX_UPLOAD_IDS_PER_SEARCH = 3
+const EMBEDDING_SIGN_SKETCH_METADATA_KEY = "embeddingSignSketchV1"
+const MIN_COMPRESSED_PREFILTER_CANDIDATES = 96
+const MAX_COMPRESSED_PREFILTER_CANDIDATES = 160
+const COMPRESSED_PREFILTER_MULTIPLIER = 8
 
 type UploadChunkRow = {
   id: string
@@ -1111,6 +1115,160 @@ function scoreChunkCaptionOverlap(chunkTerms: Set<string>, caption: string | nul
   return matches / terms.length
 }
 
+function normalizeAssetContextText(value: string | null | undefined): string {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function extractAssetContextWindow(
+  sourceText: string,
+  start: number | null,
+  end: number | null,
+  windowChars = 280
+): string {
+  const normalized = normalizeExtractedText(sourceText)
+  if (!normalized) return ""
+  if (
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    end < start
+  ) {
+    return normalized.slice(0, windowChars)
+  }
+  const safeStart = Math.max(0, Math.floor(start))
+  const safeEnd = Math.min(normalized.length, Math.ceil(end))
+  const contextStart = Math.max(0, safeStart - Math.floor(windowChars * 0.45))
+  const contextEnd = Math.min(normalized.length, safeEnd + Math.floor(windowChars * 0.55))
+  return normalized.slice(contextStart, contextEnd).trim()
+}
+
+function inferAssetFigureTypeHint(input: {
+  label: string | null
+  caption: string | null
+  contextText: string | null
+}): string | null {
+  const haystack = `${input.label || ""} ${input.caption || ""} ${input.contextText || ""}`.toLowerCase()
+  if (!haystack.trim()) return null
+  if (/\b(flow diagram|consort|study flow|enrollment|screened|allocated)\b/.test(haystack)) return "flowchart"
+  if (/\b(forest plot|hazard ratio|confidence interval|meta-analysis|subgroup)\b/.test(haystack)) return "forest_plot"
+  if (/\b(kaplan[-\s]?meier|survival curve|progression-free survival|overall survival)\b/.test(haystack)) return "survival_plot"
+  if (/\b(schematic|mechanism|pathway|immune cycle|cancer-immunity cycle|overview|cartoon|model)\b/.test(haystack)) {
+    return "schematic"
+  }
+  if (/\b(chart|graph|plot)\b/.test(haystack)) return "chart"
+  if (/\b(table|tabular)\b/.test(haystack)) return "table"
+  if (/\b(mri|ct|pet|x-ray|histology|microscopy|stain|scan)\b/.test(haystack)) return "medical_image"
+  if (/\b(photo|image|illustration)\b/.test(haystack)) return "image"
+  return null
+}
+
+function tokenizeAssetSearchTerms(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+}
+
+function scoreTokenOverlap(queryTerms: Set<string>, text: string): number {
+  if (!text.trim() || queryTerms.size === 0) return 0
+  const textTerms = new Set(tokenizeAssetSearchTerms(text))
+  if (textTerms.size === 0) return 0
+  let matches = 0
+  queryTerms.forEach((term) => {
+    if (textTerms.has(term)) matches += 1
+  })
+  return matches / Math.max(1, Math.min(queryTerms.size, 12))
+}
+
+function getAssetMetadataRecord(asset: PersistedUploadAssetRow): Record<string, unknown> {
+  return asset.metadata && typeof asset.metadata === "object" ? asset.metadata : {}
+}
+
+function getAssetContextText(asset: PersistedUploadAssetRow): string {
+  const metadata = getAssetMetadataRecord(asset)
+  return normalizeAssetContextText(
+    typeof metadata.contextText === "string"
+      ? metadata.contextText
+      : typeof metadata.nearbyText === "string"
+        ? metadata.nearbyText
+        : typeof metadata.captionContext === "string"
+          ? metadata.captionContext
+          : ""
+  )
+}
+
+function getAssetContextHeading(asset: PersistedUploadAssetRow): string {
+  const metadata = getAssetMetadataRecord(asset)
+  return normalizeAssetContextText(
+    typeof metadata.contextHeading === "string"
+      ? metadata.contextHeading
+      : typeof metadata.pageLabel === "string"
+        ? metadata.pageLabel
+        : ""
+  )
+}
+
+function getAssetFigureTypeHint(asset: PersistedUploadAssetRow): string {
+  const metadata = getAssetMetadataRecord(asset)
+  return normalizeAssetContextText(
+    typeof metadata.figureTypeHint === "string" ? metadata.figureTypeHint : ""
+  ).toLowerCase()
+}
+
+function rankVisualAssetsForQuery(input: {
+  query: string
+  chunkText?: string | null
+  assets: PersistedUploadAssetRow[]
+  preferPrimaryFigure?: boolean
+}): PersistedUploadAssetRow[] {
+  const normalizedQuery = input.query.toLowerCase()
+  const queryTerms = new Set(tokenizeAssetSearchTerms(input.query))
+  const chunkTerms = new Set(tokenizeAssetSearchTerms(String(input.chunkText || "")))
+  const mechanismIntent =
+    /\b(compare|comparison|versus|vs|difference|differentiate|mechanism|pathway|how|why|explain|overview|concept)\b/.test(
+      normalizedQuery
+    ) || /\bpd-?1\b/.test(normalizedQuery) || /\bctla-?4\b/.test(normalizedQuery)
+  const outcomesIntent =
+    /\b(survival|overall survival|progression|pfs|os|hazard ratio|response rate|efficacy|safety|toxicity|trial|meta-analysis|forest plot)\b/.test(
+      normalizedQuery
+    )
+
+  return [...input.assets]
+    .map((asset, index) => {
+      const contextText = getAssetContextText(asset)
+      const contextHeading = getAssetContextHeading(asset)
+      const figureTypeHint = getAssetFigureTypeHint(asset)
+      const labelCaptionText = `${asset.label || ""} ${asset.caption || ""}`
+      const queryScore =
+        scoreTokenOverlap(queryTerms, `${labelCaptionText} ${contextText} ${contextHeading}`) * 0.58
+      const chunkScore = scoreChunkCaptionOverlap(chunkTerms, asset.caption, asset.label) * 0.22
+      const headingScore = scoreTokenOverlap(queryTerms, contextHeading) * 0.14
+      let typeScore = 0
+      if (mechanismIntent && /schematic|flowchart|image/.test(figureTypeHint)) typeScore += 0.28
+      if (mechanismIntent && /forest_plot|survival_plot|chart|table/.test(figureTypeHint)) typeScore -= 0.22
+      if (outcomesIntent && /forest_plot|survival_plot|chart|table/.test(figureTypeHint)) typeScore += 0.18
+      if (input.preferPrimaryFigure && asset.asset_type === "preview") typeScore -= 0.08
+
+      const totalScore = queryScore + chunkScore + headingScore + typeScore
+      return {
+        asset,
+        score: totalScore,
+        sortOrder: asset.sort_order,
+        fallbackIndex: index,
+      }
+    })
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score
+      if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder
+      return left.fallbackIndex - right.fallbackIndex
+    })
+    .map((entry) => entry.asset)
+}
+
 function selectChunkFigureAssetIds(input: {
   chunkText: string
   chunkStart: number | null
@@ -1155,10 +1313,30 @@ function selectChunkFigureAssetIds(input: {
         }
       }
 
-      const captionScore = scoreChunkCaptionOverlap(chunkTerms, asset.caption, asset.label)
+      const contextText = getAssetContextText(asset)
+      const contextHeading = getAssetContextHeading(asset)
+      const figureTypeHint = getAssetFigureTypeHint(asset)
+      const captionScore = scoreChunkCaptionOverlap(
+        chunkTerms,
+        [asset.caption, contextText, contextHeading].filter(Boolean).join(" "),
+        asset.label
+      )
       const figureCueScore =
         /\b(figure|fig\.|chart|diagram|table|panel)\b/i.test(input.chunkText) ? 0.08 : 0
-      const score = offsetScore * 0.7 + captionScore * 0.22 + figureCueScore
+      const mechanismCueScore =
+        /\b(compare|comparison|versus|vs|difference|differentiate|mechanism|pathway|how|why|explain|overview|concept)\b/i.test(
+          input.chunkText
+        ) && /schematic|flowchart|image/.test(figureTypeHint)
+          ? 0.16
+          : 0
+      const penaltyScore =
+        /\b(forest_plot|survival_plot|chart|table)\b/.test(figureTypeHint) &&
+        /\b(compare|comparison|versus|vs|difference|differentiate|mechanism|pathway|how|why|explain|overview|concept)\b/i.test(
+          input.chunkText
+        )
+          ? -0.1
+          : 0
+      const score = offsetScore * 0.52 + captionScore * 0.28 + figureCueScore + mechanismCueScore + penaltyScore
 
       return {
         assetId,
@@ -1702,6 +1880,148 @@ function chunkSourceUnitNumber(row: UploadChunkRow) {
   return null
 }
 
+const BIT_COUNT_LOOKUP = Uint8Array.from(
+  Array.from({ length: 256 }, (_, value) => {
+    let count = 0
+    let current = value
+    while (current > 0) {
+      count += current & 1
+      current >>= 1
+    }
+    return count
+  })
+)
+
+function buildEmbeddingSignSketch(embedding: number[]): string {
+  const bytes = new Uint8Array(Math.ceil(embedding.length / 8))
+  for (let index = 0; index < embedding.length; index += 1) {
+    if ((embedding[index] ?? 0) >= 0) {
+      bytes[index >> 3] |= 1 << (index & 7)
+    }
+  }
+  return Buffer.from(bytes).toString("base64")
+}
+
+function decodeEmbeddingSignSketch(sketch: string): Uint8Array | null {
+  try {
+    const bytes = Buffer.from(sketch, "base64")
+    return bytes.length > 0 ? Uint8Array.from(bytes) : null
+  } catch {
+    return null
+  }
+}
+
+function getEmbeddingSignSketch(row: UploadChunkRow): string | null {
+  const stored = row.metadata?.[EMBEDDING_SIGN_SKETCH_METADATA_KEY]
+  if (typeof stored === "string" && stored.length > 0) {
+    return stored
+  }
+  if (Array.isArray(row.embedding) && row.embedding.length > 0) {
+    return buildEmbeddingSignSketch(row.embedding)
+  }
+  return null
+}
+
+function computeCompressedEmbeddingSimilarity(
+  querySketchBytes: Uint8Array,
+  candidateSketch: string,
+  dimensions: number
+): number | null {
+  const candidateBytes = decodeEmbeddingSignSketch(candidateSketch)
+  if (!candidateBytes || candidateBytes.length !== querySketchBytes.length) {
+    return null
+  }
+
+  let differingBits = 0
+  for (let index = 0; index < querySketchBytes.length; index += 1) {
+    differingBits += BIT_COUNT_LOOKUP[querySketchBytes[index] ^ candidateBytes[index]]
+  }
+
+  const comparedDimensions = Math.min(dimensions, querySketchBytes.length * 8)
+  if (comparedDimensions <= 0) return null
+
+  return 1 - (2 * differingBits) / comparedDimensions
+}
+
+function adaptiveCompressedPrefilterCap(candidateCount: number, topK: number) {
+  return Math.min(
+    candidateCount,
+    clamp(topK * COMPRESSED_PREFILTER_MULTIPLIER, 48, MAX_COMPRESSED_PREFILTER_CANDIDATES)
+  )
+}
+
+function computeUploadCandidateSignals(params: {
+  row: UploadChunkRow
+  queryTerms: string[]
+  activeTopicTerms: string[]
+  recentEvidenceIds: Set<string>
+  recentPages: Set<number>
+  intent: UploadContextSearchIntent
+  includeNeighborPages: number
+}): {
+  lexicalScore: number
+  qualityScore: number
+  bibliographyPenalty: number
+  pageIntentBoost: number
+  topicBoost: number
+  evidenceBoost: number
+  continuityBoost: number
+} {
+  const { row, queryTerms, activeTopicTerms, recentEvidenceIds, recentPages, intent, includeNeighborPages } =
+    params
+  const text = String(row.chunk_text ?? "")
+  const lexicalScore = computeLexicalOverlap(queryTerms, text)
+  const qualityScore = getChunkQualityScore(row)
+  const bibliographyPenalty = isLikelyBibliographyNoise(text) ? 0.24 : 0
+  const pageNumber = chunkSourceUnitNumber(row)
+  const topicBoost =
+    activeTopicTerms.length > 0 && computeLexicalOverlap(activeTopicTerms, text) > 0
+      ? 0.08
+      : 0
+  const evidenceBoost = recentEvidenceIds.has(row.id) ? 0.14 : 0
+  const continuityBoost =
+    pageNumber && recentPages.has(pageNumber)
+      ? 0.06
+      : 0
+
+  let pageIntentBoost = 0
+  if (intent.modeResolved === "page_lookup" && intent.page && pageNumber) {
+    if (pageNumber === intent.page) {
+      pageIntentBoost = 0.45
+    } else if (Math.abs(pageNumber - intent.page) <= includeNeighborPages) {
+      pageIntentBoost = 0.18
+    }
+  } else if (
+    intent.modeResolved === "range_lookup" &&
+    intent.pageStart &&
+    intent.pageEnd &&
+    pageNumber
+  ) {
+    const minPage = Math.min(intent.pageStart, intent.pageEnd)
+    const maxPage = Math.max(intent.pageStart, intent.pageEnd)
+    if (pageNumber >= minPage && pageNumber <= maxPage) {
+      pageIntentBoost = 0.34
+    } else if (
+      pageNumber >= minPage - includeNeighborPages &&
+      pageNumber <= maxPage + includeNeighborPages
+    ) {
+      pageIntentBoost = 0.14
+    }
+  } else if (intent.modeResolved === "hybrid" && pageNumber && recentPages.has(pageNumber)) {
+    pageIntentBoost = 0.12
+  }
+
+  return {
+    lexicalScore,
+    qualityScore,
+    bibliographyPenalty,
+    pageIntentBoost,
+    topicBoost,
+    evidenceBoost,
+    continuityBoost,
+  }
+}
+
 function inferFollowUpType(query: string): UploadTopicContext["followUpType"] {
   const normalized = query.toLowerCase()
   if (/\bnext page\b/.test(normalized)) return "next_page"
@@ -1737,6 +2057,158 @@ function tryReadImageDimensions(buffer: Buffer) {
   }
 }
 
+/**
+ * Extract embedded images from a PDF page using pdfjs-dist operator list.
+ * Captures the largest images per page (skips tiny icons/logos).
+ */
+async function extractPageFigures(
+  pageProxy: any,
+  pageNumber: number,
+  maxFigures: number,
+): Promise<ParsedUploadAsset[]> {
+  const figures: ParsedUploadAsset[] = []
+  if (maxFigures <= 0) return figures
+
+  try {
+    const ops = await pageProxy.getOperatorList()
+    const OPS = (await import("pdf-parse/lib/pdf.js/v1.10.100/build/pdf.js")).OPS
+
+    for (let i = 0; i < ops.fnArray.length && figures.length < maxFigures; i++) {
+      if (ops.fnArray[i] !== OPS?.paintImageXObject && ops.fnArray[i] !== OPS?.paintJpegXObject) {
+        continue
+      }
+
+      const imgName = ops.argsArray[i]?.[0]
+      if (!imgName) continue
+
+      try {
+        const imgData = await new Promise<any>((resolve, reject) => {
+          const handler = pageProxy.objs || pageProxy._transport?.objs
+          if (handler && typeof handler.get === "function") {
+            handler.get(imgName, resolve)
+          } else {
+            reject(new Error("no objs handler"))
+          }
+        })
+
+        if (!imgData) continue
+        const width = imgData.width || 0
+        const height = imgData.height || 0
+
+        // Skip tiny images (icons, decorative elements)
+        if (width < 80 || height < 80) continue
+        // Skip extremely narrow banners
+        if (width / Math.max(height, 1) > 8 || height / Math.max(width, 1) > 8) continue
+
+        const dataBytes = imgData.data
+        if (!dataBytes || dataBytes.length < 500) continue
+
+        // Convert raw RGBA data to a PNG via canvas-like encoding
+        // For server-side, we create a minimal PNG from the raw pixel data
+        const pngBuffer = encodeRawPixelsToPNG(dataBytes, width, height)
+        if (!pngBuffer || pngBuffer.length < 200) continue
+
+        figures.push({
+          assetType: "figure",
+          label: `Figure (Page ${pageNumber})`,
+          caption: undefined,
+          buffer: pngBuffer,
+          mimeType: "image/png",
+          width,
+          height,
+          metadata: {
+            provider: "pdf-parse-fallback",
+            pageNumber,
+            extractionMethod: "operatorList",
+          },
+        })
+      } catch {
+        // Individual image extraction can fail; continue with next
+      }
+    }
+  } catch {
+    // Operator list access not available in all pdf-parse builds
+  }
+
+  return figures
+}
+
+/**
+ * Minimal PNG encoder for raw RGBA pixel data.
+ * Avoids needing canvas or sharp for basic image extraction.
+ */
+function encodeRawPixelsToPNG(
+  data: Uint8Array | Buffer,
+  width: number,
+  height: number,
+): Buffer | null {
+  try {
+    // For large images, skip encoding to avoid memory issues
+    if (width * height > 4_000_000) return null
+
+    // Use zlib to create a valid PNG (simplified - no filtering for speed)
+    const { deflateSync } = require("zlib")
+
+    // Build raw pixel rows with filter byte (0 = None)
+    const channels = data.length / (width * height)
+    const useRGBA = channels >= 4
+    const rowSize = width * (useRGBA ? 4 : 3) + 1
+    const rawRows = Buffer.alloc(height * rowSize)
+
+    for (let y = 0; y < height; y++) {
+      rawRows[y * rowSize] = 0 // filter: None
+      for (let x = 0; x < width; x++) {
+        const srcIdx = (y * width + x) * Math.floor(channels)
+        const dstIdx = y * rowSize + 1 + x * (useRGBA ? 4 : 3)
+        rawRows[dstIdx] = data[srcIdx] ?? 0
+        rawRows[dstIdx + 1] = data[srcIdx + 1] ?? 0
+        rawRows[dstIdx + 2] = data[srcIdx + 2] ?? 0
+        if (useRGBA) {
+          rawRows[dstIdx + 3] = data[srcIdx + 3] ?? 255
+        }
+      }
+    }
+
+    const compressed = deflateSync(rawRows, { level: 1 })
+
+    // Build PNG file
+    const colorType = useRGBA ? 6 : 2
+    const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+
+    const ihdr = Buffer.alloc(13)
+    ihdr.writeUInt32BE(width, 0)
+    ihdr.writeUInt32BE(height, 4)
+    ihdr[8] = 8 // bit depth
+    ihdr[9] = colorType
+    ihdr[10] = 0 // compression
+    ihdr[11] = 0 // filter
+    ihdr[12] = 0 // interlace
+
+    const crc32 = require("zlib").crc32 || (() => 0)
+    const makeChunk = (type: string, data: Buffer): Buffer => {
+      const typeBuffer = Buffer.from(type, "ascii")
+      const length = Buffer.alloc(4)
+      length.writeUInt32BE(data.length, 0)
+      const crcData = Buffer.concat([typeBuffer, data])
+      const crc = Buffer.alloc(4)
+      try {
+        crc.writeUInt32BE(crc32(crcData) >>> 0, 0)
+      } catch {
+        crc.writeUInt32BE(0, 0)
+      }
+      return Buffer.concat([length, typeBuffer, data, crc])
+    }
+
+    const ihdrChunk = makeChunk("IHDR", ihdr)
+    const idatChunk = makeChunk("IDAT", compressed)
+    const iendChunk = makeChunk("IEND", Buffer.alloc(0))
+
+    return Buffer.concat([signature, ihdrChunk, idatChunk, iendChunk])
+  } catch {
+    return null
+  }
+}
+
 async function extractPdfDocument(buffer: Buffer, title: string): Promise<ParsedUploadDocument> {
   try {
     const { pageCount, pageTexts, info } = await extractPdfPages(buffer)
@@ -1758,6 +2230,31 @@ async function extractPdfDocument(buffer: Buffer, title: string): Promise<Parsed
           extractedTextLength: extractedText.length,
         },
       })
+    }
+
+    // Attempt figure extraction from the fallback parser (best-effort, non-blocking)
+    try {
+      const maxFiguresPerPage = 4
+      const pdfjs = await import("pdf-parse/lib/pdf.js/v1.10.100/build/pdf.js")
+      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) })
+      const pdfDoc = await loadingTask.promise
+
+      let totalFigures = 0
+      for (let p = 1; p <= Math.min(pageCount, 50); p++) {
+        if (totalFigures >= 24) break
+        try {
+          const pageProxy = await pdfDoc.getPage(p)
+          const figures = await extractPageFigures(pageProxy, p, maxFiguresPerPage)
+          if (figures.length > 0 && sourceUnits[p - 1]) {
+            sourceUnits[p - 1].figures = figures
+            totalFigures += figures.length
+          }
+        } catch {
+          // Skip pages where figure extraction fails
+        }
+      }
+    } catch {
+      // Figure extraction is best-effort; text extraction still succeeds
     }
 
     return {
@@ -2019,7 +2516,8 @@ async function extractVideoDocument(
 }
 
 async function tryParseWithDocling(options: {
-  buffer: Buffer
+  buffer?: Buffer | null
+  fileUrl?: string | null
   title: string
   fileName: string
   mimeType: string
@@ -2039,6 +2537,7 @@ async function tryParseWithDocling(options: {
 
   const parsed = await parseDocumentWithDocling({
     buffer: options.buffer,
+    fileUrl: options.fileUrl,
     title: options.title,
     fileName: options.fileName,
     mimeType: options.mimeType,
@@ -2057,7 +2556,8 @@ async function tryParseWithDocling(options: {
 }
 
 async function parseUploadDocument(options: {
-  buffer: Buffer
+  buffer?: Buffer | null
+  fileUrl?: string | null
   title: string
   fileName: string
   mimeType: string
@@ -2065,6 +2565,7 @@ async function parseUploadDocument(options: {
   const kind = detectUploadKind(options.fileName, options.mimeType)
   const doclingParsed = await tryParseWithDocling({
     buffer: options.buffer,
+    fileUrl: options.fileUrl,
     title: options.title,
     fileName: options.fileName,
     mimeType: options.mimeType,
@@ -2073,20 +2574,24 @@ async function parseUploadDocument(options: {
   if (doclingParsed) {
     return doclingParsed
   }
+  const buffer = options.buffer
+  if (!buffer || buffer.length === 0) {
+    throw new Error("Upload fallback parser requires a local buffer")
+  }
   switch (kind) {
     case "pdf":
-      return extractPdfDocument(options.buffer, options.title)
+      return extractPdfDocument(buffer, options.title)
     case "pptx":
-      return extractPptxDocument(options.buffer, options.title)
+      return extractPptxDocument(buffer, options.title)
     case "docx":
-      return extractDocxDocument(options.buffer, options.title)
+      return extractDocxDocument(buffer, options.title)
     case "image":
-      return extractImageDocument(options.buffer, options.title, options.mimeType)
+      return extractImageDocument(buffer, options.title, options.mimeType)
     case "text":
-      return extractTextDocument(options.buffer, options.title)
+      return extractTextDocument(buffer, options.title)
     case "video":
       return extractVideoDocument(
-        options.buffer,
+        buffer,
         options.title,
         options.fileName,
         options.mimeType
@@ -2474,16 +2979,12 @@ export class UserUploadService {
       throw new Error(`Failed to create reprocess job: ${jobError?.message ?? "Unknown error"}`)
     }
 
-    const storageDownload = await supabase.storage
-      .from(upload.storage_bucket)
-      .download(upload.original_file_path)
-
-    if (storageDownload.error || !storageDownload.data) {
-      throw new Error(`Failed to download original upload: ${storageDownload.error?.message ?? "Unknown error"}`)
-    }
-
-    const buffer = Buffer.from(await storageDownload.data.arrayBuffer())
-      await this.ingestUploadRecord(uploadId, buffer, jobData.id, options)
+    const originalFileUrl = await this.safeCreateSignedUrl(upload.storage_bucket, upload.original_file_path)
+    await this.ingestUploadRecord(uploadId, null, jobData.id, options, originalFileUrl, {
+      user_id: userId,
+      storage_bucket: upload.storage_bucket,
+      original_file_path: upload.original_file_path,
+    })
     return this.getUploadListItem(userId, uploadId)
   }
 
@@ -2734,9 +3235,10 @@ export class UserUploadService {
 
   async uploadContextSearch(input: UploadContextSearchInput): Promise<UploadContextSearchResult> {
     const startedAt = Date.now()
+    const normalizedQuery = input.query.trim()
     const topicContext = normalizeTopicContext(input.topicContext)
     const intent = inferUploadContextIntent({
-      query: input.query,
+      query: normalizedQuery,
       page: input.page ?? null,
       pageStart: input.pageStart ?? null,
       pageEnd: input.pageEnd ?? null,
@@ -2864,7 +3366,7 @@ export class UserUploadService {
         topicContext: {
           ...topicContext,
           lastUploadId: uploadIds[0] || topicContext.lastUploadId || null,
-          followUpType: inferFollowUpType(input.query),
+          followUpType: inferFollowUpType(normalizedQuery),
         },
         metrics: {
           candidateCount: 0,
@@ -2879,7 +3381,7 @@ export class UserUploadService {
       }
     }
 
-    const queryTerms = buildQueryTerms(input.query, topicContext.activeTopic)
+    const queryTerms = buildQueryTerms(normalizedQuery, topicContext.activeTopic)
     let fallbackUsed = false
     let fallbackReason: UploadContextSearchResult["metrics"]["fallbackReason"] = "none"
     let queryEmbedding: number[] | null = null
@@ -2889,17 +3391,19 @@ export class UserUploadService {
     const embeddingApiKey = isLikelyOpenAIEmbeddingKey(candidateEmbeddingKey)
       ? candidateEmbeddingKey
       : undefined
-    try {
-      queryEmbedding = await withTimeout(
-        generateEmbedding(input.query, embeddingApiKey),
-        Math.min(QUERY_EMBEDDING_TIMEOUT_MS, Math.floor(maxDurationMs * 0.55))
-      )
-    } catch (error) {
-      queryEmbedding = null
-      fallbackUsed = true
-      fallbackReason = classifyEmbeddingFallbackReason(error)
+    if (normalizedQuery.length > 0) {
+      try {
+        queryEmbedding = await withTimeout(
+          generateEmbedding(normalizedQuery, embeddingApiKey),
+          Math.min(QUERY_EMBEDDING_TIMEOUT_MS, Math.floor(maxDurationMs * 0.55))
+        )
+      } catch (error) {
+        queryEmbedding = null
+        fallbackUsed = true
+        fallbackReason = classifyEmbeddingFallbackReason(error)
+      }
     }
-    if (!queryEmbedding) {
+    if (!queryEmbedding && normalizedQuery.length > 0) {
       fallbackUsed = true
       if (fallbackReason === "none") {
         fallbackReason = providerMismatchSignal
@@ -2914,75 +3418,93 @@ export class UserUploadService {
     const activeTopicTerms = buildQueryTerms(topicContext.activeTopic || "", "")
     const recentEvidenceIds = new Set(topicContext.recentEvidenceIds ?? [])
     const recentPages = new Set((topicContext.recentPages ?? []).filter((value) => value > 0))
-    const scored = candidateRows
+    const querySketchBytes =
+      queryEmbedding && queryEmbedding.length > 0
+        ? decodeEmbeddingSignSketch(buildEmbeddingSignSketch(queryEmbedding))
+        : null
+    const compressedPrefilterCap =
+      querySketchBytes && candidateRows.length >= MIN_COMPRESSED_PREFILTER_CANDIDATES
+        ? adaptiveCompressedPrefilterCap(candidateRows.length, topK)
+        : candidateRows.length
+    const rowsForFullRerank =
+      querySketchBytes && compressedPrefilterCap < candidateRows.length
+        ? candidateRows
+            .map((row) => {
+              const signals = computeUploadCandidateSignals({
+                row,
+                queryTerms,
+                activeTopicTerms,
+                recentEvidenceIds,
+                recentPages,
+                intent,
+                includeNeighborPages,
+              })
+              const sketch = getEmbeddingSignSketch(row)
+              const compressedEmbeddingScore =
+                sketch ? computeCompressedEmbeddingSimilarity(querySketchBytes, sketch, queryEmbedding?.length || 0) : null
+              const score =
+                compressedEmbeddingScore !== null
+                  ? compressedEmbeddingScore * 0.52 +
+                    signals.lexicalScore * 0.24 +
+                    signals.qualityScore * 0.12 +
+                    signals.pageIntentBoost +
+                    signals.topicBoost +
+                    signals.continuityBoost +
+                    signals.evidenceBoost -
+                    signals.bibliographyPenalty
+                  : signals.lexicalScore * 0.72 +
+                    signals.qualityScore * 0.28 +
+                    signals.pageIntentBoost +
+                    signals.topicBoost +
+                    signals.continuityBoost +
+                    signals.evidenceBoost -
+                    signals.bibliographyPenalty
+
+              return { row, score }
+            })
+            .sort((a, b) => b.score - a.score)
+            .slice(0, compressedPrefilterCap)
+            .map((item) => item.row)
+        : candidateRows
+    const scored = rowsForFullRerank
       .map((row) => {
-        const text = String(row.chunk_text ?? "")
-        const lexicalScore = computeLexicalOverlap(queryTerms, text)
-        const qualityScore = getChunkQualityScore(row)
-        const bibliographyPenalty = isLikelyBibliographyNoise(text) ? 0.24 : 0
-        const pageNumber = chunkSourceUnitNumber(row)
+        const signals = computeUploadCandidateSignals({
+          row,
+          queryTerms,
+          activeTopicTerms,
+          recentEvidenceIds,
+          recentPages,
+          intent,
+          includeNeighborPages,
+        })
         const embeddingScore =
           queryEmbedding && Array.isArray(row.embedding)
             ? cosineSimilarity(queryEmbedding, row.embedding)
             : 0
-        const topicBoost =
-          activeTopicTerms.length > 0 && computeLexicalOverlap(activeTopicTerms, text) > 0
-            ? 0.08
-            : 0
-        const evidenceBoost = recentEvidenceIds.has(row.id) ? 0.14 : 0
-        const continuityBoost =
-          pageNumber && recentPages.has(pageNumber)
-            ? 0.06
-            : 0
-
-        let pageIntentBoost = 0
-        if (intent.modeResolved === "page_lookup" && intent.page && pageNumber) {
-          if (pageNumber === intent.page) {
-            pageIntentBoost = 0.45
-          } else if (Math.abs(pageNumber - intent.page) <= includeNeighborPages) {
-            pageIntentBoost = 0.18
-          }
-        } else if (
-          intent.modeResolved === "range_lookup" &&
-          intent.pageStart &&
-          intent.pageEnd &&
-          pageNumber
-        ) {
-          const minPage = Math.min(intent.pageStart, intent.pageEnd)
-          const maxPage = Math.max(intent.pageStart, intent.pageEnd)
-          if (pageNumber >= minPage && pageNumber <= maxPage) {
-            pageIntentBoost = 0.34
-          } else if (pageNumber >= minPage - includeNeighborPages && pageNumber <= maxPage + includeNeighborPages) {
-            pageIntentBoost = 0.14
-          }
-        } else if (intent.modeResolved === "hybrid" && pageNumber && recentPages.has(pageNumber)) {
-          pageIntentBoost = 0.12
-        }
-
         const score =
           embeddingScore > 0
             ? embeddingScore * 0.58 +
-              lexicalScore * 0.28 +
-              qualityScore * 0.14 +
-              pageIntentBoost +
-              topicBoost +
-              continuityBoost +
-              evidenceBoost -
-              bibliographyPenalty
-            : lexicalScore * 0.68 +
-              qualityScore * 0.32 +
-              pageIntentBoost +
-              topicBoost +
-              continuityBoost +
-              evidenceBoost -
-              bibliographyPenalty
+              signals.lexicalScore * 0.28 +
+              signals.qualityScore * 0.14 +
+              signals.pageIntentBoost +
+              signals.topicBoost +
+              signals.continuityBoost +
+              signals.evidenceBoost -
+              signals.bibliographyPenalty
+            : signals.lexicalScore * 0.68 +
+              signals.qualityScore * 0.32 +
+              signals.pageIntentBoost +
+              signals.topicBoost +
+              signals.continuityBoost +
+              signals.evidenceBoost -
+              signals.bibliographyPenalty
 
         return {
           row,
           score,
-          lexicalScore,
-          qualityScore,
-          bibliographyPenalty,
+          lexicalScore: signals.lexicalScore,
+          qualityScore: signals.qualityScore,
+          bibliographyPenalty: signals.bibliographyPenalty,
         }
       })
       .filter(
@@ -3137,24 +3659,46 @@ export class UserUploadService {
 
       const linkedPreview = linkedAssets.find((asset) => asset.asset_type === "preview")
       const fallbackPreview = sourceAssets.find((asset) => asset.asset_type === "preview")
-      const previewAsset = linkedPreview || fallbackPreview || null
 
       const linkedFigures = linkedAssets.filter((asset) => asset.asset_type === "figure")
       const fallbackFigures = sourceAssets.filter((asset) => asset.asset_type === "figure")
-      const figureAssets =
-        linkedFigures.length > 0 ? linkedFigures : fallbackFigures
-      const uniqueFigureAssets = figureAssets
+      const figureAssets = linkedFigures.length > 0 ? linkedFigures : fallbackFigures
+      const uniqueFigureAssets = rankVisualAssetsForQuery({
+        query: normalizedQuery,
+        chunkText: row.chunk_text,
+        assets: figureAssets,
+        preferPrimaryFigure: true,
+      })
         .filter(
           (asset, figureIndex, collection) =>
             collection.findIndex((candidate) => candidate.id === asset.id) === figureIndex
         )
         .slice(0, 3)
+      const previewCandidateAssets = [
+        ...uniqueFigureAssets,
+        ...(linkedPreview ? [linkedPreview] : []),
+        ...(!linkedPreview && fallbackPreview ? [fallbackPreview] : []),
+      ].filter(
+        (asset, assetIndex, collection) =>
+          collection.findIndex((candidate) => candidate.id === asset.id) === assetIndex
+      )
+      const previewAsset =
+        rankVisualAssetsForQuery({
+          query: normalizedQuery,
+          chunkText: row.chunk_text,
+          assets: previewCandidateAssets,
+          preferPrimaryFigure: true,
+        })[0] || null
 
       const previewReference = previewAsset
         ? await resolveVisualReference(previewAsset, sourceUnit)
         : null
       const figureReferences = (
-        await Promise.all(uniqueFigureAssets.map((asset) => resolveVisualReference(asset, sourceUnit)))
+        await Promise.all(
+          uniqueFigureAssets
+            .filter((asset) => asset.id !== previewAsset?.id)
+            .map((asset) => resolveVisualReference(asset, sourceUnit))
+        )
       ).filter((reference): reference is UploadVisualReference => Boolean(reference))
 
       citations.push({
@@ -3170,7 +3714,7 @@ export class UserUploadService {
         sampleSize: null,
         meshTerms: [],
         url: viewerUrl,
-        snippet: pickFocusedExcerpt(row.chunk_text, input.query, 320) || pickExcerpt(row.chunk_text, 320),
+        snippet: pickFocusedExcerpt(row.chunk_text, normalizedQuery, 320) || pickExcerpt(row.chunk_text, 320),
         score: item.score,
         sourceType: "user_upload",
         sourceLabel: `${formatSourceLabel(sourceUnit.unit_type, sourceUnit.unit_number)} • ${upload.file_name}`,
@@ -3199,7 +3743,7 @@ export class UserUploadService {
     ).sort((a, b) => a - b)
 
     const nextTopicContext: UploadTopicContext = {
-      activeTopic: topicContext.activeTopic || input.query.trim().slice(0, 160),
+      activeTopic: topicContext.activeTopic || normalizedQuery.slice(0, 160) || null,
       lastUploadId: citations[0]?.uploadId || uploadIds[0] || topicContext.lastUploadId || null,
       recentPages:
         pagesReturned.length > 0
@@ -3211,11 +3755,17 @@ export class UserUploadService {
           ...(topicContext.recentEvidenceIds ?? []),
         ])
       ).slice(0, 10),
-      followUpType: inferFollowUpType(input.query),
+      followUpType: inferFollowUpType(normalizedQuery),
     }
     const retrievalConfidence: UploadContextSearchResult["metrics"]["retrievalConfidence"] =
-      citations.length === 0 || fallbackReason !== "none"
+      citations.length === 0
         ? "low"
+        : intent.modeResolved === "page_lookup" || intent.modeResolved === "range_lookup"
+          ? citations.length >= Math.max(2, Math.floor(topK * 0.4))
+            ? "high"
+            : "medium"
+          : fallbackReason !== "none"
+            ? "low"
         : citations.length >= Math.max(3, Math.floor(topK * 0.6))
           ? "high"
           : "medium"
@@ -4427,11 +4977,17 @@ export class UserUploadService {
     if (!asset?.file_path) return null
     const signedUrl = await this.safeCreateSignedUrl(asset.storage_bucket || USER_UPLOAD_BUCKET, asset.file_path)
     if (!signedUrl) return null
+    const metadata =
+      asset.metadata && typeof asset.metadata === "object" ? (asset.metadata as Record<string, unknown>) : {}
+    const contextualCaption =
+      typeof metadata.contextText === "string" && metadata.contextText.trim().length > 0
+        ? pickExcerpt(metadata.contextText.trim(), 220)
+        : null
     return {
       assetId: asset.id,
       type: asset.asset_type,
       label: asset.label || formatSourceLabel(sourceUnit.unit_type, sourceUnit.unit_number),
-      caption: asset.caption,
+      caption: asset.caption || contextualCaption,
       signedUrl,
       fullUrl: signedUrl,
       contentType: asset.mime_type,
@@ -4490,9 +5046,15 @@ export class UserUploadService {
 
   private async ingestUploadRecord(
     uploadId: string,
-    buffer: Buffer,
+    initialBuffer: Buffer | null,
     jobId: string,
-    options?: { reprocess?: boolean; resume?: boolean }
+    options?: { reprocess?: boolean; resume?: boolean },
+    originalFileUrl?: string | null,
+    uploadHint?: {
+      user_id?: string
+      storage_bucket?: string
+      original_file_path?: string
+    }
   ) {
     const supabase = await this.getSupabase()
     const { data: upload, error } = await (supabase as any)
@@ -4529,6 +5091,7 @@ export class UserUploadService {
     ])
 
     try {
+      let buffer = initialBuffer
       const shouldReset = options?.reprocess === true && options?.resume !== true
       if (shouldReset) {
         await Promise.all([
@@ -4538,12 +5101,47 @@ export class UserUploadService {
         ])
       }
 
-      const parsed = await parseUploadDocument({
-        buffer,
-        title: upload.title,
-        fileName: upload.file_name,
-        mimeType: upload.mime_type,
-      })
+      let parsed: ParsedUploadDocument
+      try {
+        parsed = await parseUploadDocument({
+          buffer,
+          fileUrl: originalFileUrl,
+          title: upload.title,
+          fileName: upload.file_name,
+          mimeType: upload.mime_type,
+        })
+      } catch (error) {
+        const needsBufferFallback =
+          error instanceof Error && error.message === "Upload fallback parser requires a local buffer"
+        if (!needsBufferFallback) {
+          throw error
+        }
+        const storageDownload = await supabase.storage
+          .from(uploadHint?.storage_bucket || upload.storage_bucket)
+          .download(uploadHint?.original_file_path || upload.original_file_path)
+
+        if (storageDownload.error || !storageDownload.data) {
+          throw new Error(
+            `Failed to download original upload: ${storageDownload.error?.message ?? "Unknown error"}`
+          )
+        }
+        buffer = Buffer.from(await storageDownload.data.arrayBuffer())
+        parsed = await parseUploadDocument({
+          buffer,
+          title: upload.title,
+          fileName: upload.file_name,
+          mimeType: upload.mime_type,
+        })
+      }
+      // VLM-caption uncaptioned figures (best-effort, non-blocking)
+      let vlmCaptionedCount = 0
+      try {
+        const { captionUncaptionedFigures } = await import("@/lib/media/vlm-captioner")
+        vlmCaptionedCount = await captionUncaptionedFigures(parsed.sourceUnits, { maxTotal: 12 })
+      } catch {
+        // VLM captioning is optional; continue without it
+      }
+
       const studyExtraction = deriveStudyExtractionMetadata({
         uploadTitle: upload.title,
         uploadKind: parsed.kind,
@@ -4552,6 +5150,7 @@ export class UserUploadService {
       parsed.metadata = {
         ...parsed.metadata,
         studyExtraction,
+        ...(vlmCaptionedCount > 0 ? { vlmCaptionedFigures: vlmCaptionedCount } : {}),
       }
 
       await this.updateJobProgress(jobId, "chunking", 34, {
@@ -4714,7 +5313,32 @@ export class UserUploadService {
             width: item.asset.width ?? null,
             height: item.asset.height ?? null,
             sort_order: item.sortOrder,
-            metadata: item.asset.metadata || {},
+            metadata: (() => {
+              const baseMetadata =
+                item.asset.metadata && typeof item.asset.metadata === "object" ? item.asset.metadata : {}
+              const offsetRange = parseAssetOffsetRange(baseMetadata as Record<string, unknown>)
+              const contextText = extractAssetContextWindow(
+                createdUnit.unit.extractedText,
+                offsetRange?.start ?? null,
+                offsetRange?.end ?? null
+              )
+              const contextHeading = normalizeAssetContextText(
+                createdUnit.unit.title || formatSourceLabel(createdUnit.unit.unitType, createdUnit.unit.unitNumber)
+              )
+              const pageLabel = formatSourceLabel(createdUnit.unit.unitType, createdUnit.unit.unitNumber)
+              const figureTypeHint = inferAssetFigureTypeHint({
+                label: item.asset.label || null,
+                caption: item.asset.caption || null,
+                contextText,
+              })
+              return {
+                ...baseMetadata,
+                contextText,
+                contextHeading,
+                pageLabel,
+                figureTypeHint,
+              }
+            })(),
           })
         }
       }
@@ -4847,49 +5471,71 @@ export class UserUploadService {
           kind: parsed.kind,
           sourceUnitCount: createdSourceUnits.length,
           chunkCount: chunkSeed.length,
-        })
-
-        try {
-          const allEmbeddings = await generateEmbeddings(
-            chunkSeed.map((chunk) => chunk.chunk_text),
-            process.env.OPENAI_API_KEY,
-            {
-              batchSize: 192,
-              parallelBatches: 4,
-            }
-          )
-          for (let index = 0; index < allEmbeddings.length; index += 1) {
-            embeddings[index] = allEmbeddings[index]
-          }
-        } catch {
-          // Keep null embeddings and continue so ingestion can still complete.
-        }
-
-        await this.updateJobProgress(jobId, "embedding", 96, {
-          kind: parsed.kind,
-          sourceUnitCount: createdSourceUnits.length,
-          chunkCount: chunkSeed.length,
-          embeddedChunks: chunkSeed.length,
+          embeddedChunks: 0,
           totalChunks: chunkSeed.length,
         })
+
+        const embeddingBatchSize = 96
+        const totalEmbeddingBatches = Math.max(1, Math.ceil(chunkSeed.length / embeddingBatchSize))
+        let embeddedChunks = 0
+
+        for (let start = 0; start < chunkSeed.length; start += embeddingBatchSize) {
+          const end = Math.min(start + embeddingBatchSize, chunkSeed.length)
+          const embeddingSlice = chunkSeed.slice(start, end)
+
+          try {
+            const batchEmbeddings = await generateEmbeddings(
+              embeddingSlice.map((chunk) => chunk.chunk_text),
+              process.env.OPENAI_API_KEY,
+              {
+                batchSize: embeddingBatchSize,
+                parallelBatches: 2,
+              }
+            )
+            for (let index = 0; index < embeddingSlice.length; index += 1) {
+              embeddings[start + index] = batchEmbeddings[index] ?? null
+            }
+          } catch {
+            // Keep null embeddings and continue so ingestion can still complete.
+          }
+
+          embeddedChunks = end
+          const embeddingBatchIndex = Math.floor(start / embeddingBatchSize) + 1
+          const embeddingProgress = 82 + Math.round((embeddingBatchIndex / totalEmbeddingBatches) * 14)
+          await this.updateJobProgress(jobId, "embedding", Math.min(96, embeddingProgress), {
+            kind: parsed.kind,
+            sourceUnitCount: createdSourceUnits.length,
+            chunkCount: chunkSeed.length,
+            embeddedChunks,
+            totalChunks: chunkSeed.length,
+          })
+        }
       }
 
       const chunkBatchSize = 220
       const totalChunkBatches = Math.max(1, Math.ceil(Math.max(1, chunkSeed.length) / chunkBatchSize))
       for (let start = 0; start < chunkSeed.length; start += chunkBatchSize) {
         const end = Math.min(start + chunkBatchSize, chunkSeed.length)
-        const chunkBatchPayload = chunkSeed.slice(start, end).map((chunk, indexWithinBatch) => ({
-          upload_id: chunk.upload_id,
-          user_id: chunk.user_id,
-          source_unit_id: chunk.source_unit_id,
-          preview_asset_id: chunk.preview_asset_id,
-          chunk_index: chunk.chunk_index,
-          chunk_text: chunk.chunk_text,
-          source_offset_start: chunk.source_offset_start,
-          source_offset_end: chunk.source_offset_end,
-          embedding: embeddings[start + indexWithinBatch] ?? null,
-          metadata: chunk.metadata,
-        }))
+        const chunkBatchPayload = chunkSeed.slice(start, end).map((chunk, indexWithinBatch) => {
+          const embedding = embeddings[start + indexWithinBatch] ?? null
+          return {
+            upload_id: chunk.upload_id,
+            user_id: chunk.user_id,
+            source_unit_id: chunk.source_unit_id,
+            preview_asset_id: chunk.preview_asset_id,
+            chunk_index: chunk.chunk_index,
+            chunk_text: chunk.chunk_text,
+            source_offset_start: chunk.source_offset_start,
+            source_offset_end: chunk.source_offset_end,
+            embedding,
+            metadata: embedding
+              ? {
+                  ...chunk.metadata,
+                  [EMBEDDING_SIGN_SKETCH_METADATA_KEY]: buildEmbeddingSignSketch(embedding),
+                }
+              : chunk.metadata,
+          }
+        })
 
         let batchInserted = false
         let lastChunkBatchError: unknown = null

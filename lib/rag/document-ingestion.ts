@@ -232,6 +232,8 @@ export class DocumentIngestionPipeline {
           pageChunks.length
         )
 
+        const pico = extractPicoElements(chunkText)
+
         chunks.push({
           document_id: documentId,
           chunk_text: chunkText,
@@ -242,6 +244,10 @@ export class DocumentIngestionPipeline {
           chunk_index: chunkIndex++,
           metadata: {
             paragraph_index: i,
+            ...(pico.population && { pico_population: pico.population }),
+            ...(pico.intervention && { pico_intervention: pico.intervention }),
+            ...(pico.comparison && { pico_comparison: pico.comparison }),
+            ...(pico.outcome && { pico_outcome: pico.outcome }),
           },
         })
       }
@@ -251,39 +257,43 @@ export class DocumentIngestionPipeline {
   }
 
   /**
-   * Semantic chunking with overlap
-   * TODO: Use proper tokenizer for better chunking
+   * Semantic chunking with sentence-boundary awareness and overlap.
+   * Splits on sentence boundaries, detects topic shifts via keyword heuristics,
+   * and ensures every chunk overlaps by 1-2 sentences with its neighbours.
    */
   private semanticChunk(
     text: string,
     options: { chunkSize: number; chunkOverlap: number; preservePageBoundaries: boolean }
   ): string[] {
-    // Simple implementation: split by paragraphs, then by sentences
-    // For production, use a proper tokenizer
+    const maxChars = options.chunkSize * 4
+    const overlapChars = options.chunkOverlap * 4
 
-    const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim().length > 0)
+    // Split into sentences (handles abbreviations, decimals, common patterns)
+    const sentences = text.match(/[^.!?]+[.!?]+[\s]*/g) || [text]
     const chunks: string[] = []
     let currentChunk = ''
 
-    for (const paragraph of paragraphs) {
-      // Approximate token count (1 token ≈ 4 characters)
-      const paragraphTokens = paragraph.length / 4
+    const TOPIC_SHIFT_PATTERN =
+      /^(introduction|background|methods?|results?|discussion|conclusion|limitations?|abstract|objective|purpose|aim|study design)/i
 
-      if (currentChunk.length + paragraph.length > options.chunkSize * 4) {
-        // Start new chunk
-        if (currentChunk) {
-          chunks.push(currentChunk.trim())
-        }
+    for (let i = 0; i < sentences.length; i++) {
+      const sentence = sentences[i].trim()
+      if (!sentence) continue
 
-        // Add overlap from previous chunk
-        const overlapText = this.getOverlapText(currentChunk, options.chunkOverlap * 4)
-        currentChunk = overlapText + paragraph
+      const isTopicShift = TOPIC_SHIFT_PATTERN.test(sentence)
+      const wouldExceed = currentChunk.length + sentence.length > maxChars
+
+      if ((wouldExceed || isTopicShift) && currentChunk) {
+        chunks.push(currentChunk.trim())
+        // Overlap: carry last 1-2 sentences into next chunk
+        const overlapText = this.getOverlapText(currentChunk, overlapChars)
+        currentChunk = overlapText + sentence
       } else {
-        currentChunk += (currentChunk ? '\n\n' : '') + paragraph
+        currentChunk += (currentChunk ? ' ' : '') + sentence
       }
     }
 
-    if (currentChunk) {
+    if (currentChunk.trim()) {
       chunks.push(currentChunk.trim())
     }
 
@@ -395,6 +405,52 @@ export class DocumentIngestionPipeline {
       }
     }
   }
+}
+
+/**
+ * Extract PICO (Population, Intervention, Comparison, Outcome) elements
+ * from a text chunk using lightweight keyword heuristics.
+ * For higher accuracy, replace with an LLM extraction step during ingestion.
+ */
+function extractPicoElements(text: string): {
+  population?: string
+  intervention?: string
+  comparison?: string
+  outcome?: string
+} {
+  const lower = text.toLowerCase()
+  const pico: ReturnType<typeof extractPicoElements> = {}
+
+  // Population: look for "patients with X", "adults with X", "N = ..."
+  const popMatch = text.match(
+    /(?:patients?|adults?|children|participants?|subjects?)\s+(?:with|who|aged|diagnosed)\s+([^.]{5,80})/i,
+  )
+  if (popMatch) pico.population = popMatch[0].trim()
+
+  // Intervention: "treated with X", "received X", "administered X"
+  const intMatch = text.match(
+    /(?:treated with|received|administered|given|randomized to|assigned to)\s+([^.]{5,80})/i,
+  )
+  if (intMatch) pico.intervention = intMatch[0].trim()
+
+  // Comparison: "compared to X", "versus X", "vs X", "placebo"
+  const compMatch = text.match(
+    /(?:compared (?:to|with)|versus|vs\.?)\s+([^.]{5,60})/i,
+  )
+  if (compMatch) pico.comparison = compMatch[0].trim()
+  else if (lower.includes('placebo')) pico.comparison = 'placebo'
+
+  // Outcome: "mortality", "survival", "reduction in X", "improvement in X"
+  const outcomeMatch = text.match(
+    /(?:reduction|improvement|decrease|increase|change)\s+in\s+([^.]{5,60})/i,
+  )
+  if (outcomeMatch) pico.outcome = outcomeMatch[0].trim()
+  else if (/\b(?:mortality|survival|morbidity|readmission|remission)\b/i.test(lower)) {
+    const m = lower.match(/\b(mortality|survival|morbidity|readmission|remission)\b/i)
+    if (m) pico.outcome = m[0]
+  }
+
+  return pico
 }
 
 export class UserUploadIngestionPipeline {

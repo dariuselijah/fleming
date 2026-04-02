@@ -14,7 +14,9 @@ export type ProvenanceSourceType =
   | "coverage_policy"
   | "research_dataset"
   | "chemical_database"
-  | "lab_workflow";
+  | "lab_workflow"
+  | "rxnorm"
+  | "openfda";
 
 export interface SourceProvenance {
   id: string;
@@ -86,6 +88,8 @@ export function computeProvenanceConfidence({
     research_dataset: 0.09,
     chemical_database: 0.12,
     lab_workflow: 0.07,
+    rxnorm: 0.19,
+    openfda: 0.21,
   };
   score += authorityBoostBySource[sourceType];
   reasons.push(`source:${sourceType}`);

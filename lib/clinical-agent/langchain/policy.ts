@@ -61,6 +61,7 @@ const TOOL_FAMILY_PATTERNS: Array<{ family: string; pattern: RegExp }> = [
   { family: "web", pattern: /websearch/i },
   { family: "video", pattern: /youtube/i },
   { family: "connector", pattern: /registry|coverage|chembl|synapse|benchling|biorender/i },
+  { family: "drug-safety", pattern: /rxnorm|openfda|drugLabel|interaction/i },
 ]
 
 const UPLOAD_INTENT_PATTERN =
@@ -91,6 +92,8 @@ const CONNECTOR_REASONABLE_FOR_RESEARCH = new Set<ClinicalConnectorId>([
   "clinical_trials",
   "scholar_gateway",
   "biorxiv",
+  "rxnorm",
+  "openfda",
 ])
 
 const CONNECTOR_REASONABLE_FOR_LAB = new Set<ClinicalConnectorId>([

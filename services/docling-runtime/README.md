@@ -39,8 +39,11 @@ The `docling-parse` function is deployed to your Supabase project; invoke URL pa
   "fileName": "x.pdf",
   "mimeType": "application/pdf",
   "contentBase64": "...",
+  "fileUrl": "https://...",
   "options": { "extractFigures": true, "extractPreview": true, "includeCaptions": true, "maxFiguresPerUnit": 4 }
 }
 ```
+
+Use `fileUrl` for larger files so the runtime can fetch the object directly from storage without sending the whole document inline as base64.
 
 Return JSON with `sourceUnits` (or `units` / `pages`) per the client normalizer.

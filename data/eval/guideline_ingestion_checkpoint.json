@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "createdAt": "2026-03-01T00:56:50.799Z",
-  "lastUpdated": "2026-03-01T00:56:56.556Z",
+  "createdAt": "2026-04-02T09:58:54.379Z",
+  "lastUpdated": "2026-04-02T10:12:09.870Z",
   "queries": {
     "acute abdominal pain diagnostic workup guideline adults": {
       "status": "completed",
@@ -9,31 +9,1361 @@
       "sourcesUsed": [
         "PubMed"
       ],
-      "updatedAt": "2026-03-01T00:56:52.539Z"
+      "updatedAt": "2026-04-02T09:58:56.255Z"
     },
     "hypertension first line treatment adults guideline": {
-      "status": "completed",
-      "results": 7,
-      "sourcesUsed": [
-        "PubMed"
-      ],
-      "updatedAt": "2026-03-01T00:56:54.095Z"
-    },
-    "sepsis initial management adult emergency guideline": {
-      "status": "completed",
-      "results": 3,
-      "sourcesUsed": [
-        "PubMed"
-      ],
-      "updatedAt": "2026-03-01T00:56:55.746Z"
-    },
-    "acetaminophen paracetamol overdose guideline": {
       "status": "completed",
       "results": 6,
       "sourcesUsed": [
         "PubMed"
       ],
-      "updatedAt": "2026-03-01T00:56:56.556Z"
+      "updatedAt": "2026-04-02T09:58:59.765Z"
+    },
+    "sepsis initial management adult emergency guideline": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:01.745Z"
+    },
+    "acetaminophen paracetamol overdose guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:03.691Z"
+    },
+    "acute coronary syndrome chest pain emergency guideline": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:06.359Z"
+    },
+    "acute ischemic stroke thrombolysis thrombectomy guideline": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:08.555Z"
+    },
+    "anaphylaxis emergency management adults guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:10.380Z"
+    },
+    "septic shock vasopressor escalation guideline": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T09:59:12.813Z"
+    },
+    "heart failure reduced ejection fraction guideline directed medical therapy": {
+      "status": "completed",
+      "results": 9,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:15.285Z"
+    },
+    "atrial fibrillation anticoagulation CHA2DS2 VASc guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:17.106Z"
+    },
+    "diabetes chronic kidney disease SGLT2 GLP1 guideline": {
+      "status": "completed",
+      "results": 9,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:19.970Z"
+    },
+    "lipid management secondary prevention statin guideline": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:22.175Z"
+    },
+    "community acquired pneumonia outpatient treatment by comorbidity guideline": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:24.306Z"
+    },
+    "copd exacerbation steroid antibiotic oxygen guideline": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T09:59:26.126Z"
+    },
+    "asthma stepwise controller escalation adults guideline": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T09:59:27.827Z"
+    },
+    "cystitis uncomplicated women first line antibiotic guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:30.267Z"
+    },
+    "warfarin high risk interactions INR monitoring guideline": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T09:59:32.372Z"
+    },
+    "chronic kidney disease medication dose adjustment eGFR guidance": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:34.473Z"
+    },
+    "polypharmacy deprescribing older adults guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:37.307Z"
+    },
+    "direct oral anticoagulant renal dosing guidance": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T09:59:39.098Z"
+    },
+    "acute coronary syndrome STEMI management guideline AHA ACC": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:24.667Z"
+    },
+    "NSTEMI risk stratification GRACE score guideline": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:26.532Z"
+    },
+    "hypertension first-line treatment guideline JNC AHA ACC": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:06:27.272Z"
+    },
+    "resistant hypertension aldosterone antagonist guideline": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:30.260Z"
+    },
+    "hypertensive emergency IV labetalol nicardipine guideline": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:06:31.663Z"
+    },
+    "heart failure reduced ejection fraction GDMT guideline AHA ACC": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:34.111Z"
+    },
+    "heart failure preserved ejection fraction HFpEF treatment guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:37.238Z"
+    },
+    "atrial fibrillation rate control rhythm control guideline ESC AHA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:38.709Z"
+    },
+    "atrial fibrillation anticoagulation CHA2DS2-VASc guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:42.677Z"
+    },
+    "venous thromboembolism DVT PE treatment guideline CHEST": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:44.746Z"
+    },
+    "pulmonary embolism risk stratification thrombolysis guideline": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:47.178Z"
+    },
+    "aortic stenosis transcatheter aortic valve replacement TAVR guideline": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:49.635Z"
+    },
+    "stable angina chronic coronary disease management guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:52.063Z"
+    },
+    "peripheral artery disease claudication revascularization guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:56.430Z"
+    },
+    "infective endocarditis prophylaxis treatment guideline AHA": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:58.503Z"
+    },
+    "cardiac arrest ACLS algorithm guideline AHA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:06:59.938Z"
+    },
+    "post-cardiac arrest targeted temperature management guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:03.697Z"
+    },
+    "lipid management high-intensity statin guideline ACC AHA": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:05.843Z"
+    },
+    "familial hypercholesterolemia PCSK9 inhibitor guideline": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:07.975Z"
+    },
+    "type 2 diabetes initial treatment metformin guideline ADA": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:09.717Z"
+    },
+    "type 2 diabetes GLP-1 receptor agonist SGLT2 guideline ADA": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:13.997Z"
+    },
+    "diabetic ketoacidosis DKA management insulin guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:19.728Z"
+    },
+    "hypoglycemia management inpatient guideline": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:22.178Z"
+    },
+    "thyroid nodule workup fine-needle aspiration guideline ATA": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:07:23.917Z"
+    },
+    "hypothyroidism levothyroxine dosing guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:27.146Z"
+    },
+    "Graves disease hyperthyroidism treatment guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:29.624Z"
+    },
+    "adrenal insufficiency glucocorticoid replacement guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:31.429Z"
+    },
+    "osteoporosis bisphosphonate treatment guideline AACE": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:33.537Z"
+    },
+    "community-acquired pneumonia CAP antibiotic guideline IDSA ATS": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:36.261Z"
+    },
+    "hospital-acquired pneumonia ventilator-associated VAP guideline": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:38.427Z"
+    },
+    "COPD exacerbation systemic corticosteroid antibiotic guideline GOLD": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:39.865Z"
+    },
+    "COPD stable management inhaler stepwise guideline GOLD": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:07:42.029Z"
+    },
+    "asthma stepwise controller treatment adults guideline GINA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:44.780Z"
+    },
+    "asthma severe biologic therapy omalizumab guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:46.919Z"
+    },
+    "acute respiratory distress syndrome ARDS lung protective ventilation guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:49.153Z"
+    },
+    "sepsis surviving sepsis campaign initial resuscitation guideline": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:51.487Z"
+    },
+    "septic shock vasopressor norepinephrine first-line guideline": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:53.262Z"
+    },
+    "urinary tract infection uncomplicated cystitis antibiotic guideline IDSA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:55.342Z"
+    },
+    "pyelonephritis complicated UTI inpatient antibiotic guideline": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:07:56.170Z"
+    },
+    "Clostridioides difficile C diff infection treatment guideline IDSA": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:07:59.252Z"
+    },
+    "skin soft tissue infection cellulitis abscess guideline IDSA": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:07:59.699Z"
+    },
+    "bacterial meningitis empiric antibiotic guideline IDSA": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:02.048Z"
+    },
+    "HIV antiretroviral therapy initiation guideline DHHS": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:05.204Z"
+    },
+    "hepatitis C direct-acting antiviral treatment guideline AASLD": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:06.972Z"
+    },
+    "tuberculosis latent TB treatment isoniazid rifampin guideline ATS IDSA": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:07.760Z"
+    },
+    "influenza oseltamivir antiviral treatment guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:10.874Z"
+    },
+    "COVID-19 treatment Paxlovid remdesivir guideline NIH": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:12.298Z"
+    },
+    "malaria prophylaxis treatment guideline CDC": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:15.630Z"
+    },
+    "sexually transmitted infection STI screening treatment guideline CDC": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:17.493Z"
+    },
+    "acute kidney injury AKI management guideline KDIGO": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:19.549Z"
+    },
+    "chronic kidney disease CKD staging management guideline KDIGO": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:21.691Z"
+    },
+    "CKD mineral bone disorder phosphate binder guideline KDIGO": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:23.709Z"
+    },
+    "dialysis initiation hemodialysis peritoneal guideline KDIGO": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:25.821Z"
+    },
+    "kidney transplant immunosuppression guideline KDIGO": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:28.289Z"
+    },
+    "nephrotic syndrome treatment guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:30.833Z"
+    },
+    "acute ischemic stroke thrombolysis alteplase thrombectomy guideline AHA ASA": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:32.256Z"
+    },
+    "intracerebral hemorrhage ICH management blood pressure guideline AHA ASA": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:34.696Z"
+    },
+    "subarachnoid hemorrhage aneurysm management guideline AHA ASA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:36.797Z"
+    },
+    "transient ischemic attack TIA secondary prevention guideline": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:39.269Z"
+    },
+    "epilepsy seizure first-line antiepileptic guideline AAN": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:41.067Z"
+    },
+    "migraine acute treatment preventive therapy guideline AAN AHS": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:41.833Z"
+    },
+    "Parkinson disease levodopa dopamine agonist guideline AAN": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:44.270Z"
+    },
+    "multiple sclerosis disease-modifying therapy guideline AAN": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:46.297Z"
+    },
+    "Alzheimer disease cholinesterase inhibitor memantine guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:48.751Z"
+    },
+    "status epilepticus benzodiazepine treatment guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:50.950Z"
+    },
+    "non-small cell lung cancer NSCLC treatment guideline NCCN": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:52.780Z"
+    },
+    "small cell lung cancer SCLC treatment guideline NCCN": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:54.840Z"
+    },
+    "breast cancer HER2 positive treatment guideline NCCN ASCO": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:08:56.572Z"
+    },
+    "breast cancer screening mammography guideline USPSTF": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:08:59.479Z"
+    },
+    "colorectal cancer screening colonoscopy guideline USPSTF": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:01.261Z"
+    },
+    "colorectal cancer metastatic treatment guideline NCCN": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:03.677Z"
+    },
+    "prostate cancer screening PSA guideline USPSTF AUA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:05.416Z"
+    },
+    "prostate cancer treatment guideline NCCN AUA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:07.522Z"
+    },
+    "pancreatic cancer treatment guideline NCCN": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:10.339Z"
+    },
+    "hepatocellular carcinoma HCC treatment guideline AASLD NCCN": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:10.736Z"
+    },
+    "melanoma treatment immunotherapy guideline NCCN": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:13.502Z"
+    },
+    "acute lymphoblastic leukemia ALL treatment guideline NCCN": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:15.315Z"
+    },
+    "chronic myeloid leukemia CML TKI imatinib guideline NCCN": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:17.321Z"
+    },
+    "diffuse large B-cell lymphoma DLBCL treatment guideline NCCN": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:19.449Z"
+    },
+    "multiple myeloma treatment guideline NCCN": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:21.912Z"
+    },
+    "cancer-related pain opioid management guideline NCCN": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:23.676Z"
+    },
+    "febrile neutropenia empiric antibiotic guideline IDSA ASCO": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:25.733Z"
+    },
+    "antiemetic prophylaxis chemotherapy-induced nausea guideline ASCO NCCN": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:27.843Z"
+    },
+    "cervical cancer screening HPV guideline USPSTF ASCCP": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:29.952Z"
+    },
+    "rheumatoid arthritis DMARD biologic treatment guideline ACR": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:32.394Z"
+    },
+    "systemic lupus erythematosus SLE treatment guideline ACR EULAR": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:34.324Z"
+    },
+    "gout acute treatment urate-lowering therapy guideline ACR": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:36.453Z"
+    },
+    "ankylosing spondylitis axial spondyloarthritis treatment guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:39.278Z"
+    },
+    "osteoarthritis knee hip management guideline ACR AAOS": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:40.697Z"
+    },
+    "inflammatory bowel disease Crohn disease treatment guideline AGA ACG": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:42.797Z"
+    },
+    "ulcerative colitis treatment guideline AGA ACG": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:43.925Z"
+    },
+    "irritable bowel syndrome IBS treatment guideline AGA ACG": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:46.307Z"
+    },
+    "gastroesophageal reflux GERD PPI treatment guideline AGA ACG": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:47.068Z"
+    },
+    "peptic ulcer disease H pylori eradication guideline ACG": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:49.431Z"
+    },
+    "acute pancreatitis management guideline AGA ACG": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:50.229Z"
+    },
+    "cirrhosis portal hypertension variceal bleeding guideline AASLD": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:52.599Z"
+    },
+    "nonalcoholic fatty liver disease NAFLD NASH guideline AASLD": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:55.111Z"
+    },
+    "celiac disease diagnosis management guideline AGA ACG": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:09:55.561Z"
+    },
+    "upper GI bleeding PPI endoscopy guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:09:58.296Z"
+    },
+    "lower GI bleeding colonoscopy management guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:00.126Z"
+    },
+    "major depressive disorder antidepressant treatment guideline APA": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:02.180Z"
+    },
+    "bipolar disorder lithium mood stabilizer guideline APA": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:10:03.940Z"
+    },
+    "schizophrenia antipsychotic treatment guideline APA": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:06.713Z"
+    },
+    "generalized anxiety disorder treatment guideline APA": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:10:08.142Z"
+    },
+    "PTSD post-traumatic stress disorder treatment guideline APA VA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:10.585Z"
+    },
+    "ADHD attention deficit hyperactivity stimulant treatment guideline AAP": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:12.715Z"
+    },
+    "substance use disorder opioid use naltrexone buprenorphine guideline": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:15.173Z"
+    },
+    "alcohol use disorder pharmacotherapy guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:19.296Z"
+    },
+    "insomnia cognitive behavioral therapy pharmacotherapy guideline": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:21.822Z"
+    },
+    "eating disorder anorexia bulimia treatment guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:23.656Z"
+    },
+    "warfarin INR management bridging guideline": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:25.705Z"
+    },
+    "direct oral anticoagulant DOAC renal dosing guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:27.829Z"
+    },
+    "heparin-induced thrombocytopenia HIT treatment guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:30.304Z"
+    },
+    "perioperative anticoagulation bridging guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:32.122Z"
+    },
+    "iron deficiency anemia treatment oral IV iron guideline": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:34.206Z"
+    },
+    "sickle cell disease hydroxyurea transfusion guideline": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:36.412Z"
+    },
+    "disseminated intravascular coagulation DIC treatment guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:39.131Z"
+    },
+    "perioperative beta-blocker cardiac risk assessment guideline ACC AHA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:40.897Z"
+    },
+    "preoperative pulmonary assessment guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:43.037Z"
+    },
+    "surgical site infection prevention antibiotic prophylaxis guideline": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:45.462Z"
+    },
+    "postoperative nausea vomiting PONV prevention guideline": {
+      "status": "completed",
+      "results": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:47.600Z"
+    },
+    "enhanced recovery after surgery ERAS protocol guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:49.422Z"
+    },
+    "pain management multimodal analgesia guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:51.513Z"
+    },
+    "chronic pain opioid prescribing CDC guideline": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:53.996Z"
+    },
+    "neonatal resuscitation NRP guideline AAP AHA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:55.435Z"
+    },
+    "pediatric asthma treatment guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:10:58.614Z"
+    },
+    "pediatric obesity management guideline AAP": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:00.431Z"
+    },
+    "childhood immunization schedule guideline CDC ACIP": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:11:02.566Z"
+    },
+    "prenatal care screening guideline ACOG": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:05.000Z"
+    },
+    "gestational diabetes screening treatment guideline ACOG": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:06.772Z"
+    },
+    "preeclampsia management guideline ACOG": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:09.353Z"
+    },
+    "preterm labor tocolysis corticosteroid guideline ACOG": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:10.770Z"
+    },
+    "postpartum hemorrhage management guideline ACOG": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:13.192Z"
+    },
+    "cervical insufficiency cerclage guideline ACOG": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:15.325Z"
+    },
+    "contraception selection guideline ACOG": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:17.407Z"
+    },
+    "urticaria chronic angioedema guideline": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:20.562Z"
+    },
+    "anaphylaxis epinephrine management guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:22.725Z"
+    },
+    "drug allergy penicillin desensitization guideline": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:24.504Z"
+    },
+    "food allergy management guideline": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:27.011Z"
+    },
+    "glaucoma treatment guideline AAO": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:28.447Z"
+    },
+    "age-related macular degeneration AMD treatment guideline AAO": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:30.844Z"
+    },
+    "diabetic retinopathy screening treatment guideline AAO": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:32.628Z"
+    },
+    "acute otitis media antibiotic guideline AAP": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:35.105Z"
+    },
+    "sinusitis acute bacterial rhinosinusitis guideline IDSA": {
+      "status": "completed",
+      "results": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:36.825Z"
+    },
+    "obstructive sleep apnea CPAP treatment guideline AASM": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:39.634Z"
+    },
+    "palliative care symptom management guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:41.443Z"
+    },
+    "advance directive goals of care discussion guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:43.515Z"
+    },
+    "falls prevention elderly guideline AGS": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:45.638Z"
+    },
+    "delirium prevention management ICU guideline": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:49.271Z"
+    },
+    "polypharmacy deprescribing older adults guideline AGS": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:11:49.677Z"
+    },
+    "pressure ulcer prevention treatment guideline": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:52.485Z"
+    },
+    "chronic wound diabetic foot ulcer management guideline": {
+      "status": "completed",
+      "results": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:54.290Z"
+    },
+    "burn injury initial management guideline": {
+      "status": "completed",
+      "results": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:11:56.728Z"
+    },
+    "trauma initial assessment ATLS guideline": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:11:58.505Z"
+    },
+    "acetaminophen overdose N-acetylcysteine guideline": {
+      "status": "completed",
+      "results": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:12:00.673Z"
+    },
+    "acute alcohol withdrawal benzodiazepine guideline": {
+      "status": "completed",
+      "results": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:12:02.719Z"
+    },
+    "opioid overdose naloxone guideline": {
+      "status": "completed",
+      "results": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:12:05.157Z"
+    },
+    "organophosphate poisoning atropine pralidoxime guideline": {
+      "status": "completed",
+      "results": 0,
+      "sourcesUsed": [],
+      "updatedAt": "2026-04-02T10:12:06.585Z"
+    },
+    "snakebite antivenom management guideline": {
+      "status": "completed",
+      "results": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ],
+      "updatedAt": "2026-04-02T10:12:09.869Z"
     }
   }
 }

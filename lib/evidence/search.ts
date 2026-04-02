@@ -9,9 +9,70 @@ import type {
   MedicalEvidenceResult, 
   EvidenceCitation, 
   EvidenceSearchOptions,
-  EvidenceContext 
+  EvidenceContext,
+  EvidenceFilterPreset,
 } from './types';
 import { buildEvidenceSourceId } from "./source-id";
+import { getEvidenceCache, setEvidenceCache, hashQuery, normaliseQueryForCache } from '../cache/retrieval-cache';
+import { getSemanticCache, setSemanticCache } from '../cache/semantic-cache';
+import {
+  nextQueryId,
+  startTimer,
+  recordRetrievalMetrics,
+  type RetrievalTimings,
+} from '../metrics/retrieval-metrics';
+import { crossEncoderRerank } from '../rag/cross-encoder-reranker';
+import { generateHyDEEmbedding, expandClinicalShorthand } from '../rag/query-optimizer';
+import { getMeshGraph } from '../knowledge-graph/mesh-graph';
+
+/**
+ * Resolve filter presets into concrete EvidenceSearchOptions overrides.
+ * Presets stack – multiple presets produce the tightest intersection.
+ */
+function resolveFilterPresets(
+  presets: EvidenceFilterPreset[] | undefined,
+  opts: EvidenceSearchOptions,
+): Partial<EvidenceSearchOptions> {
+  if (!presets || presets.length === 0) return {};
+
+  const overrides: Partial<EvidenceSearchOptions> = {};
+  const currentYear = new Date().getFullYear();
+
+  for (const preset of presets) {
+    switch (preset) {
+      case "guidelines_only":
+        overrides.minEvidenceLevel = Math.min(overrides.minEvidenceLevel ?? 5, 1);
+        overrides.studyTypes = [
+          ...(overrides.studyTypes ?? []),
+          "Guideline",
+          "Practice Guideline",
+          "Consensus",
+        ];
+        break;
+      case "rcts_and_above":
+        overrides.minEvidenceLevel = Math.min(overrides.minEvidenceLevel ?? 5, 2);
+        break;
+      case "high_evidence":
+        overrides.minEvidenceLevel = Math.min(overrides.minEvidenceLevel ?? 5, 3);
+        break;
+      case "meta_analyses":
+        overrides.studyTypes = [
+          ...(overrides.studyTypes ?? []),
+          "Meta-Analysis",
+          "Systematic Review",
+        ];
+        break;
+      case "recent_5y":
+        overrides.minYear = Math.max(overrides.minYear ?? 0, currentYear - 5);
+        break;
+      case "recent_10y":
+        overrides.minYear = Math.max(overrides.minYear ?? 0, currentYear - 10);
+        break;
+    }
+  }
+
+  return overrides;
+}
 
 export type MedicalQuerySignal = {
   score: number;
@@ -34,8 +95,8 @@ async function getServerClient(): Promise<SupabaseClientType | null> {
 const DEFAULT_MEDICAL_CONFIDENCE = 0.35;
 const MAX_FALLBACK_TOKENS = 6;
 const DEFAULT_CANDIDATE_MULTIPLIER = 6;
-const MIN_CITABLE_KEYWORD_OVERLAP = 0.18;
-const MIN_CITABLE_RESULTS_FLOOR = 6;
+const MIN_CITABLE_KEYWORD_OVERLAP = 0.22;
+const MIN_CITABLE_RESULTS_FLOOR = 4;
 const US_GUIDELINE_ORG_PATTERN =
   /\b(aha|acc|acp|ada|acog|aafp|cdc|nih|idsa|nccn|uspstf|sccm|ats)\b/i;
 const HIGH_AUTHORITY_STUDY_TYPE_PATTERN =
@@ -204,7 +265,8 @@ function computeCitationWorthinessBoost(result: MedicalEvidenceResult): number {
     ? 0.12
     : 0;
   const contentLengthBoost = Math.min(0.12, (result.content?.length || 0) / 3000);
-  const metadataCompletenessBoost = result.pmid || result.doi ? 0.05 : 0;
+  const hasPublicationId = Boolean(result.pmid || result.doi);
+  const metadataCompletenessBoost = hasPublicationId ? 0.15 : -0.1;
 
   return (
     evidenceBoost +
@@ -215,8 +277,26 @@ function computeCitationWorthinessBoost(result: MedicalEvidenceResult): number {
   );
 }
 
+function extractMedicalEntities(query: string): string[] {
+  const q = query.toLowerCase();
+  const entities: string[] = [];
+  const drugPattern = /\b(metformin|insulin|warfarin|heparin|enoxaparin|apixaban|rivaroxaban|dabigatran|edoxaban|aspirin|clopidogrel|ticagrelor|amiodarone|digoxin|lisinopril|losartan|valsartan|sacubitril|amlodipine|metoprolol|carvedilol|bisoprolol|atorvastatin|rosuvastatin|simvastatin|fluconazole|voriconazole|posaconazole|vancomycin|meropenem|piperacillin|ceftriaxone|azithromycin|doxycycline|levofloxacin|ciprofloxacin|trimethoprim|nitrofurantoin|isoniazid|rifampin|ethambutol|pyrazinamide|levodopa|carbidopa|donepezil|memantine|lamotrigine|valproate|carbamazepine|phenytoin|gabapentin|pregabalin|sumatriptan|pembrolizumab|nivolumab|ipilimumab|vemurafenib|dabrafenib|trametinib|imatinib|osimertinib|semaglutide|liraglutide|empagliflozin|dapagliflozin|canagliflozin|sitagliptin|pioglitazone|levothyroxine|prednisone|hydrocortisone|dexamethasone|methylprednisolone|omeprazole|pantoprazole|lansoprazole|infliximab|adalimumab|rituximab|tocilizumab|methotrexate|hydroxychloroquine|colchicine|allopurinol|febuxostat|acetaminophen|ibuprofen|naproxen|morphine|fentanyl|hydromorphone|oxycodone|buprenorphine|naloxone|naltrexone|fluoxetine|sertraline|escitalopram|venlafaxine|duloxetine|bupropion|lithium|quetiapine|olanzapine|aripiprazole|clozapine|haloperidol|lorazepam|midazolam|diazepam|propofol|ketamine|epinephrine|norepinephrine|vasopressin|dobutamine|milrinone|alteplase|tenecteplase|heparin|bivalirudin|fondaparinux)\b/gi;
+  const diseasePattern = /\b(hypertension|diabetes|heart failure|atrial fibrillation|stroke|copd|asthma|pneumonia|sepsis|meningitis|endocarditis|tuberculosis|hiv|hepatitis|cirrhosis|pancreatitis|cholecystitis|appendicitis|diverticulitis|crohn|colitis|celiac|ibs|gerd|nafld|ckd|aki|nephrotic|glomerulonephritis|lupus|rheumatoid|gout|osteoarthritis|spondylitis|vasculitis|psoriasis|eczema|dermatitis|melanoma|lymphoma|leukemia|myeloma|breast cancer|lung cancer|colorectal|prostate cancer|pancreatic cancer|glioblastoma|meningioma|epilepsy|migraine|parkinson|alzheimer|multiple sclerosis|myasthenia|guillain|huntington|als|pulmonary embolism|dvt|aortic stenosis|mitral|cardiomyopathy|pericarditis|myocarditis|aneurysm|dissection|preeclampsia|eclampsia|gestational diabetes|placenta previa|sickle cell|thalassemia|hemophilia|itp|ttp|hit|dic|anaphylaxis|angioedema|asthma|ards|pneumothorax|pleural effusion|pulmonary hypertension|sarcoidosis|amyloidosis|histiocytosis|erdheim|langerhans)\b/gi;
+  const procedurePattern = /\b(ecmo|cabg|pci|tavr|ablation|cardioversion|dialysis|crrt|transplant|lobectomy|colectomy|cholecystectomy|appendectomy|intubation|tracheostomy|thoracostomy|paracentesis|thoracentesis|lumbar puncture|bronchoscopy|colonoscopy|endoscopy|catheterization|stenting|biopsy|resection)\b/gi;
+
+  for (const pattern of [drugPattern, diseasePattern, procedurePattern]) {
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(q)) !== null) {
+      entities.push(m[1].toLowerCase());
+    }
+  }
+  return [...new Set(entities)];
+}
+
 function rerankResults(query: string, results: MedicalEvidenceResult[]): MedicalEvidenceResult[] {
   if (results.length <= 1) return results;
+
+  const queryEntities = extractMedicalEntities(query);
 
   const scored = results.map(result => {
     const text = `${result.title} ${result.content}`;
@@ -224,9 +304,36 @@ function rerankResults(query: string, results: MedicalEvidenceResult[]): Medical
     const baseScore = typeof result.score === 'number' ? result.score : 0;
     const usFirstBoost = computeUsFirstEvidenceBoost(result);
     const citationWorthinessBoost = computeCitationWorthinessBoost(result);
-    const lowOverlapPenalty = overlapScore < 0.12 ? -0.3 : 0;
+
+    // Aggressive off-topic penalty: anything below 15% keyword overlap gets crushed
+    let relevancePenalty = 0;
+    if (overlapScore < 0.08) relevancePenalty = -1.2;
+    else if (overlapScore < 0.15) relevancePenalty = -0.6;
+    else if (overlapScore < 0.22) relevancePenalty = -0.2;
+
+    // Full-text chunks contain richer detail (methods, results, discussion)
+    const sectionType = (result as any).section_type || "";
+    const fullTextBoost = sectionType.startsWith("full_text_") ? 0.12 : 0;
+
+    // Deprioritize trial registrations (ClinicalTrials.gov) — they're not evidence
+    const journalOrSource = (result.journal_name || "").toLowerCase();
+    const studyType = (result.study_type || "").toLowerCase();
+    const isTrialRegistration = journalOrSource.includes("clinicaltrials.gov") || studyType.includes("registry");
+    const trialRegistrationPenalty = isTrialRegistration ? -0.8 : 0;
+
+    // Entity-match signal: penalize results that don't mention key entities from the query
+    let entityMatchBoost = 0;
+    if (queryEntities.length > 0) {
+      const resultText = `${result.title || ""} ${result.content || ""}`.toLowerCase();
+      const matched = queryEntities.filter(e => resultText.includes(e)).length;
+      const ratio = matched / queryEntities.length;
+      if (ratio === 0) entityMatchBoost = -0.5;
+      else if (ratio < 0.3) entityMatchBoost = -0.2;
+      else if (ratio >= 0.7) entityMatchBoost = 0.15;
+    }
+
     const combinedScore =
-      baseScore + overlapScore * 0.55 + usFirstBoost + citationWorthinessBoost + lowOverlapPenalty;
+      baseScore + overlapScore * 0.7 + usFirstBoost + citationWorthinessBoost + relevancePenalty + fullTextBoost + entityMatchBoost + trialRegistrationPenalty;
 
     return {
       ...result,
@@ -255,6 +362,8 @@ function filterLowRelevanceResults(
     .filter(item => item.overlap >= MIN_CITABLE_KEYWORD_OVERLAP)
     .map(item => item.result);
 
+  // Only keep the floor if we'd otherwise return almost nothing
+  if (filtered.length >= 2) return filtered.slice(0, maxResults);
   const minimumKeepCount = Math.min(maxResults, MIN_CITABLE_RESULTS_FLOOR);
   return filtered.length >= minimumKeepCount ? filtered : results;
 }
@@ -338,13 +447,15 @@ async function fallbackKeywordSearch(
 export async function searchMedicalEvidence(
   options: EvidenceSearchOptions
 ): Promise<MedicalEvidenceResult[]> {
+  // Apply filter presets first, then let explicit options override
+  const presetOverrides = resolveFilterPresets(options.filterPresets, options);
   const {
     query,
-    maxResults = 12,
-    minEvidenceLevel = 5, // Include all by default
-    studyTypes,
+    maxResults = 20,
+    minEvidenceLevel = presetOverrides.minEvidenceLevel ?? 5,
+    studyTypes = presetOverrides.studyTypes,
     meshTerms,
-    minYear,
+    minYear = presetOverrides.minYear,
     semanticWeight = 1.0,
     keywordWeight = 1.0,
     recencyWeight = 0.1,
@@ -353,7 +464,22 @@ export async function searchMedicalEvidence(
     enableRerank = true,
     queryExpansion = true,
     supabaseClient: providedSupabaseClient,
-  } = options;
+  } = { ...options, ...presetOverrides, ...options };
+
+  const qid = nextQueryId();
+  const totalTimer = startTimer();
+  const timings: RetrievalTimings = { embeddingMs: 0, searchMs: 0, rerankMs: 0, fetchMs: 0, totalMs: 0 };
+
+  // L1 cache: check Redis for previously computed results
+  const cached = await getEvidenceCache<MedicalEvidenceResult[]>(query);
+  if (cached && cached.length > 0) {
+    timings.totalMs = totalTimer();
+    recordRetrievalMetrics({
+      queryId: qid, query, timestamp: Date.now(), timings,
+      resultCount: cached.length, cacheHit: true, cacheLevel: "L1", source: "evidence",
+    });
+    return cached.slice(0, maxResults);
+  }
 
   const supabase = providedSupabaseClient ?? (await getServerClient());
   
@@ -362,13 +488,37 @@ export async function searchMedicalEvidence(
   }
   const supabaseClient = supabase as SupabaseClientType;
 
-  const expandedQuery = queryExpansion ? expandMedicalQuery(query) : query;
+  const shorthandExpanded = expandClinicalShorthand(query);
+  let expandedQuery = queryExpansion ? expandMedicalQuery(shorthandExpanded) : shorthandExpanded;
+
+  // MeSH graph expansion – append synonyms/narrower terms when available
+  const meshGraph = getMeshGraph();
+  if (meshGraph.size > 0) {
+    const meshExpansions = meshGraph.expandQuery(expandedQuery);
+    if (meshExpansions.length > 0) {
+      expandedQuery = `${expandedQuery} ${meshExpansions.slice(0, 6).join(" ")}`;
+    }
+  }
   const candidateCount = getCandidateCount(maxResults, candidateMultiplier);
 
-  // Generate embedding for the query
-  const queryEmbedding = await generateEmbedding(expandedQuery);
+  const embTimer = startTimer();
+  const queryEmbedding = await generateHyDEEmbedding(expandedQuery);
+  timings.embeddingMs = embTimer();
 
-  // Call the hybrid search RPC function
+  // Semantic cache: check for near-duplicate queries via embedding similarity
+  try {
+    const semanticHit = await getSemanticCache<MedicalEvidenceResult[]>(queryEmbedding);
+    if (semanticHit && semanticHit.length > 0) {
+      timings.totalMs = totalTimer();
+      recordRetrievalMetrics({
+        queryId: qid, query, timestamp: Date.now(), timings,
+        resultCount: semanticHit.length, cacheHit: true, cacheLevel: "semantic", source: "evidence",
+      });
+      return semanticHit.slice(0, maxResults);
+    }
+  } catch { /* non-fatal */ }
+
+  const searchTimer = startTimer();
   const { data, error } = await supabaseClient.rpc('hybrid_medical_search', {
     query_text: expandedQuery,
     query_embedding: queryEmbedding,
@@ -382,19 +532,55 @@ export async function searchMedicalEvidence(
     filter_mesh_terms: meshTerms || null,
     min_year: minYear || null,
   });
+  timings.searchMs = searchTimer();
 
   if (error) {
     console.warn('[Evidence Search] Hybrid search failed, using fallback:', error.message);
     const fallbackResults = await fallbackKeywordSearch(supabaseClient, options, candidateCount);
+    const rerankTimer = startTimer();
     const rerankedFallback = enableRerank ? rerankResults(query, fallbackResults) : fallbackResults;
+    timings.rerankMs = rerankTimer();
     const relevanceFilteredFallback = filterLowRelevanceResults(query, rerankedFallback, maxResults);
-    return relevanceFilteredFallback.slice(0, maxResults);
+    timings.totalMs = totalTimer();
+    const fallbackFinal = relevanceFilteredFallback.slice(0, maxResults);
+    recordRetrievalMetrics({
+      queryId: qid, query, timestamp: Date.now(), timings,
+      resultCount: fallbackFinal.length, cacheHit: false, cacheLevel: "miss", source: "evidence",
+      topScore: fallbackFinal[0]?.score,
+    });
+    return fallbackFinal;
   }
 
   const results = (data || []) as MedicalEvidenceResult[];
-  const reranked = enableRerank ? rerankResults(query, results) : results;
+  const rerankTimer = startTimer();
+  let reranked = enableRerank ? rerankResults(query, results) : results;
+  // Cross-encoder reranking: refine top-k ordering when enabled
+  const crossEncoderResult = await crossEncoderRerank(query, reranked);
+  if (crossEncoderResult.method !== "none") {
+    reranked = crossEncoderResult.results;
+  }
+  timings.rerankMs = rerankTimer();
   const relevanceFiltered = filterLowRelevanceResults(query, reranked, maxResults);
-  return relevanceFiltered.slice(0, maxResults);
+  const finalResults = relevanceFiltered.slice(0, maxResults);
+  timings.totalMs = totalTimer();
+
+  recordRetrievalMetrics({
+    queryId: qid, query, timestamp: Date.now(), timings,
+    resultCount: finalResults.length, cacheHit: false, cacheLevel: "miss", source: "evidence",
+    topScore: finalResults[0]?.score,
+    avgScore: finalResults.length > 0
+      ? finalResults.reduce((s, r) => s + r.score, 0) / finalResults.length
+      : undefined,
+  });
+
+  // Store in L1 cache (fire-and-forget)
+  setEvidenceCache(query, finalResults).catch(() => {});
+
+  // Store in semantic cache for near-duplicate query matching
+  const queryHashForSemantic = hashQuery(normaliseQueryForCache(query));
+  setSemanticCache(queryHashForSemantic, queryEmbedding, finalResults).catch(() => {});
+
+  return finalResults;
 }
 
 /**
@@ -429,7 +615,7 @@ export function resultsToCitations(results: MedicalEvidenceResult[]): EvidenceCi
       : result.doi 
         ? `https://doi.org/${result.doi}`
         : null,
-    snippet: result.content.substring(0, 300) + (result.content.length > 300 ? '...' : ''),
+    snippet: result.content.substring(0, 1200) + (result.content.length > 1200 ? '...' : ''),
     score: result.score,
   }));
 }
@@ -485,61 +671,47 @@ function buildEvidenceSystemPrompt(citations: EvidenceCitation[], hasUserUploads
   }
 
   return `
-## ⚠️ CRITICAL: EVIDENCE-BASED RESPONSE REQUIREMENTS ⚠️
+## EVIDENCE-BASED RESPONSE CONTRACT
 
-You have access to ${citations.length} cited sources${hasUserUploads ? ", including private user uploads" : ""}. You MUST follow these rules:
+You have ${citations.length} indexed sources${hasUserUploads ? " (includes private uploads)" : ""}. Follow this contract exactly.
 
-### MANDATORY CITATION RULES:
-1. **EVERY factual medical claim MUST be followed by a citation in square brackets**
-   - Primary format: [CITE_<sourceId>] for single citations
-   - Multiple source IDs: [CITE_<sourceIdA>,<sourceIdB>,<sourceIdC>]
-   - Numeric [1], [2], [1,2] only as compatibility fallback when source IDs are unavailable
-   - Citation density target: **at least one citation per factual sentence** whenever evidence is available
-   
-2. **DO NOT make claims without citations** - If evidence is limited, explicitly state uncertainty and use the strongest available evidence from the provided sources
+### RESPONSE STRUCTURE
+1. **Lead with a definitive clinical recommendation.** The first paragraph must directly answer the question with a concrete, actionable statement supported by the strongest citation(s). Be authoritative — do not hedge if the evidence is clear.
+2. **Evidence synthesis by theme, not by source.** Organize by clinical priority. Each major section should cite multiple distinct sources. Weave findings from different studies together rather than citing one study per section.
+3. **Quantitative precision is mandatory when available.** Extract specific numbers from source snippets: ORs, HRs, CIs, NNTs, sensitivity/specificity, sample sizes, absolute risk reductions. "A meta-analysis found X" is weak; "A meta-analysis (n=12,000) found OR 2.3 (95% CI 1.4–3.8)" is strong. If the source snippet includes a number, include it.
+4. **Close with clinical nuance.** Conflicts, limitations, gaps, or targeted follow-up questions go at the end—not throughout.
 
-3. **CITE IMMEDIATELY after each claim**, not at the end of paragraphs
-   - ✅ CORRECT: "ACE inhibitors reduce mortality [CITE_pmid:1578956]. They are first-line therapy [CITE_pmid:27195903]."
-   - ❌ WRONG: "ACE inhibitors reduce mortality. They are first-line therapy. [CITE_pmid:1578956,CITE_pmid:27195903]"
-   - ❌ WRONG: "First-hour sepsis care includes blood cultures, lactate, broad-spectrum antibiotics, and fluids [CITE_pmid:1578956]" (multiple independent claims, only one citation)
+### CITATION RULES (CRITICAL — follow precisely)
+- **Format:** ONLY use numeric bracket markers: [1], [2], [3,4]. Do NOT use [pubmed_XXXXX], [pmid:XXXXX], or any identifier-based format — ONLY the index number shown in the evidence list.
+- Multiple sources for one claim: [1,2] or [1-3].
+- Cite immediately after EACH factual claim, not at paragraph end.
+- **MANDATORY distribution:** You MUST cite at least ${Math.min(citations.length, Math.max(4, Math.ceil(citations.length * 0.5)))} DISTINCT sources across your response. Scan ALL ${citations.length} sources and actively look for claims each source can support. Do NOT over-rely on [1] — spread citations across the full source list. Every numbered source that is relevant to ANY part of your answer should be cited at least once.
+- **Evidence hierarchy:** Prefer Level 1–2 sources (meta-analyses, RCTs); cite Level 3–5 for clinical context.
+- **Silent omission rule:** If you lack a citation for a claim, rewrite the claim using the closest available evidence OR state it as clinical context without a marker. NEVER annotate "(no citation)" or similar disclaimers.
+- DO NOT fabricate citations or cite sources not in the provided list.
+- DO NOT cite a source just to hit the count — only cite sources whose content genuinely supports the claim.
 
-4. **PRIORITIZE HIGH EVIDENCE**: Weight meta-analyses (Level 1) and RCTs (Level 2) more heavily than lower-quality studies, but you may also cite private uploads when they directly support the answer
-
-5. **BE PRECISE**: Quote study findings accurately, including sample sizes when available
-
-6. **SYNTHESIZE**: Combine findings from multiple sources when they agree: "Multiple studies show X [1,2,3]"
-
-7. **FLAG CONFLICTS**: Note when sources disagree: "Some studies show X [1], while others show Y [2]"
-
-### Citation Examples:
-- Single: "Hypertension affects 30% of adults [CITE_pmid:1578956]"
-- Multiple: "Blood pressure control improves outcomes [CITE_pmid:1578956,CITE_pmid:27195903,CITE_pmid:23480230]"
-- With context: "A meta-analysis of 50,000 patients found a 23% reduction in cardiovascular events [CITE_pmid:1578956]"
-
-### Evidence Quality Indicators:
-- **Level 1** (Meta-Analysis/Systematic Review): Strongest evidence - prioritize these
-- **Level 2** (Randomized Controlled Trial): Strong evidence - reliable for treatment recommendations
-- **Level 3** (Cohort/Case-Control): Moderate evidence - good for associations
-- **Level 4** (Case Series/Report): Weak evidence - mention with caution
-- **Level 5** (Expert Opinion/Review): Expert opinion - use for context only
-
-### AVAILABLE EVIDENCE (YOU MUST USE THESE):
+### AVAILABLE EVIDENCE:
 ${citations.map(c => {
+  const idLabel = c.sourceId || `idx:${c.index}`
   if (c.sourceType === "user_upload") {
-    return `[CITE_${c.sourceId || `idx:${c.index}`}] ${c.title} (${c.sourceLabel || "Private upload"})${c.studyType ? ` - ${c.studyType}` : ''}`
+    return `[${c.index}] (sourceId: ${idLabel}) ${c.title} (${c.sourceLabel || "Private upload"})${c.studyType ? ` - ${c.studyType}` : ''}`
   }
-  return `[CITE_${c.sourceId || `idx:${c.index}`}] ${c.title} (${c.journal}, ${c.year || 'n.d.'}) - Level ${c.evidenceLevel}${c.studyType ? ` (${c.studyType})` : ''}`
+  return `[${c.index}] (sourceId: ${idLabel}) ${c.title} (${c.journal}, ${c.year || 'n.d.'}) - Level ${c.evidenceLevel}${c.studyType ? ` (${c.studyType})` : ''}`
 }).join('\n')}
 
-### REMINDER: 
-- Every medical fact needs a source-id citation [CITE_<sourceId>]
-- Multiple facts need multiple source-id citations [CITE_<sourceIdA>,<sourceIdB>]
-- If you make 5 factual claims, you should usually have ~5 citation placements
-- If you cannot cite it, say so explicitly
-- If primary guideline evidence is missing but secondary evidence exists, state that and continue synthesis from secondary sources
-- DO NOT invent citations or use citations that don't exist
+### QUALITY LEVELS:
+- L1: Meta-Analysis/Systematic Review — strongest, prioritize these
+- L2: RCT — strong, use for treatment recommendations
+- L3: Cohort/Case-Control — moderate, good for associations
+- L4: Case Series/Report — weak, mention with caution
+- L5: Expert Opinion — use for context only
 
-Now respond with a well-structured, evidence-based answer that properly cites every claim.`;
+### FORMAT CONSTRAINTS
+- Keep ALL citations inline in the answer body. Do NOT append a trailing references list, bibliography, or "Citations:" section at the end.
+- Do not list citation details (journal, year, PMID) in a separate section — the citation pills already display this metadata.
+
+Respond with an authoritative, evidence-dense clinical synthesis. Write at attending-to-attending level.`;
 }
 
 /**

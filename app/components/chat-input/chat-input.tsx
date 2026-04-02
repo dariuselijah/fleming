@@ -426,30 +426,6 @@ export function ChatInput({
   }, [isSlashUploadsMode])
 
   useEffect(() => {
-    if (!isUserAuthenticated) return
-    if (uploadResults.length > 0 && Date.now() - uploadsLoadedAt < 60_000) return
-
-    let active = true
-    listUserUploads({
-      allowStale: true,
-      maxAgeMs: 60_000,
-      revalidateInBackground: true,
-    })
-      .then((uploads) => {
-        if (!active) return
-        setUploadResults(uploads)
-        setUploadsLoadedAt(Date.now())
-      })
-      .catch(() => {
-        if (!active) return
-      })
-
-    return () => {
-      active = false
-    }
-  }, [isUserAuthenticated, uploadResults.length, uploadsLoadedAt])
-
-  useEffect(() => {
     if (!isUploadsPickerOpen || !isUserAuthenticated) return
     const isStale = Date.now() - uploadsLoadedAt > 20_000
     if (!isStale && uploadResults.length > 0) return

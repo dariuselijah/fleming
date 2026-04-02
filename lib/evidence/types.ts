@@ -89,6 +89,18 @@ export interface EvidenceSynthesisResult {
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+/**
+ * Pre-defined filter presets that narrow the search space before vector search.
+ * Applied as SQL WHERE clauses to prune irrelevant rows early.
+ */
+export type EvidenceFilterPreset =
+  | "guidelines_only"     // evidence_level = 1 OR study_type ILIKE '%guideline%'
+  | "rcts_and_above"      // evidence_level <= 2
+  | "recent_5y"           // publication_year >= current_year - 5
+  | "recent_10y"          // publication_year >= current_year - 10
+  | "high_evidence"       // evidence_level <= 3
+  | "meta_analyses"       // study_type ILIKE '%meta%' OR study_type ILIKE '%systematic%'
+
 export interface EvidenceSearchOptions {
   query: string;
   maxResults?: number;
@@ -106,6 +118,8 @@ export interface EvidenceSearchOptions {
   forceEvidence?: boolean;
   queryExpansion?: boolean;
   supabaseClient?: SupabaseClient;
+  /** Quick filter presets applied before vector search */
+  filterPresets?: EvidenceFilterPreset[];
 }
 
 export interface EvidenceContext {

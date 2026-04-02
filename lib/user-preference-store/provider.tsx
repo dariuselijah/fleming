@@ -141,12 +141,7 @@ export function UserPreferencesProvider({
 
   // Query for user preferences
   const queryKey = ["user-preferences", userId]
-  console.log("=== USER PREFERENCES PROVIDER DEBUG ===")
-  console.log("Using query key:", queryKey)
-  console.log("isAuthenticated:", isAuthenticated)
-  console.log("initialPreferences:", initialPreferences)
-  
-      const { data: preferences = getInitialData(), isLoading } =
+  const { data: preferences = getInitialData(), isLoading } =
     useQuery<UserPreferences>({
       queryKey,
       queryFn: async () => {
@@ -176,13 +171,6 @@ export function UserPreferencesProvider({
         initialPreferences && isAuthenticated ? getInitialData() : undefined,
     })
 
-    // Log the preferences data
-    console.log("=== PREFERENCES DATA DEBUG ===")
-    console.log("preferences:", preferences)
-    console.log("preferences.userRole:", preferences?.userRole)
-    console.log("preferences.medicalSpecialty:", preferences?.medicalSpecialty)
-    console.log("=== END PREFERENCES DATA DEBUG ===")
-
   // Mutation for updating preferences
   const mutation = useMutation({
     mutationFn: async (update: Partial<UserPreferences>) => {
@@ -211,7 +199,6 @@ export function UserPreferencesProvider({
 
       const previous = queryClient.getQueryData<UserPreferences>(queryKey)
       const optimistic = { ...previous, ...update }
-      console.log("Setting optimistic update:", optimistic)
       queryClient.setQueryData(queryKey, optimistic)
 
       return { previous }

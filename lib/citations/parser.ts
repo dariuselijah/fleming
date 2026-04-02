@@ -13,6 +13,14 @@ export interface CitationMarker {
   quoteText?: string
 }
 
+function normalizeSourceIdToken(rawToken: string): string {
+  return rawToken
+    .trim()
+    .replace(/^CITE[_:]/i, "")
+    .replace(/^["']|["']$/g, "")
+    .toLowerCase()
+}
+
 /**
  * Parse citation markers from text
  * Supports:
@@ -26,12 +34,12 @@ export function parseCitationMarkers(text: string): CitationMarker[] {
   
   // Pattern 0: [CITE_<sourceId>] or [CITE_<sourceIdA>,<sourceIdB>]
   // Example: [CITE_pmid:1578956], [CITE_doi:10.1056/nejmoa2032183]
-  const sourceIdPattern = /\[CITE_([A-Za-z0-9:._\/-]+(?:\s*,\s*[A-Za-z0-9:._\/-]+)*)\]/g
+  const sourceIdPattern = /\[CITE[_:]([^\]]+)\]/gi
   let match
   while ((match = sourceIdPattern.exec(text)) !== null) {
     const sourceIds = match[1]
       .split(/\s*,\s*/)
-      .map((item) => item.trim().toLowerCase())
+      .map(normalizeSourceIdToken)
       .filter(Boolean)
     if (sourceIds.length === 0) continue
     markers.push({

@@ -30,7 +30,6 @@ import {
   buildClinicalIntelPreflight,
   formatMissingVariablePrompt,
 } from "./clinical-intel"
-import { generatePlan as generatePlanWithLlm } from "./orchestrator"
 import type {
   ChartPlanHint,
   IncompleteEvidenceState,
@@ -1569,7 +1568,7 @@ function buildSystemPromptAdditions(state: SupervisorState): string[] {
   }
   if (state.modePolicy.requireStrictUncertainty) {
     additions.push(
-      "Clinician uncertainty guardrail: explicitly state confidence boundaries and avoid overconfident recommendations."
+      "Clinician uncertainty guardrail: state confidence boundaries concisely. When evidence is conflicting or sparse, note the limitation plainly without disclaimers about missing citations."
     )
   }
   if (state.modePolicy.studentMode) {
@@ -1739,26 +1738,7 @@ function getCompiledSupervisor() {
         learningMode: state.input.learningMode,
         lmsContext: state.input.lmsContext,
       })
-      const curriculumEnabledForLlm =
-        hasEducationalIntentSignal({
-          query: state.input.query,
-          modePolicy,
-          clinicalIntel,
-          learningMode: state.input.learningMode,
-        }) &&
-        Boolean(
-          state.input.lmsContext &&
-            (state.input.lmsContext.courseCount > 0 ||
-              state.input.lmsContext.artifactCount > 0)
-        )
-      const llmTaskPlan = await generatePlanWithLlm({
-        query: state.input.query,
-        seedPlan: plannerBuild.taskPlan,
-        selectedConnectorIds: selectionHints.preferredConnectorIds,
-        selectedToolNames: selectionHints.preferredToolNames,
-        chartEnabled: chartPlan.enabled && chartPlan.feasibilityScore >= 0.55,
-        curriculumEnabled: curriculumEnabledForLlm,
-      })
+      const llmTaskPlan = null
       const taskPlan = llmTaskPlan || plannerBuild.taskPlan
       const runtimeDag = taskPlanToRuntimeDag(taskPlan)
       const runtimeSteps = taskPlanToRuntimeSteps(taskPlan)
@@ -2220,12 +2200,66 @@ function getCompiledSupervisor() {
         ],
       }
     })
+    .addNode("adaptive_retrieval", (state: SupervisorState) => {
+      // Adaptive RAG: broaden search when evaluator confidence is very low.
+      // Relaxes filters, expands query, and tries alternate retrieval paths.
+      const enabled = process.env.ENABLE_ADAPTIVE_RAG === "true"
+      if (!enabled) {
+        return {
+          trace: [...state.trace, "adaptive_retrieval:skipped(disabled)"],
+        }
+      }
+
+      const broadened: string[] = [
+        ...state.plannerNotes,
+        "[Adaptive RAG] Confidence critically low after standard retrieval. Broadening search: relaxing filters, expanding query variants, and trying alternate connectors.",
+      ]
+
+      // Add connectors not yet selected to the preferred list
+      const allConnectors = state.connectorOrder
+      const alreadySelected = new Set(state.selectedConnectorIds)
+      const additionalConnectors = allConnectors
+        .filter((c) => !alreadySelected.has(c))
+        .slice(0, 3)
+      const expandedConnectorIds = [
+        ...state.selectedConnectorIds,
+        ...additionalConnectors,
+      ] as ClinicalConnectorId[]
+      const expandedToolNames = dedupe([
+        ...state.selectedToolNames,
+        ...additionalConnectors.map(
+          (c) => CONNECTOR_TOOL_NAME_MAP[c]?.[0]
+        ).filter(Boolean) as string[],
+      ])
+
+      return {
+        selectedConnectorIds: expandedConnectorIds,
+        selectedToolNames: expandedToolNames,
+        plannerNotes: broadened,
+        trace: [
+          ...state.trace,
+          `adaptive_retrieval:expanded;addedConnectors=${additionalConnectors.join("|")}`,
+        ],
+      }
+    })
     .addEdge(START, "planner")
     .addEdge("planner", "retrieval")
     .addEdge("retrieval", "evaluator")
-    .addConditionalEdges("evaluator", (state: SupervisorState) =>
-      state.shouldContinue ? "retrieval" : "composer"
-    )
+    .addConditionalEdges("evaluator", (state: SupervisorState) => {
+      if (state.shouldContinue) return "retrieval"
+      // Adaptive RAG gate: if confidence is critically low and we haven't
+      // already done adaptive retrieval, try broadening once.
+      const adaptiveEnabled = process.env.ENABLE_ADAPTIVE_RAG === "true"
+      const criticallyLow = state.confidence < 0.25
+      const alreadyAdapted = state.trace.some((t) =>
+        t.startsWith("adaptive_retrieval:expanded")
+      )
+      if (adaptiveEnabled && criticallyLow && !alreadyAdapted) {
+        return "adaptive_retrieval"
+      }
+      return "composer"
+    })
+    .addEdge("adaptive_retrieval", "retrieval")
     .addEdge("composer", END)
 
   compiledSupervisor = graph.compile()

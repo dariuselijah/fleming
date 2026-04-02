@@ -601,7 +601,7 @@ export async function enrichEvidenceCitationsWithJournalVisuals(
   if (!Array.isArray(citations) || citations.length === 0) return citations
 
   const queryText = options?.queryText || ""
-  const maxCitationsToEnrich = Math.max(1, Math.min(options?.maxCitationsToEnrich ?? 4, 6))
+  const maxCitationsToEnrich = Math.max(1, Math.min(options?.maxCitationsToEnrich ?? 6, 8))
   const rankedCitations = [...citations]
     .filter((citation) => citation.sourceType !== "user_upload")
     .filter((citation) => !citation.previewReference && (!citation.figureReferences || citation.figureReferences.length === 0))
