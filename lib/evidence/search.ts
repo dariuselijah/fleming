@@ -95,8 +95,8 @@ async function getServerClient(): Promise<SupabaseClientType | null> {
 const DEFAULT_MEDICAL_CONFIDENCE = 0.35;
 const MAX_FALLBACK_TOKENS = 6;
 const DEFAULT_CANDIDATE_MULTIPLIER = 6;
-const MIN_CITABLE_KEYWORD_OVERLAP = 0.22;
-const MIN_CITABLE_RESULTS_FLOOR = 4;
+const MIN_CITABLE_KEYWORD_OVERLAP = 0.25;
+const MIN_CITABLE_RESULTS_FLOOR = 3;
 const US_GUIDELINE_ORG_PATTERN =
   /\b(aha|acc|acp|ada|acog|aafp|cdc|nih|idsa|nccn|uspstf|sccm|ats)\b/i;
 const HIGH_AUTHORITY_STUDY_TYPE_PATTERN =
@@ -277,11 +277,11 @@ function computeCitationWorthinessBoost(result: MedicalEvidenceResult): number {
   );
 }
 
-function extractMedicalEntities(query: string): string[] {
+function extractMedicalEntities(query: string): { entities: string[]; intentTerms: string[] } {
   const q = query.toLowerCase();
   const entities: string[] = [];
-  const drugPattern = /\b(metformin|insulin|warfarin|heparin|enoxaparin|apixaban|rivaroxaban|dabigatran|edoxaban|aspirin|clopidogrel|ticagrelor|amiodarone|digoxin|lisinopril|losartan|valsartan|sacubitril|amlodipine|metoprolol|carvedilol|bisoprolol|atorvastatin|rosuvastatin|simvastatin|fluconazole|voriconazole|posaconazole|vancomycin|meropenem|piperacillin|ceftriaxone|azithromycin|doxycycline|levofloxacin|ciprofloxacin|trimethoprim|nitrofurantoin|isoniazid|rifampin|ethambutol|pyrazinamide|levodopa|carbidopa|donepezil|memantine|lamotrigine|valproate|carbamazepine|phenytoin|gabapentin|pregabalin|sumatriptan|pembrolizumab|nivolumab|ipilimumab|vemurafenib|dabrafenib|trametinib|imatinib|osimertinib|semaglutide|liraglutide|empagliflozin|dapagliflozin|canagliflozin|sitagliptin|pioglitazone|levothyroxine|prednisone|hydrocortisone|dexamethasone|methylprednisolone|omeprazole|pantoprazole|lansoprazole|infliximab|adalimumab|rituximab|tocilizumab|methotrexate|hydroxychloroquine|colchicine|allopurinol|febuxostat|acetaminophen|ibuprofen|naproxen|morphine|fentanyl|hydromorphone|oxycodone|buprenorphine|naloxone|naltrexone|fluoxetine|sertraline|escitalopram|venlafaxine|duloxetine|bupropion|lithium|quetiapine|olanzapine|aripiprazole|clozapine|haloperidol|lorazepam|midazolam|diazepam|propofol|ketamine|epinephrine|norepinephrine|vasopressin|dobutamine|milrinone|alteplase|tenecteplase|heparin|bivalirudin|fondaparinux)\b/gi;
-  const diseasePattern = /\b(hypertension|diabetes|heart failure|atrial fibrillation|stroke|copd|asthma|pneumonia|sepsis|meningitis|endocarditis|tuberculosis|hiv|hepatitis|cirrhosis|pancreatitis|cholecystitis|appendicitis|diverticulitis|crohn|colitis|celiac|ibs|gerd|nafld|ckd|aki|nephrotic|glomerulonephritis|lupus|rheumatoid|gout|osteoarthritis|spondylitis|vasculitis|psoriasis|eczema|dermatitis|melanoma|lymphoma|leukemia|myeloma|breast cancer|lung cancer|colorectal|prostate cancer|pancreatic cancer|glioblastoma|meningioma|epilepsy|migraine|parkinson|alzheimer|multiple sclerosis|myasthenia|guillain|huntington|als|pulmonary embolism|dvt|aortic stenosis|mitral|cardiomyopathy|pericarditis|myocarditis|aneurysm|dissection|preeclampsia|eclampsia|gestational diabetes|placenta previa|sickle cell|thalassemia|hemophilia|itp|ttp|hit|dic|anaphylaxis|angioedema|asthma|ards|pneumothorax|pleural effusion|pulmonary hypertension|sarcoidosis|amyloidosis|histiocytosis|erdheim|langerhans)\b/gi;
+  const drugPattern = /\b(metformin|insulin|warfarin|heparin|enoxaparin|apixaban|rivaroxaban|dabigatran|edoxaban|aspirin|clopidogrel|ticagrelor|amiodarone|digoxin|lisinopril|losartan|valsartan|sacubitril|amlodipine|metoprolol|carvedilol|bisoprolol|atorvastatin|rosuvastatin|simvastatin|fluconazole|voriconazole|posaconazole|vancomycin|meropenem|piperacillin|ceftriaxone|azithromycin|doxycycline|levofloxacin|ciprofloxacin|trimethoprim|nitrofurantoin|isoniazid|rifampin|ethambutol|pyrazinamide|levodopa|carbidopa|donepezil|memantine|lamotrigine|valproate|carbamazepine|phenytoin|gabapentin|pregabalin|sumatriptan|pembrolizumab|nivolumab|ipilimumab|vemurafenib|dabrafenib|trametinib|imatinib|osimertinib|semaglutide|liraglutide|empagliflozin|dapagliflozin|canagliflozin|sitagliptin|pioglitazone|levothyroxine|prednisone|hydrocortisone|dexamethasone|methylprednisolone|omeprazole|pantoprazole|lansoprazole|infliximab|adalimumab|rituximab|tocilizumab|methotrexate|hydroxychloroquine|colchicine|allopurinol|febuxostat|acetaminophen|ibuprofen|naproxen|morphine|fentanyl|hydromorphone|oxycodone|buprenorphine|naloxone|naltrexone|fluoxetine|sertraline|escitalopram|venlafaxine|duloxetine|bupropion|lithium|quetiapine|olanzapine|aripiprazole|clozapine|haloperidol|lorazepam|midazolam|diazepam|propofol|ketamine|epinephrine|norepinephrine|vasopressin|dobutamine|milrinone|alteplase|tenecteplase|heparin|bivalirudin|fondaparinux|daptomycin|linezolid|chlorthalidone|indapamide|hydrochlorothiazide|spironolactone|eplerenone|finerenone|tamoxifen|letrozole|anastrozole|cyclophosphamide|avacopan|eculizumab|ruxolitinib|tofacitinib|baricitinib)\b/gi;
+  const diseasePattern = /\b(hypertension|diabetes|heart failure|atrial fibrillation|stroke|copd|asthma|pneumonia|sepsis|meningitis|endocarditis|tuberculosis|hiv|hepatitis|cirrhosis|pancreatitis|cholecystitis|appendicitis|diverticulitis|crohn|colitis|celiac|ibs|gerd|nafld|ckd|aki|nephrotic|glomerulonephritis|lupus|rheumatoid|gout|osteoarthritis|spondylitis|vasculitis|psoriasis|eczema|dermatitis|melanoma|lymphoma|leukemia|myeloma|breast cancer|lung cancer|colorectal|prostate cancer|pancreatic cancer|glioblastoma|meningioma|epilepsy|migraine|parkinson|alzheimer|multiple sclerosis|myasthenia|guillain|huntington|als|pulmonary embolism|dvt|aortic stenosis|mitral|cardiomyopathy|pericarditis|myocarditis|aneurysm|dissection|preeclampsia|eclampsia|gestational diabetes|placenta previa|sickle cell|thalassemia|hemophilia|itp|ttp|hit|dic|anaphylaxis|angioedema|asthma|ards|pneumothorax|pleural effusion|pulmonary hypertension|sarcoidosis|amyloidosis|histiocytosis|erdheim|langerhans|mrsa|vre|c\.\s*diff|clostridioides)\b/gi;
   const procedurePattern = /\b(ecmo|cabg|pci|tavr|ablation|cardioversion|dialysis|crrt|transplant|lobectomy|colectomy|cholecystectomy|appendectomy|intubation|tracheostomy|thoracostomy|paracentesis|thoracentesis|lumbar puncture|bronchoscopy|colonoscopy|endoscopy|catheterization|stenting|biopsy|resection)\b/gi;
 
   for (const pattern of [drugPattern, diseasePattern, procedurePattern]) {
@@ -290,13 +290,22 @@ function extractMedicalEntities(query: string): string[] {
       entities.push(m[1].toLowerCase());
     }
   }
-  return [...new Set(entities)];
+
+  // Intent terms: the clinical action being asked about (treatment, management, dosing, etc.)
+  const intentTerms: string[] = [];
+  const intentPattern = /\b(treatment|management|therapy|dosing|dose|guideline|first[- ]line|second[- ]line|empiric|prophylaxis|prevention|screening|diagnosis|workup|antibiotic|antihypertensive|anticoagulant|anticoagulation|antiplatelet|immunosuppression|chemotherapy|initiation|titration|monitoring|selection|choice|algorithm|protocol|recommendation|target|goal)\b/gi;
+  let im: RegExpExecArray | null;
+  while ((im = intentPattern.exec(q)) !== null) {
+    intentTerms.push(im[1].toLowerCase());
+  }
+
+  return { entities: [...new Set(entities)], intentTerms: [...new Set(intentTerms)] };
 }
 
 function rerankResults(query: string, results: MedicalEvidenceResult[]): MedicalEvidenceResult[] {
   if (results.length <= 1) return results;
 
-  const queryEntities = extractMedicalEntities(query);
+  const { entities: queryEntities, intentTerms } = extractMedicalEntities(query);
 
   const scored = results.map(result => {
     const text = `${result.title} ${result.content}`;
@@ -321,19 +330,34 @@ function rerankResults(query: string, results: MedicalEvidenceResult[]): Medical
     const isTrialRegistration = journalOrSource.includes("clinicaltrials.gov") || studyType.includes("registry");
     const trialRegistrationPenalty = isTrialRegistration ? -0.8 : 0;
 
-    // Entity-match signal: penalize results that don't mention key entities from the query
+    const resultText = `${result.title || ""} ${result.content || ""}`.toLowerCase();
+
+    // Entity-match signal: papers MUST mention the core diseases/drugs from the query.
+    // A GWAS paper that mentions "CKD" but not "hypertension" or "antihypertensive"
+    // should get crushed when the query is about HTN management in CKD.
     let entityMatchBoost = 0;
     if (queryEntities.length > 0) {
-      const resultText = `${result.title || ""} ${result.content || ""}`.toLowerCase();
       const matched = queryEntities.filter(e => resultText.includes(e)).length;
       const ratio = matched / queryEntities.length;
-      if (ratio === 0) entityMatchBoost = -0.5;
-      else if (ratio < 0.3) entityMatchBoost = -0.2;
-      else if (ratio >= 0.7) entityMatchBoost = 0.15;
+      if (ratio === 0) entityMatchBoost = -1.5;
+      else if (ratio < 0.3) entityMatchBoost = -0.8;
+      else if (ratio < 0.5) entityMatchBoost = -0.3;
+      else if (ratio >= 0.8) entityMatchBoost = 0.2;
+      else if (ratio >= 0.6) entityMatchBoost = 0.1;
+    }
+
+    // Intent-match signal: if the query asks about "treatment/management/dosing",
+    // the paper should actually be ABOUT that action, not just a disease study
+    let intentMatchBoost = 0;
+    if (intentTerms.length > 0) {
+      const intentHits = intentTerms.filter(t => resultText.includes(t)).length;
+      const intentRatio = intentHits / intentTerms.length;
+      if (intentRatio === 0) intentMatchBoost = -0.6;
+      else if (intentRatio >= 0.5) intentMatchBoost = 0.15;
     }
 
     const combinedScore =
-      baseScore + overlapScore * 0.7 + usFirstBoost + citationWorthinessBoost + relevancePenalty + fullTextBoost + entityMatchBoost + trialRegistrationPenalty;
+      baseScore + overlapScore * 0.7 + usFirstBoost + citationWorthinessBoost + relevancePenalty + fullTextBoost + entityMatchBoost + intentMatchBoost + trialRegistrationPenalty;
 
     return {
       ...result,
