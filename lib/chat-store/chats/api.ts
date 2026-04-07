@@ -24,6 +24,38 @@ export async function getChatsForUserInDb(userId: string): Promise<Chats[]> {
   return data
 }
 
+/** All consult threads for a user + clinical patient (newest first). */
+export async function getChatsForPatientInDb(
+  userId: string,
+  patientId: string
+): Promise<Chats[]> {
+  const supabase = createClient()
+  if (!supabase) return []
+
+  const { data, error } = await supabase
+    .from("chats")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("patient_id", patientId)
+    .order("updated_at", { ascending: false })
+
+  if (error || !data) {
+    if (error) console.error("getChatsForPatientInDb:", error)
+    return []
+  }
+
+  return data
+}
+
+/** Most recently updated consult thread for user + patient (legacy helper). */
+export async function getChatForPatientInDb(
+  userId: string,
+  patientId: string
+): Promise<Chats | null> {
+  const list = await getChatsForPatientInDb(userId, patientId)
+  return list[0] ?? null
+}
+
 export async function updateChatTitleInDb(id: string, title: string) {
   const supabase = createClient()
   if (!supabase) return
@@ -185,7 +217,8 @@ export async function createNewChat(
   title?: string,
   model?: string,
   isAuthenticated?: boolean,
-  projectId?: string
+  projectId?: string,
+  patientId?: string
 ): Promise<Chats> {
   try {
     const payload: {
@@ -194,6 +227,7 @@ export async function createNewChat(
       model: string
       isAuthenticated?: boolean
       projectId?: string
+      patientId?: string
     } = {
       userId,
       title: title || "New Chat",
@@ -203,6 +237,9 @@ export async function createNewChat(
 
     if (projectId) {
       payload.projectId = projectId
+    }
+    if (patientId) {
+      payload.patientId = patientId
     }
 
     const res = await fetchClient("/api/create-chat", {
@@ -226,6 +263,7 @@ export async function createNewChat(
       public: responseData.chat.public,
       updated_at: responseData.chat.updated_at,
       project_id: responseData.chat.project_id || null,
+      patient_id: responseData.chat.patient_id ?? null,
     }
 
     await writeToIndexedDB("chats", chat)

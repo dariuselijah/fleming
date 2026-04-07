@@ -21,6 +21,11 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
   const { preferences } = useUserPreferences()
 
   const isLoggedIn = !!user
+  const isClinicalMode = preferences.userRole === "doctor"
+
+  if (isClinicalMode && isLoggedIn) {
+    return null
+  }
 
   return (
     <header className="h-app-header pointer-events-none fixed top-0 right-0 left-0 z-50">

@@ -20,6 +20,7 @@ import { AccountManagement } from "./general/account-management"
 import { UserProfile } from "./general/user-profile"
 import { HealthContext } from "./general/health-context"
 import { UserRoleSelection } from "./general/user-role-selection"
+import { PracticeSetupPreferences } from "./general/practice-setup-preferences"
 
 type SettingsContentProps = {
   isDrawer?: boolean
@@ -91,6 +92,7 @@ export function SettingsContent({
             <TabsContent value="general" className="space-y-6 px-6">
               <UserProfile />
               <UserRoleSelection />
+              <PracticeSetupPreferences />
               <HealthContext />
               {isSupabaseEnabled && (
                 <>
@@ -151,6 +153,7 @@ export function SettingsContent({
               <TabsContent value="general" className="mt-0 space-y-6">
                 <UserProfile />
                 <UserRoleSelection />
+                <PracticeSetupPreferences />
                 <HealthContext />
                 {isSupabaseEnabled && (
                   <>

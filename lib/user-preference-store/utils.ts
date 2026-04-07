@@ -51,6 +51,11 @@ export type UserPreferences = {
   
   // Onboarding
   onboardingCompleted?: boolean
+
+  /** Clinician: practice profile (BHF, HPCSA, etc.) saved via setup or settings. */
+  practiceProfileCompleted?: boolean
+  /** Clinician: user closed/dismissed the practice setup guide (corner widget). */
+  practiceSetupGuideDismissed?: boolean
 }
 
 export const defaultPreferences: UserPreferences = {
@@ -82,6 +87,8 @@ export const defaultPreferences: UserPreferences = {
   
   // Onboarding
   onboardingCompleted: false,
+  practiceProfileCompleted: false,
+  practiceSetupGuideDismissed: false,
 }
 
 // Helper functions to convert between API format (snake_case) and frontend format (camelCase)
@@ -115,6 +122,8 @@ export function convertFromApiFormat(apiData: any): UserPreferences {
     
     // Onboarding
     onboardingCompleted: apiData.onboarding_completed ?? false,
+    practiceProfileCompleted: apiData.practice_profile_completed ?? false,
+    practiceSetupGuideDismissed: apiData.practice_setup_guide_dismissed ?? false,
   }
 }
 
@@ -166,6 +175,10 @@ export function convertToApiFormat(preferences: Partial<UserPreferences>) {
     apiData.clinician_name = preferences.clinicianName
   if (preferences.onboardingCompleted !== undefined)
     apiData.onboarding_completed = preferences.onboardingCompleted
-  
+  if (preferences.practiceProfileCompleted !== undefined)
+    apiData.practice_profile_completed = preferences.practiceProfileCompleted
+  if (preferences.practiceSetupGuideDismissed !== undefined)
+    apiData.practice_setup_guide_dismissed = preferences.practiceSetupGuideDismissed
+
   return apiData
 }

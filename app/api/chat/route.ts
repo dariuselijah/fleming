@@ -105,6 +105,7 @@ import {
   normalizeCitationStyle,
   type CitationStyle,
 } from "@/lib/citations/formatters"
+import { buildPatientClinicalTools } from "@/lib/clinical/chat-patient-tools"
 import { runClinicalAgentHarness } from "@/lib/clinical-agent/graph"
 import { recordCitationContractViolation } from "@/lib/clinical-agent/telemetry"
 import type {
@@ -3727,6 +3728,8 @@ export async function POST(req: Request) {
     }
 
     let effectiveChatId = chatId
+    let consultPatientId: string | null = null
+    let consultPracticeId: string | null = null
 
     // CRITICAL: Check rate limits FIRST - fail fast before any other work
     let validatedSupabase: Awaited<ReturnType<typeof validateAndTrackUsage>> = null
@@ -3782,6 +3785,20 @@ export async function POST(req: Request) {
             chatId: effectiveChatId,
             userId,
           })
+          const { data: cRow } = await validatedSupabase
+            .from("chats")
+            .select("patient_id")
+            .eq("id", effectiveChatId)
+            .maybeSingle()
+          consultPatientId = (cRow?.patient_id as string | null) ?? null
+          if (consultPatientId) {
+            const { data: pRow } = await validatedSupabase
+              .from("practice_patients")
+              .select("practice_id")
+              .eq("id", consultPatientId)
+              .maybeSingle()
+            consultPracticeId = (pRow?.practice_id as string | null) ?? null
+          }
         }
       } catch (error: any) {
         if (error.code === "DAILY_LIMIT_REACHED" || error.limitType === "hourly") {
@@ -4937,6 +4954,12 @@ export async function POST(req: Request) {
           queryText,
           benchStrictMode ? strictCitationFloor : 6
         )
+        // If relevance filtering removed everything but the ranker still had candidates,
+        // keep top sources so the client gets real citation metadata and the task board
+        // can attribute retrieval (avoids empty X-Evidence-Citations + "Citation 1" UI).
+        if (selected.length === 0 && rankedPool.length > 0) {
+          selected = dedupeAndReindexCitations(rankedPool).slice(0, 12)
+        }
         if (benchStrictMode) {
           selected = ensureCitationFloor(selected, rankedPool, strictCitationFloor)
         }
@@ -6972,7 +6995,22 @@ export async function POST(req: Request) {
         }
       : ({} as ToolSet)
 
+    const patientClinicalTools: ToolSet =
+      supportsTools &&
+      (effectiveUserRole === "doctor" || effectiveUserRole === "medical_student") &&
+      consultPatientId &&
+      consultPracticeId &&
+      validatedSupabase
+        ? buildPatientClinicalTools({
+            supabase: validatedSupabase,
+            userId,
+            practiceId: consultPracticeId,
+            patientId: consultPatientId,
+          })
+        : ({} as ToolSet)
+
     let runtimeTools: ToolSet = {
+      ...patientClinicalTools,
       ...webSearchRuntimeTools,
       ...evidenceRuntimeTools,
       ...connectorRuntimeTools,

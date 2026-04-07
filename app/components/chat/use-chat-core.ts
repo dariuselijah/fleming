@@ -69,6 +69,23 @@ function createEphemeralChatId() {
   return `temp-chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 }
 
+/** Doctor-role messages that imply guideline or citation-backed answers should run the evidence path. */
+function messageImpliesClinicalEvidence(text: string): boolean {
+  const s = text.trim()
+  if (!s) return false
+  const lower = s.toLowerCase()
+  if (/\[\/evidence\]/i.test(s)) return true
+  if (/\[\/\s*evidence\s*\]/i.test(s)) return true
+  if (/\bevidence[-\s]based\b/i.test(lower)) return true
+  if (/\bpeer[-\s]reviewed\b/i.test(lower) && /\b(literature|source|study)\b/i.test(lower)) {
+    return true
+  }
+  if (/\bguideline\b/i.test(lower) && /\b(cite|citation|source|reference)\b/i.test(lower)) {
+    return true
+  }
+  return false
+}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -641,12 +658,18 @@ export function useChatCore({
   }, [])
 
   const startOptimisticTaskBoard = useCallback(
-    (rawQuery: string) => {
+    (
+      rawQuery: string,
+      options?: { enableEvidence?: boolean; enableSearch?: boolean }
+    ) => {
       const condensedQuery = rawQuery.replace(/\s+/g, " ").trim()
       const querySnippet =
         condensedQuery.length > 120
           ? `${condensedQuery.slice(0, 117)}...`
           : condensedQuery
+
+      const boardEnableEvidence = options?.enableEvidence ?? enableEvidence
+      const boardEnableSearch = options?.enableSearch ?? enableSearch
 
       const items: TaskBoardItem[] = [
         {
@@ -658,9 +681,11 @@ export function useChatCore({
         },
         {
           id: "optimistic-retrieval",
-          label: enableEvidence ? "Gather evidence and context" : "Gather context",
+          label: boardEnableEvidence
+            ? "Gather evidence and context"
+            : "Gather context",
           status: "pending",
-          detail: enableSearch
+          detail: boardEnableSearch
             ? "Preparing retrieval sources and tools."
             : "Preparing model context and constraints.",
           phase: "retrieval",
@@ -2063,6 +2088,12 @@ export function useChatCore({
     const resolvedInput = typeof overrideInput === "string" ? overrideInput : input
     if (!resolvedInput.trim() && files.length === 0) return
 
+    const userRole = userPreferences.preferences.userRole || "general"
+    const effectiveEnableEvidence =
+      userRole === "doctor" && messageImpliesClinicalEvidence(resolvedInput)
+        ? true
+        : enableEvidence
+
     const isAuthenticatedNow = !!user?.id
     if (!isAuthenticatedNow) {
       const fileMetadata = files.map((file) => ({
@@ -2077,7 +2108,7 @@ export function useChatCore({
         hasFiles: files.length > 0,
         selectedModel,
         enableSearch,
-        enableEvidence,
+        enableEvidence: effectiveEnableEvidence,
         learningMode,
         clinicianMode,
         artifactIntent,
@@ -2096,7 +2127,10 @@ export function useChatCore({
     startSubmitTelemetry("submit")
     setIsSubmitting(true)
     setStreamIntroPreview(INSTANT_STREAM_INTRO)
-    startOptimisticTaskBoard(resolvedInput || "New request")
+    startOptimisticTaskBoard(resolvedInput || "New request", {
+      enableEvidence: effectiveEnableEvidence,
+      enableSearch,
+    })
     pendingHeaderTimelineAnnotationsRef.current = []
     headerTimelineSequenceRef.current = 0
     clearEvidenceCitations()
@@ -2348,7 +2382,7 @@ export function useChatCore({
         isAuthenticated: !!user?.id,
         systemPrompt,
         enableSearch,
-        enableEvidence,
+        enableEvidence: effectiveEnableEvidence,
         learningMode,
         clinicianMode,
         userRole: userPreferences.preferences.userRole || "general",
@@ -2546,6 +2580,11 @@ export function useChatCore({
   const handleSuggestion = useCallback(
     async (suggestion: string) => {
       const isAuthenticatedNow = !!user?.id
+      const userRole = userPreferences.preferences.userRole || "general"
+      const effectiveSuggestionEvidence =
+        userRole === "doctor" && messageImpliesClinicalEvidence(suggestion)
+          ? true
+          : enableEvidence
 
       if (!isAuthenticatedNow) {
         const pendingMessage = {
@@ -2554,7 +2593,7 @@ export function useChatCore({
           hasFiles: false,
           selectedModel,
           enableSearch,
-          enableEvidence,
+          enableEvidence: effectiveSuggestionEvidence,
           learningMode,
           clinicianMode,
           artifactIntent,
@@ -2574,7 +2613,10 @@ export function useChatCore({
       startSubmitTelemetry("suggestion")
       setIsSubmitting(true)
       setStreamIntroPreview(INSTANT_STREAM_INTRO)
-      startOptimisticTaskBoard(suggestion || "Suggested request")
+      startOptimisticTaskBoard(suggestion || "Suggested request", {
+        enableEvidence: effectiveSuggestionEvidence,
+        enableSearch,
+      })
       pendingHeaderTimelineAnnotationsRef.current = []
       headerTimelineSequenceRef.current = 0
       clearEvidenceCitations()
@@ -2619,7 +2661,7 @@ export function useChatCore({
           isAuthenticated: !!user?.id,
           systemPrompt: getSystemPromptByRole(userPreferences.preferences.userRole),
           enableSearch,
-          enableEvidence,
+          enableEvidence: effectiveSuggestionEvidence,
           learningMode,
           clinicianMode: DEFAULT_CLINICIAN_WORKFLOW_MODE,
           topicContext: topicContextRef.current || undefined,
@@ -2729,7 +2771,17 @@ export function useChatCore({
         .reverse()
         .find((message) => message.role === "user" && typeof message.content === "string")
         ?.content || "Regenerate previous response"
-    startOptimisticTaskBoard(latestUserPrompt)
+    const userRole = userPreferences.preferences.userRole || "general"
+    const reloadPrompt =
+      typeof latestUserPrompt === "string" ? latestUserPrompt : String(latestUserPrompt)
+    const effectiveReloadEvidence =
+      userRole === "doctor" && messageImpliesClinicalEvidence(reloadPrompt)
+        ? true
+        : enableEvidence
+    startOptimisticTaskBoard(reloadPrompt, {
+      enableEvidence: effectiveReloadEvidence,
+      enableSearch,
+    })
     clearEvidenceCitations()
     pendingHeaderTimelineAnnotationsRef.current = []
     headerTimelineSequenceRef.current = 0
@@ -2749,7 +2801,7 @@ export function useChatCore({
         isAuthenticated,
         systemPrompt: systemPrompt || getSystemPromptByRole(userPreferences.preferences.userRole),
         enableSearch,
-        enableEvidence,
+        enableEvidence: effectiveReloadEvidence,
         learningMode,
         clinicianMode,
         topicContext: topicContextRef.current || undefined,
@@ -2767,6 +2819,7 @@ export function useChatCore({
     systemPrompt,
     enableSearch,
     enableEvidence,
+    userPreferences,
     learningMode,
     clinicianMode,
     artifactIntent,

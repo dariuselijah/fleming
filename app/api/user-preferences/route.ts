@@ -7,6 +7,8 @@ const OPTIONAL_ONBOARDING_COLUMNS = [
   "student_school",
   "student_year",
   "clinician_name",
+  "practice_profile_completed",
+  "practice_setup_guide_dismissed",
 ] as const
 
 function stripOptionalOnboardingColumns(payload: Record<string, unknown>) {

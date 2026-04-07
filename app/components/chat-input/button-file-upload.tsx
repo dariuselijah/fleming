@@ -67,7 +67,7 @@ export function ButtonFileUpload({
       onFilesAdded={onFileUpload}
       multiple
       disabled={!isUserAuthenticated}
-      accept={`.txt,.md,.pdf,.pptx,.docx,.mp4,.mov,.m4v,.webm,.mkv,video/mp4,video/quicktime,video/webm,${supportedImageAccept}`}
+      accept={`.txt,.md,.pdf,.pptx,.docx,.mp4,.mov,.m4v,.webm,.mkv,.mp3,.wav,.m4a,.ogg,.aac,.flac,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/wav,audio/mp4,audio/ogg,audio/aac,audio/flac,audio/webm,${supportedImageAccept}`}
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -94,10 +94,8 @@ export function ButtonFileUpload({
           <FileArrowUp className="text-muted-foreground size-8" />
           <span className="mt-4 mb-1 text-lg font-medium">Drop files here</span>
           <span className="text-muted-foreground text-sm">
-            Drop images, documents, or lecture videos here (up to{" "}
-            {getChatAttachmentSizeLimitLabel("image/png")} for images; supported image types: JPEG,
-            PNG, WEBP, GIF; {getChatAttachmentSizeLimitLabel("application/pdf")} for documents and
-            videos)
+            Drop images, documents, audio, or videos here (up to{" "}
+            {getChatAttachmentSizeLimitLabel("image/png")} for images; {getChatAttachmentSizeLimitLabel("application/pdf")} for documents, audio, and videos)
           </span>
         </div>
       </FileUploadContent>

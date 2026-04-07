@@ -136,6 +136,7 @@ ${evidenceContext.systemPromptAddition}
 7. IMPORTANT: Use at LEAST 3 different citations throughout your response. Spread citations across multiple claims. Do NOT rely on a single source for the entire answer.
 8. Prefer citing published PubMed articles and guidelines over trial registrations (ClinicalTrials.gov). Trial registrations are NOT evidence — they only prove a trial exists.
 9. When citing a landmark trial (e.g., PARADIGM-HF, DAPA-HF, ARISTOTLE, AASK), cite the specific source that contains the trial data, not a secondary review.
+10. Never use transcript provenance tags like [T], [E], or [H]. Those are for dictation/workspace notes only. In this evidence-grounded mode use ONLY numbered markers [1]–[${evidenceContext.citations.length}] tied to the evidence list below.
 
 ### EVIDENCE CONTENT:
 ${evidenceContext.formattedContext}`;

@@ -2,7 +2,7 @@
 
 import { toast } from "@/components/ui/toast"
 import { createContext, useContext, useEffect, useState } from "react"
-import { MODEL_DEFAULT, SYSTEM_PROMPT_DEFAULT, getSystemPromptByRole } from "../../config"
+import { MODEL_DEFAULT } from "../../config"
 import type { Chats } from "../types"
 import {
   createNewChat as createNewChatFromDb,
@@ -12,6 +12,7 @@ import {
   updateChatModel as updateChatModelFromDb,
   updateChatTitle,
 } from "./api"
+import { isPracticePatientUuid } from "@/lib/clinical-workspace/clinical-uuid"
 
 interface ChatsContextType {
   chats: Chats[]
@@ -31,7 +32,8 @@ interface ChatsContextType {
     isAuthenticated?: boolean,
     systemPrompt?: string,
     projectId?: string,
-    userRole?: "general" | "doctor" | "medical_student"
+    userRole?: "general" | "doctor" | "medical_student",
+    patientId?: string
   ) => Promise<Chats | undefined>
   resetChats: () => Promise<void>
   getChatById: (id: string) => Chats | undefined
@@ -169,22 +171,41 @@ export function ChatsProvider({
     isAuthenticated?: boolean,
     systemPrompt?: string,
     projectId?: string,
-    userRole?: "general" | "doctor" | "medical_student"
+    userRole?: "general" | "doctor" | "medical_student",
+    patientId?: string
   ) => {
     if (!userId) return
+
+    const trimmedPatient = patientId?.trim()
+    if (trimmedPatient && !isPracticePatientUuid(trimmedPatient)) {
+      toast({
+        title: "Cannot link consult chat",
+        description:
+          "This patient record does not have a practice UUID yet. Open them from the patient directory or re-add them so the ID matches your database.",
+        status: "error",
+      })
+      return undefined
+    }
+    const safePatientId = trimmedPatient && isPracticePatientUuid(trimmedPatient) ? trimmedPatient : undefined
+
     const prev = [...chats]
 
     // CRITICAL: Check if chat with same title/content already exists to prevent duplicates
     // This prevents creating multiple chats when ensureChatExists is called multiple times
     const existingChat = chats.find(
-      (c) => c.title === (title || "New Chat") && 
-             c.user_id === userId &&
-             c.created_at &&
-             Math.abs(new Date(c.created_at).getTime() - Date.now()) < 5000 // Created within last 5 seconds
+      (c) =>
+        !safePatientId &&
+        c.title === (title || "New Chat") &&
+        c.user_id === userId &&
+        c.created_at &&
+        Math.abs(new Date(c.created_at).getTime() - Date.now()) < 5000 // Created within last 5 seconds
     )
-    
-    if (existingChat && !existingChat.id.startsWith('optimistic-')) {
-      console.log('[createNewChat] Chat with same title already exists, returning existing:', existingChat.id)
+
+    if (existingChat && !existingChat.id.startsWith("optimistic-")) {
+      console.log(
+        "[createNewChat] Chat with same title already exists, returning existing:",
+        existingChat.id
+      )
       return existingChat
     }
 
@@ -197,16 +218,16 @@ export function ChatsProvider({
       return existingOptimistic
     }
     
-    const optimisticChat = {
+    const optimisticChat: Chats = {
       id: optimisticId,
       title: title || "New Chat",
       created_at: new Date().toISOString(),
       model: model || MODEL_DEFAULT,
-      system_prompt: getSystemPromptByRole(userRole, systemPrompt),
       user_id: userId,
       public: true,
       updated_at: new Date().toISOString(),
       project_id: null,
+      patient_id: safePatientId ?? null,
     }
     
     // CRITICAL: Only add if it doesn't already exist
@@ -225,7 +246,8 @@ export function ChatsProvider({
         title,
         model,
         isAuthenticated,
-        projectId
+        projectId,
+        safePatientId
       )
 
       setChats((prev) => [

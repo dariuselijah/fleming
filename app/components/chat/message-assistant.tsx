@@ -32,6 +32,11 @@ import { parseCitationMarkers, getUniqueCitationIndices } from "@/lib/citations/
 import { useMemo, useCallback, useEffect, useState, useRef, useReducer } from "react"
 import { parseLearningCard } from "@/lib/medical-student-learning"
 import { LearningCard } from "./learning-card"
+import { detectClinicalCommand } from "@/app/components/clinical-blocks/clinical-response-block"
+import { ClinicalDocumentCard } from "@/app/components/clinical-blocks/clinical-document-card"
+import { PrescriptionCard } from "@/app/components/clinical-blocks/prescription-card"
+import { detectCommandFromUserMessage, buildClinicalDocument } from "@/lib/clinical-workspace"
+import { useWorkspaceStore } from "@/lib/clinical-workspace"
 import type { DocumentArtifact, QuizArtifact } from "@/lib/uploads/artifacts"
 import { splitTrailingSourceAppendix } from "./source-appendix"
 import {
@@ -271,7 +276,17 @@ function isMeaningfulEvidenceCitation(citation: EvidenceCitation): boolean {
     typeof citation.year === "number" ||
     Boolean(citation.studyType?.trim())
 
-  return hasStableLocator || (hasNamedSource && hasContext)
+  const indexedMedicalEvidence =
+    typeof citation.index === "number" &&
+    citation.index > 0 &&
+    (citation.sourceType === "medical_evidence" ||
+      (typeof citation.evidenceLevel === "number" && citation.evidenceLevel >= 1))
+
+  return (
+    hasStableLocator ||
+    (hasNamedSource && hasContext) ||
+    indexedMedicalEvidence
+  )
 }
 
 function isMeaningfulCitationData(citation: CitationData): boolean {
@@ -564,6 +579,104 @@ export function MessageAssistant({
   
   const contentNullOrEmpty = contentToRender === null || contentToRender === ""
   const isLastStreaming = status === "streaming" && isLast
+
+  const clinicalDocType = useMemo(
+    () => contextPrompt ? detectCommandFromUserMessage(contextPrompt) : null,
+    [contextPrompt]
+  )
+
+  const documentSheetOpen = useWorkspaceStore((s) => s.documentSheet.isOpen)
+  const documentSheetDoc = useWorkspaceStore((s) => s.documentSheet.contentDocument)
+
+  const stableClinicalDocumentId = useMemo(() => {
+    if (!documentSheetOpen || !documentSheetDoc || !clinicalDocType) return null
+    if (clinicalDocType !== documentSheetDoc.type) return null
+    return documentSheetDoc.id
+  }, [documentSheetOpen, documentSheetDoc, clinicalDocType])
+
+  const clinicalDocument = useMemo(() => {
+    if (!clinicalDocType || contentToRender === null || contentToRender === undefined)
+      return null
+    if (contentToRender === "" && clinicalDocType !== "prescribe") return null
+    const doc = buildClinicalDocument(
+      messageId,
+      clinicalDocType,
+      contentToRender,
+      !!isLastStreaming,
+      undefined,
+      stableClinicalDocumentId,
+      {
+        sourcesParseInput: sanitizedContent,
+        trailingPmidSources:
+          trailingSourceEntries.length > 0 ? trailingSourceEntries : undefined,
+      },
+    )
+    const rx = doc.prescriptionItems?.length ?? 0
+    const bodyLen = doc.content.trim().length
+    if (isLastStreaming) {
+      if (bodyLen < 12 && rx === 0) return null
+      return doc
+    }
+    if (bodyLen <= 50 && rx === 0) return null
+    return doc
+  }, [
+    clinicalDocType,
+    contentToRender,
+    messageId,
+    isLastStreaming,
+    stableClinicalDocumentId,
+    sanitizedContent,
+    trailingSourceEntries,
+  ])
+
+  const openDocumentContent = useWorkspaceStore((s) => s.openDocumentContent)
+  const updateDocumentContent = useWorkspaceStore((s) => s.updateDocumentContent)
+  const upsertSessionDocument = useWorkspaceStore((s) => s.upsertSessionDocument)
+  const ingestClinicalNoteText = useWorkspaceStore((s) => s.ingestClinicalNoteText)
+  const docSheetIsOpen = useWorkspaceStore((s) => s.documentSheet.isOpen)
+  const docSheetContentId = useWorkspaceStore((s) => s.documentSheet.contentDocument?.id)
+
+  useEffect(() => {
+    if (!clinicalDocument || !isLast) return
+    if (docSheetIsOpen && docSheetContentId === clinicalDocument.id) {
+      updateDocumentContent(clinicalDocument.content, !!isLastStreaming, {
+        sources: clinicalDocument.sources,
+        prescriptionItems: clinicalDocument.prescriptionItems,
+      })
+    }
+  }, [clinicalDocument, isLast, isLastStreaming, docSheetIsOpen, docSheetContentId, updateDocumentContent])
+
+  const sessionDocRegisteredRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!clinicalDocument || isLastStreaming || !isLast) return
+    const registrationKey = `${messageId}:${clinicalDocument.id}`
+    if (sessionDocRegisteredRef.current === registrationKey) return
+    sessionDocRegisteredRef.current = registrationKey
+    const pid = useWorkspaceStore.getState().activePatientId
+    if (!pid) return
+    upsertSessionDocument(pid, {
+      id: clinicalDocument.id,
+      messageId,
+      status: "draft",
+      document: { ...clinicalDocument, isStreaming: false },
+      updatedAt: new Date().toISOString(),
+    })
+    if (clinicalDocument.content?.trim()) {
+      ingestClinicalNoteText(pid, clinicalDocument.content, "Assistant note")
+    }
+  }, [
+    clinicalDocument,
+    ingestClinicalNoteText,
+    isLast,
+    isLastStreaming,
+    messageId,
+    upsertSessionDocument,
+  ])
+
+  const handleExpandDocument = useCallback((doc: typeof clinicalDocument) => {
+    if (doc) openDocumentContent(doc)
+  }, [openDocumentContent])
+
   const hasRenderableTimelineParts = useMemo(
     () =>
       Array.isArray(parts) &&
@@ -1649,9 +1762,28 @@ export function MessageAssistant({
 
         {learningCard && <LearningCard card={learningCard} />}
 
-        {contentNullOrEmpty && !hasRenderableActivityTimeline ? (
-        isLastStreaming ? <div
-            className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
+        {clinicalDocument &&
+        (clinicalDocument.content.trim().length > 50 ||
+          clinicalDocument.isStreaming ||
+          (clinicalDocument.type === "prescribe" &&
+            (clinicalDocument.prescriptionItems?.length ?? 0) > 0)) ? (
+          <>
+            {clinicalDocument.type === "prescribe" &&
+              (clinicalDocument.prescriptionItems?.length ?? 0) > 0 && (
+                <PrescriptionCard items={clinicalDocument.prescriptionItems!} />
+              )}
+            {(clinicalDocument.content.trim().length > 50 ||
+              clinicalDocument.isStreaming) && (
+              <ClinicalDocumentCard
+                document={clinicalDocument}
+                onExpand={handleExpandDocument}
+                messageId={messageId}
+              />
+            )}
+          </>
+        ) : contentNullOrEmpty && !hasRenderableActivityTimeline ? (
+          isLastStreaming ? (
+            <div className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
               {streamIntroPreview ? (
                 <div className="text-muted-foreground text-sm leading-6">
                   {streamIntroPreview}
@@ -1659,7 +1791,8 @@ export function MessageAssistant({
               ) : (
                 <ProcessingLoader />
               )}
-            </div> : null
+            </div>
+          ) : null
         ) : (
           ENABLE_CHAT_ACTIVITY_TIMELINE_V2 ? (
             <ActivityTimeline
