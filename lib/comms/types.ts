@@ -1,7 +1,7 @@
 export type ChannelType = "whatsapp" | "voice" | "sms"
 export type ThreadStatus = "active" | "awaiting_input" | "handoff" | "closed"
 export type ThreadPriority = "low" | "normal" | "high" | "urgent"
-export type FlowType = "none" | "booking" | "onboarding" | "triage" | "faq"
+export type FlowType = "none" | "booking" | "onboarding" | "triage" | "faq" | "patient_lookup"
 export type MessageDirection = "inbound" | "outbound"
 export type SenderType = "patient" | "agent" | "staff" | "system"
 export type ContentType = "text" | "audio" | "image" | "document" | "template" | "interactive" | "location"

@@ -1,7 +1,10 @@
 import type { ExtractedEntities, HighlightSpan } from "@/lib/scribe/entity-highlighter"
 import type {
+  AcceptHistoryEntry,
   ConsultStatus,
+  EvidenceDeepDiveState,
   MedicalBlock,
+  PatientLifestyle,
   PatientMedication,
   PatientSession,
   SessionDocument,
@@ -26,7 +29,9 @@ export type EncounterStatePlain = {
   claimId?: string
   criticalAllergies?: string[]
   chronicConditions?: string[]
+  encounterProblems?: string[]
   activeMedications?: PatientMedication[]
+  lifestyle?: PatientLifestyle
   medicalAidStatus?: PatientSession["medicalAidStatus"]
   medicalAidScheme?: string
   memberNumber?: string
@@ -35,6 +40,10 @@ export type EncounterStatePlain = {
   scribeEntities?: ExtractedEntities
   scribeHighlights?: HighlightSpan[]
   scribeEntityStatus?: Record<string, "pending" | "accepted" | "rejected">
+  acceptHistory?: AcceptHistoryEntry[]
+  evidenceDeepDive?: EvidenceDeepDiveState | null
+  /** Optional text extracted from uploads for RAG (indexed as uploaded_document) */
+  ragAttachmentSnippets?: { id?: string; label: string; text: string }[]
 }
 
 export function serializeEncounterState(
@@ -66,7 +75,9 @@ export function serializeEncounterState(
     claimId: session.claimId,
     criticalAllergies: session.criticalAllergies,
     chronicConditions: session.chronicConditions,
+    encounterProblems: session.encounterProblems,
     activeMedications: session.activeMedications,
+    lifestyle: session.lifestyle,
     medicalAidStatus: session.medicalAidStatus,
     medicalAidScheme: session.medicalAidScheme,
     memberNumber: session.memberNumber,
@@ -75,6 +86,8 @@ export function serializeEncounterState(
     scribeEntities: scribe.entities,
     scribeHighlights: scribe.highlights,
     scribeEntityStatus: scribe.entityStatus,
+    acceptHistory: session.acceptHistory,
+    evidenceDeepDive: session.evidenceDeepDive ?? null,
   }
 }
 
@@ -93,10 +106,14 @@ export function encounterPlainToSessionPartial(plain: EncounterStatePlain): Part
     claimId: plain.claimId,
     criticalAllergies: plain.criticalAllergies,
     chronicConditions: plain.chronicConditions ?? [],
+    encounterProblems: plain.encounterProblems ?? [],
     activeMedications: plain.activeMedications ?? [],
+    lifestyle: plain.lifestyle,
     medicalAidStatus: plain.medicalAidStatus,
     medicalAidScheme: plain.medicalAidScheme,
     memberNumber: plain.memberNumber,
+    acceptHistory: plain.acceptHistory,
+    evidenceDeepDive: plain.evidenceDeepDive ?? undefined,
   }
 }
 

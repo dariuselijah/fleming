@@ -1,21 +1,38 @@
 "use client"
 
 import { useWorkspace, createPatientSession, useWorkspaceStore } from "@/lib/clinical-workspace"
-import type { PracticePatient, MedicalAidVerification, PatientMedication, PatientSession } from "@/lib/clinical-workspace"
+import type {
+  PracticePatient,
+  PracticeAppointment,
+  MedicalAidVerification,
+  PatientMedication,
+  PatientSession,
+} from "@/lib/clinical-workspace"
+import {
+  findDuplicatePatient,
+  isPracticePatientProfileIncomplete,
+  type PatientRegistrationPrefill,
+} from "@/lib/clinical/smart-import-patient"
 import { encryptPatientProfile, usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-context"
 import {
   encounterPlainToSessionPartial,
   scribePartialFromPlain,
   type EncounterStatePlain,
 } from "@/lib/clinical-workspace/encounter-state"
+import { fetchLatestEncounterPlain } from "@/lib/clinical-workspace/fetch-latest-encounter"
 import { decryptJson } from "@/lib/crypto/practice-e2ee"
 import { createClient } from "@/lib/supabase/client"
 import { useUser } from "@/lib/user-store/provider"
+import { useEligibilityCheck } from "@/lib/hooks/use-eligibility-check"
+import type { EligibilityResponse, FamilyEligibilityResponse } from "@/lib/medikredit/types"
+import { MediKreditAccreditationModal } from "@/app/components/medikredit/medi-kredit-accreditation-modal"
 import { BentoTile } from "./bento-tile"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 import {
   MagnifyingGlass,
   Plus,
+  PlusCircle,
   CalendarBlank,
   Stethoscope,
   ArrowUp,
@@ -35,6 +52,13 @@ import {
   CurrencyDollar,
   ClockCounterClockwise,
   PencilSimple,
+  ShieldCheck,
+  UsersThree,
+  CalendarCheck,
+  ChatCircle,
+  SpinnerGap,
+  CheckCircle,
+  XCircle,
 } from "@phosphor-icons/react"
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { AnimatePresence, motion } from "motion/react"
@@ -116,13 +140,31 @@ export type PracticePatientDraft = Omit<PracticePatient, "id">
 export function PatientDirectory() {
   const { user } = useUser()
   const { practiceId, dekKey, unlocked } = usePracticeCrypto()
-  const { patients, claims, openPatients, setMode, setAdminTab, openPatient, addPatient, updatePatient } = useWorkspace()
+  const {
+    patients,
+    claims,
+    setMode,
+    setAdminTab,
+    openPatient,
+    addPatient,
+    updatePatient,
+    beginNewVisitForPatient,
+  } = useWorkspace()
   const [schemeNames, setSchemeNames] = useState<string[]>(MA_SCHEMES)
   const [search, setSearch] = useState("")
   const [sortKey, setSortKey] = useState<SortKey>("name")
   const [sortDir, setSortDir] = useState<SortDir>("asc")
   const [showRegister, setShowRegister] = useState(false)
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null)
+  const [registerError, setRegisterError] = useState<string | null>(null)
+  const patientAddModalOpenNonce = useWorkspaceStore((s) => s.patientAddModalOpenNonce)
+  const patientAddModalPrefill = useWorkspaceStore((s) => s.patientAddModalPrefill)
+
+  useEffect(() => {
+    if (patientAddModalPrefill && patientAddModalOpenNonce > 0) {
+      setShowRegister(true)
+    }
+  }, [patientAddModalPrefill, patientAddModalOpenNonce])
 
   useEffect(() => {
     const supabase = createClient()
@@ -185,7 +227,8 @@ export function PatientDirectory() {
     const verified = patients.filter((p) => p.medicalAidStatus === "verified").length
     const pending = patients.filter((p) => p.medicalAidStatus === "pending" || p.medicalAidStatus === "unknown").length
     const chronic = patients.filter((p) => (p.chronicConditions?.length ?? 0) > 0).length
-    return { total: patients.length, verified, pending, chronic }
+    const incompleteProfiles = patients.filter((p) => p.profileIncomplete).length
+    return { total: patients.length, verified, pending, chronic, incompleteProfiles }
   }, [patients])
 
   const selectedPatient = useMemo(
@@ -209,29 +252,17 @@ export function PatientDirectory() {
       if (practiceId && dekKey && unlocked) {
         const supabase = createClient()
         if (supabase) {
-          const { data } = await supabase
-            .from("clinical_encounters")
-            .select("id, state_ciphertext, state_iv")
-            .eq("practice_id", practiceId)
-            .eq("patient_id", patient.id)
-            .order("updated_at", { ascending: false })
-            .limit(1)
-            .maybeSingle()
-          if (data?.state_ciphertext && data.state_iv) {
-            try {
-              const plain = await decryptJson<EncounterStatePlain>(
-                dekKey,
-                String(data.state_ciphertext),
-                String(data.state_iv)
-              )
-              if (plain && plain.v === 1) {
-                encounterId = data.id as string
-                fromEncounter = encounterPlainToSessionPartial(plain)
-                plainForScribe = plain
-              }
-            } catch {
-              /* ignore corrupt row */
-            }
+          const row = await fetchLatestEncounterPlain({
+            supabase,
+            practiceId,
+            patientId: patient.id,
+            chatId: null,
+            dekKey,
+          })
+          if (row) {
+            encounterId = row.encounterId
+            fromEncounter = encounterPlainToSessionPartial(row.plain)
+            plainForScribe = row.plain
           }
         }
       }
@@ -273,12 +304,55 @@ export function PatientDirectory() {
     [dekKey, openPatient, practiceId, setMode, unlocked]
   )
 
+  const handleStartNewVisit = useCallback(
+    (patient: PracticePatient) => {
+      const existing = useWorkspaceStore.getState().openPatients.find((p) => p.patientId === patient.id)
+      if (existing) {
+        beginNewVisitForPatient(patient.id)
+      } else {
+        const session = createPatientSession({
+          patientId: patient.id,
+          name: patient.name,
+          age: patient.age,
+          sex: patient.sex,
+          medicalAidStatus:
+            patient.medicalAidStatus === "verified"
+              ? "active"
+              : patient.medicalAidStatus === "terminated"
+                ? "inactive"
+                : patient.medicalAidStatus,
+          medicalAidScheme: patient.medicalAidScheme,
+          memberNumber: patient.memberNumber,
+          chronicConditions: patient.chronicConditions,
+          criticalAllergies: patient.allergies,
+          activeMedications: patient.currentMedications,
+          status: "checked_in",
+        })
+        openPatient(session)
+        useWorkspaceStore.getState().clearScribeTranscript()
+      }
+      setMode("clinical")
+    },
+    [beginNewVisitForPatient, openPatient, setMode]
+  )
+
   const handleViewPatient = useCallback((patient: PracticePatient) => {
     setSelectedPatientId(patient.id)
   }, [])
 
   const handleCreatePatient = useCallback(
     async (draft: PracticePatientDraft) => {
+      setRegisterError(null)
+      const dup = findDuplicatePatient(patients, {
+        idNumber: draft.idNumber,
+        passportNumber: draft.passportNumber,
+      })
+      if (dup) {
+        setRegisterError(
+          `This practice already has a patient with this SA ID or passport number (${dup.name}). Open their file or use a different identifier.`
+        )
+        return
+      }
       const supabase = createClient()
       if (practiceId && dekKey && unlocked && supabase && user?.id) {
         try {
@@ -308,7 +382,7 @@ export function PatientDirectory() {
       addPatient({ ...draft, id: crypto.randomUUID() })
       setShowRegister(false)
     },
-    [addPatient, dekKey, practiceId, unlocked, user?.id]
+    [addPatient, dekKey, patients, practiceId, unlocked, user?.id]
   )
 
   return (
@@ -330,11 +404,16 @@ export function PatientDirectory() {
       </div>
 
       {/* Top Stats */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard label="Total Patients" value={stats.total} />
         <StatCard label="Verified MA" value={stats.verified} accent="text-[#00E676]" />
         <StatCard label="Pending Verification" value={stats.pending} accent="text-[#FFC107]" />
         <StatCard label="Chronic Conditions" value={stats.chronic} accent="text-blue-400" />
+        <StatCard
+          label="Incomplete profiles"
+          value={stats.incompleteProfiles}
+          accent={stats.incompleteProfiles > 0 ? "text-amber-400" : "text-white/30"}
+        />
       </div>
 
       {/* Bento Grid */}
@@ -382,6 +461,7 @@ export function PatientDirectory() {
                     patient={patient}
                     onBook={handleBookAppointment}
                     onScribe={handleStartScribe}
+                    onNewVisit={handleStartNewVisit}
                     onView={handleViewPatient}
                     isSelected={patient.id === selectedPatientId}
                   />
@@ -493,7 +573,12 @@ export function PatientDirectory() {
         {showRegister && (
           <AddPatientModal
             schemeOptions={schemeNames}
-            onClose={() => setShowRegister(false)}
+            smartImportPrefillNonce={patientAddModalOpenNonce}
+            registrationError={registerError}
+            onClose={() => {
+              setShowRegister(false)
+              setRegisterError(null)
+            }}
             onCreate={handleCreatePatient}
           />
         )}
@@ -505,7 +590,6 @@ export function PatientDirectory() {
           <PatientFilePanel
             patient={selectedPatient}
             claims={claims}
-            openPatients={openPatients}
             onClose={() => setSelectedPatientId(null)}
             onUpdate={(id, update) => updatePatient(id, update)}
           />
@@ -521,12 +605,14 @@ function PatientRow({
   patient,
   onBook,
   onScribe,
+  onNewVisit,
   onView,
   isSelected,
 }: {
   patient: PracticePatient
   onBook: (p: PracticePatient) => void
   onScribe: (p: PracticePatient) => void
+  onNewVisit: (p: PracticePatient) => void
   onView: (p: PracticePatient) => void
   isSelected: boolean
 }) {
@@ -545,7 +631,14 @@ function PatientRow({
             {patient.name.split(" ").map((n) => n[0]).join("")}
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground">{patient.name}</p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <p className="text-xs font-medium text-foreground">{patient.name}</p>
+              {patient.profileIncomplete ? (
+                <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-400">
+                  Incomplete
+                </span>
+              ) : null}
+            </div>
             <p className="truncate text-[10px] text-white/25">
               {patient.idNumber ?? "No ID"}{patient.medicalAidScheme ? ` · ${patient.medicalAidScheme}` : ""}
             </p>
@@ -582,9 +675,20 @@ function PatientRow({
           </button>
           <button
             type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onNewVisit(patient)
+            }}
+            className="rounded-md border border-white/[0.06] px-2 py-1 text-[10px] text-white/50 transition-colors hover:bg-sky-500/10 hover:text-sky-400"
+            title="New visit — fresh encounter"
+          >
+            <PlusCircle className="size-3" weight="bold" />
+          </button>
+          <button
+            type="button"
             onClick={(e) => { e.stopPropagation(); onScribe(patient) }}
             className="rounded-md border border-white/[0.06] px-2 py-1 text-[10px] text-white/50 transition-colors hover:bg-[#00E676]/10 hover:text-[#00E676]"
-            title="Start scribe"
+            title="Resume last visit / scribe"
           >
             <Stethoscope className="size-3" weight="bold" />
           </button>
@@ -680,14 +784,48 @@ const INITIAL_FORM: ManualFormState = {
   chronicConditions: "",
 }
 
+function registrationPrefillToManualForm(p: PatientRegistrationPrefill): Partial<ManualFormState> {
+  const out: Partial<ManualFormState> = {}
+  if (p.title !== undefined) out.title = p.title
+  if (p.firstName !== undefined) out.firstName = p.firstName
+  if (p.lastName !== undefined) out.lastName = p.lastName
+  if (p.idNumber !== undefined) out.idNumber = p.idNumber.replace(/\D/g, "").slice(0, 13)
+  if (p.dateOfBirth !== undefined) out.dateOfBirth = p.dateOfBirth
+  if (p.sex !== undefined) out.sex = p.sex
+  if (p.email !== undefined) out.email = p.email
+  if (p.scheme !== undefined) out.scheme = p.scheme
+  if (p.plan !== undefined) out.plan = p.plan
+  if (p.memberNumber !== undefined) out.memberNumber = p.memberNumber
+  if (p.dependentCode !== undefined) out.dependentCode = p.dependentCode
+  if (p.mainMemberName !== undefined) out.mainMemberName = p.mainMemberName
+  if (p.hasMedicalAid !== undefined) {
+    out.hasMedicalAid = p.hasMedicalAid
+  } else if (p.scheme || p.memberNumber) {
+    out.hasMedicalAid = true
+  }
+  if (p.phone !== undefined) {
+    const ph = p.phone.trim()
+    if (ph.startsWith("+")) out.phone = ph
+    else if (ph.replace(/\D/g, "").length >= 9) {
+      const d = ph.replace(/\D/g, "")
+      out.phone = d.startsWith("27") ? `+${d}` : `+27${d.replace(/^0/, "")}`
+    }
+  }
+  return out
+}
+
 function AddPatientModal({
   onClose,
   onCreate,
   schemeOptions,
+  smartImportPrefillNonce = 0,
+  registrationError,
 }: {
   onClose: () => void
   onCreate: (p: PracticePatientDraft) => void | Promise<void>
   schemeOptions: string[]
+  smartImportPrefillNonce?: number
+  registrationError?: string | null
 }) {
   const [tab, setTab] = useState<ModalTab>("manual")
   const [form, setForm] = useState<ManualFormState>(INITIAL_FORM)
@@ -697,6 +835,18 @@ function AddPatientModal({
   // Smart Scan state
   const [scanStage, setScanStage] = useState<"idle" | "scanning" | "confirm">("idle")
   const [scanData, setScanData] = useState<Partial<ManualFormState> | null>(null)
+
+  useEffect(() => {
+    if (smartImportPrefillNonce <= 0) return
+    const prefill = useWorkspaceStore.getState().patientAddModalPrefill
+    if (!prefill) return
+    setForm((f) => ({
+      ...INITIAL_FORM,
+      ...registrationPrefillToManualForm(prefill),
+    }))
+    setTab("manual")
+    useWorkspaceStore.getState().clearPatientAddModalPrefill()
+  }, [smartImportPrefillNonce])
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -756,6 +906,7 @@ function AddPatientModal({
         : undefined,
       medicalAidStatus: form.hasMedicalAid ? "pending" : "unknown",
       medicalAidScheme: form.hasMedicalAid ? form.scheme || undefined : undefined,
+      medicalAidPlan: form.hasMedicalAid ? form.plan || undefined : undefined,
       memberNumber: form.hasMedicalAid ? form.memberNumber || undefined : undefined,
       dependentCode: form.hasMedicalAid ? form.dependentCode || undefined : undefined,
       mainMemberName: form.hasMedicalAid ? form.mainMemberName || undefined : undefined,
@@ -763,6 +914,11 @@ function AddPatientModal({
       allergies: allergies.length > 0 ? allergies : undefined,
       outstandingBalance: 0,
       registeredAt: new Date().toISOString().slice(0, 10),
+      profileIncomplete: isPracticePatientProfileIncomplete({
+        phone: form.phone,
+        email: form.email,
+        address: form.address,
+      }),
     }
     void onCreate(draft)
   }, [form, onCreate])
@@ -833,6 +989,12 @@ function AddPatientModal({
             </button>
           ))}
         </div>
+
+        {registrationError ? (
+          <p className="border-b border-white/[0.06] bg-red-500/10 px-6 py-2 text-[11px] text-red-300">
+            {registrationError}
+          </p>
+        ) : null}
 
         {/* Body */}
         <div className="max-h-[calc(85vh-140px)] overflow-y-auto p-6" style={{ scrollbarWidth: "thin" }}>
@@ -1072,21 +1234,133 @@ function AddPatientModal({
 
 // ── Patient File Panel ──
 
+/** Aligned with bento-calendar day grid (08:00–18:00, 30-minute slots). */
+const CAL_DAY_START = 8
+const CAL_DAY_END = 18
+const SLOT_MINUTES = 30
+
+function patientToMedikreditPayload(p: PracticePatient) {
+  return {
+    id: p.id,
+    name: p.name,
+    idNumber: p.idNumber,
+    memberNumber: p.memberNumber,
+    medicalAidScheme: p.medicalAidScheme,
+    dependentCode: p.dependentCode,
+    mainMemberName: p.mainMemberName,
+    dateOfBirth: p.dateOfBirth,
+    sex: p.sex,
+  }
+}
+
+function padTime(n: number): string {
+  return String(n).padStart(2, "0")
+}
+
+function fmtLocalYmd(d: Date): string {
+  return `${d.getFullYear()}-${padTime(d.getMonth() + 1)}-${padTime(d.getDate())}`
+}
+
+function timeStrHm(h: number, m: number): string {
+  return `${padTime(h)}:${padTime(m)}`
+}
+
+function addClockMinutes(h: number, mi: number, add: number): { h: number; m: number } {
+  let t = h * 60 + mi + add
+  const hh = Math.floor(t / 60)
+  const mm = t % 60
+  return { h: hh, m: mm }
+}
+
+function iterDaySlots(): { hour: number; minute: number }[] {
+  const n = (CAL_DAY_END - CAL_DAY_START) * 2
+  return Array.from({ length: n }, (_, i) => ({
+    hour: CAL_DAY_START + Math.floor(i / 2),
+    minute: (i % 2) * 30,
+  }))
+}
+
+function slotIsBlocked(appointments: PracticeAppointment[], dateStr: string, hour: number, minute: number): boolean {
+  return appointments.some(
+    (a) =>
+      a.date === dateStr &&
+      a.hour === hour &&
+      a.minute === minute &&
+      !["cancelled", "no_show", "completed"].includes(a.status)
+  )
+}
+
+function findBookedTodayForPatient(
+  appointments: PracticeAppointment[],
+  patientId: string,
+  todayStr: string
+): PracticeAppointment | null {
+  const candidates = appointments.filter(
+    (a) =>
+      a.patientId === patientId &&
+      a.date === todayStr &&
+      (a.status === "booked" || a.status === "confirmed")
+  )
+  if (candidates.length === 0) return null
+  candidates.sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute))
+  return candidates[0]
+}
+
+/**
+ * Next free slot from “now” onward: prefers the current 30-minute window if still empty,
+ * otherwise the next free slot (today, then rolling forward up to 14 days).
+ */
+function findNextWalkInSlot(appointments: PracticeAppointment[], now: Date): { dateStr: string; hour: number; minute: number } | null {
+  const slots = iterDaySlots()
+  let day = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+
+  for (let dayOffset = 0; dayOffset < 14; dayOffset++) {
+    const dateStr = fmtLocalYmd(day)
+    const isToday = dayOffset === 0
+
+    for (const { hour, minute } of slots) {
+      const start = hour * 60 + minute
+      const end = start + SLOT_MINUTES
+      if (isToday && end <= nowMin) continue
+      if (!slotIsBlocked(appointments, dateStr, hour, minute)) {
+        return { dateStr, hour, minute }
+      }
+    }
+    day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)
+  }
+  return null
+}
+
 type PanelTab = "overview" | "history" | "medications" | "billing"
 
 function PatientFilePanel({
   patient,
   claims,
-  openPatients,
   onClose,
   onUpdate,
 }: {
   patient: PracticePatient
   claims: { id: string; patientId: string; patientName: string; totalAmount: number; status: string; createdAt: string; lines: { description: string; amount: number }[] }[]
-  openPatients: { patientId: string; name: string; openedAt: Date; soapNote: { subjective: string; objective: string; assessment: string; plan: string }; status: string }[]
   onClose: () => void
   onUpdate: (id: string, update: Partial<PracticePatient>) => void
 }) {
+  const {
+    appointments,
+    addAppointment,
+    updateAppointment,
+    practiceProviders,
+    activeDoctorId,
+    setSelectedDate,
+    setAdminTab,
+    requestCalendarFocusAppointment,
+    openPatient,
+    setMode,
+  } = useWorkspace()
+
+  const { practiceId, dekKey, unlocked } = usePracticeCrypto()
+  const { runEligibility, runFamily, loading: mkLoading, error: mkError } = useEligibilityCheck({ practiceId })
+
   const [activeTab, setActiveTab] = useState<PanelTab>("overview")
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({
@@ -1097,6 +1371,25 @@ function PatientFilePanel({
     chronicConditions: (patient.chronicConditions ?? []).join(", "),
   })
 
+  const [quickPanel, setQuickPanel] = useState<null | "eligibility" | "family">(null)
+  const [eligibilityUi, setEligibilityUi] = useState<
+    | { phase: "idle" }
+    | { phase: "checking" }
+    | { phase: "result"; api: EligibilityResponse }
+  >({ phase: "idle" })
+  const [familyUi, setFamilyUi] = useState<
+    | { phase: "idle" }
+    | { phase: "checking" }
+    | { phase: "result"; api: FamilyEligibilityResponse }
+  >({ phase: "idle" })
+  const [checkInBusy, setCheckInBusy] = useState(false)
+  const [checkInMessage, setCheckInMessage] = useState<string | null>(null)
+  const [accreditation, setAccreditation] = useState<null | "eligibility" | "family">(null)
+  const [encounterList, setEncounterList] = useState<
+    { id: string; status: string; updated_at: string; started_at: string }[]
+  >([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+
   useEffect(() => {
     setEditForm({
       phone: patient.phone ?? "",
@@ -1106,7 +1399,164 @@ function PatientFilePanel({
       chronicConditions: (patient.chronicConditions ?? []).join(", "),
     })
     setEditing(false)
+    setQuickPanel(null)
+    setEligibilityUi({ phase: "idle" })
+    setFamilyUi({ phase: "idle" })
+    setCheckInMessage(null)
+    setAccreditation(null)
   }, [patient.id, patient.phone, patient.email, patient.address, patient.allergies, patient.chronicConditions])
+
+  useEffect(() => {
+    if (mkError) toast.error(mkError)
+  }, [mkError])
+
+  useEffect(() => {
+    if (!practiceId || !patient.id) return
+    const supabase = createClient()
+    if (!supabase) return
+    let cancelled = false
+    ;(async () => {
+      setHistoryLoading(true)
+      try {
+        const { data, error } = await supabase
+          .from("clinical_encounters")
+          .select("id, status, updated_at, started_at")
+          .eq("practice_id", practiceId)
+          .eq("patient_id", patient.id)
+          .order("updated_at", { ascending: false })
+        if (!cancelled && !error && data)
+          setEncounterList(
+            data as { id: string; status: string; updated_at: string; started_at: string }[]
+          )
+        else if (!cancelled && error) setEncounterList([])
+      } finally {
+        if (!cancelled) setHistoryLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [practiceId, patient.id])
+
+  const runEligibilityCheck = useCallback(async () => {
+    setQuickPanel("eligibility")
+    setEligibilityUi({ phase: "checking" })
+    const payload = patientToMedikreditPayload(patient)
+    const api = await runEligibility(payload, true)
+    if (api) {
+      setEligibilityUi({ phase: "result", api })
+      if (api.status === "eligible" && api.ok) {
+        onUpdate(patient.id, { medicalAidStatus: "verified" })
+      }
+    } else {
+      setEligibilityUi({ phase: "idle" })
+    }
+  }, [patient, runEligibility, onUpdate])
+
+  const runFamilyCheck = useCallback(async () => {
+    setQuickPanel("family")
+    setFamilyUi({ phase: "checking" })
+    const payload = patientToMedikreditPayload(patient)
+    const api = await runFamily(payload, undefined, true)
+    if (api) {
+      setFamilyUi({ phase: "result", api })
+    } else {
+      setFamilyUi({ phase: "idle" })
+    }
+  }, [patient, runFamily])
+
+  const handleQuickCheckIn = useCallback(() => {
+    setCheckInBusy(true)
+    setCheckInMessage(null)
+    try {
+      const todayStr = fmtLocalYmd(new Date())
+      const existing = findBookedTodayForPatient(appointments, patient.id, todayStr)
+      if (existing) {
+        updateAppointment(existing.id, { status: "checked_in" })
+        setSelectedDate(existing.date)
+        requestCalendarFocusAppointment(existing.id)
+        setAdminTab("calendar")
+        openPatient(
+          createPatientSession({
+            patientId: patient.id,
+            name: patient.name,
+            appointmentReason: existing.reason,
+            status: "checked_in",
+            medicalAidScheme: patient.medicalAidScheme ?? existing.medicalAid,
+            memberNumber: patient.memberNumber ?? existing.memberNumber,
+            chronicConditions: patient.chronicConditions ?? [],
+            criticalAllergies: patient.allergies ?? [],
+            activeMedications: patient.currentMedications ?? [],
+          })
+        )
+        setMode("clinical")
+        setCheckInMessage(`Checked in to your ${existing.startTime} appointment today.`)
+        return
+      }
+
+      const slot = findNextWalkInSlot(appointments, new Date())
+      if (!slot) {
+        setCheckInMessage("No open slots in the next two weeks. Add an appointment manually on the calendar.")
+        return
+      }
+
+      const providerId = activeDoctorId ?? practiceProviders[0]?.id ?? "provider-1"
+      const end = addClockMinutes(slot.hour, slot.minute, SLOT_MINUTES)
+      const id = `appt-${Date.now()}`
+      addAppointment({
+        id,
+        patientId: patient.id,
+        patientName: patient.name,
+        providerId,
+        date: slot.dateStr,
+        startTime: timeStrHm(slot.hour, slot.minute),
+        endTime: timeStrHm(end.h, end.m),
+        hour: slot.hour,
+        minute: slot.minute,
+        duration: SLOT_MINUTES,
+        reason: "Walk-in check-in",
+        service: "Consultation",
+        status: "checked_in",
+        paymentType: patient.medicalAidStatus === "verified" ? "medical_aid" : "cash",
+        medicalAid: patient.medicalAidScheme,
+        memberNumber: patient.memberNumber,
+      })
+      setSelectedDate(slot.dateStr)
+      requestCalendarFocusAppointment(id)
+      setAdminTab("calendar")
+      openPatient(
+        createPatientSession({
+          patientId: patient.id,
+          name: patient.name,
+          appointmentReason: "Walk-in check-in",
+          status: "checked_in",
+          medicalAidScheme: patient.medicalAidScheme,
+          memberNumber: patient.memberNumber,
+          chronicConditions: patient.chronicConditions ?? [],
+          criticalAllergies: patient.allergies ?? [],
+          activeMedications: patient.currentMedications ?? [],
+        })
+      )
+      setMode("clinical")
+      const when =
+        slot.dateStr === todayStr ? `today at ${timeStrHm(slot.hour, slot.minute)}` : `${slot.dateStr} ${timeStrHm(slot.hour, slot.minute)}`
+      setCheckInMessage(`Checked in — scheduled ${when}.`)
+    } finally {
+      setCheckInBusy(false)
+    }
+  }, [
+    activeDoctorId,
+    addAppointment,
+    appointments,
+    openPatient,
+    patient,
+    practiceProviders,
+    requestCalendarFocusAppointment,
+    setAdminTab,
+    setMode,
+    setSelectedDate,
+    updateAppointment,
+  ])
 
   const handleSaveEdit = useCallback(() => {
     onUpdate(patient.id, {
@@ -1124,19 +1574,69 @@ function PatientFilePanel({
     [claims, patient.id]
   )
 
-  const patientSessions = useMemo(() => {
-    const sessions = openPatients.filter((s) => s.patientId === patient.id)
-    if (sessions.length > 0) return sessions
-    return [
-      {
-        patientId: patient.id,
-        name: patient.name,
-        openedAt: new Date(patient.lastVisit ?? patient.registeredAt),
-        soapNote: { subjective: "Follow-up visit for chronic condition management.", objective: "Vitals stable. No acute distress.", assessment: "Condition well-managed on current regimen.", plan: "Continue current medications. Review in 3 months." },
-        status: "finished",
-      },
-    ]
-  }, [openPatients, patient])
+  const handleOpenClinicalEncounter = useCallback(
+    async (encounterId: string) => {
+      if (!practiceId || !dekKey || !unlocked) {
+        toast.error("Unlock clinical workspace to open this session")
+        return
+      }
+      const supabase = createClient()
+      if (!supabase) return
+      const { data, error } = await supabase
+        .from("clinical_encounters")
+        .select("id, state_ciphertext, state_iv")
+        .eq("id", encounterId)
+        .eq("practice_id", practiceId)
+        .eq("patient_id", patient.id)
+        .maybeSingle()
+      if (error || !data?.state_ciphertext || !data.state_iv) {
+        toast.error("Could not load this encounter")
+        return
+      }
+      try {
+        const plain = await decryptJson<EncounterStatePlain>(
+          dekKey,
+          String(data.state_ciphertext),
+          String(data.state_iv)
+        )
+        if (!plain || plain.v !== 1) throw new Error("Invalid state")
+        const fromEncounter = encounterPlainToSessionPartial(plain)
+        const session = createPatientSession({
+          patientId: patient.id,
+          name: patient.name,
+          clinicalEncounterId: data.id as string,
+          age: patient.age,
+          sex: patient.sex,
+          medicalAidStatus:
+            patient.medicalAidStatus === "verified"
+              ? "active"
+              : patient.medicalAidStatus === "terminated"
+                ? "inactive"
+                : patient.medicalAidStatus,
+          medicalAidScheme: patient.medicalAidScheme,
+          memberNumber: patient.memberNumber,
+          chronicConditions: patient.chronicConditions,
+          criticalAllergies: patient.allergies,
+          activeMedications: patient.currentMedications,
+          ...fromEncounter,
+        })
+        openPatient(session)
+        const s = scribePartialFromPlain(plain)
+        useWorkspaceStore.setState({
+          scribeTranscript: s.transcript,
+          scribeSegments: s.segments,
+          scribeEntities: s.entities,
+          scribeHighlights: s.highlights,
+          scribeEntityStatus: s.entityStatus,
+        })
+        setMode("clinical")
+        onClose()
+      } catch {
+        toast.error("Could not decrypt this session")
+      }
+    },
+    [dekKey, onClose, openPatient, patient, practiceId, setMode, unlocked]
+  )
 
   const tabs: { id: PanelTab; label: string; icon: React.ReactNode }[] = [
     { id: "overview", label: "Overview", icon: <UserCircle className="size-3.5" /> },
@@ -1147,7 +1647,11 @@ function PatientFilePanel({
 
   const status = STATUS_CONFIG[patient.medicalAidStatus]
 
+  const elig = eligibilityUi.phase === "result" ? eligibilityUi.api : null
+  const fam = familyUi.phase === "result" ? familyUi.api : null
+
   return (
+    <>
     <motion.div
       initial={{ x: "100%" }}
       animate={{ x: 0 }}
@@ -1171,6 +1675,235 @@ function PatientFilePanel({
         <button type="button" onClick={onClose} className="rounded-md p-1.5 text-white/30 transition-colors hover:bg-white/[0.06] hover:text-white">
           <X className="size-4" />
         </button>
+      </div>
+
+      {/* Quick actions — eligibility, family, check-in, inbox */}
+      <div className="border-b border-white/[0.06] px-6 py-3">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setQuickPanel((p) => (p === "eligibility" ? null : "eligibility"))
+              if (eligibilityUi.phase === "idle") void runEligibilityCheck()
+            }}
+            disabled={mkLoading && quickPanel === "eligibility"}
+            className={cn(
+              "inline-flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-medium transition-all",
+              quickPanel === "eligibility"
+                ? "border-white/25 bg-white/[0.08] text-white shadow-sm"
+                : "border-white/[0.08] bg-white/[0.03] text-white/70 hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white"
+            )}
+          >
+            <ShieldCheck className="size-3.5 text-emerald-400/90" weight="bold" />
+            Eligibility
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setQuickPanel((p) => (p === "family" ? null : "family"))
+              if (familyUi.phase === "idle") void runFamilyCheck()
+            }}
+            disabled={mkLoading && quickPanel === "family"}
+            className={cn(
+              "inline-flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-medium transition-all",
+              quickPanel === "family"
+                ? "border-white/25 bg-white/[0.08] text-white shadow-sm"
+                : "border-white/[0.08] bg-white/[0.03] text-white/70 hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white"
+            )}
+          >
+            <UsersThree className="size-3.5 text-sky-400/90" weight="bold" />
+            Family
+          </button>
+          <button
+            type="button"
+            disabled={checkInBusy || mkLoading}
+            onClick={handleQuickCheckIn}
+            className={cn(
+              "inline-flex flex-[1.2] min-w-[120px] items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-semibold transition-all",
+              "border-[#00E676]/35 bg-[#00E676]/12 text-[#00E676] hover:bg-[#00E676]/18 disabled:opacity-50"
+            )}
+          >
+            {checkInBusy ? <SpinnerGap className="size-3.5 animate-spin" /> : <CalendarCheck className="size-3.5" weight="bold" />}
+            Quick check-in
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdminTab("inbox")}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 text-[11px] font-medium text-white/70 transition-all hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white"
+            title="Open practice inbox"
+          >
+            <ChatCircle className="size-3.5 text-white/50" weight="bold" />
+            Inbox
+          </button>
+        </div>
+
+        <AnimatePresence initial={false}>
+          {quickPanel === "eligibility" && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                {eligibilityUi.phase === "checking" && (
+                  <div className="flex items-center gap-2 py-2 text-[11px] text-white/50">
+                    <SpinnerGap className="size-4 animate-spin text-emerald-400/80" />
+                    Running eligibility for {patient.name}…
+                  </div>
+                )}
+                {eligibilityUi.phase === "result" && elig && (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      {elig.ok && elig.status === "eligible" ? (
+                        <CheckCircle className="size-4 text-[#00E676]" weight="fill" />
+                      ) : (
+                        <XCircle className="size-4 text-[#EF5350]" weight="fill" />
+                      )}
+                      <span
+                        className={cn(
+                          "text-xs font-semibold",
+                          elig.ok && elig.status === "eligible" ? "text-[#00E676]" : "text-[#EF5350]"
+                        )}
+                      >
+                        {elig.status === "eligible"
+                          ? "Eligible"
+                          : elig.status === "not_found"
+                            ? "Member not found"
+                            : elig.status === "pending"
+                              ? "Pending"
+                              : "Not eligible"}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                      {patient.medicalAidScheme && (
+                        <div>
+                          <span className="text-white/35">Scheme</span>
+                          <p className="font-medium text-white/75">{patient.medicalAidScheme}</p>
+                        </div>
+                      )}
+                      {patient.memberNumber && (
+                        <div>
+                          <span className="text-white/35">Member #</span>
+                          <p className="font-medium tabular-nums text-white/75">{patient.memberNumber}</p>
+                        </div>
+                      )}
+                      {elig.healthNetworkId && (
+                        <div>
+                          <span className="text-white/35">HNet / Jiffy</span>
+                          <p className="font-medium text-white/75">{elig.healthNetworkId}</p>
+                        </div>
+                      )}
+                      {elig.authNumber && (
+                        <div>
+                          <span className="text-white/35">Auth #</span>
+                          <p className="font-medium tabular-nums text-white/75">{elig.authNumber}</p>
+                        </div>
+                      )}
+                    </div>
+                    {(elig.rejectionDescription || elig.responseMessage) && (
+                      <p className="mt-2 text-[11px] text-[#EF5350]/90">{elig.rejectionDescription ?? elig.responseMessage}</p>
+                    )}
+                    {elig.remittanceMessages.length > 0 && (
+                      <ul className="mt-2 space-y-0.5 text-[10px] text-amber-200/80">
+                        {elig.remittanceMessages.slice(0, 4).map((r, i) => (
+                          <li key={i}>
+                            {r.code}: {r.description}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void runEligibilityCheck()}
+                        className="text-[10px] font-medium text-white/45 hover:text-white/70"
+                      >
+                        Re-check
+                      </button>
+                      {elig.rawXml && (
+                        <button
+                          type="button"
+                          onClick={() => setAccreditation("eligibility")}
+                          className="text-[10px] font-medium text-sky-400/90 hover:text-sky-300"
+                        >
+                          Accreditation view
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+          {quickPanel === "family" && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                {familyUi.phase === "checking" && (
+                  <div className="flex items-center gap-2 py-2 text-[11px] text-white/50">
+                    <SpinnerGap className="size-4 animate-spin text-sky-400/80" />
+                    Verifying dependants and household…
+                  </div>
+                )}
+                {familyUi.phase === "result" && fam && (
+                  <div className="space-y-2 text-[11px]">
+                    <div className="flex items-center gap-2">
+                      <UsersThree className="size-4 text-sky-400" weight="bold" />
+                      <span className="font-semibold text-white/85">Family check</span>
+                    </div>
+                    <p className="text-white/55">
+                      {fam.dependents.length} PAT record{fam.dependents.length === 1 ? "" : "s"} · TX {fam.res ?? "—"}
+                    </p>
+                    {patient.dependentCode && (
+                      <p className="text-white/40">
+                        Dep code <span className="tabular-nums text-white/60">{patient.dependentCode}</span>
+                        {patient.mainMemberName ? ` · Main: ${patient.mainMemberName}` : ""}
+                      </p>
+                    )}
+                    {fam.dependents.length > 0 && (
+                      <ul className="space-y-1 rounded-lg border border-white/[0.05] bg-black/20 p-2 text-[10px] text-white/50">
+                        {fam.dependents.map((d, i) => (
+                          <li key={i}>
+                            {d.dep_cd ?? "—"} · {d.name ?? d.id_nbr ?? "—"}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void runFamilyCheck()}
+                        className="text-[10px] font-medium text-white/45 hover:text-white/70"
+                      >
+                        Re-run family check
+                      </button>
+                      {fam.rawXml && (
+                        <button
+                          type="button"
+                          onClick={() => setAccreditation("family")}
+                          className="text-[10px] font-medium text-sky-400/90 hover:text-sky-300"
+                        >
+                          Accreditation view
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {checkInMessage && (
+          <p className="mt-2 text-[11px] leading-relaxed text-white/45">{checkInMessage}</p>
+        )}
       </div>
 
       {/* Tab Bar */}
@@ -1268,36 +2001,44 @@ function PatientFilePanel({
         {activeTab === "history" && (
           <div className="space-y-3">
             <SectionLabel>Clinical Sessions</SectionLabel>
-            {patientSessions.map((session, i) => (
-              <div key={i} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-white/70">
-                    {new Date(session.openedAt).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
-                  </span>
-                  <span className={cn(
-                    "rounded-full px-2 py-0.5 text-[9px] font-medium uppercase",
-                    session.status === "finished" ? "bg-[#00E676]/10 text-[#00E676]" : "bg-[#FFC107]/10 text-[#FFC107]"
-                  )}>
-                    {session.status}
-                  </span>
-                </div>
-                <div className="space-y-1.5 text-[11px]">
-                  {session.soapNote.subjective && (
-                    <div><span className="font-medium text-white/40">S: </span><span className="text-white/60">{session.soapNote.subjective}</span></div>
-                  )}
-                  {session.soapNote.objective && (
-                    <div><span className="font-medium text-white/40">O: </span><span className="text-white/60">{session.soapNote.objective}</span></div>
-                  )}
-                  {session.soapNote.assessment && (
-                    <div><span className="font-medium text-white/40">A: </span><span className="text-white/60">{session.soapNote.assessment}</span></div>
-                  )}
-                  {session.soapNote.plan && (
-                    <div><span className="font-medium text-white/40">P: </span><span className="text-white/60">{session.soapNote.plan}</span></div>
-                  )}
-                </div>
-              </div>
-            ))}
-            {patientSessions.length === 0 && (
+            {historyLoading && (
+              <p className="py-4 text-center text-xs text-white/25">Loading sessions…</p>
+            )}
+            {!historyLoading &&
+              encounterList.map((enc) => (
+                <button
+                  key={enc.id}
+                  type="button"
+                  onClick={() => void handleOpenClinicalEncounter(enc.id)}
+                  className="w-full rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 text-left transition-colors hover:border-white/[0.12] hover:bg-white/[0.04]"
+                >
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-white/70">
+                      {new Date(enc.updated_at).toLocaleDateString("en-ZA", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[9px] font-medium uppercase",
+                        enc.status === "signed" || enc.status === "completed"
+                          ? "bg-[#00E676]/10 text-[#00E676]"
+                          : enc.status === "in_progress"
+                            ? "bg-[#FFC107]/10 text-[#FFC107]"
+                            : "bg-white/[0.06] text-white/40"
+                      )}
+                    >
+                      {enc.status.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-white/35">Open in clinical workspace — full SOAP, vitals, and documents</p>
+                </button>
+              ))}
+            {!historyLoading && encounterList.length === 0 && (
               <p className="py-8 text-center text-xs text-white/20">No clinical sessions recorded</p>
             )}
           </div>
@@ -1366,6 +2107,22 @@ function PatientFilePanel({
         )}
       </div>
     </motion.div>
+
+    <MediKreditAccreditationModal
+      open={accreditation !== null}
+      onClose={() => setAccreditation(null)}
+      transactionType={accreditation === "family" ? "famcheck" : "eligibility"}
+      title={accreditation === "family" ? "Family eligibility (tx_cd 30)" : "Eligibility (tx_cd 20)"}
+      rawXml={accreditation === "family" ? fam?.rawXml : elig?.rawXml}
+      res={accreditation === "family" ? fam?.res : elig?.res}
+      txNbr={accreditation === "family" ? fam?.txNbr : elig?.txNbr}
+      rejectionCode={accreditation === "family" ? fam?.rejectionCode : elig?.rejectionCode}
+      rejectionDescription={accreditation === "family" ? fam?.rejectionDescription : elig?.rejectionDescription}
+      remittanceMessages={accreditation === "family" ? fam?.remittanceMessages : elig?.remittanceMessages}
+      warnings={accreditation === "family" ? fam?.warnings : elig?.warnings}
+      dependents={accreditation === "family" ? fam?.dependents : undefined}
+    />
+    </>
   )
 }
 

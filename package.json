@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:tunnel": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/dev-tunnel.ts",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -61,7 +62,8 @@
     "benchmark:release": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts",
     "benchmark:release:strict": "BENCH_STRICT_MODE=true npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts",
     "test:lms-media-platform": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-lms-media-platform-regressions.ts",
-    "benchmark:lms-media": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/benchmark-lms-media-pipeline.ts"
+    "benchmark:lms-media": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/benchmark-lms-media-pipeline.ts",
+    "test:medikredit": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-medikredit-parse.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.10",
@@ -72,7 +74,7 @@
     "@ai-sdk/xai": "^1.2.16",
     "@langchain/core": "^1.1.31",
     "@langchain/langgraph": "^1.2.2",
-    "@napi-rs/canvas": "^0.1.96",
+    "@napi-rs/canvas": "^0.1.97",
     "@openrouter/ai-sdk-provider": "^0.7.1",
     "@phosphor-icons/react": "^2.1.7",
     "@radix-ui/react-alert-dialog": "^1.1.13",

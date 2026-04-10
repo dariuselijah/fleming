@@ -11,16 +11,18 @@ import type {
   messageFromRow,
 } from "./types"
 import { threadFromRow as _threadFromRow, messageFromRow as _messageFromRow } from "./types"
+import { findPatientByPracticePhone } from "./patient-phone"
 
 const supabase = () => createAdminClient()
 
 export async function resolvePracticeFromPhone(phoneNumber: string): Promise<string | null> {
   const cleanNum = phoneNumber.replace("whatsapp:", "")
+  // Accept active and pending_wa_approval (sandbox testing)
   const { data } = await supabase()
     .from("practice_channels")
     .select("practice_id")
     .eq("phone_number", cleanNum)
-    .eq("status", "active")
+    .in("status", ["active", "pending_wa_approval", "registering_sender"])
     .limit(1)
     .maybeSingle()
   return data?.practice_id ?? null
@@ -32,7 +34,7 @@ export async function getPracticeWhatsAppNumber(practiceId: string): Promise<str
     .select("phone_number")
     .eq("practice_id", practiceId)
     .eq("channel_type", "whatsapp")
-    .eq("status", "active")
+    .in("status", ["active", "pending_wa_approval", "registering_sender"])
     .limit(1)
     .maybeSingle()
   return data?.phone_number ?? null
@@ -183,8 +185,10 @@ export async function updateThreadStatus(
     patientId?: string
     assignedStaffId?: string
     unreadCount?: number
+    metadataPatch?: Record<string, unknown>
   }
 ): Promise<void> {
+  const db = supabase()
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (updates.status) row.status = updates.status
   if (updates.priority) row.priority = updates.priority
@@ -192,7 +196,17 @@ export async function updateThreadStatus(
   if (updates.assignedStaffId) row.assigned_staff_id = updates.assignedStaffId
   if (updates.unreadCount !== undefined) row.unread_count = updates.unreadCount
 
-  await supabase().from("conversation_threads").update(row).eq("id", threadId)
+  if (updates.metadataPatch) {
+    const { data: existing } = await db
+      .from("conversation_threads")
+      .select("metadata")
+      .eq("id", threadId)
+      .single()
+    const prev = (existing?.metadata as Record<string, unknown>) || {}
+    row.metadata = { ...prev, ...updates.metadataPatch }
+  }
+
+  await db.from("conversation_threads").update(row).eq("id", threadId)
 }
 
 export async function getThreadMessages(
@@ -213,19 +227,8 @@ export async function resolvePatientByPhone(
   practiceId: string,
   phone: string
 ): Promise<string | null> {
-  // display_name_hint may contain phone for matching (unencrypted hint field)
-  const { data } = await supabase()
-    .from("practice_patients")
-    .select("id, display_name_hint")
-    .eq("practice_id", practiceId)
-
-  if (!data) return null
-  const cleanPhone = phone.replace(/\D/g, "").slice(-9)
-  for (const patient of data) {
-    const hint = (patient.display_name_hint || "").toLowerCase()
-    if (hint.includes(cleanPhone)) return patient.id
-  }
-  return null
+  const row = await findPatientByPracticePhone(practiceId, phone)
+  return row?.id ?? null
 }
 
 export async function checkMessageIdempotency(providerMessageId: string): Promise<boolean> {

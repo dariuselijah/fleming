@@ -48,7 +48,11 @@ import {
   storeAssistantMessage,
   validateAndTrackUsage,
 } from "./api"
-import { createErrorResponse, extractErrorMessage } from "./utils"
+import {
+  createErrorResponse,
+  ensureToolCallArgumentsInMessages,
+  extractErrorMessage,
+} from "./utils"
 import { 
   analyzeMedicalQuery, 
   MedicalContext, 
@@ -4028,13 +4032,20 @@ export async function POST(req: Request) {
         : "none"
     const evidenceSeekingIntent = hasEvidenceSeekingIntent(queryText) || hasGuidelineIntent(queryText)
     const freshEvidenceIntent = needsFreshEvidence(queryText)
+    /** SOAP is charting from the consult only — no PubMed/web/RAG retrieval. */
+    const isSoapCommandRequest = /^\[\/soap\]/i.test(queryText.trim())
     const finalEnableEvidence =
-      enableEvidenceFromClient === true || clinicianRoleFromResolvedRole || evidenceSeekingIntent
+      isSoapCommandRequest
+        ? false
+        : enableEvidenceFromClient === true ||
+          clinicianRoleFromResolvedRole ||
+          evidenceSeekingIntent
     const finalEnableSearch =
       ENABLE_WEB_SEARCH_TOOL &&
       enableSearchFromClient !== false
     const webSearchConfigured = hasWebSearchConfigured()
     const allowWebRetrieval =
+      !isSoapCommandRequest &&
       finalEnableSearch &&
       webSearchConfigured &&
       queryText.length > 0 &&
@@ -5029,6 +5040,32 @@ export async function POST(req: Request) {
       }
     } catch { /* non-fatal */ }
 
+    if (
+      (effectiveUserRole === "doctor" || effectiveUserRole === "medical_student") &&
+      consultPatientId &&
+      consultPracticeId &&
+      validatedSupabase
+    ) {
+      try {
+        const { buildStructuredClinicalConsultContext } = await import(
+          "@/lib/clinical/server-patient-context"
+        )
+        const clinicalBlock = await buildStructuredClinicalConsultContext({
+          supabase: validatedSupabase,
+          userId,
+          practiceId: consultPracticeId,
+          patientId: consultPatientId,
+          chatId: effectiveChatId,
+          firstUserMessage: queryText.slice(0, 500),
+        })
+        if (clinicalBlock) {
+          effectiveSystemPrompt += `\n\n${clinicalBlock}`
+        }
+      } catch (e) {
+        console.warn("[/api/chat] structured clinical consult context failed", e)
+      }
+    }
+
     const attachmentContext = await runWithTimeBudget(
       "ATTACHMENT_CONTEXT_PREVIEW",
       () => attachmentContextPromise,
@@ -5071,6 +5108,9 @@ export async function POST(req: Request) {
     if (!finalEnableEvidence) {
       effectiveSystemPrompt = removeCitationInstructions(effectiveSystemPrompt)
       effectiveSystemPrompt += `\n\n**IMPORTANT: Do NOT include citations, citation markers, or reference numbers in your response. Respond naturally without any [CITATION:X] or [X] markers. Do not include a "Citations" section at the end.`
+    }
+    if (isSoapCommandRequest) {
+      effectiveSystemPrompt += `\n\n**SOAP NOTE:** Write a polished chart-ready SOAP using only the consultation transcript and structured patient context already in this thread. Do not use transcript source tags like [T], [E], or [H]. Do not add numeric literature citations. If something was not discussed, write "not documented" for that element rather than inferring. Prefer accurate omission over speculation.`
     }
     effectiveSystemPrompt += `\n\nFORMATTING GUARDRAILS:
 - Never output internal tool/source tags such as [tool ...], [tool slide ...], [source ...], or [doc ...].
@@ -5152,7 +5192,10 @@ export async function POST(req: Request) {
 
     // CRITICAL: Anonymize messages before sending to LLM providers
     // This ensures no PII/PHI is sent to third-party LLM services (HIPAA compliance)
-    const anonymizedMessages = anonymizeMessages(filteredMessages) as MessageAISDK[]
+    const messagesWithToolArgs = ensureToolCallArgumentsInMessages(
+      filteredMessages as MessageAISDK[]
+    )
+    const anonymizedMessages = anonymizeMessages(messagesWithToolArgs) as MessageAISDK[]
     console.log("🔒 Messages anonymized before sending to LLM provider")
     const coreMessages = convertToCoreMessages(
       anonymizedMessages as Array<Omit<MessageAISDK, "id">>
@@ -7006,6 +7049,7 @@ export async function POST(req: Request) {
             userId,
             practiceId: consultPracticeId,
             patientId: consultPatientId,
+            omitRetrievalTools: isSoapCommandRequest,
           })
         : ({} as ToolSet)
 

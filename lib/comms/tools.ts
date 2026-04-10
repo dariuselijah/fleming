@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { PracticeHours, PracticeService, PracticeFAQ } from "./types"
+import { findPatientByPracticePhone, normalizePhoneE164Za } from "./patient-phone"
 
 const supabase = () => createAdminClient()
 
@@ -244,15 +245,20 @@ export async function createPatientRecord(opts: {
   practiceId: string
   displayNameHint: string
   phone?: string
+  profileStatus?: "incomplete" | "complete"
 }): Promise<string> {
   const db = supabase()
-  const hint = opts.phone ? `${opts.displayNameHint} | ${opts.phone}` : opts.displayNameHint
+  const phoneE164 = opts.phone ? normalizePhoneE164Za(opts.phone) : null
+  const hint = phoneE164 ? `${opts.displayNameHint} | ${phoneE164}` : opts.displayNameHint
+  const profileStatus = opts.profileStatus ?? "complete"
 
   const { data, error } = await db
     .from("practice_patients")
     .insert({
       practice_id: opts.practiceId,
       display_name_hint: hint,
+      phone_e164: phoneE164,
+      profile_status: profileStatus,
       profile_version: 1,
     })
     .select("id")
@@ -260,6 +266,60 @@ export async function createPatientRecord(opts: {
 
   if (error) throw new Error(`Failed to create patient: ${error.message}`)
   return data.id
+}
+
+/** Voice inbound: ensure a patient row exists for this number (stub until WhatsApp onboarding). */
+export async function createStubPatientForVoice(opts: {
+  practiceId: string
+  rawPhone: string
+  fullName: string
+}): Promise<{ patientId: string; alreadyExisted: boolean }> {
+  const existing = await findPatientByPracticePhone(opts.practiceId, opts.rawPhone)
+  if (existing) {
+    return { patientId: existing.id, alreadyExisted: true }
+  }
+  const id = await createPatientRecord({
+    practiceId: opts.practiceId,
+    displayNameHint: opts.fullName.trim() || "Unknown caller",
+    phone: opts.rawPhone,
+    profileStatus: "incomplete",
+  })
+  return { patientId: id, alreadyExisted: false }
+}
+
+/** WhatsApp onboarding completion: merge into existing voice stub or insert new patient. */
+export async function finalizePatientFromOnboarding(opts: {
+  practiceId: string
+  existingPatientId?: string | null
+  displayNameHint: string
+  phone?: string
+}): Promise<string> {
+  const db = supabase()
+  const phoneE164 = opts.phone ? normalizePhoneE164Za(opts.phone) : null
+  const hint = phoneE164 ? `${opts.displayNameHint} | ${phoneE164}` : opts.displayNameHint
+
+  if (opts.existingPatientId) {
+    const { error } = await db
+      .from("practice_patients")
+      .update({
+        display_name_hint: hint,
+        phone_e164: phoneE164,
+        profile_status: "complete",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", opts.existingPatientId)
+      .eq("practice_id", opts.practiceId)
+
+    if (error) throw new Error(`Failed to update patient: ${error.message}`)
+    return opts.existingPatientId
+  }
+
+  return createPatientRecord({
+    practiceId: opts.practiceId,
+    displayNameHint: opts.displayNameHint,
+    phone: opts.phone,
+    profileStatus: "complete",
+  })
 }
 
 export async function getPracticeName(practiceId: string): Promise<string> {

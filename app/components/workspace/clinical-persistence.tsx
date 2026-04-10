@@ -7,6 +7,7 @@ import { usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-cont
 import { buildRagChunksFromEncounterState } from "@/lib/clinical-workspace/clinical-chunks"
 import { isPracticePatientUuid } from "@/lib/clinical-workspace/clinical-uuid"
 import { serializeEncounterState } from "@/lib/clinical-workspace/encounter-state"
+import { registerEncounterPersistenceFlush } from "@/lib/clinical-workspace/encounter-persist-bridge"
 import { useWorkspaceStore } from "@/lib/clinical-workspace"
 import { useUser } from "@/lib/user-store/provider"
 import { useEffect, useRef } from "react"
@@ -56,6 +57,9 @@ export function ClinicalPersistence() {
         entityStatus: state.scribeEntityStatus,
       })
 
+      const encStatus = patient.consultSigned ? "signed" : "in_progress"
+      const endedAt = patient.consultSigned ? new Date().toISOString() : null
+
       let encId = patient.clinicalEncounterId
       try {
         const { ciphertext, iv } = await encryptJson(key, plain)
@@ -66,7 +70,9 @@ export function ClinicalPersistence() {
               practice_id: pid,
               patient_id: patient.patientId,
               provider_user_id: auth.user.id,
-              status: "in_progress",
+              status: encStatus,
+              started_at: new Date().toISOString(),
+              ended_at: endedAt,
               state_ciphertext: ciphertext,
               state_iv: iv,
               state_version: 1,
@@ -89,6 +95,8 @@ export function ClinicalPersistence() {
               state_ciphertext: ciphertext,
               state_iv: iv,
               updated_at: new Date().toISOString(),
+              status: encStatus,
+              ended_at: endedAt,
               chat_id: patient.chatId ?? null,
             })
             .eq("id", encId)
@@ -120,9 +128,33 @@ export function ClinicalPersistence() {
       timer = setTimeout(() => void run(), DEBOUNCE_MS)
     }
 
+    const flushNow = () => {
+      if (timer) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      void run()
+    }
+
     const unsub = useWorkspaceStore.subscribe(schedule)
+    const unreg = registerEncounterPersistenceFlush(flushNow)
+
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushNow()
+    }
+    const onPageHide = () => flushNow()
+    const onBeforeUnload = () => flushNow()
+
+    document.addEventListener("visibilitychange", onVisibility)
+    window.addEventListener("pagehide", onPageHide)
+    window.addEventListener("beforeunload", onBeforeUnload)
+
     return () => {
       unsub()
+      unreg()
+      document.removeEventListener("visibilitychange", onVisibility)
+      window.removeEventListener("pagehide", onPageHide)
+      window.removeEventListener("beforeunload", onBeforeUnload)
       if (timer) clearTimeout(timer)
     }
   }, [])

@@ -73,5 +73,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: mErr.message }, { status: 400 })
   }
 
+  const { error: mkErr } = await admin.from("medikredit_providers").upsert(
+    {
+      practice_id: practice.id,
+      extra_settings: {},
+      use_test_provider: false,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "practice_id" }
+  )
+  if (mkErr) {
+    console.warn("[clinical bootstrap] medikredit_providers upsert (apply migration 20260409180000 if missing):", mkErr.message)
+  }
+
   return NextResponse.json({ practiceId: practice.id, already: false })
 }

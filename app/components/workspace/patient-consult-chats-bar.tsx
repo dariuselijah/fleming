@@ -24,6 +24,18 @@ import { toast } from "sonner"
 
 type ConsultChatsBarVariant = "canvas" | "sidebar"
 
+function formatConsultThreadLabel(patientName: string, chat: Chats): string {
+  const d = new Date(chat.updated_at || chat.created_at || Date.now())
+  const when = d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  return `${patientName} · ${when}`
+}
+
 /**
  * Lists consult chats for the active clinical patient and supports starting a new thread.
  */
@@ -207,9 +219,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
             ) : (
               patientChats.map((c) => {
                 const active = routeChatId === c.id
-                const title =
-                  (c.title && c.title.length > 0 ? c.title : "Consult").slice(0, 56) +
-                  ((c.title?.length ?? 0) > 56 ? "…" : "")
+                const title = formatConsultThreadLabel(activePatient.name, c).slice(0, 72)
                 return (
                   <div
                     key={c.id}
@@ -260,9 +270,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
         <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {patientChats.map((c) => {
             const active = routeChatId === c.id
-            const title =
-              (c.title && c.title.length > 0 ? c.title : "Consult").slice(0, 42) +
-              ((c.title?.length ?? 0) > 42 ? "…" : "")
+            const title = formatConsultThreadLabel(activePatient.name, c).slice(0, 48)
             return (
               <div
                 key={c.id}

@@ -74,47 +74,13 @@ function fmtCurrency(n: number): string {
   return `R${n.toLocaleString()}`
 }
 
-const DEMO_CHART_MA = [8200, 12400, 9800, 16200, 13800, 20100, 22400, 18600, 25200, 28400, 24600, 30200]
-const DEMO_CHART_CASH = [3400, 5100, 4200, 5800, 5200, 7600, 8200, 7400, 8800, 9600, 8100, 10800]
-const DEMO_CHART_TOTAL = DEMO_CHART_MA.map((v, i) => v + DEMO_CHART_CASH[i])
-
-const DEMO_PROCEDURES = [
-  { code: "0190", description: "Consultation", count: 45, revenue: 20250 },
-  { code: "0191", description: "Extended Consultation", count: 12, revenue: 8400 },
-  { code: "0023", description: "Follow-up Visit", count: 28, revenue: 5600 },
-  { code: "0192", description: "Comprehensive Exam", count: 8, revenue: 7200 },
-  { code: "1112", description: "ECG Recording", count: 6, revenue: 2400 },
-]
-
 export function BentoSales() {
   const { claims } = useWorkspace()
   const [period, setPeriod] = useState<Period>("month")
 
-  const isDemo = claims.length === 0
-
   const { start, end, prevStart, prevEnd } = useMemo(() => getPeriodRange(period), [period])
 
   const analytics = useMemo(() => {
-    if (isDemo) {
-      return {
-        totalRevenue: 41000,
-        maRevenue: 30200,
-        cashRevenue: 10800,
-        outstanding: 3200,
-        prevTotalRevenue: 36500,
-        prevMaRevenue: 27000,
-        prevCashRevenue: 9500,
-        prevOutstanding: 4100,
-        paidCount: 93,
-        totalClaimCount: 98,
-        rejectedCount: 5,
-        stuckClaims: 2,
-        stuckAmount: 3200,
-        highOutstanding: 1,
-        highOutstandingAmount: 6200,
-      }
-    }
-
     let totalRevenue = 0, maRevenue = 0, cashRevenue = 0, outstanding = 0
     let prevTotalRevenue = 0, prevMaRevenue = 0, prevCashRevenue = 0, prevOutstanding = 0
     let paidCount = 0, totalClaimCount = 0, rejectedCount = 0
@@ -172,11 +138,9 @@ export function BentoSales() {
       stuckClaims, stuckAmount,
       highOutstanding, highOutstandingAmount,
     }
-  }, [claims, isDemo, start, end, prevStart, prevEnd])
+  }, [claims, start, end, prevStart, prevEnd])
 
   const procedures = useMemo(() => {
-    if (isDemo) return DEMO_PROCEDURES
-
     const map = new Map<string, { code: string; description: string; count: number; revenue: number }>()
     for (const c of claims) {
       const created = new Date(c.createdAt)
@@ -201,13 +165,9 @@ export function BentoSales() {
     return Array.from(map.values())
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 6)
-  }, [claims, isDemo, start, end])
+  }, [claims, start, end])
 
   const chartData = useMemo(() => {
-    if (isDemo) {
-      return { ma: DEMO_CHART_MA, cash: DEMO_CHART_CASH, total: DEMO_CHART_TOTAL }
-    }
-
     const now = new Date()
     const ma = new Array(12).fill(0)
     const cash = new Array(12).fill(0)
@@ -222,7 +182,7 @@ export function BentoSales() {
       }
     }
     return { ma, cash, total: ma.map((v, i) => v + cash[i]) }
-  }, [claims, isDemo])
+  }, [claims])
 
   const chartLabels = useMemo(() => {
     const now = new Date()
@@ -239,15 +199,15 @@ export function BentoSales() {
 
   const collectionRate = analytics.totalClaimCount > 0
     ? (analytics.paidCount / analytics.totalClaimCount) * 100
-    : isDemo ? 94.9 : 0
+    : 0
 
   const avgConsultValue = analytics.paidCount > 0
     ? analytics.totalRevenue / analytics.paidCount
-    : isDemo ? 441 : 0
+    : 0
 
   const rejectionRate = analytics.totalClaimCount > 0
     ? (analytics.rejectedCount / analytics.totalClaimCount) * 100
-    : isDemo ? 4.8 : 0
+    : 0
 
   const revenueCards: {
     label: string
@@ -310,13 +270,6 @@ export function BentoSales() {
           ))}
         </div>
       </div>
-
-      {isDemo && (
-        <div className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-1.5">
-          <ChartLineUp className="size-3.5 text-white/30" />
-          <span className="text-[10px] text-white/30">Demo data — submit claims to see real analytics</span>
-        </div>
-      )}
 
       {/* Revenue Cards */}
       <div className="grid grid-cols-4 gap-3">
@@ -444,9 +397,9 @@ export function BentoSales() {
             <MetricRow
               icon={Timer}
               color="text-white/60"
-              value="14.2 days"
+              value="—"
               label="Avg Settlement Time"
-              sub="Medical Aid"
+              sub="Medical Aid (when payment dates recorded)"
             />
             <MetricRow
               icon={Hourglass}

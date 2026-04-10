@@ -1,8 +1,8 @@
 const VAPI_BASE = "https://api.vapi.ai"
 
 function getApiKey(): string {
-  const key = process.env.VAPI_API_KEY
-  if (!key) throw new Error("Missing VAPI_API_KEY")
+  const key = process.env.VAPI_API_KEY?.trim() || process.env.VAPI_PRIVATE_KEY?.trim()
+  if (!key) throw new Error("Missing VAPI_API_KEY (or VAPI_PRIVATE_KEY)")
   return key
 }
 
@@ -66,6 +66,40 @@ export async function cloneAssistant(opts: {
   }
 
   return vapiRequest("/assistant", { method: "POST", body: JSON.stringify(cloned) })
+}
+
+/**
+ * Import a Twilio number into Vapi so it gets its own phoneNumberId for
+ * inbound routing and outbound calls. smsEnabled=false avoids clobbering
+ * the WhatsApp/SMS webhook URLs that Twilio already has.
+ */
+export async function importTwilioNumber(opts: {
+  phoneNumber: string
+  name: string
+  assistantId: string
+  serverUrl: string
+}): Promise<{ id: string; number: string; assistantId?: string }> {
+  const sid = process.env.TWILIO_ACCOUNT_SID
+  const token = process.env.TWILIO_AUTH_TOKEN
+  if (!sid || !token) throw new Error("Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN for Vapi import")
+
+  return vapiRequest("/phone-number", {
+    method: "POST",
+    body: JSON.stringify({
+      provider: "twilio",
+      number: opts.phoneNumber,
+      twilioAccountSid: sid,
+      twilioAuthToken: token,
+      name: opts.name,
+      assistantId: opts.assistantId,
+      server: { url: opts.serverUrl },
+      smsEnabled: false,
+    }),
+  })
+}
+
+export async function deleteVapiPhoneNumber(phoneNumberId: string): Promise<void> {
+  await vapiRequest(`/phone-number/${phoneNumberId}`, { method: "DELETE" })
 }
 
 export function validateVapiSignature(body: string, signature: string): boolean {

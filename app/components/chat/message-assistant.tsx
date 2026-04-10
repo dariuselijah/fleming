@@ -633,6 +633,7 @@ export function MessageAssistant({
   const updateDocumentContent = useWorkspaceStore((s) => s.updateDocumentContent)
   const upsertSessionDocument = useWorkspaceStore((s) => s.upsertSessionDocument)
   const ingestClinicalNoteText = useWorkspaceStore((s) => s.ingestClinicalNoteText)
+  const setPatientEvidenceDeepDive = useWorkspaceStore((s) => s.setPatientEvidenceDeepDive)
   const docSheetIsOpen = useWorkspaceStore((s) => s.documentSheet.isOpen)
   const docSheetContentId = useWorkspaceStore((s) => s.documentSheet.contentDocument?.id)
 
@@ -647,6 +648,7 @@ export function MessageAssistant({
   }, [clinicalDocument, isLast, isLastStreaming, docSheetIsOpen, docSheetContentId, updateDocumentContent])
 
   const sessionDocRegisteredRef = useRef<string | null>(null)
+  const evidenceDeepDiveSyncedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!clinicalDocument || isLastStreaming || !isLast) return
     const registrationKey = `${messageId}:${clinicalDocument.id}`
@@ -671,6 +673,45 @@ export function MessageAssistant({
     isLastStreaming,
     messageId,
     upsertSessionDocument,
+  ])
+
+  useEffect(() => {
+    if (clinicalDocType !== "evidence" || !clinicalDocument || isLastStreaming || !isLast) return
+    const src = clinicalDocument.sources
+    if (!src?.length) return
+    const pid = useWorkspaceStore.getState().activePatientId
+    if (!pid) return
+    const key = `${messageId}:evidence-dive`
+    if (evidenceDeepDiveSyncedRef.current === key) return
+    evidenceDeepDiveSyncedRef.current = key
+
+    const fromPrompt =
+      contextPrompt &&
+      /^\[\/evidence\]\s*Evidence-based answer for:\s*([^.]+)/i.exec(contextPrompt)?.[1]?.trim()
+
+    setPatientEvidenceDeepDive(pid, {
+      query: fromPrompt || "Evidence review",
+      synthesis: clinicalDocument.content?.trim() ?? "",
+      results: src.map((s) => ({
+        id: `chat-src-${s.index}-${messageId}`,
+        title: s.title,
+        journal: s.journal,
+        year: s.year ? parseInt(s.year, 10) : undefined,
+        url: s.url ?? (s.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${s.pmid}/` : undefined),
+        evidenceLevel: 3,
+        keyFindings: s.snippet?.trim() || s.title,
+      })),
+      updatedAt: new Date().toISOString(),
+      stages: [{ label: "From /evidence chat", done: true }],
+    })
+  }, [
+    clinicalDocType,
+    clinicalDocument,
+    contextPrompt,
+    isLast,
+    isLastStreaming,
+    messageId,
+    setPatientEvidenceDeepDive,
   ])
 
   const handleExpandDocument = useCallback((doc: typeof clinicalDocument) => {
@@ -1770,10 +1811,16 @@ export function MessageAssistant({
           <>
             {clinicalDocument.type === "prescribe" &&
               (clinicalDocument.prescriptionItems?.length ?? 0) > 0 && (
-                <PrescriptionCard items={clinicalDocument.prescriptionItems!} />
+                <PrescriptionCard
+                  items={clinicalDocument.prescriptionItems!}
+                  narrativeContent={clinicalDocument.content}
+                  isStreaming={clinicalDocument.isStreaming}
+                />
               )}
-            {(clinicalDocument.content.trim().length > 50 ||
-              clinicalDocument.isStreaming) && (
+            {(clinicalDocument.type !== "prescribe" ||
+              !(clinicalDocument.prescriptionItems?.length ?? 0)) &&
+              (clinicalDocument.content.trim().length > 50 ||
+                clinicalDocument.isStreaming) && (
               <ClinicalDocumentCard
                 document={clinicalDocument}
                 onExpand={handleExpandDocument}

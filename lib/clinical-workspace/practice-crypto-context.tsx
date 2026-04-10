@@ -16,6 +16,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -49,6 +50,32 @@ export function PracticeCryptoProvider({ children }: { children: ReactNode }) {
     setDekBase64(null)
     setError(null)
   }, [])
+
+  /** Rehydrate DEK from server session vault after soft navigation (avoids passphrase on every route change). */
+  useEffect(() => {
+    if (!practiceId || dekKey) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetchClient(
+          `/api/clinical/session-vault?practiceId=${encodeURIComponent(practiceId)}`
+        )
+        if (!res.ok || cancelled) return
+        const j = (await res.json()) as { dekBase64?: string | null }
+        if (!j.dekBase64 || cancelled) return
+        const raw = dekBase64ToRaw(j.dekBase64)
+        const key = await importDekRaw(raw)
+        if (cancelled) return
+        setDekKey(key)
+        setDekBase64(j.dekBase64)
+      } catch {
+        /* missing / expired vault — user unlocks with passphrase */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [practiceId, dekKey])
 
   const pushVaultSession = useCallback(async () => {
     if (!practiceId || !dekBase64) return

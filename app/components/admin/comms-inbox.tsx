@@ -13,7 +13,6 @@ import {
   UserPlus,
   CalendarCheck,
   Check,
-  CheckCircle,
   Checks,
   CircleNotch,
   Robot,
@@ -33,7 +32,6 @@ import {
   SmartImportTile,
 } from "./bento-inbox"
 import { LiveActivityFeed } from "./live-activity-feed"
-import { CommsHealthPanel } from "./comms-health-panel"
 import { LabIntegrationsPanel } from "./lab-integrations-panel"
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { AnimatePresence, motion } from "motion/react"
@@ -116,6 +114,8 @@ type PracticeChannelRow = {
   channel_type: string
   status: string
   phone_number?: string | null
+  sender_display_name?: string | null
+  vapi_phone_number_id?: string | null
 }
 
 export function CommsInbox() {
@@ -209,7 +209,7 @@ export function CommsInbox() {
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [filter, setFilter] = useState<"all" | "unread" | "handoff">("all")
   const [channelFilter, setChannelFilter] = useState<string>("all")
-  const pollRef = useRef<ReturnType<typeof setInterval>>()
+  const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
 
   const fetchThreads = useCallback(async () => {
     if (!hasProvisionedChannel) {
@@ -271,10 +271,8 @@ export function CommsInbox() {
   const panelHeightClass = "min-h-[min(520px,calc(100vh-320px))] max-h-[calc(100vh-180px)]"
 
   return (
-    <div
-      className="relative grid gap-3 pb-12 max-lg:grid-cols-1 lg:grid-cols-[minmax(0,2.45fr)_minmax(248px,0.78fr)] lg:[grid-template-rows:auto_minmax(360px,1fr)_auto_auto_auto]"
-    >
-      <div className="col-span-2">
+    <div className="relative grid gap-3 pb-12 lg:grid-cols-2">
+      <div className="col-span-full">
         <BentoTile
           title="Notifications"
           subtitle={filterSubtitle}
@@ -329,20 +327,32 @@ export function CommsInbox() {
         </BentoTile>
       </div>
 
-      <div id="inbox-messages" className="relative min-h-0 scroll-mt-4">
+      <div
+        className={cn(
+          "col-span-full grid gap-3 max-lg:grid-cols-1 lg:grid-cols-[minmax(0,2.45fr)_minmax(248px,0.78fr)] lg:items-stretch",
+          panelHeightClass
+        )}
+      >
+      <div
+        id="inbox-messages"
+        className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col scroll-mt-4"
+      >
         {provisionLoading ? (
-          <BentoTile className={cn("flex items-center justify-center", panelHeightClass)}>
+          <BentoTile className={cn("flex w-full flex-1 items-center justify-center", panelHeightClass)}>
             <CircleNotch className="size-6 animate-spin text-white/15" />
           </BentoTile>
         ) : !hasProvisionedChannel ? (
-          <InboxSetupEmptyState onOpenChannels={() => setAdminTab("channels")} />
+          <div className={cn("flex w-full flex-1 flex-col", panelHeightClass)}>
+            <InboxSetupEmptyState onOpenChannels={() => setAdminTab("channels")} />
+          </div>
         ) : (
-          <div
-            className={cn(
-              "grid h-full gap-3 max-lg:grid-cols-1 lg:grid-cols-[minmax(220px,31%)_minmax(0,1fr)]",
-              panelHeightClass
-            )}
-          >
+          <div className="flex w-full min-h-0 flex-1 flex-col space-y-3">
+            <PracticeNumberBanner channels={channels} />
+            <div
+              className={cn(
+                "grid min-h-0 flex-1 gap-3 max-lg:grid-cols-1 lg:grid-cols-[minmax(220px,31%)_minmax(0,1fr)]"
+              )}
+            >
             <BentoTile className="min-h-0 flex flex-col">
               <div className="-mt-2 -mx-1 flex min-h-0 flex-1 flex-col">
                 <div className="mb-3 flex items-center gap-1.5">
@@ -397,9 +407,6 @@ export function CommsInbox() {
                       <p className="mt-1 max-w-[220px] text-[10px] leading-relaxed text-white/18">
                         Messages appear when patients WhatsApp your practice number.
                       </p>
-                      <p className="mt-3 text-[9px] text-white/15">
-                        Tip: send a test WhatsApp to your provisioned number to verify webhooks.
-                      </p>
                     </div>
                   ) : (
                     filteredThreads.map((thread) => (
@@ -445,29 +452,38 @@ export function CommsInbox() {
               </AnimatePresence>
             </BentoTile>
           </div>
+          </div>
         )}
       </div>
 
-      <div id="inbox-labs" className="scroll-mt-4">
-        <BentoTile title="Lab Results" subtitle={`${labs.length} in queue · newest first`}>
-          {labs.length === 0 ? (
-            <div className="py-6 text-center">
-              <Flask className="mx-auto mb-2 size-7 text-white/10" />
-              <p className="text-[11px] text-white/25">No lab results in inbox</p>
-              <p className="mt-1 text-[10px] text-white/15">HL7 or Smart Import can add items here</p>
+      <div
+        id="inbox-labs"
+        className="flex min-h-0 w-full min-w-0 flex-1 flex-col scroll-mt-4"
+      >
+        <BentoTile
+          title="Lab Results"
+          subtitle={`${labs.length} in queue · newest first`}
+          className="flex h-full min-h-0 w-full flex-1 flex-col"
+        >
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            <div className="min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+              {labs.length === 0 ? (
+                <div className="py-6 text-center">
+                  <Flask className="mx-auto mb-2 size-7 text-white/10" />
+                  <p className="text-[11px] text-white/25">No lab results in inbox</p>
+                  <p className="mt-1 text-[10px] text-white/15">HL7 or Smart Import can add items here</p>
+                </div>
+              ) : (
+                <LabResultsQueue labs={labsSorted} />
+              )}
             </div>
-          ) : (
-            <LabResultsQueue labs={labsSorted} />
-          )}
-          <LabIntegrationsPanel />
+            <LabIntegrationsPanel />
+          </div>
         </BentoTile>
       </div>
-
-      <div id="inbox-comms-health" className="col-span-2 scroll-mt-4">
-        <CommsHealthPanel hasChannels={hasProvisionedChannel} />
       </div>
 
-      <div id="inbox-smart-import" className="col-span-2 scroll-mt-4">
+      <div id="inbox-smart-import" className="col-span-full scroll-mt-4">
         <SmartImportTile
           addPatient={addPatient}
           patients={patients}
@@ -476,7 +492,7 @@ export function CommsInbox() {
         />
       </div>
 
-      <div id="inbox-activity" className="col-span-2 scroll-mt-4">
+      <div id="inbox-activity" className="col-span-full scroll-mt-4">
         <LiveActivityFeed />
       </div>
 
@@ -490,6 +506,48 @@ export function CommsInbox() {
           />
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+function PracticeNumberBanner({ channels }: { channels: PracticeChannelRow[] }) {
+  const wa = channels.find((c) => c.channel_type === "whatsapp")
+  const voice = channels.find((c) => c.channel_type === "voice")
+
+  if (!wa && !voice) return null
+
+  const STATUS_LABEL: Record<string, { text: string; color: string }> = {
+    active: { text: "Live", color: "text-emerald-400" },
+    registering_sender: { text: "Registering", color: "text-sky-400" },
+    pending_waba: { text: "Meta signup", color: "text-amber-400" },
+    pending_wa_approval: { text: "Pending approval", color: "text-amber-400" },
+    provisioning: { text: "Setting up", color: "text-blue-400" },
+    suspended: { text: "Suspended", color: "text-red-400" },
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
+      {wa && (
+        <div className="flex items-center gap-2">
+          <WhatsappLogo className="size-4 text-[#25D366]" weight="fill" />
+          <span className="font-mono text-sm text-white/75">{wa.phone_number}</span>
+          {wa.sender_display_name && (
+            <span className="text-[10px] text-white/30">({wa.sender_display_name})</span>
+          )}
+          <span className={cn("text-[10px] font-medium", STATUS_LABEL[wa.status]?.color || "text-white/40")}>
+            {STATUS_LABEL[wa.status]?.text || wa.status}
+          </span>
+        </div>
+      )}
+      {voice && (
+        <div className="flex items-center gap-2">
+          <Phone className="size-4 text-violet-400" weight="fill" />
+          <span className="font-mono text-sm text-white/75">{voice.phone_number}</span>
+          <span className={cn("text-[10px] font-medium", STATUS_LABEL[voice.status]?.color || "text-white/40")}>
+            {voice.vapi_phone_number_id ? "Voice ready" : "Voice"}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

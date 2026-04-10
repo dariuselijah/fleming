@@ -34,7 +34,9 @@ const DOC_TITLES: Record<ClinicalDocType, string> = {
 }
 
 export function detectCommandFromUserMessage(userMessage: string): ClinicalDocType | null {
-  const match = userMessage.match(/^\[\/(\w+)\]/)
+  let t = userMessage.trimStart()
+  if (t.startsWith("{")) t = t.slice(1).trimStart()
+  const match = t.match(/^\[\/(\w+)\]/)
   if (!match) return null
   return COMMAND_TO_DOC_TYPE[match[1]] ?? null
 }
@@ -130,6 +132,7 @@ function normalizePrescriptionRow(raw: unknown, index: number): PrescriptionItem
     frequency: str("frequency"),
     duration: str("duration"),
     instructions: str("instructions"),
+    reasoning: str("reasoning"),
   }
 }
 
@@ -166,7 +169,8 @@ function trailingPmidSourcesToClinicalSources(
   return entries.map((e, i) => ({
     index: i + 1,
     title: e.title?.trim() || `PubMed ${e.pmid}`,
-    journal: "PubMed",
+    /** Leave journal empty so UI shows article title instead of a fake "PubMed" journal name. */
+    journal: undefined,
     pmid: e.pmid.trim(),
     url: `https://pubmed.ncbi.nlm.nih.gov/${e.pmid.trim()}/`,
     snippet: e.note?.trim(),

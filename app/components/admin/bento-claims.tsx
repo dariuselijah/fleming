@@ -9,6 +9,8 @@ import {
   type ClaimStatus,
   type BillingSubTab,
 } from "@/lib/clinical-workspace"
+import { usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-context"
+import { fetchClient } from "@/lib/fetch"
 import { cn } from "@/lib/utils"
 import {
   ArrowsClockwise,
@@ -23,6 +25,7 @@ import {
   MagnifyingGlass,
   PaperPlaneTilt,
   PencilSimple,
+  Play,
   Plus,
   Printer,
   Receipt,
@@ -39,8 +42,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 type SortKey = "date" | "patient" | "amount" | "status"
 type SortDir = "asc" | "desc"
 
-const MOCK_SPARKLINE_SENT = [12, 15, 8, 22, 18, 25, 30, 28, 35, 32, 38, 42]
-const MOCK_SPARKLINE_SETTLED = [5, 8, 6, 14, 12, 18, 22, 20, 28, 25, 30, 35]
+/** Last 12 weeks, oldest bucket left — amounts in ZAR (rounded). */
+function weeklyBucketsZar(
+  claims: PracticeClaim[],
+  pred: (c: PracticeClaim) => boolean
+): number[] {
+  const now = Date.now()
+  const buckets = Array.from({ length: 12 }, () => 0)
+  for (const c of claims) {
+    if (!pred(c)) continue
+    const t = new Date(c.createdAt).getTime()
+    const weeksAgo = Math.floor((now - t) / (7 * 86400000))
+    if (weeksAgo < 0 || weeksAgo >= 12) continue
+    const idx = 11 - weeksAgo
+    buckets[idx] += c.totalAmount
+  }
+  return buckets.map((n) => Math.round(n))
+}
 
 const STATUS_BADGE: Record<string, string> = {
   draft: "bg-white/[0.06] text-white/50",
@@ -56,16 +74,6 @@ const SUB_TABS: { id: BillingSubTab; label: string }[] = [
   { id: "invoices", label: "Invoices" },
   { id: "outstanding", label: "Outstanding" },
   { id: "payments", label: "Payments" },
-]
-
-/** Shown in UI when the workspace store has no claims yet (sidebar + table). */
-export const DEMO_PRACTICE_CLAIMS: PracticeClaim[] = [
-  { id: "cl-1", patientId: "p1", patientName: "Sarah Johnson", lines: [{ id: "l1", description: "Consultation (0190)", icdCode: "I10", amount: 450, lineType: "medical_aid", status: "draft" }], totalAmount: 450, medicalAidAmount: 450, cashAmount: 0, status: "draft", createdAt: "2026-04-04T08:30:00Z" },
-  { id: "cl-2", patientId: "p2", patientName: "Michael Chen", lines: [{ id: "l2", description: "Extended Consult (0191)", icdCode: "R07.9", amount: 680, lineType: "medical_aid", status: "submitted" }, { id: "l2b", description: "ECG (1112)", icdCode: "R07.9", tariffCode: "1112", amount: 220, lineType: "cash", status: "submitted" }], totalAmount: 900, medicalAidAmount: 680, cashAmount: 220, status: "submitted", submittedAt: "2026-04-04T09:10:00Z", createdAt: "2026-04-04T08:45:00Z" },
-  { id: "cl-3", patientId: "p3", patientName: "Emma Williams", lines: [{ id: "l3", description: "Follow-up (0023)", icdCode: "E11.9", amount: 350, lineType: "medical_aid", status: "paid" }], totalAmount: 350, medicalAidAmount: 350, cashAmount: 0, status: "paid", createdAt: "2026-04-03T10:00:00Z", paidAt: "2026-04-03T16:00:00Z", paymentMethod: "EFT", paymentRef: "REF-99102" },
-  { id: "cl-4", patientId: "p4", patientName: "James Brown", lines: [{ id: "l4", description: "Skin Biopsy (0270)", icdCode: "D23.9", amount: 1200, lineType: "cash", status: "draft" }], totalAmount: 1200, medicalAidAmount: 0, cashAmount: 1200, status: "draft", createdAt: "2026-04-04T09:30:00Z" },
-  { id: "cl-5", patientId: "p7", patientName: "Lisa Anderson", lines: [{ id: "l5", description: "Consultation (0190)", icdCode: "F41.1", amount: 450, lineType: "medical_aid", status: "rejected" }], totalAmount: 450, medicalAidAmount: 450, cashAmount: 0, status: "rejected", rejectionReason: "Pre-authorisation required for psychiatric consultation", createdAt: "2026-04-02T14:00:00Z" },
-  { id: "cl-6", patientId: "p8", patientName: "Robert Taylor", lines: [{ id: "l6", description: "Post-op Follow-up (0023)", icdCode: "T81.4", amount: 350, lineType: "medical_aid", status: "submitted" }], totalAmount: 350, medicalAidAmount: 350, cashAmount: 0, status: "submitted", submittedAt: "2026-04-03T15:30:00Z", createdAt: "2026-04-03T14:00:00Z" },
 ]
 
 // ─── Main Component ──────────────────────────────────────────────
@@ -84,7 +92,7 @@ export function BentoClaims() {
   const billingFocusRequest = useWorkspaceStore((s) => s.billingFocusRequest)
   const lastBillingFocusNonce = useRef(0)
 
-  const allClaims = storeClaims.length > 0 ? storeClaims : DEMO_PRACTICE_CLAIMS
+  const allClaims = storeClaims
 
   const [sortKey, setSortKey] = useState<SortKey>("date")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
@@ -112,8 +120,29 @@ export function BentoClaims() {
       if (cl.status === "paid") c += cl.totalAmount
       if (cl.status === "submitted") p += cl.totalAmount
     }
-    return { totalSent: s || 4250, totalSettled: c || 2870, totalPending: p || 1380 }
+    return { totalSent: s, totalSettled: c, totalPending: p }
   }, [allClaims])
+
+  const sparkSent = useMemo(
+    () => weeklyBucketsZar(allClaims, (c) => c.status !== "draft"),
+    [allClaims]
+  )
+  const sparkPending = useMemo(
+    () =>
+      weeklyBucketsZar(
+        allClaims,
+        (c) => c.status === "submitted" || c.status === "partial"
+      ),
+    [allClaims]
+  )
+  const sparkCleared = useMemo(
+    () =>
+      weeklyBucketsZar(
+        allClaims,
+        (c) => c.status === "paid" || c.status === "approved"
+      ),
+    [allClaims]
+  )
 
   const filteredClaims = useMemo(() => {
     if (activeBillingSubTab === "outstanding")
@@ -212,9 +241,9 @@ export function BentoClaims() {
         {/* Pulse strip (claims & outstanding tabs) */}
         {(activeBillingSubTab === "claims" || activeBillingSubTab === "outstanding") && (
           <div className="mb-3 flex items-center gap-6">
-            <PulseChip label="Sent" value={`R${totalSent.toLocaleString()}`} data={MOCK_SPARKLINE_SENT} color="#3b82f6" />
-            <PulseChip label="Pending" value={`R${totalPending.toLocaleString()}`} color="#FFC107" />
-            <PulseChip label="Cleared" value={`R${totalSettled.toLocaleString()}`} data={MOCK_SPARKLINE_SETTLED} color="#00E676" />
+            <PulseChip label="Sent" value={`R${totalSent.toLocaleString()}`} data={sparkSent} color="#3b82f6" />
+            <PulseChip label="Pending" value={`R${totalPending.toLocaleString()}`} data={sparkPending} color="#FFC107" />
+            <PulseChip label="Cleared" value={`R${totalSettled.toLocaleString()}`} data={sparkCleared} color="#00E676" />
             <div className="ml-auto">
               {draftSelected.length > 0 && (
                 <button
@@ -583,10 +612,19 @@ function ClaimDetailPanel({
   onUpdateClaim: (id: string, update: Partial<PracticeClaim>) => void
   onUpdateStatus: (id: string, status: ClaimStatus) => void
 }) {
+  const { resumeMedikreditClaimDraft, setMode } = useWorkspace()
+  const { practiceId } = usePracticeCrypto()
   const [editingLines, setEditingLines] = useState<ClaimLine[]>(claim.lines)
   const [paymentMethod, setPaymentMethod] = useState("EFT")
   const [paymentRef, setPaymentRef] = useState("")
   const [isEditing, setIsEditing] = useState(false)
+
+  useEffect(() => {
+    setEditingLines(claim.lines)
+    setIsEditing(false)
+  }, [claim.id])
+
+  const linesForResume = isEditing ? editingLines : claim.lines
 
   const recalcTotals = useCallback((lines: ClaimLine[]) => {
     let ma = 0, cash = 0
@@ -601,6 +639,19 @@ function ClaimDetailPanel({
     const totals = recalcTotals(editingLines)
     onUpdateClaim(claim.id, { lines: editingLines, ...totals })
     setIsEditing(false)
+    if (claim.status === "draft" && practiceId) {
+      void fetchClient("/api/clinical/practice-claims/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          practiceId,
+          patientId: claim.patientId,
+          clinicalEncounterId: claim.clinicalEncounterId ?? null,
+          claimId: claim.id,
+          lines: editingLines,
+        }),
+      }).catch(() => {})
+    }
   }
 
   const updateLine = (lineId: string, field: keyof ClaimLine, value: string | number) => {
@@ -671,6 +722,35 @@ function ClaimDetailPanel({
           <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3">
             <StatusTimeline status={claim.status} />
           </div>
+
+          {claim.status === "draft" && linesForResume.length > 0 && (
+            <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.06] p-3">
+              <p className="text-[11px] font-medium text-blue-300">Complete in MediKredit</p>
+              <p className="mt-1 text-[10px] text-white/35">
+                Opens the claim preview with these lines so you can validate modifiers and send to the switch.
+                {claim.clinicalEncounterId ? "" : " This draft has no linked encounter — open from a signed consult when possible."}
+              </p>
+              <button
+                type="button"
+                disabled={!claim.clinicalEncounterId}
+                onClick={() => {
+                  resumeMedikreditClaimDraft({
+                    patientId: claim.patientId,
+                    patientName: claim.patientName,
+                    lines: linesForResume,
+                    remoteClaimId: claim.id,
+                    clinicalEncounterId: claim.clinicalEncounterId,
+                  })
+                  setMode("clinical")
+                  onClose()
+                }}
+                className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500/20 py-2 text-[11px] font-semibold text-blue-300 transition-colors hover:bg-blue-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Play className="size-3.5" weight="fill" />
+                Open claim preview
+              </button>
+            </div>
+          )}
 
           {/* Rejection reason */}
           {claim.status === "rejected" && claim.rejectionReason && (

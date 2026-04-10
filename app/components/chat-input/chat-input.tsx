@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUpIcon,
   FileDoc,
@@ -10,6 +10,7 @@ import {
   FileVideo,
   FolderOpen,
   ImageSquare,
+  Microphone,
   SpinnerGap,
   StopIcon,
   X,
@@ -49,6 +50,7 @@ import type { FileUploadSummary, FileUploadStatus } from "../chat/use-file-uploa
 import { useCommandBar } from "@/lib/command-bar/use-command-bar"
 import type { SlashCommand } from "@/lib/command-bar/command-registry"
 import { useWorkspaceStore, buildClinicalContext } from "@/lib/clinical-workspace"
+import { useChatDictation } from "@/lib/hooks/use-chat-dictation"
 import { AnimatePresence } from "motion/react"
 import dynamic from "next/dynamic"
 
@@ -139,6 +141,24 @@ export function ChatInput({
   const [selectedUploads, setSelectedUploads] = useState<UserUploadListItem[]>([])
   const [selectedUploadIndex, setSelectedUploadIndex] = useState(0)
   const [uploadsLoadedAt, setUploadsLoadedAt] = useState(0)
+  const valueRef = useRef(value)
+  valueRef.current = value
+
+  const dictation = useChatDictation({
+    onAppendText: useCallback(
+      (t: string) => {
+        onValueChange(valueRef.current + t)
+      },
+      [onValueChange]
+    ),
+  })
+
+  useEffect(() => {
+    if (!dictation.error) return
+    toast({ title: dictation.error, status: "error" })
+  }, [dictation.error])
+
+  const activePatientId = useWorkspaceStore((s) => s.activePatientId)
 
   const handleCommandAction_ = useCallback(
     (command: SlashCommand, args: string) => {
@@ -148,6 +168,11 @@ export function ChatInput({
         window.dispatchEvent(
           new CustomEvent("fleming:command", { detail: { command: command.id, args } })
         )
+        return
+      }
+
+      if (command.id === "upload") {
+        window.dispatchEvent(new CustomEvent("fleming:open-document-selector"))
         return
       }
 
@@ -170,6 +195,8 @@ export function ChatInput({
       )
       const CTX_BLOCK = ctx ? `\n\n${ctx}` : ""
       const CONCISE = "Be concise and clinically precise. No preamble. Bullet points preferred. Tag each statement with [T] (from transcript), [E] (from extracted entities), or [H] (from patient history) to indicate its source."
+      const SOAP_FROM_CONSULT =
+        "Be concise and clinically precise. Chart-ready SOAP from the consultation context only. Do not tag lines with [T], [E], or [H]. If something was not discussed, write \"not documented\" rather than guessing."
       const OPEN_EVIDENCE_STYLE =
         "OpenEvidence-style: lead with actionable recommendations, then conditional/alternative paths. " +
         "Cite ONLY with numbered in-text markers [1], [2] matching retrieved evidence — never use [T], [E], or [H]. " +
@@ -198,8 +225,8 @@ export function ChatInput({
           ? `[/refer] Referral letter to: ${a}. Reason, clinical summary, investigations, questions. ${CONCISE}${CTX_BLOCK}`
           : `[/refer] Generate referral letter. Reason, clinical summary, investigations, specialist questions. ${CONCISE}${CTX_BLOCK}`,
         soap: (a) => a
-          ? `[/soap] SOAP note focusing on: ${a}. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${CONCISE}${CTX_BLOCK}`
-          : `[/soap] Create a SOAP note from this consultation. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/soap] SOAP note focusing on: ${a}. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${SOAP_FROM_CONSULT}${CTX_BLOCK}`
+          : `[/soap] Create a SOAP note from this consultation. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${SOAP_FROM_CONSULT}${CTX_BLOCK}`,
         vitals: (a) => a
           ? `[/vitals] Record vitals: ${a}. BP, HR, RR, Temp, SpO2, Weight, Height, BMI. Interpret abnormalities. ${CONCISE}${CTX_BLOCK}`
           : `[/vitals] Document vital-sign set: BP, HR, RR, Temp, SpO2, Weight, Height, BMI, Pain. Interpret abnormalities. ${CONCISE}${CTX_BLOCK}`,
@@ -209,7 +236,6 @@ export function ChatInput({
         claim: (a) => a
           ? `[/claim] Billing claim: ${a}. ICD-10 codes, tariff codes, line items. ${CONCISE}${CTX_BLOCK}`
           : `[/claim] Prepare billing claim from consultation. ICD-10, tariffs, line items. ${CONCISE}${CTX_BLOCK}`,
-        upload: () => "[/upload] I'd like to attach a document to this consult.",
       }
 
       const promptFn = COMMAND_PROMPTS[command.id]
@@ -234,7 +260,8 @@ export function ChatInput({
   )
 
   const commandBar = useCommandBar({
-    hasPatient: isDoctor_,
+    hasPatient: Boolean(activePatientId),
+    clinicalCopilot: isDoctor_ || isMedicalStudent_,
     onCommandAction: handleCommandAction_,
   })
 
@@ -616,7 +643,9 @@ export function ChatInput({
     // Button should be disabled when:
     // 1. No input and not streaming
     // 2. Submitting (but not streaming)
-    const hasValidInput = value && !isOnlyWhitespace(value);
+    const hasValidInput =
+      (value && !isOnlyWhitespace(value)) ||
+      Boolean(dictation.interimTranscript?.trim());
     const hasAttachedFiles = files.length > 0
     const hasUploadReferences = selectedUploads.length > 0
     const hasArtifactIntent = artifactIntent !== "none"
@@ -625,7 +654,7 @@ export function ChatInput({
     
     const shouldDisable = !isStreaming && ((!hasValidInput && !hasAttachedFiles && !hasUploadReferences && !hasArtifactIntent) || isSubmittingButNotStreaming);
     setIsButtonDisabled(Boolean(shouldDisable));
-  }, [files.length, value, selectedUploads.length, artifactIntent, isSubmitting, status])
+  }, [files.length, value, selectedUploads.length, artifactIntent, isSubmitting, status, dictation.interimTranscript])
 
   // Reset tabs-dismissed when conversation has no messages (e.g. new chat)
   useEffect(() => {
@@ -645,6 +674,9 @@ export function ChatInput({
     !tabsDismissed &&
     clinicianMode !== "open_search"
   const shouldShowInlineSuggestions = showClinicianWorkflowPanel
+
+  const showDictation =
+    (isDoctor_ || isMedicalStudent_) && dictation.supported && !showClinicianWorkflowPanel
 
   const handleClinicianPanelSubmit = useCallback(
     (prompt: string) => {
@@ -786,6 +818,11 @@ export function ChatInput({
                 </div>
               )}
             </AnimatePresence>
+            {dictation.interimTranscript ? (
+              <div className="px-4 pt-1 text-xs italic text-muted-foreground/90">
+                {dictation.interimTranscript}
+              </div>
+            ) : null}
             <PromptInputTextarea
               placeholder={
                 commandBar.activeChip
@@ -892,6 +929,23 @@ export function ChatInput({
                   isUserAuthenticated={isUserAuthenticated}
                   className="h-9 rounded-full"
                 />
+                {showDictation ? (
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant={dictation.isListening ? "default" : "outline"}
+                    className={cn(
+                      "size-9 shrink-0 rounded-full border p-0",
+                      dictation.isListening &&
+                        "border-emerald-500/40 bg-emerald-500/15 text-emerald-400 shadow-[0_0_0_1px_rgba(16,185,129,0.25)]"
+                    )}
+                    onClick={() => dictation.toggle()}
+                    aria-label={dictation.isListening ? "Stop dictation" : "Start dictation"}
+                    aria-pressed={dictation.isListening}
+                  >
+                    <Microphone className={cn("size-4", dictation.isListening && "animate-pulse")} />
+                  </Button>
+                ) : null}
               </div>
               <PromptInputAction tooltip={status === "streaming" ? "Stop" : "Send"}>
                 <Button

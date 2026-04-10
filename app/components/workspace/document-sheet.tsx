@@ -11,7 +11,13 @@ import { CitationMarkdown } from "@/app/components/chat/citation-markdown"
 import { EvidenceCitationPill } from "@/app/components/chat/evidence-citation-pill"
 import type { CitationData } from "@/app/components/chat/citation-popup"
 import type { EvidenceCitation } from "@/lib/evidence/types"
-import { stripPrescriptionItemsBlock } from "@/lib/clinical-workspace/parse-clinical-response"
+import {
+  stripPrescriptionItemsBlock,
+  stripResponseWrapper,
+} from "@/lib/clinical-workspace/parse-clinical-response"
+import ReactMarkdown from "react-markdown"
+import remarkBreaks from "remark-breaks"
+import remarkGfm from "remark-gfm"
 import { cn } from "@/lib/utils"
 import {
   X,
@@ -42,6 +48,7 @@ import {
 import { motion, AnimatePresence } from "motion/react"
 import { useCallback, useMemo, useState, useRef, useEffect } from "react"
 import type { MedicalBlockType, ClinicalDocType } from "@/lib/clinical-workspace"
+import { PrescriptionEditorPanel } from "@/app/components/workspace/prescription-sidebar"
 
 const BLOCK_ICONS: Record<MedicalBlockType, React.ComponentType<any>> = {
   LAB: Flask,
@@ -116,7 +123,7 @@ function clinicalSourcesToEvidenceCitations(
     sourceId: `clinical-doc:${s.index}`,
     pmid: s.pmid?.trim() || null,
     title: s.title?.trim() || `Source ${s.index}`,
-    journal: s.journal?.trim() || "Literature",
+    journal: s.journal?.trim() || "",
     year: parseClinicalSourceYear(s.year),
     doi: null,
     authors: [],
@@ -280,11 +287,27 @@ function MarkdownDocumentView({
   )
   const stripTranscriptProvenance = documentType === "evidence"
 
+  const bodyForMd = useMemo(() => stripResponseWrapper(content), [content])
+
+  const mdComponents = useMemo(
+    () => ({
+      text: ({ value }: { value?: string }) =>
+        value === undefined || value === "" ? null : (
+          <ClinicalInlineWithCitations
+            text={value}
+            evidenceCitations={evidenceCitations}
+            stripTranscriptProvenance={stripTranscriptProvenance}
+          />
+        ),
+    }),
+    [evidenceCitations, stripTranscriptProvenance]
+  )
+
   useEffect(() => {
     if (isStreaming && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [content, isStreaming])
+  }, [bodyForMd, isStreaming])
 
   useEffect(() => {
     if (editMode && textareaRef.current) {
@@ -294,23 +317,6 @@ function MarkdownDocumentView({
       ta.style.height = `${ta.scrollHeight}px`
     }
   }, [editMode])
-
-  const sections = useMemo(() => {
-    const mainContent = content.replace(/=== FLEMING FULL RESPONSE ===\n?/, "").replace(/=== END ===\n?/, "")
-    const evidenceMatch = mainContent.match(/=== EVIDENCE SOURCES \(\d+\) ===([\s\S]*?)(?:=== END ===|$)/)
-    const bodyContent = evidenceMatch
-      ? mainContent.slice(0, mainContent.indexOf("=== EVIDENCE SOURCES"))
-      : mainContent
-
-    const parts = bodyContent.split(/\n(?=## )/)
-    return parts.map((part) => {
-      const headingMatch = part.match(/^## (.+)\n/)
-      return {
-        heading: headingMatch ? headingMatch[1].replace(/\*\*/g, "") : null,
-        body: headingMatch ? part.slice(headingMatch[0].length) : part,
-      }
-    })
-  }, [content])
 
   if (editMode) {
     return (
@@ -329,76 +335,20 @@ function MarkdownDocumentView({
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
-      <div className="space-y-0 divide-y divide-border/20">
-        {sections.map((section, i) => (
-          <div key={i} className="px-5 py-4">
-            {section.heading && (
-              <h3 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-foreground/80">
-                {section.heading}
-              </h3>
-            )}
-            <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed">
-              {section.body.split("\n").map((line, j) => {
-                const trimmed = line.trim()
-                if (!trimmed) return null
-
-                if (trimmed.startsWith("### ")) {
-                  return (
-                    <h4 key={j} className="mb-1.5 mt-3 text-[12px] font-bold text-foreground">
-                      {trimmed.replace(/^### /, "").replace(/\*\*/g, "")}
-                    </h4>
-                  )
-                }
-
-                if (trimmed.startsWith("- **") || trimmed.startsWith("* **")) {
-                  const boldMatch = trimmed.match(/^[-*] \*\*(.+?)\*\*(.*)/)
-                  if (boldMatch) {
-                    return (
-                      <div key={j} className="flex gap-2 py-0.5">
-                        <span className="mt-1.5 size-1 shrink-0 rounded-full bg-foreground/30" />
-                        <span>
-                          <strong className="font-semibold text-foreground">{boldMatch[1]}</strong>
-                          <span className="text-muted-foreground">
-                            <ClinicalInlineWithCitations
-                              text={boldMatch[2] || ""}
-                              evidenceCitations={evidenceCitations}
-                              stripTranscriptProvenance={stripTranscriptProvenance}
-                            />
-                          </span>
-                        </span>
-                      </div>
-                    )
-                  }
-                }
-
-                if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-                  return (
-                    <div key={j} className="flex gap-2 py-0.5">
-                      <span className="mt-1.5 size-1 shrink-0 rounded-full bg-foreground/30" />
-                      <span className="text-foreground/90">
-                        <ClinicalInlineWithCitations
-                          text={trimmed.slice(2)}
-                          evidenceCitations={evidenceCitations}
-                          stripTranscriptProvenance={stripTranscriptProvenance}
-                        />
-                      </span>
-                    </div>
-                  )
-                }
-
-                return (
-                  <div key={j} className="py-0.5 text-foreground/90">
-                    <ClinicalInlineWithCitations
-                      text={trimmed}
-                      evidenceCitations={evidenceCitations}
-                      stripTranscriptProvenance={stripTranscriptProvenance}
-                    />
-                  </div>
-                )
-              })}
-            </div>
+      <div className="px-5 py-4">
+        {bodyForMd.trim().length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">No content yet.</p>
+        ) : (
+          <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed prose-headings:font-semibold prose-p:my-1.5 prose-li:my-0.5 prose-ul:my-2 prose-ol:my-2 [&_p]:text-foreground/90">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkBreaks]}
+              /* `text` overrides markdown text nodes; cast avoids clash with SVG `text` in Components typings */
+              components={mdComponents as any}
+            >
+              {bodyForMd}
+            </ReactMarkdown>
           </div>
-        ))}
+        )}
       </div>
 
       {isStreaming && (
@@ -409,22 +359,28 @@ function MarkdownDocumentView({
       )}
 
       {documentType !== "evidence" && (
-      <div className="shrink-0 border-t border-border/20 px-5 py-2">
-        <div className="flex items-center gap-3 text-[9px] text-muted-foreground/50">
-          <span className="flex items-center gap-0.5">
-            <sup className="inline-flex size-3 items-center justify-center rounded bg-blue-500/10 text-[7px] font-bold text-blue-600 dark:text-blue-400">T</sup>
-            Transcript
-          </span>
-          <span className="flex items-center gap-0.5">
-            <sup className="inline-flex size-3 items-center justify-center rounded bg-purple-500/10 text-[7px] font-bold text-purple-600 dark:text-purple-400">E</sup>
-            Extraction
-          </span>
-          <span className="flex items-center gap-0.5">
-            <sup className="inline-flex size-3 items-center justify-center rounded bg-amber-500/10 text-[7px] font-bold text-amber-600 dark:text-amber-400">H</sup>
-            History
-          </span>
+        <div className="shrink-0 border-t border-border/20 px-5 py-2">
+          <div className="flex items-center gap-3 text-[9px] text-muted-foreground/50">
+            <span className="flex items-center gap-0.5">
+              <sup className="inline-flex size-3 items-center justify-center rounded bg-blue-500/10 text-[7px] font-bold text-blue-600 dark:text-blue-400">
+                T
+              </sup>
+              Transcript
+            </span>
+            <span className="flex items-center gap-0.5">
+              <sup className="inline-flex size-3 items-center justify-center rounded bg-purple-500/10 text-[7px] font-bold text-purple-600 dark:text-purple-400">
+                E
+              </sup>
+              Extraction
+            </span>
+            <span className="flex items-center gap-0.5">
+              <sup className="inline-flex size-3 items-center justify-center rounded bg-amber-500/10 text-[7px] font-bold text-amber-600 dark:text-amber-400">
+                H
+              </sup>
+              History
+            </span>
+          </div>
         </div>
-      </div>
       )}
     </div>
   )
@@ -476,6 +432,7 @@ export function DocumentSheet() {
     activePatient,
     acceptSessionDocument,
     rejectSessionDocument,
+    addSessionMedication,
   } = useWorkspace()
   const [shareOpen, setShareOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
@@ -769,6 +726,29 @@ export function DocumentSheet() {
 
       {/* Content area */}
       {hasContent ? (
+        contentDoc!.type === "prescribe" ? (
+          activePatient ? (
+            <PrescriptionEditorPanel
+              doc={contentDoc!}
+              updateDocumentContent={updateDocumentContent}
+              activePatient={{
+                patientId: activePatient.patientId,
+                name: activePatient.name,
+              }}
+              acceptSessionDocument={acceptSessionDocument}
+              addSessionMedication={addSessionMedication}
+            />
+          ) : (
+            <MarkdownDocumentView
+              content={contentDoc!.content}
+              isStreaming={contentDoc!.isStreaming}
+              editMode={documentSheet.editMode}
+              onContentChange={(newContent) => updateDocumentContent(newContent, false)}
+              sources={contentDoc!.sources}
+              documentType={contentDoc!.type}
+            />
+          )
+        ) : (
         <MarkdownDocumentView
           content={contentDoc!.content}
           isStreaming={contentDoc!.isStreaming}
@@ -777,6 +757,7 @@ export function DocumentSheet() {
           sources={contentDoc!.sources}
           documentType={contentDoc!.type}
         />
+        )
       ) : hasBlock ? (
         <BlockDocumentContent block={block!} />
       ) : null}

@@ -69,6 +69,37 @@ export interface PatientLifestyle {
   alcohol?: string
   exercise?: string
   diet?: string
+  /** Lines promoted from AI Accept on Social History (longitudinal notes). */
+  socialHistoryLines?: string[]
+}
+
+/** Audit log for AI extraction accept / unaccept / reject (sidebar History). */
+export type AcceptHistoryEntry = {
+  at: string
+  entityKey: string
+  item: string
+  action: "accepted" | "unaccepted" | "rejected"
+}
+
+/** Evidence deep-dive panel results (session-scoped, persisted with encounter). */
+export type EvidenceDeepDiveResultRow = {
+  id: string
+  title: string
+  journal?: string
+  year?: number
+  url?: string
+  evidenceLevel?: number
+  keyFindings: string
+  relevanceScore?: number
+}
+
+export type EvidenceDeepDiveState = {
+  query: string
+  synthesis: string
+  results: EvidenceDeepDiveResultRow[]
+  updatedAt: string
+  /** Pipeline stages for task-board UI */
+  stages?: { label: string; done: boolean }[]
 }
 
 export interface PatientSession {
@@ -83,6 +114,8 @@ export interface PatientSession {
   memberNumber?: string
   criticalAllergies?: string[]
   chronicConditions?: string[]
+  /** Problems accepted for this encounter only (not the longitudinal chronic list). */
+  encounterProblems?: string[]
   /** Active meds / e-script queue for this encounter (sidebar + Medprax-aware search). */
   activeMedications?: PatientMedication[]
   lifestyle?: PatientLifestyle
@@ -94,11 +127,21 @@ export interface PatientSession {
   consultSignedAt?: Date
   claimSubmitted?: boolean
   claimId?: string
+  /** Edited claim lines before MediKredit send; initialized when preview opens */
+  claimDraftLines?: ClaimLine[] | null
+  /** User closed claim preview without sending; header "Submit Claim" clears this */
+  claimPreviewDismissed?: boolean
+  /** practice_claims row id when this session's draft was saved for later (server upsert). */
+  remoteDraftClaimId?: string | null
   openedAt: Date
   soapNote: SOAPNote
   vitals: VitalReading[]
   blocks: MedicalBlock[]
   sessionDocuments?: SessionDocument[]
+  /** AI extraction accept/unaccept audit trail */
+  acceptHistory?: AcceptHistoryEntry[]
+  /** Last evidence deep-dive run (Evidence tab + chat /evidence sync) */
+  evidenceDeepDive?: EvidenceDeepDiveState | null
 }
 
 export type ConsultStatus =
@@ -147,6 +190,8 @@ export interface PrescriptionItem {
   frequency?: string
   duration?: string
   instructions?: string
+  /** AI / safety rationale for this line */
+  reasoning?: string
 }
 
 export interface SessionDocument {
@@ -224,9 +269,14 @@ export interface PracticePatient {
   phone?: string
   email?: string
   address?: string
+  /** True when contact / registration details still need admin completion (e.g. after Smart Import). */
+  profileIncomplete?: boolean
+  passportNumber?: string
+  nationality?: string
   emergencyContact?: { name: string; relationship: string; phone: string }
   medicalAidStatus: MedicalAidVerification
   medicalAidScheme?: string
+  medicalAidPlan?: string
   memberNumber?: string
   dependentCode?: string
   mainMemberName?: string
@@ -258,10 +308,20 @@ export interface ClaimLine {
   icdCode?: string
   tariffCode?: string
   nappiCode?: string
+  /** When set, overrides nappi/tariff inference for MediKredit ITEM tp */
+  medikreditTp?: 1 | 2 | 3
   quantity?: number
   amount: number
   lineType: ClaimLineType
   status: ClaimStatus
+  /** Up to 5 PHISC modifier codes attached to this line */
+  modifierCodes?: string[]
+  /** Parallel array of modifier ZAR amounts (informational, electronic only) */
+  modifierAmounts?: number[]
+  /** Parallel array of processing order sequences */
+  modifierSequences?: number[]
+  /** PHISC Table 6 item type indicator */
+  itemTypeIndicator?: string
 }
 
 export interface PracticeClaim {
@@ -270,6 +330,8 @@ export interface PracticeClaim {
   patientName: string
   doctorId?: string
   sessionDocumentId?: string
+  /** When claim was created from a signed encounter */
+  clinicalEncounterId?: string
   lines: ClaimLine[]
   totalAmount: number
   medicalAidAmount: number
@@ -281,6 +343,8 @@ export interface PracticeClaim {
   paidAt?: string
   submittedAt?: string
   createdAt: string
+  /** Raw MediKredit adjudication JSON when persisted from switch */
+  medikreditResponse?: Record<string, unknown> | null
 }
 
 export interface InventoryItem {

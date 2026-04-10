@@ -1,8 +1,28 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { generateEmbedding } from "@/lib/rag/embeddings"
 
 type ChunkIn = { text: string; sourceType: string; chunkKey?: string; chunkIndex: number }
+
+async function deleteEncounterChunks(encounterId: string, userSupabase: Awaited<ReturnType<typeof createClient>>) {
+  if (!userSupabase) return
+  try {
+    const admin = createAdminClient()
+    const { error } = await admin.from("clinical_rag_chunks").delete().eq("encounter_id", encounterId)
+    if (!error) return
+    console.warn("[rag index] admin delete", error)
+  } catch (e) {
+    console.warn(
+      "[rag index] admin delete skipped",
+      e instanceof Error ? e.message : e
+    )
+  }
+  const { error } = await userSupabase.from("clinical_rag_chunks").delete().eq("encounter_id", encounterId)
+  if (error) {
+    console.warn("[rag index] user delete", error)
+  }
+}
 
 /**
  * Rebuilds RAG chunks for an encounter (server-side embedding; plaintext visible to API route only).
@@ -45,7 +65,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Encounter not found" }, { status: 404 })
   }
 
-  await supabase.from("clinical_rag_chunks").delete().eq("encounter_id", encounterId)
+  await deleteEncounterChunks(encounterId, supabase)
+
+  type Row = {
+    practice_id: string
+    patient_id: string
+    encounter_id: string
+    chunk_index: number
+    source_type: string
+    chunk_key: string | null
+    embedding: string
+    chunk_body: string
+  }
+
+  const byIndex = new Map<number, Row>()
 
   for (const c of chunks) {
     if (!c.text?.trim()) continue
@@ -57,20 +90,43 @@ export async function POST(req: NextRequest) {
       continue
     }
     const vec = `[${embedding.join(",")}]`
-    const { error: upErr } = await supabase.from("clinical_rag_chunks").insert({
+    byIndex.set(c.chunkIndex, {
       practice_id: practiceId,
       patient_id: patientId,
       encounter_id: encounterId,
       chunk_index: c.chunkIndex,
       source_type: c.sourceType,
       chunk_key: c.chunkKey ?? null,
-      embedding: vec as unknown as string,
+      embedding: vec,
       chunk_body: c.text.slice(0, 12000),
     })
-    if (upErr) {
-      console.error("[rag index] insert", upErr)
+  }
+
+  const rows = [...byIndex.values()]
+  if (rows.length === 0) {
+    return NextResponse.json({ ok: true, indexed: 0 })
+  }
+
+  const { error: insErr } = await supabase.from("clinical_rag_chunks").insert(rows)
+  if (insErr) {
+    console.error("[rag index] insert", insErr)
+    if (insErr.code === "23505") {
+      const { error: upErr } = await supabase.from("clinical_rag_chunks").upsert(rows, {
+        onConflict: "encounter_id,chunk_index",
+      })
+      if (upErr) {
+        console.error("[rag index] upsert fallback", upErr)
+        return NextResponse.json({ error: upErr.message }, { status: 500 })
+      }
+    } else {
+      return NextResponse.json({ error: insErr.message }, { status: 500 })
     }
   }
 
-  return NextResponse.json({ ok: true, indexed: chunks.length })
+  await supabase
+    .from("clinical_encounters")
+    .update({ last_indexed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", encounterId)
+
+  return NextResponse.json({ ok: true, indexed: rows.length })
 }

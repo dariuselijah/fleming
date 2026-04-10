@@ -11,6 +11,11 @@ import type {
 import { runBookingFlow } from "./flows/booking"
 import { runOnboardingFlow } from "./flows/onboarding"
 import { runTriageFlow } from "./flows/triage"
+import { runPatientLookupFlow } from "./flows/patient-lookup"
+import {
+  resolvePatientIdForThread,
+  confirmUpcomingAppointmentFromReminder,
+} from "./appointment-actions"
 import { getFAQs } from "./tools"
 import { formatHoursForAgent } from "./after-hours"
 
@@ -58,6 +63,26 @@ export async function runCommsAgent(
     }
   }
 
+  // Handle button responses that route across flows
+  if (inboundMessage === "register_yes") {
+    return runOnboardingFlow(ctx, inboundMessage, { step: "welcome", collected: {} })
+  }
+  if (inboundMessage === "register_no" || inboundMessage === "action_done" || inboundMessage === "book_no") {
+    return {
+      text: "No problem! Feel free to message us anytime you need help.",
+      flowUpdate: { currentFlow: "none", flowState: {} },
+    }
+  }
+  if (inboundMessage === "book_yes" || inboundMessage === "action_book") {
+    return runBookingFlow(ctx, inboundMessage, { step: "detect_reason", collected: {} })
+  }
+
+  // Reply CONFIRM / RESCHEDULE to scheduled reminders (only when not inside another flow)
+  if (ctx.thread.currentFlow === "none") {
+    const reminder = await tryHandleReminderKeywordReply(ctx, inboundMessage)
+    if (reminder) return reminder
+  }
+
   // Resume active flow
   if (ctx.thread.currentFlow !== "none") {
     return resumeFlow(ctx, inboundMessage, inboundMedia)
@@ -78,7 +103,7 @@ async function detectIntentAndRoute(
     model,
     temperature: 0.1,
     maxTokens: 150,
-    system: `You are an intent classifier for a medical practice's WhatsApp assistant. Classify the patient's message into exactly one intent. Respond with JSON only: {"intent": "booking" | "onboarding" | "triage" | "faq" | "greeting" | "cancel" | "reschedule", "reason": "brief description"}`,
+    system: `You are an intent classifier for a medical practice's WhatsApp assistant. Classify the patient's message into exactly one intent. Respond with JSON only: {"intent": "booking" | "onboarding" | "triage" | "faq" | "greeting" | "cancel" | "reschedule" | "check_record", "reason": "brief description"}`,
     prompt: `Patient message: "${message}"\n\nContext: ${ctx.thread.patientId ? "Existing patient" : "Unknown patient"}, channel: ${ctx.thread.channel}`,
   })
 
@@ -91,6 +116,8 @@ async function detectIntentAndRoute(
     const lower = message.toLowerCase()
     if (lower.includes("book") || lower.includes("appointment") || lower.includes("schedule")) intent = "booking"
     else if (lower.includes("new patient") || lower.includes("register") || lower.includes("sign up")) intent = "onboarding"
+    else if (lower.includes("check") && (lower.includes("record") || lower.includes("file") || lower.includes("registered"))) intent = "check_record"
+    else if (lower.includes("my record") || lower.includes("am i registered") || lower.includes("my id") || lower.includes("patient file")) intent = "check_record"
     else if (lower.includes("sick") || lower.includes("pain") || lower.includes("symptoms")) intent = "triage"
     else if (lower.includes("cancel")) intent = "cancel"
     else if (lower.includes("reschedule")) intent = "reschedule"
@@ -111,6 +138,9 @@ async function detectIntentAndRoute(
 
     case "onboarding":
       return runOnboardingFlow(ctx, message, { step: "welcome", collected: {} })
+
+    case "check_record":
+      return runPatientLookupFlow(ctx, message, { step: "ask_method", collected: {} })
 
     case "triage":
       return runTriageFlow(ctx, message, { step: "collect_symptoms", collected: {} })
@@ -144,6 +174,8 @@ async function resumeFlow(
       return runOnboardingFlow(ctx, message, state, media)
     case "triage":
       return runTriageFlow(ctx, message, state, media)
+    case "patient_lookup":
+      return runPatientLookupFlow(ctx, message, state, media)
     case "faq":
       return handleFAQOrChat(ctx, message)
     default:
@@ -224,4 +256,53 @@ function isEmergency(text: string): boolean {
 function isHandoffRequest(text: string): boolean {
   const lower = text.toLowerCase()
   return HANDOFF_KEYWORDS.some((kw) => lower.includes(kw))
+}
+
+/** CONFIRM / RESCHEDULE from 24h reminder templates (handled only when currentFlow is none). */
+async function tryHandleReminderKeywordReply(
+  ctx: CommsAgentContext,
+  message: string
+): Promise<CommsAgentResponse | null> {
+  const t = message.trim().toUpperCase()
+  const words = t.split(/\s+/).filter(Boolean)
+  const first = words[0] || ""
+
+  const isConfirm =
+    t === "CONFIRM" || (words.length === 1 && (first === "YES" || first === "OK"))
+  const isReschedule = first === "RESCHEDULE" || (words.length === 1 && first === "CHANGE")
+
+  if (!isConfirm && !isReschedule) return null
+
+  const patientId = await resolvePatientIdForThread(
+    ctx.practiceId,
+    ctx.thread.patientId,
+    ctx.thread.externalParty
+  )
+
+  if (!patientId) {
+    return {
+      text:
+        "I couldn't match this number to a patient profile yet. Reply *REGISTER* to sign up, or call the practice so we can link your file.",
+      flowUpdate: { currentFlow: "none", flowState: {} },
+    }
+  }
+
+  if (isReschedule) {
+    return runBookingFlow(ctx, message, {
+      step: "detect_reason",
+      collected: { intent: "reschedule" },
+    })
+  }
+
+  const result = await confirmUpcomingAppointmentFromReminder({
+    practiceId: ctx.practiceId,
+    patientId,
+  })
+
+  return {
+    text: result.ok
+      ? `✅ ${result.message}`
+      : `We couldn't find an upcoming appointment to confirm. ${result.message}\n\nSay *book* to schedule, or *reschedule* to pick a new time.`,
+    flowUpdate: { currentFlow: "none", flowState: {} },
+  }
 }

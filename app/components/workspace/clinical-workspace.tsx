@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils"
 import { motion, AnimatePresence } from "motion/react"
 import { useEffect } from "react"
 import { PatientChatSync } from "./patient-chat-sync"
+import { ClinicalEncounterHydrate } from "./clinical-encounter-hydrate"
+import { ConsultChatTitleSync } from "./consult-chat-title-sync"
 import { PatientTabBar } from "./patient-tab-bar"
 import { WorkspaceHeader } from "./workspace-header"
 import { PaneTimeline } from "./pane-timeline"
@@ -155,6 +157,8 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
   return (
     <ScribeProvider value={scribeContextValue}>
       <PatientChatSync />
+      <ClinicalEncounterHydrate />
+      <ConsultChatTitleSync />
       <div className="relative flex h-full w-full flex-col overflow-hidden">
         <PatientTabBar />
 

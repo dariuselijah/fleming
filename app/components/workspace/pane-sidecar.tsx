@@ -8,6 +8,7 @@ import {
 } from "@/lib/clinical-workspace"
 import { BLOCK_COLORS, BLOCK_ICONS } from "./medical-block-timeline-styles"
 import { SessionDocumentRow } from "./session-document-row"
+import { EvidenceDeepDivePanel } from "./evidence-deep-dive-panel"
 import { requestMicrophoneAccess, useScribeContext } from "@/lib/scribe"
 import { cn } from "@/lib/utils"
 import {
@@ -18,6 +19,7 @@ import {
   Heartbeat,
   TrendUp,
   Microphone,
+  Flask,
   Upload,
   FileAudio,
   CheckCircle,
@@ -33,6 +35,7 @@ import {
   Check,
   X,
   Files,
+  Scan,
   CaretDown,
   CaretRight,
   PencilSimple,
@@ -92,6 +95,8 @@ function EntityItem({
     setEntityStatus,
     updateEntityText,
     acceptScribeEntity,
+    unacceptScribeEntity,
+    rejectScribeEntity,
     activePatient,
   } = useWorkspace()
   const statusKey = `${entityKey}:${item}`
@@ -109,6 +114,8 @@ function EntityItem({
 
   const handleAccept = useCallback(() => {
     if (status === "accepted") {
+      const pid = activePatient?.patientId
+      if (pid) unacceptScribeEntity(pid, entityKey, item)
       setEntityStatus(statusKey, "pending")
       return
     }
@@ -120,6 +127,7 @@ function EntityItem({
     }
   }, [
     acceptScribeEntity,
+    unacceptScribeEntity,
     activePatient?.patientId,
     entityKey,
     item,
@@ -130,8 +138,24 @@ function EntityItem({
   ])
 
   const handleReject = useCallback(() => {
-    setEntityStatus(statusKey, "rejected")
-  }, [setEntityStatus, statusKey])
+    const pid = activePatient?.patientId
+    if (status === "accepted" && pid) {
+      unacceptScribeEntity(pid, entityKey, item)
+      setEntityStatus(statusKey, "rejected")
+      return
+    }
+    if (pid) rejectScribeEntity(pid, entityKey, item)
+    else setEntityStatus(statusKey, "rejected")
+  }, [
+    setEntityStatus,
+    statusKey,
+    status,
+    activePatient?.patientId,
+    entityKey,
+    item,
+    unacceptScribeEntity,
+    rejectScribeEntity,
+  ])
 
   const startEdit = useCallback(() => {
     setEditValue(item)
@@ -228,13 +252,21 @@ function EntityPillItem({
   sectionLabel: string
   dotColor: string
 }) {
-  const { scribeEntityStatus, setEntityStatus, acceptScribeEntity, activePatient } =
-    useWorkspace()
+  const {
+    scribeEntityStatus,
+    setEntityStatus,
+    acceptScribeEntity,
+    unacceptScribeEntity,
+    rejectScribeEntity,
+    activePatient,
+  } = useWorkspace()
   const statusKey = `${entityKey}:${item}`
   const status = scribeEntityStatus[statusKey] ?? "pending"
 
   const handleAccept = useCallback(() => {
     if (status === "accepted") {
+      const pid = activePatient?.patientId
+      if (pid) unacceptScribeEntity(pid, entityKey, item)
       setEntityStatus(statusKey, "pending")
       return
     }
@@ -246,6 +278,7 @@ function EntityPillItem({
     }
   }, [
     acceptScribeEntity,
+    unacceptScribeEntity,
     activePatient?.patientId,
     entityKey,
     item,
@@ -256,8 +289,24 @@ function EntityPillItem({
   ])
 
   const handleReject = useCallback(() => {
-    setEntityStatus(statusKey, "rejected")
-  }, [setEntityStatus, statusKey])
+    const pid = activePatient?.patientId
+    if (status === "accepted" && pid) {
+      unacceptScribeEntity(pid, entityKey, item)
+      setEntityStatus(statusKey, "rejected")
+      return
+    }
+    if (pid) rejectScribeEntity(pid, entityKey, item)
+    else setEntityStatus(statusKey, "rejected")
+  }, [
+    setEntityStatus,
+    statusKey,
+    status,
+    activePatient?.patientId,
+    entityKey,
+    item,
+    unacceptScribeEntity,
+    rejectScribeEntity,
+  ])
 
   if (status === "rejected") return null
 
@@ -353,9 +402,20 @@ function DismissedEntities() {
 }
 
 function IntelligenceTab() {
-  const { activePatient, scribeActive, setScribeActive, scribeEntities, scribeTranscript } = useWorkspace()
+  const {
+    activePatient,
+    scribeActive,
+    setScribeActive,
+    scribeEntities,
+    scribeTranscript,
+    scribeEntityStatus,
+    acceptScribeEntity,
+    addSessionMedication,
+    removeSessionMedication,
+  } = useWorkspace()
   const scribeCtx = useScribeContext()
   const audioRef = useRef<HTMLInputElement>(null)
+  const [medQuickAdd, setMedQuickAdd] = useState("")
   const isSigned = activePatient?.consultSigned
   const isClaimSubmitted = activePatient?.claimSubmitted
   const isTranscribing = scribeCtx?.isTranscribing ?? false
@@ -365,6 +425,35 @@ function IntelligenceTab() {
       (arr) => Array.isArray(arr) && arr.length > 0
     )
   }, [scribeEntities])
+
+  const pendingExtractionCount = useMemo(() => {
+    let n = 0
+    for (const { key } of ENTITY_SECTION_CONFIG) {
+      const items = (scribeEntities as Record<string, string[] | undefined>)[key]
+      if (!items?.length) continue
+      for (const item of items) {
+        const sk = `${key}:${item}`
+        const st = scribeEntityStatus[sk] ?? "pending"
+        if (st === "pending") n++
+      }
+    }
+    return n
+  }, [scribeEntities, scribeEntityStatus])
+
+  const acceptAllPendingExtraction = useCallback(() => {
+    const pid = activePatient?.patientId
+    if (!pid) return
+    for (const { key, label } of ENTITY_SECTION_CONFIG) {
+      const items = (scribeEntities as Record<string, string[] | undefined>)[key]
+      if (!items?.length) continue
+      for (const item of items) {
+        const sk = `${key}:${item}`
+        const st = scribeEntityStatus[sk] ?? "pending"
+        if (st !== "pending") continue
+        acceptScribeEntity(pid, key, item, label)
+      }
+    }
+  }, [activePatient?.patientId, scribeEntities, scribeEntityStatus, acceptScribeEntity])
 
   const handleAudioUpload = useCallback(() => {
     audioRef.current?.click()
@@ -422,10 +511,74 @@ function IntelligenceTab() {
         </div>
       )}
 
+      {/* Encounter meds — same store as left chart Medications section */}
+      {activePatient && (
+        <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.04] p-2.5">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <h4 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700/90 dark:text-sky-300/90">
+              <Pill className="size-3" weight="fill" />
+              Medications (chart)
+            </h4>
+            <span className="text-[9px] text-muted-foreground/80">Synced</span>
+          </div>
+          {(activePatient.activeMedications?.length ?? 0) === 0 ? (
+            <p className="text-[10px] text-muted-foreground/80">None — add from the left chart or here.</p>
+          ) : (
+            <ul className="space-y-1">
+              {(activePatient.activeMedications ?? []).map((m) => (
+                <li
+                  key={m.id}
+                  className="group/em flex items-start justify-between gap-2 rounded-md border border-border/40 bg-background/60 px-2 py-1"
+                >
+                  <span className="text-[11px] font-medium leading-snug">{m.name}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      activePatient.patientId && removeSessionMedication(activePatient.patientId, m.id)
+                    }
+                    className="shrink-0 rounded p-0.5 text-muted-foreground/40 opacity-0 transition hover:text-red-500 group-hover/em:opacity-100"
+                    aria-label="Remove"
+                  >
+                    <X className="size-3" weight="bold" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-2 flex gap-1.5">
+            <input
+              value={medQuickAdd}
+              onChange={(e) => setMedQuickAdd(e.target.value)}
+              placeholder="Drug name…"
+              className="min-w-0 flex-1 rounded-md border border-border/50 bg-background/80 px-2 py-1 text-[10px] outline-none placeholder:text-muted-foreground/50"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && medQuickAdd.trim() && activePatient.patientId) {
+                  addSessionMedication(activePatient.patientId, { name: medQuickAdd.trim() })
+                  setMedQuickAdd("")
+                }
+              }}
+            />
+            <button
+              type="button"
+              disabled={!medQuickAdd.trim()}
+              onClick={() => {
+                if (medQuickAdd.trim() && activePatient.patientId) {
+                  addSessionMedication(activePatient.patientId, { name: medQuickAdd.trim() })
+                  setMedQuickAdd("")
+                }
+              }}
+              className="shrink-0 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-700 disabled:opacity-40 dark:text-sky-300"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Live extracted entities — collapsible sections to reduce visual noise */}
       {hasEntities && (
         <div className="space-y-1">
-          <div className="flex items-center justify-between gap-2 px-0.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
             <div className="flex items-center gap-1.5">
               <Brain className="size-3 text-muted-foreground" />
               <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -439,7 +592,25 @@ function IntelligenceTab() {
                 />
               )}
             </div>
-            <span className="text-[9px] text-muted-foreground/60">Expand sections as needed</span>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={acceptAllPendingExtraction}
+                disabled={pendingExtractionCount === 0}
+                className={cn(
+                  "rounded-lg border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                  pendingExtractionCount > 0
+                    ? "border-primary/35 bg-primary/10 text-primary hover:bg-primary/15"
+                    : "cursor-not-allowed border-border/40 bg-muted/30 text-muted-foreground/50"
+                )}
+              >
+                Accept all
+                {pendingExtractionCount > 0 ? (
+                  <span className="ml-1 tabular-nums text-muted-foreground">({pendingExtractionCount})</span>
+                ) : null}
+              </button>
+              <span className="text-[9px] text-muted-foreground/60">Reject inaccurate lines below</span>
+            </div>
           </div>
           {ENTITY_SECTION_CONFIG.map(
             ({ key, label, dotColor, display, critical }) => {
@@ -573,20 +744,7 @@ function IntelligenceTab() {
 }
 
 function EvidenceTab() {
-  return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="rounded-xl border border-border/50 bg-card p-3">
-        <h4 className="flex items-center gap-1.5 text-xs font-semibold">
-          <BookOpen className="size-3.5 text-emerald-500" />
-          AskFleming Evidence
-        </h4>
-        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-          Evidence-based answers with citations linked to sources.
-          Use <code className="rounded bg-muted px-1 text-[10px]">/evidence</code> to search.
-        </p>
-      </div>
-    </div>
-  )
+  return <EvidenceDeepDivePanel />
 }
 
 function VitalsTab() {
@@ -677,6 +835,22 @@ function HistoryTab() {
     openDocumentContent,
     setSidecarContent,
   } = useWorkspace()
+
+  const goVitals = useCallback(() => {
+    setSidecarContent(sidecarContent ? { ...sidecarContent, tab: "vitals" } : { tab: "vitals" })
+  }, [setSidecarContent, sidecarContent])
+
+  const goLabsHint = useCallback(() => {
+    toast.info("Use Labs (+) in the left chart panel to order labs.", { duration: 4_000 })
+  }, [])
+
+  const goImagingHint = useCallback(() => {
+    toast.info("Use Imaging (+) in the left chart panel to add imaging.", { duration: 4_000 })
+  }, [])
+
+  const openDocumentsTab = useCallback(() => {
+    setSidecarContent(sidecarContent ? { ...sidecarContent, tab: "documents" } : { tab: "documents" })
+  }, [setSidecarContent, sidecarContent])
   const blocks = useMemo(
     () =>
       [...(activePatient?.blocks ?? [])].sort(
@@ -721,7 +895,14 @@ function HistoryTab() {
     (block: MedicalBlock) => {
       const rawId = block.metadata?.clinicalDocumentId
       const docId = typeof rawId === "string" ? rawId : null
-      if (!docId || (block.type !== "NOTE" && block.type !== "SOAP")) return false
+      if (!docId) return false
+      const docLinkedTypes: MedicalBlock["type"][] = [
+        "NOTE",
+        "SOAP",
+        "PRESCRIPTION",
+        "REFERRAL",
+      ]
+      if (!docLinkedTypes.includes(block.type)) return false
       return Boolean(
         activePatient?.sessionDocuments?.some(
           (e) => e.document.id === docId || e.id === docId
@@ -733,8 +914,89 @@ function HistoryTab() {
 
   const historyBlocks = useMemo(() => blocks.slice(0, 40), [blocks])
 
+  const acceptLog = useMemo(
+    () =>
+      [...(activePatient?.acceptHistory ?? [])].sort(
+        (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()
+      ),
+    [activePatient?.acceptHistory]
+  )
+
   return (
     <div className="flex flex-col gap-3 p-2">
+      <div className="mx-1 flex flex-wrap gap-1.5 rounded-xl border border-border/40 bg-muted/20 p-2">
+        <button
+          type="button"
+          onClick={goVitals}
+          className="inline-flex flex-1 min-w-[6.5rem] items-center justify-center gap-1 rounded-lg border border-border/50 bg-background/80 px-2 py-1.5 text-[10px] font-semibold text-foreground transition-colors hover:border-primary/30 hover:bg-primary/5"
+        >
+          <Heartbeat className="size-3.5 text-rose-500" weight="fill" />
+          Vitals
+        </button>
+        <button
+          type="button"
+          onClick={goLabsHint}
+          className="inline-flex flex-1 min-w-[6.5rem] items-center justify-center gap-1 rounded-lg border border-border/50 bg-background/80 px-2 py-1.5 text-[10px] font-semibold text-foreground transition-colors hover:border-primary/30 hover:bg-primary/5"
+        >
+          <Flask className="size-3.5 text-emerald-500" weight="fill" />
+          Labs
+        </button>
+        <button
+          type="button"
+          onClick={goImagingHint}
+          className="inline-flex flex-1 min-w-[6.5rem] items-center justify-center gap-1 rounded-lg border border-border/50 bg-background/80 px-2 py-1.5 text-[10px] font-semibold text-foreground transition-colors hover:border-primary/30 hover:bg-primary/5"
+        >
+          <Scan className="size-3.5 text-rose-400" weight="fill" />
+          Imaging
+        </button>
+        <button
+          type="button"
+          onClick={openDocumentsTab}
+          className="inline-flex flex-1 min-w-[6.5rem] items-center justify-center gap-1 rounded-lg border border-border/50 bg-background/80 px-2 py-1.5 text-[10px] font-semibold text-foreground transition-colors hover:border-primary/30 hover:bg-primary/5"
+        >
+          <Files className="size-3.5 text-sky-500" weight="fill" />
+          Docs
+        </button>
+      </div>
+
+      {acceptLog.length > 0 && (
+        <div className="mx-1 rounded-xl border border-border/40 bg-muted/15 p-2.5">
+          <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Chart actions (AI extraction)
+          </p>
+          <ul
+            className="mt-1.5 max-h-40 space-y-1.5 overflow-y-auto pr-1"
+            style={{ scrollbarWidth: "thin" }}
+          >
+            {acceptLog.slice(0, 40).map((e, i) => (
+              <li key={`${e.at}-${i}-${e.item.slice(0, 24)}`} className="flex gap-2 text-[10px] leading-snug">
+                <span
+                  className={cn(
+                    "mt-1 size-1.5 shrink-0 rounded-full",
+                    e.action === "accepted" && "bg-emerald-500",
+                    e.action === "unaccepted" && "bg-amber-500",
+                    e.action === "rejected" && "bg-red-500"
+                  )}
+                />
+                <div className="min-w-0 flex-1">
+                  <div>
+                    <span className="font-semibold capitalize text-foreground">{e.action}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {e.entityKey.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-foreground/85">{e.item}</p>
+                  <p className="text-[9px] tabular-nums text-muted-foreground/80">
+                    {new Date(e.at).toLocaleString()}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {pinnedBlock && (
         <div className="mx-1 rounded-xl border-2 border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-transparent p-3">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
@@ -747,14 +1009,14 @@ function HistoryTab() {
         </div>
       )}
 
-      {blocks.length === 0 ? (
+      {blocks.length === 0 && acceptLog.length === 0 ? (
         <div className="mx-1 rounded-xl border border-dashed border-border/40 p-4 text-center">
           <ClockCounterClockwise className="mx-auto size-6 text-muted-foreground/20" />
           <p className="mt-2 text-[11px] text-muted-foreground">
             Patient history will appear here.
           </p>
         </div>
-      ) : (
+      ) : blocks.length > 0 ? (
         <div className="relative px-1">
           <div
             className="absolute left-[19px] top-3 bottom-3 w-px bg-gradient-to-b from-indigo-500/25 via-border/60 to-border/10"
@@ -791,7 +1053,13 @@ function HistoryTab() {
                   <div className="min-w-0 flex-1 pt-0.5">
                     <button
                       type="button"
-                      onClick={() => pinToSidecar(block.id)}
+                      onClick={() => {
+                        if (hasLinkedDocument(block)) {
+                          openLinkedDocument(block)
+                          return
+                        }
+                        pinToSidecar(block.id)
+                      }}
                       className={cn(
                         "w-full rounded-xl border bg-card/90 p-2.5 text-left shadow-sm backdrop-blur-sm transition-all",
                         "hover:border-indigo-500/35 hover:shadow-md",
@@ -827,26 +1095,17 @@ function HistoryTab() {
                           {block.status.replace("_", " ")}
                         </span>
                         <span className="text-[10px] font-medium text-indigo-500/90">
-                          Click to pin
+                          {showOpen ? "Click to open document" : "Click to pin"}
                         </span>
                       </div>
                     </button>
-                    {showOpen && (
-                      <button
-                        type="button"
-                        onClick={() => openLinkedDocument(block)}
-                        className="mt-1.5 w-full rounded-lg border border-dashed border-indigo-500/25 bg-indigo-500/[0.04] py-1.5 text-center text-[10px] font-semibold text-indigo-600 transition-colors hover:border-indigo-500/40 hover:bg-indigo-500/10 dark:text-indigo-400"
-                      >
-                        Open linked document
-                      </button>
-                    )}
                   </div>
                 </li>
               )
             })}
           </ul>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

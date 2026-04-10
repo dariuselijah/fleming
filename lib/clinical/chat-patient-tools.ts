@@ -3,6 +3,18 @@ import { z } from "zod"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { decryptPracticeAesGcm, vaultOpenDek } from "@/lib/server/clinical-vault"
 import { generateEmbedding } from "@/lib/rag/embeddings"
+import { buildPrescriptionDraft } from "@/lib/clinical/prescribe-tool-logic"
+
+function asStringList(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v
+    .map((x) => {
+      if (typeof x === "string") return x
+      if (x && typeof x === "object" && "name" in x) return String((x as { name?: string }).name ?? "")
+      return String(x)
+    })
+    .filter(Boolean)
+}
 
 async function loadVaultDek(
   supabase: SupabaseClient,
@@ -23,13 +35,83 @@ async function loadVaultDek(
   return vaultOpenDek(data.enc_dek, data.dek_iv)
 }
 
+type HybridHit = {
+  chunk_id: string
+  encounter_id: string
+  chunk_index: number
+  source_type: string
+  chunk_key: string | null
+  rrf_score: number
+  similarity: number
+  keyword_rank: number
+}
+
+async function hybridSearchWithChunkBodies(params: {
+  supabase: SupabaseClient
+  practiceId: string
+  patientId: string
+  query: string
+  maxResults: number
+  encounterId: string | null
+}): Promise<{ chunks: Record<string, unknown>[]; error?: string }> {
+  const { supabase, practiceId, patientId, query, maxResults, encounterId } = params
+  let embedding: number[]
+  try {
+    embedding = await generateEmbedding(query)
+  } catch (e) {
+    return { chunks: [], error: `Embedding failed: ${e instanceof Error ? e.message : String(e)}` }
+  }
+  const vec = `[${embedding.join(",")}]`
+  const { data, error } = await supabase.rpc("hybrid_search_clinical_chunks", {
+    p_practice_id: practiceId,
+    p_patient_id: patientId,
+    p_query_text: query,
+    p_query_embedding: vec,
+    p_match_count: maxResults,
+    p_encounter_id: encounterId,
+    p_source_types: null,
+  })
+  if (error) {
+    return { chunks: [], error: error.message }
+  }
+  const hits = (data ?? []) as HybridHit[]
+  if (hits.length === 0) return { chunks: [] }
+
+  const ids = hits.map((h) => h.chunk_id)
+  const { data: rows } = await supabase
+    .from("clinical_rag_chunks")
+    .select("id, chunk_body, source_type, encounter_id")
+    .in("id", ids)
+
+  const byId = new Map((rows ?? []).map((r) => [r.id as string, r]))
+
+  const chunks = hits.map((h) => {
+    const row = byId.get(h.chunk_id)
+    return {
+      chunk_id: h.chunk_id,
+      encounter_id: h.encounter_id,
+      chunk_index: h.chunk_index,
+      source_type: h.source_type,
+      chunk_key: h.chunk_key,
+      rrf_score: h.rrf_score,
+      similarity: h.similarity,
+      keyword_rank: h.keyword_rank,
+      chunk_body: row?.chunk_body ? String(row.chunk_body).slice(0, 12000) : null,
+    }
+  })
+
+  return { chunks }
+}
+
 export function buildPatientClinicalTools(params: {
   supabase: SupabaseClient
   userId: string
   practiceId: string
   patientId: string
+  /** SOAP / chart documents: skip hybrid RAG over past chunks — consult context is in the system prompt. */
+  omitRetrievalTools?: boolean
 }): ToolSet {
-  const { supabase, userId, practiceId, patientId } = params
+  const { supabase, userId, practiceId, patientId, omitRetrievalTools } = params
 
   return {
     get_patient_summary: tool({
@@ -163,15 +245,83 @@ export function buildPatientClinicalTools(params: {
       },
     }),
 
-    search_patient_clinical_record: tool({
+    ...(omitRetrievalTools
+      ? {}
+      : {
+          search_patient_clinical_record: tool({
+            description:
+              "Hybrid semantic + keyword retrieval over indexed clinical chunks for this patient. Optionally scope to one encounter. Returns chunk text bodies for model use.",
+            parameters: z.object({
+              query: z.string().min(2),
+              max_results: z.number().int().min(1).max(20).optional(),
+              encounter_id: z.string().uuid().optional(),
+            }),
+            execute: async ({ query, max_results, encounter_id }) => {
+              const dek = await loadVaultDek(supabase, userId, practiceId)
+              if (!dek) {
+                return {
+                  error:
+                    "Practice session not unlocked for server tools. Unlock in the clinical workspace (session vault).",
+                }
+              }
+              const { chunks, error } = await hybridSearchWithChunkBodies({
+                supabase,
+                practiceId,
+                patientId,
+                query,
+                maxResults: max_results ?? 12,
+                encounterId: encounter_id ?? null,
+              })
+              if (error) return { error, chunks: [] }
+              return {
+                chunks,
+                provenance: "clinical_rag_chunks",
+              }
+            },
+          }),
+
+          search_patient_history: tool({
+            description:
+              "Search across ALL past encounters for this patient (not limited to the current visit). Use for historical labs, prior diagnoses, or previous notes.",
+            parameters: z.object({
+              query: z.string().min(2),
+              max_results: z.number().int().min(1).max(24).optional(),
+            }),
+            execute: async ({ query, max_results }) => {
+              const dek = await loadVaultDek(supabase, userId, practiceId)
+              if (!dek) {
+                return {
+                  error:
+                    "Practice session not unlocked for server tools. Unlock in the clinical workspace (session vault).",
+                }
+              }
+              const { chunks, error } = await hybridSearchWithChunkBodies({
+                supabase,
+                practiceId,
+                patientId,
+                query,
+                maxResults: max_results ?? 16,
+                encounterId: null,
+              })
+              if (error) return { error, chunks: [] }
+              return {
+                chunks,
+                provenance: "clinical_rag_chunks_all_encounters",
+              }
+            },
+          }),
+        }),
+
+    prescribe_medication: tool({
       description:
-        "Hybrid semantic + keyword retrieval over indexed clinical chunks for this patient. Returns chunk ids and scores (no free-text PHI stored server-side).",
+        "Draft a structured prescription with per-line clinical reasoning, allergy cross-checks, and duplicate medication warnings. Call when the user asks to prescribe or review medications. Always verify against the live chart.",
       parameters: z.object({
-        query: z.string().min(2),
-        max_results: z.number().int().min(1).max(20).optional(),
-        encounter_id: z.string().uuid().optional(),
+        clinical_focus: z
+          .string()
+          .optional()
+          .describe("Optional focus (e.g. indication or drug class the user asked about)"),
       }),
-      execute: async ({ query, max_results, encounter_id }) => {
+      execute: async ({ clinical_focus }) => {
         const dek = await loadVaultDek(supabase, userId, practiceId)
         if (!dek) {
           return {
@@ -179,28 +329,67 @@ export function buildPatientClinicalTools(params: {
               "Practice session not unlocked for server tools. Unlock in the clinical workspace (session vault).",
           }
         }
-        let embedding: number[]
+        const { data: prow, error: perr } = await supabase
+          .from("practice_patients")
+          .select("profile_ciphertext, profile_iv")
+          .eq("id", patientId)
+          .eq("practice_id", practiceId)
+          .maybeSingle()
+        if (perr || !prow?.profile_ciphertext || !prow?.profile_iv) {
+          return { error: "Patient profile not found." }
+        }
+        const pjson = decryptPracticeAesGcm(dek, prow.profile_ciphertext, prow.profile_iv)
+        if (!pjson) return { error: "Failed to decrypt patient profile." }
+        let profile: Record<string, unknown>
         try {
-          embedding = await generateEmbedding(query)
-        } catch (e) {
-          return { error: `Embedding failed: ${e instanceof Error ? e.message : String(e)}` }
+          profile = JSON.parse(pjson) as Record<string, unknown>
+        } catch {
+          return { error: "Invalid profile JSON." }
         }
-        const vec = `[${embedding.join(",")}]`
-        const { data, error } = await supabase.rpc("hybrid_search_clinical_chunks", {
-          p_practice_id: practiceId,
-          p_patient_id: patientId,
-          p_query_text: query,
-          p_query_embedding: vec,
-          p_match_count: max_results ?? 12,
-          p_encounter_id: encounter_id ?? null,
-          p_source_types: null,
+
+        const allergies = asStringList(profile.allergies)
+        const chronicConditions = asStringList(profile.chronicConditions)
+        const currentMeds = asStringList(profile.currentMedications)
+
+        const { data: enc } = await supabase
+          .from("clinical_encounters")
+          .select("state_ciphertext, state_iv")
+          .eq("patient_id", patientId)
+          .eq("practice_id", practiceId)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        let encounterProblems: string[] = []
+        if (enc?.state_ciphertext && enc.state_iv) {
+          const ej = decryptPracticeAesGcm(dek, enc.state_ciphertext, enc.state_iv)
+          if (ej) {
+            try {
+              const st = JSON.parse(ej) as Record<string, unknown>
+              encounterProblems = asStringList(st.encounterProblems)
+              const encChronic = asStringList(st.chronicConditions)
+              if (encChronic.length) {
+                chronicConditions.push(...encChronic.filter((c) => !chronicConditions.includes(c)))
+              }
+            } catch {
+              /* noop */
+            }
+          }
+        }
+
+        const draft = buildPrescriptionDraft({
+          allergies,
+          chronicConditions,
+          encounterProblems,
+          activeMedNames: currentMeds,
+          focus: clinical_focus,
         })
-        if (error) {
-          return { error: error.message, chunks: [] }
-        }
+
         return {
-          chunks: data ?? [],
-          provenance: "clinical_rag_chunks",
+          ...draft,
+          provenance: "prescribe_medication_tool",
+          safetyNote:
+            "Verify renal/hepatic function, pregnancy, interactions, and local formulary. This is decision support only.",
         }
       },
     }),

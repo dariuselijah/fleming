@@ -1,4 +1,9 @@
 import type { NextConfig } from "next"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+/** Pin Turbopack to this app when multiple lockfiles exist (e.g. ~/package-lock.json). */
+const turbopackRoot = path.dirname(fileURLToPath(import.meta.url))
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -72,6 +77,9 @@ const nextConfig: NextConfig = {
   eslint: {
     // @todo: remove before going live
     ignoreDuringBuilds: true,
+  },
+  turbopack: {
+    root: turbopackRoot,
   },
 }
 

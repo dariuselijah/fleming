@@ -312,6 +312,30 @@ function isGenericSourceLabel(value: string | null | undefined): boolean {
   )
 }
 
+/** Journal field placeholders that should not win over title / PubMed URL host label */
+function isPlaceholderJournalName(value: string | null | undefined): boolean {
+  if (!value?.trim()) return true
+  const t = value.trim().toLowerCase()
+  return (
+    t === "literature" ||
+    t === "pubmed" ||
+    t === "unknown" ||
+    t === "n/a" ||
+    t === "medical evidence"
+  )
+}
+
+function isPlaceholderCitationTitle(value: string | null | undefined): boolean {
+  if (!value?.trim()) return true
+  return /^Source\s*\d+$/i.test(value.trim())
+}
+
+function truncateCitationPillLabel(text: string, maxLen: number): string {
+  const t = text.replace(/\s+/g, " ").trim()
+  if (t.length <= maxLen) return t
+  return `${t.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`
+}
+
 // Shorten journal name for display
 function shortenJournalName(journal: string, maxLength: number = 18): string {
   // Common abbreviations - order matters (more specific first)
@@ -482,14 +506,30 @@ export function EvidenceCitationPill({
   const sourceFromUrl = isUploadCitation ? null : getSourceDisplayFromUrl(citation.url)
   const inferredSourceFromPmid =
     !isUploadCitation && !sourceFromUrl && citation.pmid ? "PubMed" : null
+
+  const journalPreferred =
+    !isUploadCitation && citation.journal && !isPlaceholderJournalName(citation.journal)
+      ? citation.journal
+      : null
+  const titlePreferred =
+    !isUploadCitation && citation.title && !isPlaceholderCitationTitle(citation.title)
+      ? citation.title
+      : null
+
+  // Prefer real journal, then article title — not the generic "PubMed" label from ncbi URLs.
   const effectiveSourceLabel = isUploadCitation
     ? uploadDisplayName
-    : sourceFromUrl?.label ||
+    : journalPreferred ||
+      titlePreferred ||
+      sourceFromUrl?.label ||
       inferredSourceFromPmid ||
       (!isGenericSourceLabel(citation.sourceLabel) ? citation.sourceLabel : null) ||
-      citation.journal ||
+      (!isPlaceholderJournalName(citation.journal) ? citation.journal : null) ||
       "Source"
-  const shortName = shortenJournalName(effectiveSourceLabel, 20)
+
+  const shortName = journalPreferred
+    ? shortenJournalName(journalPreferred, 20)
+    : truncateCitationPillLabel(effectiveSourceLabel, 28)
 
   const inlineVisuals: UploadVisualReference[] = (() => {
     const out: UploadVisualReference[] = []
@@ -540,7 +580,7 @@ export function EvidenceCitationPill({
           onClick={handleClick}
           className={cn(
             "inline-flex cursor-pointer items-center gap-1 rounded-full",
-            "h-5 max-w-36 overflow-hidden py-0 pr-2 pl-1",
+            "h-5 max-w-[min(16rem,85vw)] overflow-hidden py-0 pr-2 pl-1",
             "bg-muted text-muted-foreground transition-colors duration-150",
             "hover:bg-muted-foreground/20 hover:text-foreground",
             size === "sm" ? "text-[11px]" : "text-xs",
@@ -634,11 +674,17 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
     citation.url.startsWith("/uploads/")
   const sourceFromUrl = getSourceDisplayFromUrl(citation.url)
   const inferredSourceFromPmid = !sourceFromUrl && citation.pmid ? "PubMed" : null
+  const journalPreferred =
+    citation.journal && !isPlaceholderJournalName(citation.journal) ? citation.journal : null
+  const titlePreferred =
+    citation.title && !isPlaceholderCitationTitle(citation.title) ? citation.title : null
   const ctaSourceLabel =
+    journalPreferred ||
+    titlePreferred ||
     sourceFromUrl?.label ||
     inferredSourceFromPmid ||
     (!isGenericSourceLabel(citation.sourceLabel) ? citation.sourceLabel : null) ||
-    citation.journal ||
+    (!isPlaceholderJournalName(citation.journal) ? citation.journal : null) ||
     "Source"
   const primaryHref = citation.url || "#"
   const primaryTarget = isUploadCitation ? undefined : "_blank"
@@ -666,12 +712,16 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
   }, [onClose])
 
   const authorStr = formatAuthors(citationAuthors)
-  const journalStr = citation.sourceLabel || citation.journal || ""
+  const journalStr =
+    journalPreferred ||
+    (!isGenericSourceLabel(citation.sourceLabel) ? citation.sourceLabel : "")
   const metaLine = [
     journalStr,
     citation.studyType,
     citation.year,
-  ].filter(Boolean).join("  ·  ")
+  ]
+    .filter(Boolean)
+    .join("  ·  ")
 
   return (
     <AnimatePresence>

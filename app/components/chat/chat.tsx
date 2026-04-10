@@ -33,6 +33,7 @@ import { useFileUpload } from "./use-file-upload"
 import { PerformanceMonitor } from "./performance-monitor"
 import { OnboardingDialog } from "../onboarding/onboarding-dialog"
 import { HealthHomeSection } from "../health/health-home-section"
+import { DocumentSelectorModal } from "@/app/components/workspace/document-selector-modal"
 
 const FeedbackWidget = dynamic(
   () => import("./feedback-widget").then((mod) => mod.FeedbackWidget),
@@ -377,6 +378,18 @@ export function Chat() {
 
   useEffect(() => {
     if (typeof window === "undefined") return
+    const fn = (e: Event) => {
+      const prompt = (e as CustomEvent<{ prompt?: string }>).detail?.prompt
+      if (!prompt) return
+      if (statusRef.current === "streaming") stop()
+      handleSuggestionRef.current(prompt)
+    }
+    window.addEventListener("fleming:attach-chart-context", fn as EventListener)
+    return () => window.removeEventListener("fleming:attach-chart-context", fn as EventListener)
+  }, [stop])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
 
     const EVIDENCE_TAIL =
       " Where management, diagnosis, or drug choice depends on literature, cite current evidence with numbered in-text markers [1], [2] and ensure the response can include an EVIDENCE SOURCES appendix as instructed in the system prompt."
@@ -386,8 +399,7 @@ export function Chat() {
 
     const TEMPLATE_PROMPTS: Record<string, string> = {
       soap:
-        "[/soap] Create a SOAP note from this consultation. Format with ## Subjective, ## Objective, ## Assessment, ## Plan." +
-        EVIDENCE_TAIL,
+        "[/soap] Create a SOAP note from this consultation only (no external literature). Format with ## Subjective, ## Objective, ## Assessment, ## Plan. Do not use [T], [E], or [H] tags.",
       summary:
         "[/summary] Generate a clinical summary for the current consult: Presenting Complaint, Exam Findings, Assessment, Plan." +
         EVIDENCE_TAIL,
@@ -424,7 +436,9 @@ export function Chat() {
       const CONCISE =
         template === "evidence"
           ? " Be concise and clinically precise. No preamble. Bullet points preferred."
-          : " Be concise and clinically precise. No preamble. Bullet points preferred. Tag each statement with [T] (from transcript), [E] (from extracted entities), or [H] (from patient history) to indicate its source."
+          : template === "soap"
+            ? " Be concise and clinically precise. Chart-ready prose. Ground only in the consultation context below; if something was not discussed, write \"not documented\". Do not use [T], [E], or [H] tags."
+            : " Be concise and clinically precise. No preamble. Bullet points preferred. Tag each statement with [T] (from transcript), [E] (from extracted entities), or [H] (from patient history) to indicate its source."
       const basePrompt =
         TEMPLATE_PROMPTS[template] ??
         `[/${template}] Produce an updated clinical document for this consult. Follow standard clinical structure unless context implies otherwise.` +
@@ -671,6 +685,18 @@ export function Chat() {
   }, [chatId, isMounted])
 
   const isClinicalMode = preferences.userRole === "doctor"
+  const isClinicalCopilotRole =
+    preferences.userRole === "doctor" || preferences.userRole === "medical_student"
+
+  const [documentSelectorOpen, setDocumentSelectorOpen] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const fn = () => setDocumentSelectorOpen(true)
+    window.addEventListener("fleming:open-document-selector", fn)
+    return () => window.removeEventListener("fleming:open-document-selector", fn)
+  }, [])
+
   const workspaceMode = useWorkspaceStore((s) => s.mode)
   const activePatientIdWs = useWorkspaceStore((s) => s.activePatientId)
   const openPatientsWs = useWorkspaceStore((s) => s.openPatients)
@@ -773,6 +799,17 @@ export function Chat() {
       />
 
       <FeedbackWidget />
+
+      {isClinicalCopilotRole ? (
+        <DocumentSelectorModal
+          open={documentSelectorOpen}
+          onClose={() => setDocumentSelectorOpen(false)}
+          onAttach={(prompt) => {
+            if (status === "streaming") stop()
+            handleSuggestion(prompt)
+          }}
+        />
+      ) : null}
       
       {/* Performance Monitor for development */}
       <PerformanceMonitor />

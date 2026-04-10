@@ -2089,10 +2089,13 @@ export function useChatCore({
     if (!resolvedInput.trim() && files.length === 0) return
 
     const userRole = userPreferences.preferences.userRole || "general"
+    const isSoapCommandRequest = /^\[\/soap\]/i.test(resolvedInput.trim())
     const effectiveEnableEvidence =
-      userRole === "doctor" && messageImpliesClinicalEvidence(resolvedInput)
-        ? true
-        : enableEvidence
+      isSoapCommandRequest
+        ? false
+        : userRole === "doctor" && messageImpliesClinicalEvidence(resolvedInput)
+          ? true
+          : enableEvidence
 
     const isAuthenticatedNow = !!user?.id
     if (!isAuthenticatedNow) {
@@ -2581,10 +2584,13 @@ export function useChatCore({
     async (suggestion: string) => {
       const isAuthenticatedNow = !!user?.id
       const userRole = userPreferences.preferences.userRole || "general"
+      const isSoapSuggestion = /^\[\/soap\]/i.test(suggestion.trim())
       const effectiveSuggestionEvidence =
-        userRole === "doctor" && messageImpliesClinicalEvidence(suggestion)
-          ? true
-          : enableEvidence
+        isSoapSuggestion
+          ? false
+          : userRole === "doctor" && messageImpliesClinicalEvidence(suggestion)
+            ? true
+            : enableEvidence
 
       if (!isAuthenticatedNow) {
         const pendingMessage = {
@@ -2774,10 +2780,13 @@ export function useChatCore({
     const userRole = userPreferences.preferences.userRole || "general"
     const reloadPrompt =
       typeof latestUserPrompt === "string" ? latestUserPrompt : String(latestUserPrompt)
+    const isSoapReload = /^\[\/soap\]/i.test(reloadPrompt.trim())
     const effectiveReloadEvidence =
-      userRole === "doctor" && messageImpliesClinicalEvidence(reloadPrompt)
-        ? true
-        : enableEvidence
+      isSoapReload
+        ? false
+        : userRole === "doctor" && messageImpliesClinicalEvidence(reloadPrompt)
+          ? true
+          : enableEvidence
     startOptimisticTaskBoard(reloadPrompt, {
       enableEvidence: effectiveReloadEvidence,
       enableSearch,

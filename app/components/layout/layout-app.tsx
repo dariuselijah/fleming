@@ -12,6 +12,7 @@ import {
 } from "@/app/components/workspace/clinical-data-bootstrap"
 import { ClinicalUnlockGate } from "@/app/components/workspace/clinical-unlock-gate"
 import { ClinicalPersistence } from "@/app/components/workspace/clinical-persistence"
+import { ClaimPreviewModal } from "@/app/components/workspace/claim-preview-modal"
 import { OnboardingChecklist } from "@/app/components/onboarding/onboarding-checklist"
 
 export function LayoutApp({ children }: { children: React.ReactNode }) {
@@ -27,6 +28,7 @@ export function LayoutApp({ children }: { children: React.ReactNode }) {
           <ClinicalUnlockGate>
             <ClinicalDataBootstrap />
             <ClinicalPersistence />
+            <ClaimPreviewModal />
             <div className="bg-background flex h-dvh w-full overflow-hidden">
               {hasSidebar && <AppSidebar />}
               <div className="relative flex h-full w-0 flex-shrink flex-grow flex-col overflow-hidden">

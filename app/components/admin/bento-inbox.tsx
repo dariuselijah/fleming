@@ -9,6 +9,14 @@ import {
   type PracticePatient,
   type InboxNotificationFilter,
 } from "@/lib/clinical-workspace"
+import {
+  partitionSmartImportFields,
+  mergeIdentityAndMedicalAidExtract,
+  pickMedicalAidFieldsOnly,
+  buildPatientFromSmartImportFields,
+  buildPatientRegistrationPrefill,
+  findDuplicatePatient,
+} from "@/lib/clinical/smart-import-patient"
 import { cn } from "@/lib/utils"
 import {
   WhatsappLogo,
@@ -22,11 +30,9 @@ import {
   Info,
   ShieldWarning,
   X,
-  Check,
   CheckCircle,
   PaperPlaneTilt,
   CaretRight,
-  CaretLeft,
   CurrencyDollar,
   CalendarCheck,
   Package,
@@ -46,6 +52,7 @@ import {
 } from "@phosphor-icons/react"
 import { BentoTile } from "./bento-tile"
 import { LabIntegrationsPanel } from "./lab-integrations-panel"
+import { LiveActivityFeed as ActivityFeedTile } from "./live-activity-feed"
 import { useRef, useState, useCallback, useMemo, useEffect } from "react"
 import { AnimatePresence, motion } from "motion/react"
 
@@ -249,10 +256,12 @@ export function BentoInbox() {
         ? `${stripNotifications.length} unread shown`
         : `${stripNotifications.length} need attention`
 
+  const panelHeightClass = "min-h-[min(520px,calc(100vh-320px))] max-h-[calc(100vh-180px)]"
+
   return (
-    <div className="relative grid gap-3" style={{ gridTemplateColumns: "1fr 300px", gridTemplateRows: "auto 1fr auto auto" }}>
+    <div className="relative grid gap-3 pb-6 lg:grid-cols-2">
       {/* ── Notifications (full width) ── */}
-      <div className="col-span-2">
+      <div className="col-span-full">
         <BentoTile
           title="Notifications"
           subtitle={filterSubtitle}
@@ -311,12 +320,18 @@ export function BentoInbox() {
         </BentoTile>
       </div>
 
+      <div
+        className={cn(
+          "col-span-full grid gap-3 max-lg:grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-stretch",
+          panelHeightClass
+        )}
+      >
       {/* ── Messages (left column) ── */}
-      <div id="inbox-messages" className="relative scroll-mt-4 overflow-hidden">
+      <div id="inbox-messages" className="relative flex min-h-0 min-w-0 flex-1 flex-col scroll-mt-4 overflow-hidden">
         <BentoTile
           title="Messages"
           subtitle={`${conversations.length} conversations`}
-          className="h-full"
+          className="flex h-full min-h-0 flex-1 flex-col"
         >
           <AnimatePresence mode="popLayout" initial={false}>
             {activeConversation ? (
@@ -361,23 +376,28 @@ export function BentoInbox() {
       </div>
 
       {/* ── Lab Results (right column) ── */}
-      <div id="inbox-labs" className="scroll-mt-4">
-      <BentoTile
-        title="Lab Results"
-        subtitle={`${labs.length} in queue · newest first`}
-      >
-        {labs.length === 0 ? (
-          <p className="py-6 text-center text-[11px] text-white/25">No lab results</p>
-        ) : (
-          <LabResultsQueue labs={labsSorted} />
-        )}
-
-        <LabIntegrationsPanel />
-      </BentoTile>
+      <div id="inbox-labs" className="flex min-h-0 min-w-0 flex-1 flex-col scroll-mt-4">
+        <BentoTile
+          title="Lab Results"
+          subtitle={`${labs.length} in queue · newest first`}
+          className="flex h-full min-h-0 w-full flex-1 flex-col"
+        >
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            <div className="min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+              {labs.length === 0 ? (
+                <p className="py-6 text-center text-[11px] text-white/25">No lab results</p>
+              ) : (
+                <LabResultsQueue labs={labsSorted} />
+              )}
+            </div>
+            <LabIntegrationsPanel />
+          </div>
+        </BentoTile>
+      </div>
       </div>
 
       {/* ── Smart Import (full width) ── */}
-      <div id="inbox-smart-import" className="col-span-2 scroll-mt-4">
+      <div id="inbox-smart-import" className="col-span-full scroll-mt-4">
         <SmartImportTile
           addPatient={addPatient}
           patients={patients}
@@ -387,7 +407,7 @@ export function BentoInbox() {
       </div>
 
       {/* ── Activity Feed (full width) ── */}
-      <div id="inbox-activity" className="col-span-2 scroll-mt-4">
+      <div id="inbox-activity" className="col-span-full scroll-mt-4">
         <ActivityFeedTile />
       </div>
 
@@ -819,11 +839,13 @@ export function SmartImportTile({
   addInboxMessage: (message: InboxMessage) => void
   addNotification: (n: AdminNotification) => void
 }) {
+  const openPatientAddModalWithPrefill = useWorkspaceStore((s) => s.openPatientAddModalWithPrefill)
   const [mode, setMode] = useState<SmartImportMode>("auto")
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [fileLabel, setFileLabel] = useState<string | null>(null)
   const [detected, setDetected] = useState<string | null>(null)
-  const [extractedFields, setExtractedFields] = useState<Record<string, string> | null>(null)
+  const [identityFields, setIdentityFields] = useState<Record<string, string> | null>(null)
+  const [medicalAidFields, setMedicalAidFields] = useState<Record<string, string> | null>(null)
   const [isExtracting, setIsExtracting] = useState(false)
   const [created, setCreated] = useState<"patient" | "doc" | "lab" | null>(null)
   const [attachPatientId, setAttachPatientId] = useState("")
@@ -833,82 +855,232 @@ export function SmartImportTile({
   const [hl7Preview, setHl7Preview] = useState<{ code: string; value: string; unit: string }[] | null>(
     null
   )
+  const [extractionStage, setExtractionStage] = useState<string | null>(null)
+  const [extractionError, setExtractionError] = useState<string | null>(null)
+  const [importWarnings, setImportWarnings] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const extractAbortRef = useRef<AbortController | null>(null)
+  /** Bumps on each new extract so stale requests cannot leave the spinner stuck. */
+  const extractGenRef = useRef(0)
+  const expectingMedicalAidRef = useRef(false)
+  const identityFieldsRef = useRef<Record<string, string> | null>(null)
+
+  const mergedExtractedFields = useMemo(
+    () => mergeIdentityAndMedicalAidExtract(identityFields, medicalAidFields),
+    [identityFields, medicalAidFields]
+  )
+
+  const { patient: patientFieldRows, documentMeta: documentMetaRows } = useMemo(
+    () => partitionSmartImportFields(mergedExtractedFields ?? {}),
+    [mergedExtractedFields]
+  )
+
+  const importIncompleteHint = useMemo(() => {
+    if (!mergedExtractedFields) return null
+    const built = buildPatientFromSmartImportFields(mergedExtractedFields)
+    return built.profileIncomplete
+      ? "Phone and email are still missing — the record will be flagged incomplete until an admin completes them."
+      : null
+  }, [mergedExtractedFields])
+
+  useEffect(() => {
+    identityFieldsRef.current = identityFields
+  }, [identityFields])
 
   const resetFile = useCallback(() => {
+    extractAbortRef.current?.abort()
+    extractAbortRef.current = null
+    extractGenRef.current += 1
+    expectingMedicalAidRef.current = false
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setPreviewUrl(null)
     setFileLabel(null)
     setDetected(null)
-    setExtractedFields(null)
+    setIdentityFields(null)
+    setMedicalAidFields(null)
     setIsExtracting(false)
+    setExtractionStage(null)
+    setExtractionError(null)
+    setImportWarnings(null)
     setCreated(null)
     setHl7Preview(null)
     if (fileRef.current) fileRef.current.value = ""
   }, [previewUrl])
 
-  const runExtractionMock = useCallback(
-    (file: File, importMode: SmartImportMode) => {
-      setIsExtracting(true)
-      setCreated(null)
-      const lower = file.name.toLowerCase()
-      const isHl7 =
-        importMode === "hl7" || lower.endsWith(".hl7") || lower.endsWith(".txt") || lower.endsWith(".xml")
+  const runSmartImportExtraction = useCallback((file: File, importMode: SmartImportMode) => {
+    const lower = file.name.toLowerCase()
+    if (importMode === "hl7" || lower.endsWith(".hl7")) {
+      setIsExtracting(false)
+      setExtractionStage(null)
+      setExtractionError(null)
+      setImportWarnings(null)
+      setDetected("HL7-style file")
+      setIdentityFields({
+        Tip: 'Open the "HL7 / lab" tab above to paste or parse pipe-delimited messages.',
+      })
+      setMedicalAidFields(null)
+      return
+    }
 
-      window.setTimeout(() => {
-        if (isHl7) {
-          setDetected("HL7 ORU — lab result message")
-          setExtractedFields({
-            Patient: "Thandi Mokoena",
-            Accession: "LAB-90821",
-            Summary: "CBC within reference range",
-          })
-        } else if (importMode === "patient_file") {
-          setDetected("ID / medical aid — onboarding capture")
-          setExtractedFields({
-            "Full Name": "David Nkosi",
-            "ID Number": "8805015012089",
-            "Medical Aid": "Discovery Health",
-            "Member No.": "DH-12345678",
-          })
-        } else if (importMode === "attach") {
-          setDetected("General document (PDF / scan)")
-          setExtractedFields({
-            Title: file.name.replace(/\.[^.]+$/, ""),
-            Pages: "1",
-            Summary: "Ready to attach to a patient file",
-          })
-        } else {
-          const roll = file.size % 3
-          if (roll === 0) {
-            setDetected("SA ID card — demographic extract")
-            setExtractedFields({
-              "Full Name": "David Nkosi",
-              "ID Number": "8805015012089",
-              "Date of Birth": "1988-05-01",
-            })
-          } else if (roll === 1) {
-            setDetected("Medical aid card — scheme details")
-            setExtractedFields({
-              "Medical Aid": "Discovery Health",
-              Plan: "Smart Plan",
-              "Member No.": "DH-12345678",
-              "Main Member": "David Nkosi",
-            })
+    extractAbortRef.current?.abort()
+    const ac = new AbortController()
+    extractAbortRef.current = ac
+    const myGen = ++extractGenRef.current
+    const stillMine = () => extractGenRef.current === myGen
+    const extractTimeoutMs = 240_000
+    const timeoutId = window.setTimeout(() => ac.abort(), extractTimeoutMs)
+
+    setIsExtracting(true)
+    setCreated(null)
+    setExtractionError(null)
+    setImportWarnings(null)
+    setExtractionStage("Uploading…")
+    setDetected(null)
+    if (!expectingMedicalAidRef.current) {
+      setIdentityFields(null)
+      setMedicalAidFields(null)
+    }
+
+    const apiMode =
+      importMode === "attach" ? "attach" : importMode === "patient_file" ? "patient_file" : "auto"
+
+    const form = new FormData()
+    form.append("file", file)
+    form.append("mode", apiMode)
+    form.append("stream", "true")
+
+    const applyNdjsonEvent = (evt: {
+      type?: string
+      message?: string
+      detected?: string
+      fields?: Record<string, string>
+      warnings?: string[]
+    }) => {
+      if (!stillMine()) return
+      if (evt.type === "stage" && evt.message) {
+        setExtractionStage(evt.message)
+      }
+      if (evt.type === "done") {
+        if (evt.detected) setDetected(evt.detected)
+        if (evt.fields && Object.keys(evt.fields).length > 0) {
+          if (expectingMedicalAidRef.current) {
+            expectingMedicalAidRef.current = false
+            if (!identityFieldsRef.current) {
+              addNotification({
+                id: `notif-${Date.now()}`,
+                type: "warning",
+                title: "Scan ID or passport first",
+                detail: "Import the identity document, then add a medical aid card.",
+                timestamp: new Date().toISOString(),
+                read: false,
+              })
+              setIdentityFields(evt.fields)
+              setMedicalAidFields(null)
+            } else {
+              const picked = pickMedicalAidFieldsOnly(evt.fields)
+              if (Object.keys(picked).length > 0) {
+                setMedicalAidFields((prev) => ({ ...(prev ?? {}), ...picked }))
+              } else {
+                addNotification({
+                  id: `notif-${Date.now()}`,
+                  type: "warning",
+                  title: "No medical aid fields detected",
+                  detail: "Try a clearer photo of the scheme card.",
+                  timestamp: new Date().toISOString(),
+                  read: false,
+                })
+              }
+            }
           } else {
-            setDetected("Clinical document — not a membership card")
-            setExtractedFields({
-              Title: "Referral letter",
-              Summary: "Specialist follow-up requested",
-              Pages: "2",
-            })
+            setIdentityFields(evt.fields)
+            setMedicalAidFields(null)
           }
         }
-        setIsExtracting(false)
-      }, 900)
-    },
-    []
-  )
+        if (evt.warnings?.length) {
+          setImportWarnings(evt.warnings.join(" · "))
+        }
+      }
+      if (evt.type === "error" && evt.message) {
+        setExtractionError(evt.message)
+      }
+    }
+
+    void (async () => {
+      try {
+        const res = await fetch("/api/clinical/smart-import/extract", {
+          method: "POST",
+          body: form,
+          signal: ac.signal,
+        })
+
+        if (!stillMine()) return
+
+        if (!res.ok) {
+          let msg = `Request failed (${res.status})`
+          try {
+            const j = (await res.json()) as { error?: string }
+            if (j.error) msg = j.error
+          } catch {
+            /* ignore */
+          }
+          if (stillMine()) {
+            setExtractionError(msg)
+          }
+          return
+        }
+
+        const reader = res.body?.getReader()
+        if (!reader) {
+          if (stillMine()) {
+            setExtractionError("No response stream")
+          }
+          return
+        }
+
+        const decoder = new TextDecoder()
+        let buffer = ""
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split("\n")
+          buffer = lines.pop() ?? ""
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              applyNdjsonEvent(JSON.parse(line) as Parameters<typeof applyNdjsonEvent>[0])
+            } catch {
+              continue
+            }
+          }
+        }
+        const tail = buffer.trim()
+        if (tail) {
+          try {
+            applyNdjsonEvent(JSON.parse(tail) as Parameters<typeof applyNdjsonEvent>[0])
+          } catch {
+            /* ignore partial line */
+          }
+        }
+      } catch (e) {
+        if (!stillMine()) return
+        if (e instanceof DOMException && e.name === "AbortError") {
+          setExtractionError(
+            "Timed out after several minutes — try a smaller PDF, one page, or a photo."
+          )
+          return
+        }
+        setExtractionError(e instanceof Error ? e.message : "Extraction failed")
+      } finally {
+        window.clearTimeout(timeoutId)
+        if (stillMine()) {
+          setIsExtracting(false)
+          setExtractionStage(null)
+          extractAbortRef.current = null
+        }
+      }
+    })()
+  }, [addNotification])
 
   const handleFile = useCallback(
     (file: File) => {
@@ -922,37 +1094,50 @@ export function SmartImportTile({
         setPreviewUrl(null)
       }
       setFileLabel(file.name)
-      setExtractedFields(null)
-      runExtractionMock(file, mode)
+      runSmartImportExtraction(file, mode)
     },
-    [mode, previewUrl, runExtractionMock]
+    [mode, previewUrl, runSmartImportExtraction]
   )
 
+  const handleOpenRegistrationForm = useCallback(() => {
+    if (!mergedExtractedFields) return
+    openPatientAddModalWithPrefill(buildPatientRegistrationPrefill(mergedExtractedFields))
+  }, [mergedExtractedFields, openPatientAddModalWithPrefill])
+
+  const handleRequestMedicalAidScan = useCallback(() => {
+    expectingMedicalAidRef.current = true
+    fileRef.current?.click()
+  }, [])
+
   const handleCreatePatient = useCallback(() => {
-    if (!extractedFields) return
-    const name =
-      extractedFields["Full Name"] ?? extractedFields["Main Member"] ?? extractedFields["Patient"] ?? "Unknown"
-    addPatient({
-      id: crypto.randomUUID(),
-      name,
-      idNumber: extractedFields["ID Number"],
-      dateOfBirth: extractedFields["Date of Birth"],
-      medicalAidStatus: "pending",
-      medicalAidScheme: extractedFields["Medical Aid"],
-      memberNumber: extractedFields["Member No."],
-      outstandingBalance: 0,
-      registeredAt: new Date().toISOString(),
+    if (!mergedExtractedFields) return
+    const built = buildPatientFromSmartImportFields(mergedExtractedFields)
+    const dup = findDuplicatePatient(patients, {
+      idNumber: built.idNumber,
+      passportNumber: built.passportNumber,
     })
+    if (dup) {
+      addNotification({
+        id: `notif-${Date.now()}`,
+        type: "warning",
+        title: "Duplicate patient",
+        detail: `${dup.name} already has this SA ID or passport in this practice.`,
+        timestamp: new Date().toISOString(),
+        read: false,
+      })
+      return
+    }
+    addPatient({ ...built, id: crypto.randomUUID() })
     setCreated("patient")
     addNotification({
       id: `notif-${Date.now()}`,
       type: "info",
-      title: "Patient created from import",
-      detail: name,
+      title: built.profileIncomplete ? "Patient created (incomplete profile)" : "Patient created from import",
+      detail: built.name,
       timestamp: new Date().toISOString(),
       read: false,
     })
-  }, [extractedFields, addPatient, addNotification])
+  }, [mergedExtractedFields, patients, addPatient, addNotification])
 
   const handleAttachToPatient = useCallback(() => {
     if (!attachPatientId || !fileLabel) return
@@ -1158,21 +1343,64 @@ export function SmartImportTile({
                 {detected && (
                   <p className="mb-2 rounded-lg bg-blue-500/10 px-2 py-1 text-[10px] text-blue-300">{detected}</p>
                 )}
+                {importWarnings && !isExtracting && (
+                  <p className="mb-2 text-[9px] leading-relaxed text-amber-300/90">{importWarnings}</p>
+                )}
+                {extractionError && !isExtracting && (
+                  <p className="mb-2 rounded-lg bg-red-500/10 px-2 py-1 text-[10px] text-red-300">{extractionError}</p>
+                )}
                 {isExtracting ? (
-                  <div className="flex items-center gap-2 py-4">
-                    <CircleNotch className="size-4 animate-spin text-blue-400" />
-                    <p className="text-[11px] text-blue-400">Classifying &amp; extracting…</p>
-                  </div>
-                ) : extractedFields ? (
-                  <div className="space-y-2.5">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
-                      {Object.entries(extractedFields).map(([key, val]) => (
-                        <div key={key}>
-                          <p className="text-[9px] uppercase tracking-wider text-white/25">{key}</p>
-                          <p className="text-[11px] font-medium text-white/80">{val}</p>
-                        </div>
-                      ))}
+                  <div className="flex flex-col gap-1 py-4">
+                    <div className="flex items-center gap-2">
+                      <CircleNotch className="size-4 shrink-0 animate-spin text-blue-400" />
+                      <p className="text-[11px] text-blue-400">Live extraction</p>
                     </div>
+                    {extractionStage && (
+                      <p className="pl-6 text-[10px] text-white/45">{extractionStage}</p>
+                    )}
+                  </div>
+                ) : mergedExtractedFields ? (
+                  <div className="space-y-2.5">
+                    {importIncompleteHint ? (
+                      <p className="rounded-lg bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-200/90">
+                        {importIncompleteHint}
+                      </p>
+                    ) : null}
+                    {medicalAidFields && Object.keys(medicalAidFields).length > 0 ? (
+                      <p className="text-[9px] font-medium text-emerald-300/85">
+                        Medical aid fields merged from card scan.
+                      </p>
+                    ) : null}
+                    {Object.keys(patientFieldRows).length > 0 ? (
+                      <>
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-white/40">
+                          Patient registration
+                        </p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
+                          {Object.entries(patientFieldRows).map(([key, val]) => (
+                            <div key={key}>
+                              <p className="text-[9px] uppercase tracking-wider text-white/25">{key}</p>
+                              <p className="text-[11px] font-medium text-white/80">{val}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                    {Object.keys(documentMetaRows).length > 0 ? (
+                      <>
+                        <p className="pt-1 text-[9px] font-semibold uppercase tracking-wider text-white/25">
+                          Document details
+                        </p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
+                          {Object.entries(documentMetaRows).map(([key, val]) => (
+                            <div key={key}>
+                              <p className="text-[9px] uppercase tracking-wider text-white/20">{key}</p>
+                              <p className="text-[11px] font-medium text-white/60">{val}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
                     <div className="flex flex-wrap gap-2 pt-1">
                       {mode === "attach" ? (
                         <>
@@ -1201,8 +1429,27 @@ export function SmartImportTile({
                             <>
                               <button
                                 type="button"
+                                onClick={handleOpenRegistrationForm}
+                                disabled={Object.keys(patientFieldRows).length === 0}
+                                className="rounded-lg bg-blue-500/20 px-3 py-1.5 text-[10px] font-semibold text-blue-300 hover:bg-blue-500/30 disabled:opacity-30"
+                              >
+                                Open add patient form
+                              </button>
+                              {identityFields ? (
+                                <button
+                                  type="button"
+                                  onClick={handleRequestMedicalAidScan}
+                                  disabled={isExtracting}
+                                  className="rounded-lg bg-white/[0.08] px-3 py-1.5 text-[10px] font-semibold text-white/60 hover:bg-white/[0.12] disabled:opacity-30"
+                                >
+                                  Scan medical aid card
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
                                 onClick={handleCreatePatient}
-                                className="flex items-center gap-1.5 rounded-lg bg-[#00E676]/15 px-3 py-1.5 text-[10px] font-semibold text-[#00E676] hover:bg-[#00E676]/25"
+                                disabled={Object.keys(patientFieldRows).length === 0}
+                                className="flex items-center gap-1.5 rounded-lg bg-[#00E676]/15 px-3 py-1.5 text-[10px] font-semibold text-[#00E676] hover:bg-[#00E676]/25 disabled:opacity-30"
                               >
                                 <UserPlus className="size-3.5" weight="bold" />
                                 Create patient
@@ -1260,6 +1507,6 @@ export function SmartImportTile({
   )
 }
 
-// ── Activity Feed (live workspace timeline) ──
+// ── Activity Feed (live workspace timeline) — ActivityFeedTile imported above ──
 
-export { LiveActivityFeed as ActivityFeedTile } from "./live-activity-feed"
+export { LiveActivityFeed } from "./live-activity-feed"

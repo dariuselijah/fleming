@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { whatsAppEmbeddedSignupProvisioningEnabled } from "@/lib/comms/twilio"
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     const { data: channels } = await supabase
       .from("practice_channels")
       .select(
-        "channel_type, provider, phone_number, phone_number_sid, status, created_at, updated_at, vapi_assistant_id, vapi_phone_number_id, webhook_url"
+        "channel_type, provider, phone_number, phone_number_sid, status, created_at, updated_at, vapi_assistant_id, vapi_phone_number_id, webhook_url, sender_display_name"
       )
       .eq("practice_id", membership.practice_id)
 
@@ -39,7 +40,21 @@ export async function GET(req: NextRequest) {
       .eq("practice_id", membership.practice_id)
       .order("sort_order")
 
-    return NextResponse.json({ channels: channels || [], hours: hours || [], faqs: faqs || [] })
+    const embeddedSignup = {
+      provisioningEnabled: whatsAppEmbeddedSignupProvisioningEnabled(),
+      facebookSdkConfigured: Boolean(
+        process.env.NEXT_PUBLIC_META_APP_ID &&
+          process.env.NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID &&
+          process.env.NEXT_PUBLIC_TWILIO_PARTNER_SOLUTION_ID
+      ),
+    }
+
+    return NextResponse.json({
+      channels: channels || [],
+      hours: hours || [],
+      faqs: faqs || [],
+      embeddedSignup,
+    })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }

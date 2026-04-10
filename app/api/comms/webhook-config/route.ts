@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { whatsAppEmbeddedSignupProvisioningEnabled } from "@/lib/comms/twilio"
 
 /**
  * Returns exact webhook URLs to paste into Twilio (and a short console checklist).
@@ -37,11 +38,14 @@ export async function GET(req: NextRequest) {
     }
 
     const twilioChecklist = [
-      "When you provision a number in Admin → Channels, we set these URLs on the Twilio phone number via API. Use **Sync webhooks** in Channels if you change TWILIO_WEBHOOK_BASE_URL or fix a misconfigured number.",
-      "TWILIO_WEBHOOK_BASE_URL must be your public HTTPS origin (no path), identical to what Twilio calls — otherwise inbound requests fail signature validation.",
-      "WhatsApp Business: after the number is linked in Twilio / Meta, inbound WhatsApp typically uses the same SMS webhook on that number. Sandbox senders may still need the Twilio console “sandbox” webhook set once.",
-      "Set status callback to **whatsappStatus** if you configure manually — delivery ticks update thread_messages in the inbox.",
-      "Live traffic may require WhatsApp template approval and Meta business verification outside this app.",
+      "**Greenfield (recommended):** Admin → Channels → “New number” searches Twilio inventory, purchases a number, and points webhooks here automatically.",
+      "**Existing number:** Use “Link existing number” only if that E.164 is already an **Incoming Phone Number in the same Twilio account** as TWILIO_ACCOUNT_SID (bought earlier or ported into this project). We cannot attach numbers from another Twilio account from this screen.",
+      whatsAppEmbeddedSignupProvisioningEnabled()
+        ? "**Embedded Signup:** With TWILIO_WHATSAPP_USE_EMBEDDED_SIGNUP=true, the practice admin uses **Connect with Meta** on Channels after the number exists; Fleming then calls the Senders API with the WABA id. Requires Meta app + Twilio Tech Provider (Partner Solution ID)."
+        : "After linking any number, complete **WhatsApp sender registration** in Twilio Console (Messaging → WhatsApp senders) or enable Embedded Signup (see TWILIO_WHATSAPP_USE_EMBEDDED_SIGNUP in .env.example). Then use **Sync webhooks** if inbound messages do not hit the app.",
+      "TWILIO_WEBHOOK_BASE_URL must be your public HTTPS origin (no path), identical to what Twilio calls — otherwise signature validation fails.",
+      "Set status callback to **whatsappStatus** if you configure manually — delivery updates thread_messages in the inbox.",
+      "Outbound campaigns and reminders outside the 24h session usually need **approved WhatsApp templates** in Meta/Twilio.",
     ]
 
     const vapiChecklist = [
@@ -56,6 +60,14 @@ export async function GET(req: NextRequest) {
       urls,
       twilioChecklist,
       vapiChecklist,
+      embeddedWhatsAppSignup: {
+        provisioningEnabled: whatsAppEmbeddedSignupProvisioningEnabled(),
+        facebookSdkConfigured: Boolean(
+          process.env.NEXT_PUBLIC_META_APP_ID &&
+            process.env.NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID &&
+            process.env.NEXT_PUBLIC_TWILIO_PARTNER_SOLUTION_ID
+        ),
+      },
     })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

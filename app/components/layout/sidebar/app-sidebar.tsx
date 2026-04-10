@@ -28,7 +28,6 @@ import {
   Funnel,
   Package,
   UsersThree,
-  Heart,
   Syringe,
   FileText,
   FileXls,
@@ -45,20 +44,27 @@ import {
 } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useParams, usePathname, useRouter } from "next/navigation"
-import { useMemo, useState, useCallback } from "react"
+import { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { FeedbackTrigger } from "../feedback/feedback-trigger"
 import { HistoryTrigger } from "../../history/history-trigger"
 import { SidebarList } from "./sidebar-list"
 import { SidebarProject } from "./sidebar-project"
 import { cn } from "@/lib/utils"
 import { useWorkspaceStore, type PracticeClaim, type InventoryItem } from "@/lib/clinical-workspace"
-import { DEMO_PRACTICE_CLAIMS } from "@/app/components/admin/bento-claims"
 import { SessionDocumentRow } from "@/app/components/workspace/session-document-row"
 import { PatientConsultChatsBar } from "@/app/components/workspace/patient-consult-chats-bar"
 import {
+  ClinicalSidebarAllergiesSection,
   ClinicalSidebarChronicSection,
+  ClinicalSidebarEncounterProblemsSection,
+  ClinicalSidebarLabsSection,
   ClinicalSidebarMedicationsSection,
+  ClinicalSidebarSocialHistorySection,
+  ClinicalSidebarVitalsSection,
+  ClinicalSidebarImagingSection,
+  SidebarSection,
 } from "@/app/components/layout/sidebar/clinical-sidebar-patient-sections"
+import { ChannelsSidebarPanel } from "@/app/components/layout/sidebar/sidebar-panel-placeholder"
 
 function useWorkspaceSafe() {
   try {
@@ -81,6 +87,67 @@ function useWorkspaceSafe() {
   }
 }
 
+const SIDEBAR_MIN_W = 240
+const SIDEBAR_MAX_W = 480
+const SIDEBAR_LS_KEY = "fleming:sidebar-width"
+
+function useResizableSidebar(enabled: boolean) {
+  /** Must match server render — read localStorage in useEffect to avoid hydration mismatch. */
+  const [width, setWidth] = useState(256)
+  const dragging = useRef(false)
+  const startX = useRef(0)
+  const startW = useRef(width)
+
+  useEffect(() => {
+    if (!enabled) return
+    if (typeof window === "undefined") return
+    const stored = localStorage.getItem(SIDEBAR_LS_KEY)
+    if (!stored) return
+    const n = Number(stored)
+    if (!Number.isFinite(n)) return
+    setWidth(Math.max(SIDEBAR_MIN_W, Math.min(SIDEBAR_MAX_W, n)))
+  }, [enabled])
+
+  useEffect(() => {
+    if (!enabled) return
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current) return
+      const delta = e.clientX - startX.current
+      const next = Math.max(SIDEBAR_MIN_W, Math.min(SIDEBAR_MAX_W, startW.current + delta))
+      setWidth(next)
+    }
+    const onUp = () => {
+      if (dragging.current) {
+        dragging.current = false
+        document.body.style.cursor = ""
+        document.body.style.userSelect = ""
+        localStorage.setItem(SIDEBAR_LS_KEY, String(width))
+      }
+    }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+    }
+  }, [enabled, width])
+
+  const onDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      if (!enabled) return
+      e.preventDefault()
+      dragging.current = true
+      startX.current = e.clientX
+      startW.current = width
+      document.body.style.cursor = "col-resize"
+      document.body.style.userSelect = "none"
+    },
+    [enabled, width]
+  )
+
+  return { width, onDragStart, isDragging: dragging }
+}
+
 export function AppSidebar() {
   const isMobile = useBreakpoint(768)
   const { setOpenMobile } = useSidebar()
@@ -93,6 +160,7 @@ export function AppSidebar() {
   const workspace = useWorkspaceSafe()
   const isAdmin = workspace?.mode === "admin"
   const isClinical = workspace?.mode === "clinical"
+  const { width, onDragStart } = useResizableSidebar(isClinical ?? false)
 
   const groupedChats = useMemo(() => {
     const result = groupChatsByDate(chats, "")
@@ -100,8 +168,12 @@ export function AppSidebar() {
   }, [chats])
   const hasChats = chats.length > 0
 
+  const sidebarStyle = isClinical
+    ? ({ "--sidebar-width": `${width}px` } as React.CSSProperties)
+    : undefined
+
   return (
-    <Sidebar collapsible="offcanvas" variant="sidebar" className="border-none">
+    <Sidebar collapsible="offcanvas" variant="sidebar" className="border-none" style={sidebarStyle}>
       <SidebarHeader className="h-14 pl-3">
         <div className="flex justify-between">
           {isMobile ? (
@@ -118,7 +190,7 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="mask-t-from-98% mask-t-to-100% mask-b-from-98% mask-b-to-100% px-3">
+      <SidebarContent className="mask-t-from-98% mask-t-to-100% mask-b-from-98% mask-b-to-100% px-2">
         <ScrollArea className="flex h-full [&>div>div]:!block">
           {isAdmin && workspace ? (
             <AdminSidebarContent workspace={workspace} />
@@ -175,6 +247,15 @@ export function AppSidebar() {
           </FeedbackTrigger>
         )}
       </SidebarFooter>
+
+      {/* Resize handle — right edge */}
+      {isClinical && !isMobile && (
+        <div
+          onMouseDown={onDragStart}
+          className="absolute inset-y-0 right-0 z-20 w-1 cursor-col-resize transition-colors hover:bg-white/[0.08] active:bg-white/[0.12]"
+          aria-label="Resize sidebar"
+        />
+      )}
     </Sidebar>
   )
 }
@@ -289,9 +370,7 @@ function AdminSidebarContent({ workspace }: { workspace: ReturnType<typeof useWo
         <CalendarSidebarPanel providers={practiceProviders} appointments={workspace.appointments} selectedDate={workspace.selectedDate} />
       )}
       {activeAdminTab === "billing" && (
-        <BillingSidebarPanel
-          claims={claims.length > 0 ? claims : DEMO_PRACTICE_CLAIMS}
-        />
+        <BillingSidebarPanel claims={claims} />
       )}
       {activeAdminTab === "inventory" && (
         <InventorySidebarPanel inventory={inventory} />
@@ -304,6 +383,7 @@ function AdminSidebarContent({ workspace }: { workspace: ReturnType<typeof useWo
         <PatientsSidebarPanel patients={workspace.patients ?? []} />
       )}
       {activeAdminTab === "settings" && <SettingsSidebarPanel />}
+      {activeAdminTab === "channels" && <ChannelsSidebarPanel />}
     </div>
   )
 }
@@ -1090,7 +1170,7 @@ function AnalyticsSidebarPanel({ claims }: { claims: { status: string; totalAmou
       if (c.status === "paid" || c.status === "approved") { paid++; revenue += c.totalAmount; maRevenue += c.medicalAidAmount; cashRevenue += c.cashAmount }
       if (c.status === "submitted") pending++
     }
-    return { paid, pending, total, revenue: revenue || 41000, maRevenue: maRevenue || 30200, cashRevenue: cashRevenue || 10800 }
+    return { paid, pending, total, revenue, maRevenue, cashRevenue }
   }, [claims])
 
   return (
@@ -1116,19 +1196,21 @@ function AnalyticsSidebarPanel({ claims }: { claims: { status: string; totalAmou
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-white/40">Total Claims</span>
-            <span className="font-bold tabular-nums">{stats.total || 24}</span>
+            <span className="font-bold tabular-nums">{stats.total}</span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-white/40">Settled</span>
-            <span className="font-bold tabular-nums text-[#00E676]">{stats.paid || 16}</span>
+            <span className="font-bold tabular-nums text-[#00E676]">{stats.paid}</span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-white/40">Pending</span>
-            <span className="font-bold tabular-nums text-[#FFC107]">{stats.pending || 6}</span>
+            <span className="font-bold tabular-nums text-[#FFC107]">{stats.pending}</span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-white/40">Collection Rate</span>
-            <span className="font-bold tabular-nums text-[#00E676]">{stats.total > 0 ? ((stats.paid / stats.total) * 100).toFixed(0) : 67}%</span>
+            <span className="font-bold tabular-nums text-[#00E676]">
+              {stats.total > 0 ? ((stats.paid / stats.total) * 100).toFixed(0) : 0}%
+            </span>
           </div>
         </div>
       </div>
@@ -1227,125 +1309,81 @@ function ClinicalSidebarContent({ workspace }: { workspace: ReturnType<typeof us
   const pathname = usePathname()
 
   return (
-    <div className="mt-3 space-y-5">
-      <div className="mb-1 flex flex-col gap-1">
-        <button
-          type="button"
-          onClick={() => {
-            resetChatClientState(pathname)
-            router.push("/")
-          }}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-primary transition-colors hover:bg-accent/80 hover:text-foreground"
-        >
-          <ChatCircle size={18} weight="bold" />
-          Chat
-        </button>
-      </div>
-
-      <div className="px-1">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/25">
-          {activePatient ? "Active Patient" : "Clinical Mode"}
-        </p>
-        {activePatient && (
-          <p className="mt-1 text-sm font-semibold text-foreground">{activePatient.name}</p>
-        )}
-      </div>
+    <div className="mt-2 flex flex-col gap-0.5">
+      {/* Nav row */}
+      <button
+        type="button"
+        onClick={() => {
+          resetChatClientState(pathname)
+          router.push("/")
+        }}
+        className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] font-medium text-white/50 transition-colors hover:bg-white/[0.04] hover:text-white/80"
+      >
+        <ChatCircle size={15} weight="bold" />
+        Chat
+      </button>
 
       {activePatient ? (
         <>
-          <PatientConsultChatsBar variant="sidebar" />
-
-          {/* Quick Vitals */}
-          <div>
-            <div className="mb-2 flex items-center gap-2 px-1">
-              <Heart className="size-3.5 text-[#EF5350]" weight="fill" />
-              <p className="text-xs font-semibold text-foreground">Vitals</p>
-            </div>
-            {activePatient.vitals.length > 0 ? (
-              <div className="grid grid-cols-2 gap-1.5">
-                {activePatient.vitals.slice(-6).map((v) => (
-                  <div key={v.id} className="rounded-lg bg-white/[0.03] px-2.5 py-2">
-                    <p className="text-[9px] uppercase tracking-wider text-white/25">{v.type.replace("_", " ")}</p>
-                    <p className="mt-0.5 text-sm font-bold tabular-nums">
-                      {v.value}{v.secondaryValue ? `/${v.secondaryValue}` : ""} <span className="text-[9px] font-normal text-white/30">{v.unit}</span>
-                    </p>
-                  </div>
-                ))}
+          {/* Patient header — always visible, compact */}
+          <div className="mb-1 rounded-lg bg-white/[0.03] px-3 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-white/[0.1] to-white/[0.04] text-[10px] font-bold text-white/50">
+                {activePatient.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
               </div>
-            ) : (
-              <p className="px-2 text-[11px] text-white/25">No vitals recorded</p>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold text-white/90">{activePatient.name}</p>
+                <div className="flex items-center gap-1.5 text-[10px] text-white/35">
+                  {activePatient.age && <span>{activePatient.age}{activePatient.sex ? ` ${activePatient.sex}` : ""}</span>}
+                  {activePatient.age && activePatient.medicalAidScheme && <span>·</span>}
+                  {activePatient.medicalAidScheme && <span className="truncate">{activePatient.medicalAidScheme}</span>}
+                </div>
+              </div>
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold",
+                  activePatient.medicalAidStatus === "active"
+                    ? "bg-emerald-500/12 text-emerald-400"
+                    : activePatient.medicalAidStatus === "inactive"
+                      ? "bg-red-500/12 text-red-400"
+                      : "bg-amber-500/12 text-amber-400"
+                )}
+              >
+                {activePatient.medicalAidStatus === "active" ? "Active" : activePatient.medicalAidStatus === "inactive" ? "Inactive" : "Pending"}
+              </span>
+            </div>
+            {activePatient.memberNumber && (
+              <p className="mt-1.5 text-[10px] tabular-nums text-white/25">
+                Member {activePatient.memberNumber}
+              </p>
             )}
           </div>
 
-          {/* Patient Info */}
-          <div>
-            <div className="mb-2 flex items-center gap-2 px-1">
-              <UserCircle className="size-3.5 text-blue-400" weight="fill" />
-              <p className="text-xs font-semibold text-foreground">Details</p>
-            </div>
-            <div className="space-y-1.5 px-2">
-              {activePatient.age && (
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-white/40">Age / Sex</span>
-                  <span className="font-medium">{activePatient.age}{activePatient.sex ? ` ${activePatient.sex}` : ""}</span>
-                </div>
-              )}
-              {activePatient.medicalAidScheme && (
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-white/40">Scheme</span>
-                  <span className="font-medium">{activePatient.medicalAidScheme}</span>
-                </div>
-              )}
-              {activePatient.memberNumber && (
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-white/40">Member #</span>
-                  <span className="font-medium tabular-nums">{activePatient.memberNumber}</span>
-                </div>
-              )}
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-white/40">MA Status</span>
-                <span className={cn(
-                  "font-medium",
-                  activePatient.medicalAidStatus === "active" ? "text-[#00E676]"
-                    : activePatient.medicalAidStatus === "inactive" ? "text-[#EF5350]"
-                    : "text-[#FFC107]"
-                )}>
-                  {activePatient.medicalAidStatus ?? "Unknown"}
-                </span>
-              </div>
-            </div>
-          </div>
+          <PatientConsultChatsBar variant="sidebar" />
 
-          {(activePatient.criticalAllergies?.length ?? 0) > 0 && (
-            <div>
-              <div className="mb-2 flex items-center gap-2 px-1">
-                <Warning className="size-3.5 text-[#EF5350]" weight="fill" />
-                <p className="text-xs font-semibold text-foreground">Allergies</p>
-              </div>
-              <div className="flex flex-wrap gap-1 px-2">
-                {activePatient.criticalAllergies!.map((a) => (
-                  <span
-                    key={a}
-                    className="rounded-md border border-[#EF5350]/20 bg-[#EF5350]/10 px-2 py-0.5 text-[10px] font-medium text-[#EF5350]"
-                  >
-                    {a}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Divider */}
+          <div className="mx-2 my-1 border-t border-white/[0.05]" />
 
+          <ClinicalSidebarVitalsSection />
+
+          <ClinicalSidebarAllergiesSection />
+          <ClinicalSidebarEncounterProblemsSection />
           <ClinicalSidebarChronicSection />
           <ClinicalSidebarMedicationsSection />
+          <ClinicalSidebarLabsSection />
+          <ClinicalSidebarImagingSection />
+          <ClinicalSidebarSocialHistorySection />
 
           {/* Documents */}
           {(activePatient.sessionDocuments?.length ?? 0) > 0 && (
-            <div>
-              <div className="mb-2 flex items-center gap-2 px-1">
-                <FileText className="size-3.5 text-white/40" />
-                <p className="text-xs font-semibold text-foreground">Documents ({activePatient.sessionDocuments!.length})</p>
-              </div>
-              <div className="space-y-1.5">
+            <SidebarSection
+              icon={<FileText className="size-3.5" />}
+              iconColor="text-white/40"
+              title="Documents"
+              count={activePatient.sessionDocuments!.length}
+              defaultOpen
+            >
+              <div className="space-y-1">
                 {activePatient.sessionDocuments!.slice(0, 5).map((sd) => (
                   <SessionDocumentRow
                     key={sd.id}
@@ -1362,38 +1400,39 @@ function ClinicalSidebarContent({ workspace }: { workspace: ReturnType<typeof us
                   />
                 ))}
               </div>
-            </div>
+            </SidebarSection>
           )}
 
-          {/* SOAP Summary */}
+          {/* SOAP Note */}
           {(activePatient.soapNote.subjective || activePatient.soapNote.assessment) && (
-            <div>
-              <div className="mb-2 flex items-center gap-2 px-1">
-                <FileText className="size-3.5 text-white/40" />
-                <p className="text-xs font-semibold text-foreground">SOAP Note</p>
-              </div>
-              <div className="space-y-2 px-2">
+            <SidebarSection
+              icon={<FileText className="size-3.5" />}
+              iconColor="text-white/40"
+              title="SOAP Note"
+              defaultOpen={false}
+            >
+              <div className="space-y-1.5 pl-0.5">
                 {activePatient.soapNote.subjective && (
                   <div>
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-white/25">Subjective</p>
-                    <p className="mt-0.5 line-clamp-2 text-[11px] text-white/60">{activePatient.soapNote.subjective}</p>
+                    <p className="text-[8px] font-semibold uppercase tracking-wider text-white/20">S</p>
+                    <p className="line-clamp-3 text-[10px] leading-relaxed text-white/50">{activePatient.soapNote.subjective}</p>
                   </div>
                 )}
                 {activePatient.soapNote.assessment && (
                   <div>
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-white/25">Assessment</p>
-                    <p className="mt-0.5 line-clamp-2 text-[11px] text-white/60">{activePatient.soapNote.assessment}</p>
+                    <p className="text-[8px] font-semibold uppercase tracking-wider text-white/20">A</p>
+                    <p className="line-clamp-3 text-[10px] leading-relaxed text-white/50">{activePatient.soapNote.assessment}</p>
                   </div>
                 )}
               </div>
-            </div>
+            </SidebarSection>
           )}
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center py-16">
-          <Syringe className="mb-2 size-6 text-white/10" />
-          <p className="text-xs text-white/30">No active patient</p>
-          <p className="mt-0.5 text-[10px] text-white/15">Select a patient from the calendar</p>
+        <div className="flex flex-col items-center justify-center py-20">
+          <Syringe className="mb-2 size-5 text-white/8" />
+          <p className="text-[11px] text-white/25">No active patient</p>
+          <p className="mt-0.5 text-[9px] text-white/12">Open from calendar or patient list</p>
         </div>
       )}
     </div>
@@ -1404,30 +1443,23 @@ function ClinicalSidebarFooter({ workspace }: { workspace: ReturnType<typeof use
   const activePatient = workspace.openPatients?.find((p) => p.patientId === workspace.activePatientId) ?? null
   if (!activePatient) return null
 
-  const statusLabels: Record<string, { label: string; color: string }> = {
-    scribing: { label: "Scribing", color: "text-[#00E676]" },
-    reviewing: { label: "Reviewing", color: "text-blue-400" },
-    billing: { label: "Billing", color: "text-[#FFC107]" },
-    finished: { label: "Complete", color: "text-white/40" },
-    waiting: { label: "Waiting", color: "text-white/30" },
-    checked_in: { label: "Checked In", color: "text-[#FFC107]" },
+  const statusLabels: Record<string, { label: string; color: string; dot: string }> = {
+    scribing: { label: "Scribing", color: "text-emerald-400", dot: "bg-emerald-400" },
+    reviewing: { label: "Reviewing", color: "text-blue-400", dot: "bg-blue-400" },
+    billing: { label: "Billing", color: "text-amber-400", dot: "bg-amber-400" },
+    finished: { label: "Complete", color: "text-white/35", dot: "bg-white/25" },
+    waiting: { label: "Waiting", color: "text-white/30", dot: "bg-white/20" },
+    checked_in: { label: "Checked in", color: "text-amber-400", dot: "bg-amber-400" },
   }
-  const st = statusLabels[activePatient.status] ?? { label: activePatient.status, color: "text-white/40" }
+  const st = statusLabels[activePatient.status] ?? { label: activePatient.status, color: "text-white/35", dot: "bg-white/20" }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 rounded-md bg-white/[0.03] p-2">
-        <div className="flex size-7 items-center justify-center rounded-full bg-white/[0.06] text-[10px] font-bold text-white/40">
-          {activePatient.name.split(" ").map((n) => n[0]).join("")}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="truncate text-xs font-medium text-foreground">{activePatient.name}</p>
-          <p className={cn("text-[10px] font-medium", st.color)}>{st.label}</p>
-        </div>
-        {activePatient.status === "scribing" && (
-          <span className="size-2 animate-pulse rounded-full bg-[#00E676]" />
-        )}
+    <div className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2">
+      <span className={cn("size-1.5 shrink-0 rounded-full", st.dot, activePatient.status === "scribing" && "animate-pulse")} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[11px] font-medium text-white/70">{activePatient.name}</p>
       </div>
+      <span className={cn("shrink-0 text-[10px] font-medium", st.color)}>{st.label}</span>
     </div>
   )
 }

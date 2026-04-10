@@ -42,5 +42,16 @@ export function buildRagChunksFromEncounterState(state: EncounterStatePlain): Ra
     push(state.scribeTranscript, "scribe:transcript")
   }
 
+  const enc = state.encounterProblems?.filter(Boolean) ?? []
+  if (enc.length) push(`Encounter problems: ${enc.join("; ")}`, "encounter:problems")
+
+  const chronic = state.chronicConditions?.filter(Boolean) ?? []
+  if (chronic.length) push(`Chronic conditions: ${chronic.join("; ")}`, "patient:chronic")
+
+  for (const s of state.ragAttachmentSnippets ?? []) {
+    const t = [s.label, s.text].filter(Boolean).join("\n").trim()
+    if (t.length >= 8) push(t.slice(0, 8000), "uploaded_document", s.id)
+  }
+
   return out
 }

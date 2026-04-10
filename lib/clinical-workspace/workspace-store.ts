@@ -10,6 +10,7 @@ import type {
   ClinicalDocument,
   ConsultStatus,
   DocumentSheetState,
+  EvidenceDeepDiveState,
   InboxMessage,
   InventoryItem,
   OverlayType,
@@ -33,6 +34,7 @@ import type { ExtractedEntities, HighlightSpan } from "@/lib/scribe/entity-highl
 import {
   buildAcceptedClinicalDocumentBlock,
   buildAcceptedEntityBlock,
+  buildLabOrderBlock,
   buildScribeExtractionBlock,
   dedupeVitalReadings,
   parseVitalsFromClinicalText,
@@ -40,7 +42,24 @@ import {
   extractionHasSignal,
   uniqStrings,
 } from "./ingest-patient-clinical"
-import { generateDraftClaim } from "./generate-draft-claim"
+import {
+  findBestCatalogEntryForLabel,
+  isLikelyLabOrderText,
+} from "./lab-order-catalog"
+import { requestEncounterPersistenceFlush } from "./encounter-persist-bridge"
+import { suppressEncounterHydrationForMs } from "./encounter-hydrate-suppress"
+import type { PatientRegistrationPrefill } from "@/lib/clinical/smart-import-patient"
+import { shouldPromoteDiagnosisToChronic } from "./diagnosis-accept-routing"
+import { parseMedicationLine } from "./medication-line-parse"
+
+function sessionMedicalAidFromPractice(
+  m: import("./types").PracticePatient["medicalAidStatus"]
+): import("./types").PatientSession["medicalAidStatus"] {
+  if (m === "verified") return "active"
+  if (m === "pending") return "pending"
+  if (m === "terminated") return "inactive"
+  return "unknown"
+}
 
 export interface ScribeSegment {
   speaker: string | null
@@ -67,6 +86,55 @@ const EMPTY_SOAP: SOAPNote = {
   objective: "",
   assessment: "",
   plan: "",
+}
+
+const MAX_ACCEPT_HISTORY = 200
+
+function appendAcceptHistory(
+  patient: PatientSession,
+  entityKey: string,
+  item: string,
+  action: "accepted" | "unaccepted" | "rejected"
+): PatientSession {
+  const entry = {
+    at: new Date().toISOString(),
+    entityKey,
+    item,
+    action,
+  }
+  return {
+    ...patient,
+    acceptHistory: [...(patient.acceptHistory ?? []), entry].slice(-MAX_ACCEPT_HISTORY),
+  }
+}
+
+/** Remove timeline NOTE/LAB rows tied to an unaccepted extraction item. */
+function stripBlocksForUnaccept(
+  blocks: MedicalBlock[],
+  entityKey: string,
+  item: string
+): MedicalBlock[] {
+  return blocks.filter((b) => {
+    if (
+      entityKey === "procedures" &&
+      b.type === "LAB" &&
+      b.metadata?.acceptedProcedureItem === item
+    ) {
+      return false
+    }
+    const ent = b.metadata?.entityKey
+    const acc = b.metadata?.acceptedEntity
+    if (
+      (b.type === "NOTE" || b.type === "SCRIBE") &&
+      typeof ent === "string" &&
+      ent === entityKey &&
+      typeof acc === "string" &&
+      acc === item
+    ) {
+      return false
+    }
+    return true
+  })
 }
 
 interface WorkspaceState {
@@ -128,6 +196,18 @@ interface WorkspaceState {
   addPatientChronicCondition: (patientId: string, condition: string) => void
   removePatientChronicCondition: (patientId: string, condition: string) => void
   renamePatientChronicCondition: (patientId: string, fromLabel: string, toLabel: string) => void
+  removeEncounterProblem: (patientId: string, problem: string) => void
+  addEncounterProblem: (patientId: string, problem: string) => void
+  addCriticalAllergy: (patientId: string, allergy: string) => void
+  removeCriticalAllergy: (patientId: string, allergy: string) => void
+  renameCriticalAllergy: (patientId: string, fromLabel: string, toLabel: string) => void
+  removePatientBlock: (patientId: string, blockId: string) => void
+  updateLabOrderBlock: (patientId: string, blockId: string, newLabel: string) => void
+  rejectScribeEntity: (patientId: string, entityKey: string, item: string) => void
+  setPatientEvidenceDeepDive: (
+    patientId: string,
+    state: EvidenceDeepDiveState | null
+  ) => void
   addSessionMedication: (
     patientId: string,
     med: Omit<PatientMedication, "id" | "startDate"> &
@@ -141,7 +221,22 @@ interface WorkspaceState {
   commitVital: (patientId: string, vitalId: string) => void
   addBlock: (patientId: string, block: MedicalBlock) => void
   signConsult: (patientId: string) => void
+  /** Reopen MediKredit claim preview (after dismiss or from header). */
   submitClaim: (patientId: string) => void
+  setClaimDraftLines: (patientId: string, lines: ClaimLine[] | null) => void
+  dismissClaimPreview: (patientId: string) => void
+  recordClaimSubmissionSuccess: (patientId: string, claimId?: string) => void
+  /** Link session to a saved server draft (practice_claims id) for upsert on "Save for later". */
+  setPatientRemoteDraftClaimId: (patientId: string, claimId: string | null) => void
+  /** Open clinical workspace with draft lines so the MediKredit preview modal appears. */
+  resumeMedikreditClaimDraft: (args: {
+    patientId: string
+    patientName: string
+    lines: ClaimLine[]
+    remoteClaimId: string
+    clinicalEncounterId?: string
+  }) => void
+  beginNewVisitForPatient: (patientId: string) => void
 
   // Pane control
   togglePane: (pane: "timeline" | "sidecar") => void
@@ -164,6 +259,12 @@ interface WorkspaceState {
   setScribeEntities: (entities: ExtractedEntities) => void
   setScribeHighlights: (highlights: HighlightSpan[]) => void
   setEntityStatus: (key: string, status: "pending" | "accepted" | "rejected") => void
+  /** Reverse an accepted entity — removes the item from the session arrays it was pushed into. */
+  unacceptScribeEntity: (
+    patientId: string,
+    entityKey: string,
+    item: string
+  ) => void
   acceptScribeEntity: (
     patientId: string,
     entityKey: string,
@@ -209,6 +310,8 @@ interface WorkspaceState {
   setActiveDoctor: (doctorId: string | null) => void
   setSelectedDate: (date: string) => void
   addClaim: (claim: PracticeClaim) => void
+  /** Replace claims list from server (e.g. practice_claims hydrate). */
+  setClaims: (claims: PracticeClaim[]) => void
   updateClaim: (claimId: string, update: Partial<PracticeClaim>) => void
   updateClaimStatus: (claimId: string, status: PracticeClaim["status"]) => void
   upsertInventoryItem: (item: InventoryItem) => void
@@ -220,6 +323,10 @@ interface WorkspaceState {
   // Patients
   addPatient: (patient: import("./types").PracticePatient) => void
   updatePatient: (patientId: string, update: Partial<import("./types").PracticePatient>) => void
+  patientAddModalPrefill: PatientRegistrationPrefill | null
+  patientAddModalOpenNonce: number
+  openPatientAddModalWithPrefill: (prefill: PatientRegistrationPrefill) => void
+  clearPatientAddModalPrefill: () => void
 
   // Appointments
   addAppointment: (appointment: PracticeAppointment) => void
@@ -269,6 +376,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       notifications: [],
       patients: [],
       commandBarOpen: false,
+
+      patientAddModalPrefill: null,
+      patientAddModalOpenNonce: 0,
 
       inboxNotificationFilter: "all",
       activeInboxThreadId: null,
@@ -377,6 +487,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                   chronicConditions: uniqStrings(
                     (p.chronicConditions ?? []).map((x) => (x === fromLabel ? next : x))
                   ),
+                }
+          ),
+        }))
+      },
+
+      removeEncounterProblem: (patientId, problem) => {
+        const t = problem.trim()
+        if (!t) return
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId !== patientId
+              ? p
+              : {
+                  ...p,
+                  encounterProblems: (p.encounterProblems ?? []).filter((x) => x !== t),
                 }
           ),
         }))
@@ -527,8 +652,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const patient = state.openPatients.find((p) => p.patientId === patientId)
         if (!patient) return
 
-        const claim = generateDraftClaim(patient, state.activeDoctorId)
-
         set({
           openPatients: state.openPatients.map((p) =>
             p.patientId === patientId
@@ -537,24 +660,153 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                   consultSigned: true,
                   consultSignedAt: new Date(),
                   status: "reviewing" as const,
-                  claimId: claim?.id,
+                  claimDraftLines: null,
+                  claimPreviewDismissed: false,
+                  remoteDraftClaimId: undefined,
                 }
               : p
           ),
-          ...(claim ? { claims: [...state.claims, claim] } : {}),
           mode: "admin" as const,
           activeAdminTab: "billing" as const,
         })
+        requestEncounterPersistenceFlush()
       },
 
       submitClaim: (patientId) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId ? { ...p, claimPreviewDismissed: false } : p
+          ),
+        }))
+      },
+
+      setClaimDraftLines: (patientId, lines) => {
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId ? { ...p, claimDraftLines: lines } : p
+          ),
+        }))
+      },
+
+      dismissClaimPreview: (patientId) => {
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId ? { ...p, claimPreviewDismissed: true } : p
+          ),
+        }))
+      },
+
+      recordClaimSubmissionSuccess: (patientId, claimId) => {
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
             p.patientId === patientId
-              ? { ...p, claimSubmitted: true, claimId: `CLM-${Date.now()}`, status: "billing" as const }
+              ? {
+                  ...p,
+                  claimSubmitted: true,
+                  claimId: claimId ?? p.claimId,
+                  status: "billing" as const,
+                  claimPreviewDismissed: true,
+                  remoteDraftClaimId: undefined,
+                }
               : p
           ),
         }))
+      },
+
+      setPatientRemoteDraftClaimId: (patientId, claimId) => {
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId ? { ...p, remoteDraftClaimId: claimId ?? undefined } : p
+          ),
+        }))
+      },
+
+      resumeMedikreditClaimDraft: ({
+        patientId,
+        patientName,
+        lines,
+        remoteClaimId,
+        clinicalEncounterId,
+      }) => {
+        const state = get()
+        const pp = state.patients.find((p) => p.id === patientId)
+        const existing = state.openPatients.find((p) => p.patientId === patientId)
+
+        const medicalAidStatus = pp
+          ? sessionMedicalAidFromPractice(pp.medicalAidStatus)
+          : existing?.medicalAidStatus ?? "unknown"
+
+        const base =
+          existing ??
+          createPatientSession({
+            patientId,
+            name: patientName,
+            medicalAidStatus,
+            medicalAidScheme: pp?.medicalAidScheme,
+            memberNumber: pp?.memberNumber,
+            sex: pp?.sex,
+            age: pp?.age,
+          })
+
+        const merged: PatientSession = {
+          ...base,
+          name: pp?.name?.trim() ? pp.name : patientName,
+          consultSigned: true,
+          clinicalEncounterId: clinicalEncounterId ?? base.clinicalEncounterId,
+          claimDraftLines: lines,
+          claimPreviewDismissed: false,
+          claimSubmitted: false,
+          remoteDraftClaimId: remoteClaimId,
+          status: "reviewing",
+        }
+
+        set({
+          mode: "clinical",
+          activePatientId: patientId,
+          openPatients: existing
+            ? state.openPatients.map((p) => (p.patientId === patientId ? merged : p))
+            : [...state.openPatients, merged],
+        })
+      },
+
+      beginNewVisitForPatient: (patientId) => {
+        suppressEncounterHydrationForMs(15_000)
+        const state = get()
+        const patient = state.openPatients.find((p) => p.patientId === patientId)
+        if (!patient) return
+        get().clearScribeTranscript()
+        const next = createPatientSession({
+          patientId: patient.patientId,
+          name: patient.name,
+          age: patient.age,
+          sex: patient.sex,
+          medicalAidStatus: patient.medicalAidStatus,
+          medicalAidScheme: patient.medicalAidScheme,
+          memberNumber: patient.memberNumber,
+          criticalAllergies: patient.criticalAllergies,
+          chronicConditions: patient.chronicConditions,
+          encounterProblems: [],
+          activeMedications: patient.activeMedications,
+          lifestyle: patient.lifestyle,
+          chatId: patient.chatId,
+          appointmentReason: patient.appointmentReason,
+          roomNumber: patient.roomNumber,
+          status: "checked_in",
+          consultSigned: false,
+          consultSignedAt: undefined,
+          claimSubmitted: false,
+          claimId: undefined,
+          clinicalEncounterId: undefined,
+          claimDraftLines: null,
+          claimPreviewDismissed: false,
+          remoteDraftClaimId: undefined,
+          acceptHistory: [],
+          evidenceDeepDive: null,
+        })
+        set({
+          openPatients: state.openPatients.map((p) => (p.patientId === patientId ? next : p)),
+        })
+        requestEncounterPersistenceFlush()
       },
 
       togglePane: (pane) => {
@@ -617,6 +869,44 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         set((state) => ({
           scribeEntityStatus: { ...state.scribeEntityStatus, [key]: status },
         })),
+
+      unacceptScribeEntity: (patientId, entityKey, item) => {
+        set((state) => {
+          const openPatients = state.openPatients.map((p) => {
+            if (p.patientId !== patientId) return p
+            let next = { ...p }
+            if (entityKey === "diagnoses") {
+              next.chronicConditions = (p.chronicConditions ?? []).filter((x) => x !== item)
+              next.encounterProblems = (p.encounterProblems ?? []).filter((x) => x !== item)
+            } else if (
+              entityKey === "chief_complaint" ||
+              entityKey === "symptoms" ||
+              entityKey === "risk_factors"
+            ) {
+              next.encounterProblems = (p.encounterProblems ?? []).filter((x) => x !== item)
+            } else if (entityKey === "allergies") {
+              next.criticalAllergies = (p.criticalAllergies ?? []).filter((x) => x !== item)
+            } else if (entityKey === "medications") {
+              const nameLower = item.split(/\s+/)[0]?.toLowerCase() ?? item.toLowerCase()
+              next.activeMedications = (p.activeMedications ?? []).filter(
+                (m) => m.name.toLowerCase() !== nameLower && m.name.toLowerCase() !== item.toLowerCase()
+              )
+            } else if (entityKey === "social_history") {
+              next.lifestyle = {
+                ...p.lifestyle,
+                socialHistoryLines: (p.lifestyle?.socialHistoryLines ?? []).filter((x) => x !== item),
+              }
+            }
+            next = {
+              ...next,
+              blocks: stripBlocksForUnaccept(next.blocks, entityKey, item),
+            }
+            return appendAcceptHistory(next, entityKey, item, "unaccepted")
+          })
+          return { openPatients }
+        })
+      },
+
       acceptScribeEntity: (patientId, entityKey, item, sectionLabel) => {
         const statusKey = `${entityKey}:${item}`
         set((state) => {
@@ -626,26 +916,200 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             item,
             sectionLabel
           )
+          const extraLabBlocks: MedicalBlock[] = []
+          if (entityKey === "procedures" && isLikelyLabOrderText(item)) {
+            const cat = findBestCatalogEntryForLabel(item)
+            const label = cat?.label ?? item.trim()
+            extraLabBlocks.push(
+              buildLabOrderBlock(patientId, label, {
+                catalogId: cat?.id,
+                category: cat?.category,
+                fromProcedureAccept: item,
+                sourceType: "scribe",
+              })
+            )
+          }
           const openPatients = state.openPatients.map((p) => {
             if (p.patientId !== patientId) return p
             let next: PatientSession = {
               ...p,
-              blocks: [...p.blocks, block],
+              blocks: [...p.blocks, block, ...extraLabBlocks],
             }
             if (entityKey === "diagnoses") {
-              const chronic = uniqStrings([...(p.chronicConditions ?? []), item])
-              next = { ...next, chronicConditions: chronic }
+              if (shouldPromoteDiagnosisToChronic(item)) {
+                next = {
+                  ...next,
+                  chronicConditions: uniqStrings([...(p.chronicConditions ?? []), item]),
+                }
+              } else {
+                next = {
+                  ...next,
+                  encounterProblems: uniqStrings([...(p.encounterProblems ?? []), item]),
+                }
+              }
+            } else if (
+              entityKey === "chief_complaint" ||
+              entityKey === "symptoms" ||
+              entityKey === "risk_factors"
+            ) {
+              next = {
+                ...next,
+                encounterProblems: uniqStrings([...(p.encounterProblems ?? []), item]),
+              }
             } else if (entityKey === "allergies") {
               const al = uniqStrings([...(p.criticalAllergies ?? []), item])
               next = { ...next, criticalAllergies: al }
+            } else if (entityKey === "medications") {
+              const parsed = parseMedicationLine(item)
+              if (parsed.name) {
+                const id = `med-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+                const row: PatientMedication = {
+                  id,
+                  name: parsed.name,
+                  dosage: parsed.dosage,
+                  frequency: parsed.frequency,
+                  startDate: new Date().toISOString().slice(0, 10),
+                }
+                next = {
+                  ...next,
+                  activeMedications: [...(p.activeMedications ?? []), row],
+                }
+              }
+            } else if (entityKey === "social_history") {
+              next = {
+                ...next,
+                lifestyle: {
+                  ...p.lifestyle,
+                  socialHistoryLines: uniqStrings([
+                    ...(p.lifestyle?.socialHistoryLines ?? []),
+                    item,
+                  ]),
+                },
+              }
             }
-            return next
+            return appendAcceptHistory(next, entityKey, item, "accepted")
           })
           return {
             scribeEntityStatus: { ...state.scribeEntityStatus, [statusKey]: "accepted" },
             openPatients,
           }
         })
+      },
+
+      rejectScribeEntity: (patientId, entityKey, item) => {
+        const statusKey = `${entityKey}:${item}`
+        set((state) => ({
+          scribeEntityStatus: { ...state.scribeEntityStatus, [statusKey]: "rejected" },
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId
+              ? appendAcceptHistory(p, entityKey, item, "rejected")
+              : p
+          ),
+        }))
+      },
+
+      addEncounterProblem: (patientId, problem) => {
+        const t = problem.trim()
+        if (!t) return
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId
+              ? {
+                  ...p,
+                  encounterProblems: uniqStrings([...(p.encounterProblems ?? []), t]),
+                }
+              : p
+          ),
+        }))
+      },
+
+      addCriticalAllergy: (patientId, allergy) => {
+        const t = allergy.trim()
+        if (!t) return
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId
+              ? {
+                  ...p,
+                  criticalAllergies: uniqStrings([...(p.criticalAllergies ?? []), t]),
+                }
+              : p
+          ),
+        }))
+      },
+
+      removeCriticalAllergy: (patientId, allergy) => {
+        const t = allergy.trim()
+        if (!t) return
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId
+              ? {
+                  ...p,
+                  criticalAllergies: (p.criticalAllergies ?? []).filter((x) => x !== t),
+                }
+              : p
+          ),
+        }))
+      },
+
+      renameCriticalAllergy: (patientId, fromLabel, toLabel) => {
+        const from = fromLabel.trim()
+        const to = toLabel.trim()
+        if (!from || !to) return
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId
+              ? {
+                  ...p,
+                  criticalAllergies: uniqStrings(
+                    (p.criticalAllergies ?? []).map((x) => (x === from ? to : x))
+                  ),
+                }
+              : p
+          ),
+        }))
+      },
+
+      removePatientBlock: (patientId, blockId) => {
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId
+              ? { ...p, blocks: p.blocks.filter((b) => b.id !== blockId) }
+              : p
+          ),
+        }))
+      },
+
+      updateLabOrderBlock: (patientId, blockId, newLabel) => {
+        const t = newLabel.trim()
+        if (!t) return
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId
+              ? {
+                  ...p,
+                  blocks: p.blocks.map((b) =>
+                    b.id === blockId && b.type === "LAB"
+                      ? {
+                          ...b,
+                          title: t,
+                          metadata: { ...b.metadata, label: t },
+                        }
+                      : b
+                  ),
+                }
+              : p
+          ),
+        }))
+      },
+
+      setPatientEvidenceDeepDive: (patientId, dive) => {
+        set((state) => ({
+          openPatients: state.openPatients.map((p) =>
+            p.patientId === patientId ? { ...p, evidenceDeepDive: dive } : p
+          ),
+        }))
       },
       updateEntityText: (category, oldText, newText) => {
         if (!newText.trim()) return
@@ -895,9 +1359,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           nextPatient.vitals
         )
         if (combined.length > 0) {
+          const merged = combined.map((v) => ({ ...v, committed: true }))
           nextPatient = {
             ...nextPatient,
-            vitals: [...nextPatient.vitals, ...combined],
+            vitals: [...nextPatient.vitals, ...merged],
           }
         }
 
@@ -940,6 +1405,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       addClaim: (claim) =>
         set((state) => ({ claims: [...state.claims, claim] })),
+
+      setClaims: (claims) => set({ claims }),
 
       updateClaim: (claimId, update) =>
         set((state) => ({
@@ -998,6 +1465,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       addPatient: (patient) =>
         set((state) => ({ patients: [...state.patients, patient] })),
+
+      openPatientAddModalWithPrefill: (prefill) =>
+        set((s) => ({
+          patientAddModalPrefill: prefill,
+          patientAddModalOpenNonce: s.patientAddModalOpenNonce + 1,
+          mode: "admin",
+          activeAdminTab: "patients",
+        })),
+
+      clearPatientAddModalPrefill: () => set({ patientAddModalPrefill: null }),
 
       updatePatient: (patientId, update) =>
         set((state) => ({
@@ -1152,8 +1629,11 @@ export function createPatientSession(
     vitals: [],
     blocks: [],
     sessionDocuments: [],
+    acceptHistory: [],
+    evidenceDeepDive: null,
     ...overrides,
     chronicConditions: overrides.chronicConditions ?? [],
+    encounterProblems: overrides.encounterProblems ?? [],
     criticalAllergies: overrides.criticalAllergies ?? [],
     activeMedications: overrides.activeMedications ?? [],
   }

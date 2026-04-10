@@ -6,16 +6,28 @@ import {
   purchaseNumber,
   syncPurchasedNumberWebhooks,
   commsWebhookUrls,
+  listOwnedIncomingNumbers,
+  resolveIncomingPhoneNumberSid,
+  getTwilioClient,
+  registerWhatsAppSender,
+  TWILIO_WHATSAPP_VERTICAL_MEDICAL,
+  whatsAppEmbeddedSignupProvisioningEnabled,
 } from "@/lib/comms/twilio"
-import { cloneAssistant } from "@/lib/comms/vapi"
 import { getPracticeName } from "@/lib/comms/tools"
+import {
+  seedPracticeHoursAndFaqsIfEmpty,
+  ensureVoiceChannelForNumber,
+} from "@/lib/comms/provision-practice-defaults"
 
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient()
     if (!supabase) return NextResponse.json({ error: "Unavailable" }, { status: 500 })
 
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error: authErr,
+    } = await supabase.auth.getUser()
     if (authErr || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const { data: membership } = await supabase
@@ -31,10 +43,28 @@ export async function POST(req: NextRequest) {
 
     const practiceId = membership.practice_id
     const body = await req.json()
-    const { action, phoneNumber, areaCode } = body as {
-      action: "search" | "provision" | "sync_webhooks"
+    const {
+      action,
+      phoneNumber,
+      areaCode,
+      countryCode,
+      incomingPhoneNumberSid,
+      practiceDisplayName,
+      notes,
+    } = body as {
+      action:
+        | "search"
+        | "provision"
+        | "sync_webhooks"
+        | "list_owned_numbers"
+        | "attach_existing"
+        | "request_number"
       phoneNumber?: string
       areaCode?: string
+      countryCode?: string
+      incomingPhoneNumberSid?: string
+      practiceDisplayName?: string
+      notes?: string
     }
 
     if (action === "sync_webhooks") {
@@ -78,8 +108,124 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "search") {
-      const numbers = await searchAvailableNumbers("ZA", { areaCode, limit: 10 })
+      // Resolve country: explicit param > practice's stored country > default ZA
+      let cc = countryCode?.toUpperCase()
+      if (!cc) {
+        const db = createAdminClient()
+        const { data: practice } = await db
+          .from("practices")
+          .select("country_code")
+          .eq("id", practiceId)
+          .maybeSingle()
+        cc = (practice?.country_code as string) || "ZA"
+      }
+      const numbers = await searchAvailableNumbers(cc, { areaCode, limit: 10 })
+      return NextResponse.json({ numbers, countryCode: cc })
+    }
+
+    if (action === "list_owned_numbers") {
+      const numbers = await listOwnedIncomingNumbers({ limit: 80 })
       return NextResponse.json({ numbers })
+    }
+
+    if (action === "attach_existing") {
+      const db = createAdminClient()
+      const webhookBase = process.env.TWILIO_WEBHOOK_BASE_URL || req.nextUrl.origin
+      const practiceName = await getPracticeName(practiceId)
+
+      let sid = incomingPhoneNumberSid?.trim()
+      let e164 = phoneNumber?.replace(/\s/g, "").trim()
+
+      if (!sid && !e164) {
+        return NextResponse.json(
+          { error: "Provide incomingPhoneNumberSid or phoneNumber (E.164) for a number in this Twilio account." },
+          { status: 400 }
+        )
+      }
+
+      if (!sid && e164) {
+        const resolved = await resolveIncomingPhoneNumberSid(e164)
+        if (!resolved) {
+          return NextResponse.json(
+            {
+              error:
+                "That number was not found in your Twilio account. Buy or port it into this Twilio project first, then try again.",
+            },
+            { status: 404 }
+          )
+        }
+        sid = resolved
+      }
+
+      const client = getTwilioClient()
+      const incoming = await client.incomingPhoneNumbers(sid!).fetch()
+      e164 = incoming.phoneNumber
+
+      await syncPurchasedNumberWebhooks(sid!, webhookBase)
+
+      const displayName = practiceDisplayName?.trim() || practiceName || "Medical Practice"
+      const useEmbedded = whatsAppEmbeddedSignupProvisioningEnabled()
+
+      let whatsappSenderSid: string | null = null
+      let whatsappSenderStatus: string | undefined
+      let whatsappStatus: "pending_waba" | "registering_sender"
+
+      if (useEmbedded) {
+        whatsappStatus = "pending_waba"
+      } else {
+        const sender = await registerWhatsAppSender({
+          phoneNumber: e164,
+          profile: {
+            name: displayName,
+            about: "Medical practice powered by Fleming",
+            vertical: TWILIO_WHATSAPP_VERTICAL_MEDICAL,
+          },
+          webhookBaseUrl: webhookBase,
+        })
+        whatsappSenderSid = sender.sid
+        whatsappSenderStatus = sender.status
+        whatsappStatus = "registering_sender"
+      }
+
+      await db.from("practice_channels").upsert(
+        {
+          practice_id: practiceId,
+          channel_type: "whatsapp",
+          provider: "twilio",
+          phone_number: e164,
+          phone_number_sid: sid,
+          whatsapp_sender_sid: whatsappSenderSid,
+          status: whatsappStatus,
+          sender_display_name: displayName,
+          webhook_url: `${webhookBase}/api/comms/whatsapp/webhook`,
+          ...(useEmbedded ? { whatsapp_waba_id: null } : {}),
+        },
+        { onConflict: "practice_id,channel_type" }
+      )
+
+      await seedPracticeHoursAndFaqsIfEmpty(db, practiceId)
+      const voice = await ensureVoiceChannelForNumber({
+        db,
+        practiceId,
+        practiceName,
+        phoneNumber: e164,
+        phoneNumberSid: sid!,
+        webhookBase,
+      })
+
+      return NextResponse.json({
+        ok: true,
+        phoneNumber: e164,
+        incomingPhoneNumberSid: sid,
+        whatsappSenderSid,
+        whatsappSenderStatus,
+        whatsappStatus,
+        voiceStatus: voice.voiceStatus,
+        embeddedSignupNext: useEmbedded,
+        message: useEmbedded
+          ? "Number linked. Complete Meta Embedded Signup in Admin → Channels, then we register the sender with your WABA."
+          : "Number linked and WhatsApp sender registration submitted. Status will move to active once Meta approves (polled automatically).",
+      })
     }
 
     if (action === "provision") {
@@ -89,82 +235,108 @@ export async function POST(req: NextRequest) {
       const webhookBase = process.env.TWILIO_WEBHOOK_BASE_URL || req.nextUrl.origin
       const practiceName = await getPracticeName(practiceId)
 
-      // 1. Purchase number (webhooks set on create)
       const purchased = await purchaseNumber(phoneNumber, webhookBase)
-      // 2. Re-apply via REST so URLs always match current TWILIO_WEBHOOK_BASE_URL
       await syncPurchasedNumberWebhooks(purchased.sid, webhookBase)
 
-      // 3. Create WhatsApp channel
-      await db.from("practice_channels").upsert({
-        practice_id: practiceId,
-        channel_type: "whatsapp",
-        provider: "twilio",
-        phone_number: purchased.phoneNumber,
-        phone_number_sid: purchased.sid,
-        status: "pending_wa_approval",
-        webhook_url: `${webhookBase}/api/comms/whatsapp/webhook`,
-      }, { onConflict: "practice_id,channel_type" })
+      const displayName = practiceDisplayName?.trim() || practiceName || "Medical Practice"
+      const useEmbedded = whatsAppEmbeddedSignupProvisioningEnabled()
 
-      // 4. Clone Vapi assistant for this practice
-      let vapiAssistantId: string | undefined
-      let vapiPhoneNumberId = process.env.VAPI_PHONE_NUMBER_ID
-      const defaultAssistant = process.env.VAPI_DEFAULT_ASSISTANT_ID
+      let whatsappSenderSid: string | null = null
+      let whatsappSenderStatus: string | undefined
+      let whatsappStatus: "pending_waba" | "registering_sender"
 
-      if (defaultAssistant) {
-        try {
-          const cloned = await cloneAssistant({
-            sourceAssistantId: defaultAssistant,
-            name: `${practiceName} Assistant`,
-            serverUrl: `${webhookBase}/api/comms/voice/webhook`,
-            firstMessage: `Thank you for calling ${practiceName}. How can I help you today?`,
-          })
-          vapiAssistantId = cloned.id
-        } catch (err) {
-          console.error("[provision] Vapi clone failed:", err)
-        }
+      if (useEmbedded) {
+        whatsappStatus = "pending_waba"
+      } else {
+        const sender = await registerWhatsAppSender({
+          phoneNumber: purchased.phoneNumber,
+          profile: {
+            name: displayName,
+            about: "Medical practice powered by Fleming",
+            vertical: TWILIO_WHATSAPP_VERTICAL_MEDICAL,
+          },
+          webhookBaseUrl: webhookBase,
+        })
+        whatsappSenderSid = sender.sid
+        whatsappSenderStatus = sender.status
+        whatsappStatus = "registering_sender"
       }
 
-      // 5. Create Voice channel
-      if (vapiAssistantId) {
-        await db.from("practice_channels").upsert({
+      await db.from("practice_channels").upsert(
+        {
           practice_id: practiceId,
-          channel_type: "voice",
-          provider: "vapi",
+          channel_type: "whatsapp",
+          provider: "twilio",
           phone_number: purchased.phoneNumber,
           phone_number_sid: purchased.sid,
-          vapi_assistant_id: vapiAssistantId,
-          vapi_phone_number_id: vapiPhoneNumberId,
-          status: "active",
-          webhook_url: `${webhookBase}/api/comms/voice/webhook`,
-        }, { onConflict: "practice_id,channel_type" })
-      }
-
-      // 6. Seed default practice hours (Mon-Fri 08:00-17:00)
-      const defaultHours = [1, 2, 3, 4, 5].map((day) => ({
-        practice_id: practiceId,
-        day_of_week: day,
-        open_time: "08:00",
-        close_time: "17:00",
-        is_closed: false,
-      }))
-      defaultHours.push(
-        { practice_id: practiceId, day_of_week: 6, open_time: "08:00", close_time: "12:00", is_closed: false },
-        { practice_id: practiceId, day_of_week: 0, open_time: "08:00", close_time: "12:00", is_closed: true },
+          whatsapp_sender_sid: whatsappSenderSid,
+          status: whatsappStatus,
+          sender_display_name: displayName,
+          webhook_url: `${webhookBase}/api/comms/whatsapp/webhook`,
+          ...(useEmbedded ? { whatsapp_waba_id: null } : {}),
+        },
+        { onConflict: "practice_id,channel_type" }
       )
-      await db.from("practice_hours").upsert(defaultHours, { onConflict: "practice_id,day_of_week" })
 
-      // 7. Seed starter FAQs
-      await db.from("practice_faqs").insert([
-        { practice_id: practiceId, category: "hours", question: "What are your hours?", answer: `We are open Monday to Friday 08:00-17:00 and Saturday 08:00-12:00.`, keywords: ["hours", "open", "close", "time"], sort_order: 0 },
-        { practice_id: practiceId, category: "directions", question: "Where are you located?", answer: "Please contact us for our exact address and directions.", keywords: ["location", "address", "where", "directions", "find"], sort_order: 1 },
-        { practice_id: practiceId, category: "fees", question: "How much does a consultation cost?", answer: "Our consultation fees vary by service. Please ask about a specific service for pricing.", keywords: ["cost", "price", "fee", "charge", "how much"], sort_order: 2 },
-      ])
+      await seedPracticeHoursAndFaqsIfEmpty(db, practiceId)
+      const voice = await ensureVoiceChannelForNumber({
+        db,
+        practiceId,
+        practiceName,
+        phoneNumber: purchased.phoneNumber,
+        phoneNumberSid: purchased.sid,
+        webhookBase,
+      })
 
       return NextResponse.json({
         ok: true,
         phoneNumber: purchased.phoneNumber,
-        whatsappStatus: "pending_wa_approval",
-        voiceStatus: vapiAssistantId ? "active" : "not_configured",
+        whatsappSenderSid,
+        whatsappSenderStatus,
+        whatsappStatus,
+        voiceStatus: voice.voiceStatus,
+        embeddedSignupNext: useEmbedded,
+      })
+    }
+
+    if (action === "request_number") {
+      const db = createAdminClient()
+      let cc = countryCode?.toUpperCase()
+      if (!cc) {
+        const { data: practice } = await db
+          .from("practices")
+          .select("country_code")
+          .eq("id", practiceId)
+          .maybeSingle()
+        cc = (practice?.country_code as string) || "ZA"
+      }
+
+      const { data: existing } = await db
+        .from("number_requests")
+        .select("id")
+        .eq("practice_id", practiceId)
+        .eq("status", "pending")
+        .limit(1)
+        .maybeSingle()
+
+      if (existing) {
+        return NextResponse.json({
+          ok: true,
+          alreadyRequested: true,
+          message: "You already have a pending number request. We'll notify you when it's fulfilled.",
+        })
+      }
+
+      await db.from("number_requests").insert({
+        practice_id: practiceId,
+        country_code: cc,
+        notes: notes || null,
+      })
+
+      return NextResponse.json({
+        ok: true,
+        countryCode: cc,
+        message: `Number request for ${cc} submitted. We'll assign a number to your practice soon.`,
       })
     }
 

@@ -23,6 +23,10 @@ function textFromParts(parts: unknown): string {
 }
 
 async function fetchMessagesFromServer(chatId: string): Promise<MessageAISDK[]> {
+  if (!chatId || chatId.startsWith("temp-chat-") || chatId === "temp") {
+    return []
+  }
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), MESSAGE_FETCH_TIMEOUT_MS)
   try {
@@ -34,6 +38,10 @@ async function fetchMessagesFromServer(chatId: string): Promise<MessageAISDK[]> 
         signal: controller.signal,
       }
     )
+    // No row in DB or chat not visible to this user — treat as empty, use IndexedDB cache if any.
+    if (response.status === 404) {
+      return []
+    }
     if (!response.ok) {
       throw new Error(`Failed to fetch messages (${response.status})`)
     }

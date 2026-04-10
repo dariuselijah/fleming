@@ -5,18 +5,24 @@ import { searchCommands, getCommandByTrigger, type SlashCommand } from "./comman
 
 interface UseCommandBarOptions {
   hasPatient: boolean
+  /** Doctor/medical-student clinical chat: hide admin/navigation slash commands */
+  clinicalCopilot?: boolean
   onCommandAction: (command: SlashCommand, args: string) => void
 }
 
-export function useCommandBar({ hasPatient, onCommandAction }: UseCommandBarOptions) {
+export function useCommandBar({
+  hasPatient,
+  clinicalCopilot = false,
+  onCommandAction,
+}: UseCommandBarOptions) {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [query, setQuery] = useState("")
   const [activeChip, setActiveChip] = useState<SlashCommand | null>(null)
 
   const results = useMemo(
-    () => searchCommands(query, hasPatient),
-    [query, hasPatient]
+    () => searchCommands(query, hasPatient, { clinicalCopilot }),
+    [query, hasPatient, clinicalCopilot]
   )
 
   const parseSlashInput = useCallback(

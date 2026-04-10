@@ -11,6 +11,7 @@ import {
   Layout,
   CheckCircle,
   PaperPlaneTilt,
+  PlusCircle,
   CaretDown,
   FileAudio,
   Stop,
@@ -233,6 +234,7 @@ export function WorkspaceHeader() {
     togglePane,
     signConsult,
     submitClaim,
+    beginNewVisitForPatient,
   } = useWorkspace()
 
   if (!activePatient) return null
@@ -283,6 +285,28 @@ export function WorkspaceHeader() {
             Submitted
           </span>
         )}
+
+        <button
+          type="button"
+          title="New visit — fresh encounter for this patient"
+          onClick={() => {
+            if (
+              activePatient.consultSigned &&
+              !activePatient.claimSubmitted &&
+              !window.confirm(
+                "Claim not sent yet. Start a new visit anyway? Current draft will be cleared."
+              )
+            ) {
+              return
+            }
+            beginNewVisitForPatient(activePatient.patientId)
+            toast.success("New visit started")
+          }}
+          className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2.5 py-1.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <PlusCircle className="size-3.5" weight="bold" />
+          New visit
+        </button>
 
         <div className="mx-1 h-4 w-px bg-border/50" />
 

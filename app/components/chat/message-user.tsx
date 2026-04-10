@@ -42,15 +42,23 @@ export type MessageUserProps = {
 }
 
 function parseCommandPrefix(text: string): { commandTag: string | null; rest: string; hasContext: boolean } {
-  const match = text.match(/^\[\/(\w+)\]\s*/)
+  let t = text.trimStart()
+  if (t.startsWith("{")) t = t.slice(1).trimStart()
+
+  const match = t.match(/^\[\/(\w+)\]\s*/)
   if (!match) return { commandTag: null, rest: text, hasContext: false }
 
-  const afterTag = text.slice(match[0].length)
-  const contextStart = afterTag.indexOf("\n\n=== ")
-  if (contextStart >= 0) {
+  const afterTag = t.slice(match[0].length)
+  const markers = ["\n\n<patient_context", "\n<patient_context", "\n\n<scribe_transcript", "\n<scribe_transcript", "\n\n=== ", "\n=== "]
+  let cut = -1
+  for (const m of markers) {
+    const i = afterTag.indexOf(m)
+    if (i >= 0 && (cut < 0 || i < cut)) cut = i
+  }
+  if (cut >= 0) {
     return {
       commandTag: match[1],
-      rest: afterTag.slice(0, contextStart).trim(),
+      rest: afterTag.slice(0, cut).trim(),
       hasContext: true,
     }
   }

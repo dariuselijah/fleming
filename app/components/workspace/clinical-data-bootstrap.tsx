@@ -8,6 +8,7 @@ import {
   usePracticeCrypto,
 } from "@/lib/clinical-workspace/practice-crypto-context"
 import { useWorkspaceStore } from "@/lib/clinical-workspace"
+import { fetchPracticeClaimsForWorkspace } from "@/lib/clinical-workspace/refresh-practice-claims"
 import type {
   AdminNotification,
   AdminTab,
@@ -193,6 +194,8 @@ export function ClinicalDataBootstrap() {
           .select("*")
           .eq("practice_id", practiceId)
 
+        const claims = await fetchPracticeClaimsForWorkspace(practiceId)
+
         if (cancelled) return
         useWorkspaceStore.setState({
           appointments: (appts ?? []).map((r) => mapAppointmentRow(r as Record<string, unknown>)),
@@ -201,6 +204,7 @@ export function ClinicalDataBootstrap() {
           notifications: (notifs ?? []).map((r) => mapNotifRow(r as Record<string, unknown>)),
           practiceFlow: (flow ?? []).map((r) => mapFlowRow(r as Record<string, unknown>)),
           practiceProviders: (staff ?? []).map((r) => mapStaffRow(r as Record<string, unknown>)),
+          claims,
         })
       } catch (e) {
         console.warn("[ClinicalDataBootstrap] admin lists", e)

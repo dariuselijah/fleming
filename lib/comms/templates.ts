@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { sendWhatsAppMessage } from "./twilio"
+import { sendWhatsAppMessage, sendWhatsAppTemplate } from "./twilio"
 
 export function interpolateTemplate(
   template: string,
@@ -32,7 +32,7 @@ export const BUILTIN_TEMPLATES = {
     name: "appointment_reminder_1h",
     category: "utility" as const,
     body: "Your appointment is in 1 hour at {{1}}. See you soon!",
-    variables: ["address"],
+    variables: ["practice_name"],
   },
   appointment_confirmation: {
     name: "appointment_confirmation",
@@ -66,6 +66,39 @@ export const BUILTIN_TEMPLATES = {
   },
 } as const
 
+/**
+ * Resolve Twilio Content Template SID: env JSON map first, then approved `whatsapp_templates` row.
+ * Env: `TWILIO_WHATSAPP_CONTENT_SIDS_JSON={"appointment_reminder_24h":"HXxxxx",...}`
+ */
+export async function resolveContentSidForTemplate(
+  practiceId: string,
+  templateName: string
+): Promise<string | null> {
+  const raw = process.env.TWILIO_WHATSAPP_CONTENT_SIDS_JSON?.trim()
+  if (raw) {
+    try {
+      const map = JSON.parse(raw) as Record<string, string>
+      const sid = map[templateName]?.trim()
+      if (sid) return sid
+    } catch {
+      /* ignore invalid JSON */
+    }
+  }
+
+  const { data } = await createAdminClient()
+    .from("whatsapp_templates")
+    .select("template_sid")
+    .eq("practice_id", practiceId)
+    .eq("template_name", templateName)
+    .eq("status", "approved")
+    .not("template_sid", "is", null)
+    .limit(1)
+    .maybeSingle()
+
+  const sid = data?.template_sid?.trim()
+  return sid || null
+}
+
 export async function sendTemplateMessage(opts: {
   practiceId: string
   from: string
@@ -75,6 +108,17 @@ export async function sendTemplateMessage(opts: {
 }): Promise<string> {
   const tmpl = BUILTIN_TEMPLATES[opts.templateKey]
   const body = interpolateTemplate(tmpl.body, opts.variables)
+  const contentSid = await resolveContentSidForTemplate(opts.practiceId, tmpl.name)
+
+  if (contentSid) {
+    const { messageSid } = await sendWhatsAppTemplate({
+      to: opts.to,
+      from: opts.from,
+      contentSid,
+      contentVariables: opts.variables,
+    })
+    return messageSid
+  }
 
   const { messageSid } = await sendWhatsAppMessage({
     to: opts.to,

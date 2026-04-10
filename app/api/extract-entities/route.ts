@@ -21,10 +21,11 @@ Return ONLY valid JSON with two keys: "entities" and "highlights".
     "DO NOT list individual pertinent negatives as separate items. Instead, add ONE summary line at the end: 'ROS otherwise negative (denies SOB, dizziness, palpitations, N/V, fever/chills)'"
   ],
   "diagnoses": [
-    "ALL conditions mentioned — both ACTIVE and HISTORICAL",
-    "Mark historical/resolved conditions: 'childhood asthma (resolved)'",
+    "Clinical diagnoses and problem-list items (active, suspected, or historical) — NOT social habits.",
+    "DO NOT put tobacco, alcohol, smoking, or substance-use patterns here; those belong ONLY in social_history.",
+    "Mark historical/resolved conditions clearly: 'childhood asthma (resolved)'",
     "Include suspected/working diagnoses: 'possible cellulitis (under evaluation)'",
-    "Include lab values that define severity: 'type 2 diabetes, poorly controlled (A1C ~9)'",
+    "Include chronic problems with context: 'type 2 diabetes, poorly controlled (A1C ~9)'",
     "E.g. 'chronic back pain (10 years)', 'high cholesterol (on statin)'"
   ],
   "medications": [
@@ -36,7 +37,8 @@ Return ONLY valid JSON with two keys: "entities" and "highlights".
   "allergies": [
     "Drug name — reaction type and severity",
     "E.g. 'Penicillin — facial angioedema, respiratory distress (anaphylactoid)'",
-    "If patient denies allergies: 'NKDA'"
+    "If the patient explicitly denies drug allergies, use one line: 'No known drug allergies'",
+    "If allergies were not discussed in the transcript, leave the allergies array empty — do not invent NKDA"
   ],
   "vitals": [
     "Any vital signs WITH values mentioned: 'BP 130/85 mmHg', 'HR 92 bpm', 'Temp 38.2°C'",
@@ -48,6 +50,8 @@ Return ONLY valid JSON with two keys: "entities" and "highlights".
     "Include imaging, labs ordered or mentioned"
   ],
   "social_history": [
+    "ALL lifestyle and substance use: smoking, vaping, alcohol (with quantities), recreational drugs, occupation, living situation.",
+    "If the patient discusses tobacco or alcohol use, it MUST appear here and NOT under diagnoses.",
     "Be SPECIFIC with quantities and patterns:",
     "Smoking: 'smokes ~2 packs/week, increased recently due to stress'",
     "Alcohol: 'drinks ~24 beers/week, primarily on weekends'",

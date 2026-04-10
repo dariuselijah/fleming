@@ -1,5 +1,6 @@
 import type { CommsAgentContext, CommsAgentResponse, FlowState, BookingFlowState, InteractivePayload } from "../types"
-import { checkAvailability, bookAppointment, getServices } from "../tools"
+import { checkAvailability, bookAppointment, getServices, createPatientRecord } from "../tools"
+import { findPatientByPracticePhone } from "../patient-phone"
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
@@ -179,7 +180,7 @@ async function handleConfirm(
   message: string,
   collected: BookingFlowState["collected"]
 ): Promise<CommsAgentResponse> {
-  const lower = message.toLowerCase()
+  const lower = message.toLowerCase().trim()
   if (lower.includes("change") || lower.includes("another") || message === "confirm_change") {
     return handleDetectReason(ctx, collected?.reason || "", collected)
   }
@@ -188,12 +189,44 @@ async function handleConfirm(
     return handleDetectReason(ctx, "", collected)
   }
 
+  const affirmative =
+    message === "confirm_yes" ||
+    lower === "yes" ||
+    lower === "y" ||
+    lower === "ok" ||
+    lower === "confirm" ||
+    lower === "book it"
+  if (!affirmative) {
+    return {
+      text: "Please tap *Yes, book it* above, or reply *yes* or *confirm* to finalize this time.",
+      flowUpdate: {
+        currentFlow: "booking",
+        flowState: { step: "confirm", collected },
+      },
+    }
+  }
+
   const slot = collected.selectedSlot as { date: string; startTime: string; endTime: string; providerId?: string }
   const patientName = ctx.patientContext?.name || collected?.patientName || "Patient"
 
+  let patientId = ctx.thread.patientId ?? null
+  if (!patientId) {
+    const found = await findPatientByPracticePhone(ctx.practiceId, ctx.thread.externalParty)
+    if (found) {
+      patientId = found.id
+    } else {
+      patientId = await createPatientRecord({
+        practiceId: ctx.practiceId,
+        displayNameHint: patientName,
+        phone: ctx.thread.externalParty,
+        profileStatus: "complete",
+      })
+    }
+  }
+
   const result = await bookAppointment({
     practiceId: ctx.practiceId,
-    patientId: ctx.thread.patientId || undefined,
+    patientId: patientId || undefined,
     patientName,
     date: slot.date,
     startTime: slot.startTime,
@@ -216,6 +249,8 @@ async function handleConfirm(
   const date = new Date(slot.date)
   const dayName = DAY_NAMES[date.getDay()]
 
+  const linkedPatient = patientId && patientId !== ctx.thread.patientId
+
   return {
     text: `✅ *Appointment Confirmed!*\n\n📋 ${collected?.serviceName || "Appointment"}\n📅 ${dayName} ${date.getDate()}/${date.getMonth() + 1} at ${slot.startTime}\n\nWe'll send you a reminder 24 hours before. Reply *CANCEL* anytime to cancel or *RESCHEDULE* to change.\n\nIs there anything else I can help with?`,
     toolCalls: [{
@@ -225,5 +260,6 @@ async function handleConfirm(
       timestamp: new Date().toISOString(),
     }],
     flowUpdate: { currentFlow: "none", flowState: {} },
+    ...(linkedPatient && patientId ? { threadUpdate: { patientId } } : {}),
   }
 }

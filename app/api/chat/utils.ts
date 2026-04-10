@@ -1,6 +1,72 @@
 import { Message as MessageAISDK } from "ai"
 
 /**
+ * OpenAI rejects requests when assistant history contains tool_calls without `function.arguments`.
+ * The UI sometimes sends tool invocations with `args` missing (e.g. interrupted streams).
+ */
+export function ensureToolCallArgumentsInMessages(
+  messages: MessageAISDK[]
+): MessageAISDK[] {
+  return messages.map((message) => {
+    if (message.role !== "assistant") {
+      return message
+    }
+
+    let toolPatched = false
+    let toolInvocations = message.toolInvocations
+    if (Array.isArray(toolInvocations) && toolInvocations.length > 0) {
+      toolInvocations = toolInvocations.map((inv) => {
+        if (inv == null || typeof inv !== "object") {
+          return inv
+        }
+        const rec = inv as unknown as Record<string, unknown>
+        if (rec.args === undefined || rec.args === null) {
+          toolPatched = true
+          return { ...rec, args: {} } as NonNullable<MessageAISDK["toolInvocations"]>[number]
+        }
+        return inv
+      })
+    }
+
+    let partsPatched = false
+    let parts = message.parts
+    if (Array.isArray(parts) && parts.length > 0) {
+      parts = parts.map((part) => {
+        if (
+          part &&
+          typeof part === "object" &&
+          (part as { type?: string }).type === "tool-invocation"
+        ) {
+          const p = part as {
+            type: string
+            toolInvocation: { args?: unknown; [key: string]: unknown }
+          }
+          const ti = p.toolInvocation
+          if (ti && (ti.args === undefined || ti.args === null)) {
+            partsPatched = true
+            return {
+              ...p,
+              toolInvocation: { ...ti, args: {} },
+            }
+          }
+        }
+        return part
+      }) as NonNullable<MessageAISDK["parts"]>
+    }
+
+    if (!toolPatched && !partsPatched) {
+      return message
+    }
+
+    return {
+      ...message,
+      ...(toolPatched ? { toolInvocations } : {}),
+      ...(partsPatched ? { parts } : {}),
+    }
+  })
+}
+
+/**
  * Clean messages when switching between agents with different tool capabilities.
  * This removes tool invocations and tool-related content from messages when tools are not available
  * to prevent OpenAI API errors.

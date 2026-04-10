@@ -4,6 +4,14 @@ import type { ComponentType } from "react"
 import { useWorkspace, type MedicalBlockType } from "@/lib/clinical-workspace"
 import { cn } from "@/lib/utils"
 import { MedicalTimelinePip } from "./medical-timeline-pip"
+import { MedicalTimelineAcceptedCluster } from "./medical-timeline-accepted-cluster"
+import {
+  formatTimelineDateHeader,
+  groupBlocksByDateKey,
+  segmentBlocksForOneDay,
+  sortedDateKeysDesc,
+  type TimelineDaySegment,
+} from "@/lib/clinical-workspace/timeline-grouping"
 import {
   Flask,
   Heartbeat,
@@ -169,6 +177,37 @@ export function PaneTimeline() {
     [pinToSidecar]
   )
 
+  const blocksByDate = useMemo(
+    () => groupBlocksByDateKey(blocks),
+    [blocks]
+  )
+  const dateKeysDesc = useMemo(
+    () => sortedDateKeysDesc(blocksByDate.keys()),
+    [blocksByDate]
+  )
+
+  const timelineSections = useMemo(() => {
+    const sections: {
+      dateKey: string
+      segments: TimelineDaySegment[]
+    }[] = []
+    for (const dk of dateKeysDesc) {
+      const day = blocksByDate.get(dk)
+      if (!day?.length) continue
+      sections.push({ dateKey: dk, segments: segmentBlocksForOneDay(day) })
+    }
+    return sections
+  }, [blocksByDate, dateKeysDesc])
+
+  /** Bottom-most single row (not inside a cluster) — hides trailing connector. */
+  const lastGlobalSingleBlockId = useMemo(() => {
+    const lastDay = timelineSections[timelineSections.length - 1]
+    if (!lastDay?.segments.length) return null
+    const lastSeg = lastDay.segments[lastDay.segments.length - 1]
+    if (lastSeg.type === "single") return lastSeg.block.id
+    return null
+  }, [timelineSections])
+
   return (
     <div className="flex h-full flex-col overflow-hidden border-r border-border/40">
       <div className="shrink-0 overflow-x-auto border-b border-border/30 px-2 py-1.5" style={{ scrollbarWidth: "none" }}>
@@ -207,13 +246,38 @@ export function PaneTimeline() {
           </div>
         ) : (
           <div className="flex flex-col">
-            {blocks.map((block, idx) => (
-              <MedicalTimelinePip
-                key={block.id}
-                block={block}
-                isLast={idx === blocks.length - 1}
-                onPin={handlePin}
-              />
+            {timelineSections.map(({ dateKey, segments }) => (
+              <section key={dateKey} className="mb-1">
+                <div className="sticky top-0 z-[1] -mx-0.5 mb-2 border-b border-border/25 bg-background/90 px-3 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    {formatTimelineDateHeader(dateKey)}
+                  </p>
+                </div>
+                <div className="flex flex-col">
+                  {segments.map((seg, segIdx) => {
+                    if (seg.type === "cluster") {
+                      return (
+                        <MedicalTimelineAcceptedCluster
+                          key={`${dateKey}-acc-${seg.category}-${seg.blocks[0]?.id ?? segIdx}`}
+                          category={seg.category}
+                          blocks={seg.blocks}
+                          onPin={handlePin}
+                        />
+                      )
+                    }
+                    const block = seg.block
+                    const isLastGlobally = block.id === lastGlobalSingleBlockId
+                    return (
+                      <MedicalTimelinePip
+                        key={block.id}
+                        block={block}
+                        isLast={isLastGlobally}
+                        onPin={handlePin}
+                      />
+                    )
+                  })}
+                </div>
+              </section>
             ))}
           </div>
         )}

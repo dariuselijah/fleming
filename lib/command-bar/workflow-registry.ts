@@ -71,7 +71,7 @@ export const WORKFLOW_REGISTRY: Record<string, CommandWorkflow> = {
   soap: {
     commandId: "soap",
     blockType: "SOAP",
-    systemPromptSuffix: `Format a SOAP note. S: CC, HPI, PMH, Meds, Allergies, ROS. O: Vitals, PE, Labs. A: Diagnoses + ICD-10. P: Per diagnosis. ${CONCISE_RULE}`,
+    systemPromptSuffix: `Format a SOAP note from the consult context only (no literature retrieval). S: CC, HPI, PMH, Meds, Allergies, ROS. O: Vitals, PE, Labs. A: Diagnoses + ICD-10. P: Per diagnosis. Do not use [T], [E], or [H] source tags. ${CONCISE_RULE}`,
     requiredTools: [],
     responseFormat: "structured_block",
   },

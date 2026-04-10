@@ -1,5 +1,6 @@
 import type { CommsAgentContext, CommsAgentResponse, FlowState, OnboardingFlowState } from "../types"
-import { createPatientRecord } from "../tools"
+import { finalizePatientFromOnboarding } from "../tools"
+import { processMediaOCR } from "../media-pipeline"
 
 export async function runOnboardingFlow(
   ctx: CommsAgentContext,
@@ -17,7 +18,7 @@ export async function runOnboardingFlow(
     case "collect_name":
       return handleCollectName(ctx, message, collected)
     case "collect_id":
-      return handleCollectId(ctx, message, collected)
+      return handleCollectId(ctx, message, collected, media)
     case "collect_contact":
       return handleCollectContact(ctx, message, collected)
     case "collect_medical_aid":
@@ -37,7 +38,7 @@ export async function runOnboardingFlow(
 
 function handleWelcome(ctx: CommsAgentContext): CommsAgentResponse {
   return {
-    text: `Welcome to *${ctx.practiceName}*! 👋\n\nI'll help you register as a new patient. This takes about 2 minutes.\n\nWhat is your *full name*?`,
+    text: `Welcome to *${ctx.practiceName}*! 👋\n\nI'll help you register as a new patient. This takes about 2 minutes.\n\nYou can type your details or send *photos of your ID and medical aid card* — I'll extract the information automatically.\n\nLet's start: What is your *full name*?`,
     flowUpdate: {
       currentFlow: "onboarding",
       flowState: { step: "collect_name", collected: {} },
@@ -50,7 +51,17 @@ function handleCollectName(
   message: string,
   collected: OnboardingFlowState["collected"]
 ): CommsAgentResponse {
-  const name = message.trim()
+  const trimmed = message.trim()
+  if (trimmed.toUpperCase() === "START") {
+    return {
+      text: "Great. What is your *full name*?",
+      flowUpdate: {
+        currentFlow: "onboarding",
+        flowState: { step: "collect_name", collected: {} },
+      },
+    }
+  }
+  const name = trimmed
   if (name.length < 2) {
     return {
       text: "Please enter your full name (first and last name).",
@@ -70,11 +81,50 @@ function handleCollectName(
   }
 }
 
-function handleCollectId(
+async function handleCollectId(
   ctx: CommsAgentContext,
   message: string,
-  collected: OnboardingFlowState["collected"]
-): CommsAgentResponse {
+  collected: OnboardingFlowState["collected"],
+  media?: { storagePath: string; mimeType: string }
+): Promise<CommsAgentResponse> {
+  // Photo of ID document sent — run OCR
+  if (media && media.mimeType.startsWith("image/")) {
+    try {
+      const result = await processMediaOCR({
+        storagePath: media.storagePath,
+        mimeType: media.mimeType,
+        documentType: "id_document",
+      })
+
+      if (result.structured?.idNumber) {
+        const idNum = result.structured.idNumber as string
+        const dob = result.structured.dateOfBirth as string
+        const sex = result.structured.sex as string
+
+        return {
+          text: `I extracted your ID number from the photo: *${idNum.slice(0, 6)}****${idNum.slice(-2)}*\n\nWhat is your *email address*?\n\n_(Reply SKIP if you'd rather not provide one)_`,
+          flowUpdate: {
+            currentFlow: "onboarding",
+            flowState: {
+              step: "collect_contact",
+              collected: { ...collected, idNumber: idNum, dateOfBirth: dob, sex, idDocumentPath: media.storagePath },
+            },
+          },
+        }
+      }
+    } catch (err) {
+      console.error("[onboarding] ID OCR failed:", err)
+    }
+
+    return {
+      text: "I couldn't read the ID from that photo clearly. Could you type your *13-digit SA ID number* instead?\n\n_(Reply SKIP if you don't have it handy)_",
+      flowUpdate: {
+        currentFlow: "onboarding",
+        flowState: { step: "collect_id", collected: { ...collected, idDocumentPath: media.storagePath } },
+      },
+    }
+  }
+
   const upper = message.trim().toUpperCase()
 
   if (upper === "SKIP") {
@@ -90,7 +140,7 @@ function handleCollectId(
   const idNum = message.replace(/\s/g, "")
   if (!/^\d{13}$/.test(idNum)) {
     return {
-      text: "That doesn't look like a valid SA ID number (13 digits). Please try again or reply *SKIP*.",
+      text: "That doesn't look like a valid SA ID number (13 digits). Please try again, send a *photo of your ID*, or reply *SKIP*.",
       flowUpdate: {
         currentFlow: "onboarding",
         flowState: { step: "collect_id", collected },
@@ -98,7 +148,6 @@ function handleCollectId(
     }
   }
 
-  // Derive DOB and sex from ID
   const yy = parseInt(idNum.slice(0, 2))
   const mm = idNum.slice(2, 4)
   const dd = idNum.slice(4, 6)
@@ -177,21 +226,42 @@ function handleCollectMedicalAid(
   }
 }
 
-function handleCollectAidDetails(
+async function handleCollectAidDetails(
   ctx: CommsAgentContext,
   message: string,
   collected: OnboardingFlowState["collected"],
   media?: { storagePath: string; mimeType: string }
-): CommsAgentResponse {
-  if (media) {
-    // Photo of medical aid card sent — store path and move on
+): Promise<CommsAgentResponse> {
+  if (media && media.mimeType.startsWith("image/")) {
+    let scheme = "From card"
+    let memberNumber: string | undefined
+
+    try {
+      const result = await processMediaOCR({
+        storagePath: media.storagePath,
+        mimeType: media.mimeType,
+        documentType: "medical_aid_card",
+      })
+
+      if (result.structured) {
+        if (result.structured.possibleScheme) scheme = result.structured.possibleScheme as string
+        if (result.structured.possibleMemberNumber) memberNumber = result.structured.possibleMemberNumber as string
+      }
+    } catch (err) {
+      console.error("[onboarding] Medical aid card OCR failed:", err)
+    }
+
+    const detailsLine = memberNumber
+      ? `I found: *${scheme}* — member number *${memberNumber}*. I'll save these.\n\n`
+      : "Thanks for the photo! I've saved your medical aid card.\n\n"
+
     return {
-      text: "Thanks for the photo! I've saved your medical aid card. We'll extract the details from it.\n\nDo you have any *known allergies*? (medications, foods, latex, etc.)\n\n_(Reply NONE if not)_",
+      text: `${detailsLine}Do you have any *known allergies*? (medications, foods, latex, etc.)\n\n_(Reply NONE if not)_`,
       flowUpdate: {
         currentFlow: "onboarding",
         flowState: {
           step: "collect_allergies",
-          collected: { ...collected, medicalAidCardPath: media.storagePath, medicalAidScheme: "From card" },
+          collected: { ...collected, medicalAidCardPath: media.storagePath, medicalAidScheme: scheme, memberNumber },
         },
       },
     }
@@ -297,9 +367,9 @@ async function handleConfirm(
     }
   }
 
-  // Create patient record
-  const patientId = await createPatientRecord({
+  const patientId = await finalizePatientFromOnboarding({
     practiceId: ctx.practiceId,
+    existingPatientId: ctx.thread.patientId,
     displayNameHint: collected?.name || "Unknown",
     phone: ctx.thread.externalParty,
   })

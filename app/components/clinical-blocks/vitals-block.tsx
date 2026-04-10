@@ -17,9 +17,9 @@ import {
 import { motion, AnimatePresence } from "motion/react"
 import { useCallback, useState } from "react"
 
-type VitalType = VitalReading["type"]
+export type VitalType = VitalReading["type"]
 
-const VITAL_CONFIG: Record<
+export const VITAL_CONFIG: Record<
   VitalType,
   {
     label: string

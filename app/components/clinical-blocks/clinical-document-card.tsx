@@ -161,7 +161,7 @@ function clinicalSourcesToEvidenceCitations(
     sourceId: `clinical-doc:${s.index}`,
     pmid: s.pmid?.trim() || null,
     title: s.title?.trim() || `Source ${s.index}`,
-    journal: s.journal?.trim() || "Literature",
+    journal: s.journal?.trim() || "",
     year: parseClinicalSourceYear(s.year),
     doi: null,
     authors: [],

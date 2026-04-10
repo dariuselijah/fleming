@@ -10,6 +10,8 @@ export interface SlashCommand {
   keywords: string[]
   requiresPatient: boolean
   action: "inline" | "panel" | "overlay" | "submit"
+  /** Hidden from clinical copilot slash menu (doctor / medical student chat) */
+  hideInClinicalChat?: boolean
 }
 
 const COMMANDS: SlashCommand[] = [
@@ -127,6 +129,7 @@ const COMMANDS: SlashCommand[] = [
     keywords: ["medikredit", "eligibility", "medical aid", "verify", "check"],
     requiresPatient: true,
     action: "panel",
+    hideInClinicalChat: true,
   },
   {
     id: "claim",
@@ -138,6 +141,7 @@ const COMMANDS: SlashCommand[] = [
     keywords: ["claim", "billing", "submit", "medprax", "invoice"],
     requiresPatient: true,
     action: "panel",
+    hideInClinicalChat: true,
   },
   {
     id: "inventory",
@@ -149,6 +153,7 @@ const COMMANDS: SlashCommand[] = [
     keywords: ["stock", "inventory", "supply", "dispensing"],
     requiresPatient: false,
     action: "overlay",
+    hideInClinicalChat: true,
   },
 
   // File commands
@@ -186,6 +191,7 @@ const COMMANDS: SlashCommand[] = [
     keywords: ["calendar", "appointments", "schedule", "booking"],
     requiresPatient: false,
     action: "overlay",
+    hideInClinicalChat: true,
   },
   {
     id: "analytics",
@@ -197,6 +203,7 @@ const COMMANDS: SlashCommand[] = [
     keywords: ["analytics", "sales", "revenue", "income", "dashboard", "money"],
     requiresPatient: false,
     action: "overlay",
+    hideInClinicalChat: true,
   },
 
   // Consult lifecycle
@@ -221,6 +228,7 @@ const COMMANDS: SlashCommand[] = [
     keywords: ["submit", "medikredit", "claim", "send", "process"],
     requiresPatient: true,
     action: "panel",
+    hideInClinicalChat: true,
   },
 ]
 
@@ -228,11 +236,20 @@ export function getAllCommands(): SlashCommand[] {
   return COMMANDS
 }
 
-export function searchCommands(query: string, hasPatient: boolean): SlashCommand[] {
+export function searchCommands(
+  query: string,
+  hasPatient: boolean,
+  opts?: { clinicalCopilot?: boolean }
+): SlashCommand[] {
+  const clinical = opts?.clinicalCopilot ?? false
+  const base = COMMANDS.filter((c) => {
+    if (clinical && c.hideInClinicalChat) return false
+    return true
+  })
   const q = query.toLowerCase().replace(/^\//, "").trim()
-  if (!q) return COMMANDS.filter((c) => !c.requiresPatient || hasPatient)
+  if (!q) return base.filter((c) => !c.requiresPatient || hasPatient)
 
-  return COMMANDS.filter((cmd) => {
+  return base.filter((cmd) => {
     if (cmd.requiresPatient && !hasPatient) return false
     const haystack = [cmd.trigger, cmd.label, cmd.description, ...cmd.keywords]
       .join(" ")

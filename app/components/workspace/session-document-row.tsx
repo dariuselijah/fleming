@@ -1,6 +1,7 @@
 "use client"
 
 import type { SessionDocument } from "@/lib/clinical-workspace"
+import { stripClinicalMarkdownPreview } from "@/lib/clinical-workspace/strip-clinical-markdown"
 import { cn } from "@/lib/utils"
 import { FileText } from "@phosphor-icons/react"
 
@@ -39,7 +40,11 @@ export function SessionDocumentRow({
   variant?: "sidebar" | "sidecar"
 }) {
   const title = DOC_TAB_LABELS[entry.document.type] ?? entry.document.title
-  const preview = (entry.document.content ?? "").slice(0, 140).trim()
+  const previewRaw = entry.document.content ?? ""
+  const preview =
+    variant === "sidebar"
+      ? ""
+      : stripClinicalMarkdownPreview(previewRaw, 140)
   const updated = entry.updatedAt
     ? new Date(entry.updatedAt).toLocaleString([], {
         month: "short",
@@ -56,19 +61,19 @@ export function SessionDocumentRow({
       className={cn(
         "group flex w-full gap-2.5 rounded-xl border text-left transition-all",
         variant === "sidebar"
-          ? "border-white/[0.08] bg-white/[0.02] px-2.5 py-2 hover:border-indigo-500/30 hover:bg-white/[0.06]"
+          ? "border-white/[0.08] bg-white/[0.02] px-2 py-1.5 hover:border-indigo-500/30 hover:bg-white/[0.06]"
           : "border-border/45 bg-gradient-to-br from-card/90 to-card/40 p-3 shadow-sm hover:border-indigo-500/35 hover:from-card hover:to-card/80"
       )}
     >
       <div
         className={cn(
-          "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border",
+          "mt-0.5 flex shrink-0 items-center justify-center rounded-lg border",
           variant === "sidebar"
-            ? "border-white/[0.08] bg-white/[0.04] text-white/50"
-            : "border-border/40 bg-muted/30 text-muted-foreground"
+            ? "size-6 border-white/[0.08] bg-white/[0.04] text-white/45"
+            : "size-8 border-border/40 bg-muted/30 text-muted-foreground"
         )}
       >
-        <FileText className="size-4" weight="duotone" />
+        <FileText className={variant === "sidebar" ? "size-3.5" : "size-4"} weight="duotone" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">

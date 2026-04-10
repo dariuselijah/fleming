@@ -260,6 +260,60 @@ export function buildAcceptedEntityBlock(
   }
 }
 
+/** Lab order block for sidebar / timeline (manual catalog pick or procedure accept). */
+export function buildLabOrderBlock(
+  patientId: string,
+  label: string,
+  opts?: {
+    catalogId?: string
+    category?: string
+    /** When created from Accept on AI procedures extraction */
+    fromProcedureAccept?: string
+    sourceType?: MedicalBlock["sourceType"]
+  }
+): MedicalBlock {
+  const t = label.replace(/\s+/g, " ").trim()
+  return {
+    id: `lab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    type: "LAB",
+    timestamp: new Date(),
+    patientId,
+    metadata: {
+      label: t,
+      catalogId: opts?.catalogId,
+      labCategory: opts?.category,
+      acceptedProcedureItem: opts?.fromProcedureAccept,
+    },
+    status: "active",
+    sourceType: opts?.sourceType ?? "manual",
+    title: t,
+    summary: "Lab order (this encounter)",
+  }
+}
+
+/** Imaging / radiology request block for timeline & history (manual entry). */
+export function buildImagingOrderBlock(
+  patientId: string,
+  label: string,
+  opts?: { modality?: string; sourceType?: MedicalBlock["sourceType"] }
+): MedicalBlock {
+  const t = label.replace(/\s+/g, " ").trim()
+  return {
+    id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    type: "IMAGING",
+    timestamp: new Date(),
+    patientId,
+    metadata: {
+      label: t,
+      imagingModality: opts?.modality,
+    },
+    status: "active",
+    sourceType: opts?.sourceType ?? "manual",
+    title: t,
+    summary: "Imaging (this encounter)",
+  }
+}
+
 function clinicalTypeToBlockType(type: ClinicalDocType): MedicalBlock["type"] {
   switch (type) {
     case "soap":

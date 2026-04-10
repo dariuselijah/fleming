@@ -16,9 +16,11 @@ import type {
   BillingSubTab,
   InboxNotificationFilter,
   InboxScrollTarget,
+  ClaimLine,
   ClinicalDocument,
   ConsultStatus,
   DocumentSheetState,
+  EvidenceDeepDiveState,
   InboxMessage,
   InventoryItem,
   MedicalBlock,
@@ -36,6 +38,7 @@ import type {
   VitalReading,
   WorkspaceMode,
 } from "./types"
+import type { PatientRegistrationPrefill } from "@/lib/clinical/smart-import-patient"
 
 interface WorkspaceContextValue {
   mode: WorkspaceMode
@@ -122,6 +125,18 @@ interface WorkspaceContextValue {
     fromLabel: string,
     toLabel: string
   ) => void
+  removeEncounterProblem: (patientId: string, problem: string) => void
+  addEncounterProblem: (patientId: string, problem: string) => void
+  addCriticalAllergy: (patientId: string, allergy: string) => void
+  removeCriticalAllergy: (patientId: string, allergy: string) => void
+  renameCriticalAllergy: (patientId: string, fromLabel: string, toLabel: string) => void
+  removePatientBlock: (patientId: string, blockId: string) => void
+  updateLabOrderBlock: (patientId: string, blockId: string, newLabel: string) => void
+  rejectScribeEntity: (patientId: string, entityKey: string, item: string) => void
+  setPatientEvidenceDeepDive: (
+    patientId: string,
+    state: EvidenceDeepDiveState | null
+  ) => void
   addSessionMedication: (
     patientId: string,
     med: Omit<PatientMedication, "id" | "startDate"> &
@@ -136,6 +151,18 @@ interface WorkspaceContextValue {
   addBlock: (patientId: string, block: MedicalBlock) => void
   signConsult: (patientId: string) => void
   submitClaim: (patientId: string) => void
+  setClaimDraftLines: (patientId: string, lines: ClaimLine[] | null) => void
+  dismissClaimPreview: (patientId: string) => void
+  recordClaimSubmissionSuccess: (patientId: string, claimId?: string) => void
+  setPatientRemoteDraftClaimId: (patientId: string, claimId: string | null) => void
+  resumeMedikreditClaimDraft: (args: {
+    patientId: string
+    patientName: string
+    lines: ClaimLine[]
+    remoteClaimId: string
+    clinicalEncounterId?: string
+  }) => void
+  beginNewVisitForPatient: (patientId: string) => void
 
   togglePane: (pane: "timeline" | "sidecar") => void
   setSidecarContent: (content: SidecarPayload | null) => void
@@ -149,6 +176,7 @@ interface WorkspaceContextValue {
   setActiveDoctor: (doctorId: string | null) => void
   setBillingSubTab: (tab: BillingSubTab) => void
   addClaim: (claim: PracticeClaim) => void
+  setClaims: (claims: PracticeClaim[]) => void
   updateClaim: (claimId: string, update: Partial<PracticeClaim>) => void
   updateClaimStatus: (claimId: string, status: PracticeClaim["status"]) => void
   upsertInventoryItem: (item: InventoryItem) => void
@@ -163,6 +191,10 @@ interface WorkspaceContextValue {
 
   addPatient: (patient: PracticePatient) => void
   updatePatient: (patientId: string, update: Partial<PracticePatient>) => void
+  patientAddModalPrefill: PatientRegistrationPrefill | null
+  patientAddModalOpenNonce: number
+  openPatientAddModalWithPrefill: (prefill: PatientRegistrationPrefill) => void
+  clearPatientAddModalPrefill: () => void
 
   addNotification: (notification: AdminNotification) => void
   markNotificationRead: (notificationId: string) => void
@@ -186,6 +218,7 @@ interface WorkspaceContextValue {
   setScribeEntities: (entities: ExtractedEntities) => void
   setScribeHighlights: (highlights: HighlightSpan[]) => void
   setEntityStatus: (key: string, status: "pending" | "accepted" | "rejected") => void
+  unacceptScribeEntity: (patientId: string, entityKey: string, item: string) => void
   acceptScribeEntity: (
     patientId: string,
     entityKey: string,
@@ -280,6 +313,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       addPatientChronicCondition: store.addPatientChronicCondition,
       removePatientChronicCondition: store.removePatientChronicCondition,
       renamePatientChronicCondition: store.renamePatientChronicCondition,
+      removeEncounterProblem: store.removeEncounterProblem,
+      addEncounterProblem: store.addEncounterProblem,
+      addCriticalAllergy: store.addCriticalAllergy,
+      removeCriticalAllergy: store.removeCriticalAllergy,
+      renameCriticalAllergy: store.renameCriticalAllergy,
+      removePatientBlock: store.removePatientBlock,
+      updateLabOrderBlock: store.updateLabOrderBlock,
+      rejectScribeEntity: store.rejectScribeEntity,
+      setPatientEvidenceDeepDive: store.setPatientEvidenceDeepDive,
       addSessionMedication: store.addSessionMedication,
       removeSessionMedication: store.removeSessionMedication,
       updateSOAPNote: store.updateSOAPNote,
@@ -290,6 +332,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       addBlock: store.addBlock,
       signConsult: store.signConsult,
       submitClaim: store.submitClaim,
+      setClaimDraftLines: store.setClaimDraftLines,
+      dismissClaimPreview: store.dismissClaimPreview,
+      recordClaimSubmissionSuccess: store.recordClaimSubmissionSuccess,
+      setPatientRemoteDraftClaimId: store.setPatientRemoteDraftClaimId,
+      resumeMedikreditClaimDraft: store.resumeMedikreditClaimDraft,
+      beginNewVisitForPatient: store.beginNewVisitForPatient,
 
       togglePane: store.togglePane,
       setSidecarContent: store.setSidecarContent,
@@ -303,6 +351,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setActiveDoctor: store.setActiveDoctor,
       setBillingSubTab: store.setBillingSubTab,
       addClaim: store.addClaim,
+      setClaims: store.setClaims,
       updateClaim: store.updateClaim,
       updateClaimStatus: store.updateClaimStatus,
       upsertInventoryItem: store.upsertInventoryItem,
@@ -317,6 +366,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       addPatient: store.addPatient,
       updatePatient: store.updatePatient,
+      patientAddModalPrefill: store.patientAddModalPrefill,
+      patientAddModalOpenNonce: store.patientAddModalOpenNonce,
+      openPatientAddModalWithPrefill: store.openPatientAddModalWithPrefill,
+      clearPatientAddModalPrefill: store.clearPatientAddModalPrefill,
 
       addNotification: store.addNotification,
       markNotificationRead: store.markNotificationRead,
@@ -340,6 +393,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setScribeEntities: store.setScribeEntities,
       setScribeHighlights: store.setScribeHighlights,
       setEntityStatus: store.setEntityStatus,
+      unacceptScribeEntity: store.unacceptScribeEntity,
       acceptScribeEntity: store.acceptScribeEntity,
       updateEntityText: store.updateEntityText,
       clearScribeTranscript: store.clearScribeTranscript,

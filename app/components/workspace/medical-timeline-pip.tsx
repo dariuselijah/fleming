@@ -11,10 +11,13 @@ export function MedicalTimelinePip({
   block,
   isLast,
   onPin,
+  variant = "default",
 }: {
   block: MedicalBlock
   isLast: boolean
   onPin: (blockId: string) => void
+  /** Nested rows sit under an accepted cluster — hide duplicate date, tighter layout */
+  variant?: "default" | "nested"
 }) {
   const [expanded, setExpanded] = useState(false)
   const Icon = BLOCK_ICONS[block.type] ?? FileText
@@ -23,28 +26,30 @@ export function MedicalTimelinePip({
   const time = new Date(block.timestamp)
   const timeStr = time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   const dateStr = time.toLocaleDateString([], { month: "short", day: "numeric" })
+  const nested = variant === "nested"
 
   return (
-    <div className="group relative flex gap-3 pl-4">
+    <div className={cn("group relative flex gap-3", nested ? "pl-0" : "pl-4")}>
       <div className="flex flex-col items-center">
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
           className={cn(
-            "z-10 flex size-7 shrink-0 items-center justify-center rounded-full border border-border/50 transition-all",
+            "z-10 flex shrink-0 items-center justify-center rounded-full border border-border/50 transition-all",
+            nested ? "size-6" : "size-7",
             colorClass,
             expanded && "ring-2 ring-indigo-500/30"
           )}
         >
-          <Icon className="size-3.5" weight="fill" />
+          <Icon className={nested ? "size-3" : "size-3.5"} weight="fill" />
         </button>
         {!isLast && <div className="w-px flex-1 bg-border/40" />}
       </div>
 
-      <div className="min-w-0 flex-1 pb-3">
+      <div className={cn("min-w-0 flex-1", nested ? "pb-2" : "pb-3")}>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-medium">{timeStr}</span>
-          <span className="text-[10px] text-muted-foreground">{dateStr}</span>
+          <span className={cn("font-medium", nested ? "text-[10px]" : "text-[11px]")}>{timeStr}</span>
+          {!nested && <span className="text-[10px] text-muted-foreground">{dateStr}</span>}
         </div>
 
         <AnimatePresence>

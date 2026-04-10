@@ -18,22 +18,42 @@ const envPath = resolve(process.cwd(), ".env")
 if (existsSync(envLocalPath)) config({ path: envLocalPath })
 if (existsSync(envPath)) config({ path: envPath })
 
-const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim()
-const SERVICE_ROLE =
-  (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || "").trim()
+const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "").trim()
 const DB_URL = (process.env.DATABASE_URL || "").trim()
+
+/** Postgres user password from Dashboard → Settings → Database (NOT the service_role JWT). */
+function databasePassword(): string {
+  return (
+    process.env.SUPABASE_DB_PASSWORD ||
+    process.env.POSTGRES_PASSWORD ||
+    process.env.SUPABASE_POSTGRES_PASSWORD ||
+    ""
+  ).trim()
+}
 
 function extractProjectRef(): string {
   const match = SUPABASE_URL.match(/https:\/\/([^.]+)\.supabase\.co/)
-  if (!match) throw new Error(`Cannot extract project ref from ${SUPABASE_URL}`)
+  if (!match) throw new Error(`Cannot extract project ref from NEXT_PUBLIC_SUPABASE_URL / SUPABASE_URL`)
   return match[1]
 }
 
+/**
+ * Prefer `DATABASE_URL` from Supabase (Settings → Database → URI).
+ * Otherwise build a direct session connection using the **database password** only.
+ * Never use SUPABASE_SERVICE_ROLE_KEY as the Postgres password — that JWT triggers SCRAM errors.
+ */
 function buildConnectionString(): string {
   if (DB_URL) return DB_URL
+  const pw = databasePassword()
+  if (!pw) {
+    throw new Error(
+      "Set DATABASE_URL (recommended), or SUPABASE_DB_PASSWORD with NEXT_PUBLIC_SUPABASE_URL. " +
+        "Use the Postgres password from Supabase → Settings → Database — not the service_role key."
+    )
+  }
   const ref = extractProjectRef()
-  // Supabase pooler connection using service_role JWT as password (session mode port 5432)
-  return `postgresql://postgres.${ref}:${SERVICE_ROLE}@aws-0-us-east-1.pooler.supabase.com:5432/postgres`
+  const enc = encodeURIComponent(pw)
+  return `postgresql://postgres:${enc}@db.${ref}.supabase.co:5432/postgres?sslmode=require`
 }
 
 async function main() {
@@ -49,12 +69,23 @@ async function main() {
     process.exit(1)
   }
 
-  const connStr = buildConnectionString()
-  console.log(`Connecting to Supabase Postgres (project: ${extractProjectRef()})...`)
+  let connStr: string
+  try {
+    connStr = buildConnectionString()
+  } catch (e: any) {
+    console.error(e.message || e)
+    process.exit(1)
+  }
+  console.log(
+    DB_URL
+      ? "Connecting using DATABASE_URL..."
+      : `Connecting to Supabase Postgres (project: ${extractProjectRef()})...`
+  )
 
+  const useSsl = /supabase\.co|pooler\.supabase\.com/.test(connStr)
   const client = new Client({
     connectionString: connStr,
-    ssl: process.env.DATABASE_URL ? undefined : { rejectUnauthorized: false },
+    ...(useSsl ? { ssl: { rejectUnauthorized: false } as const } : {}),
   })
 
   try {

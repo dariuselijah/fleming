@@ -874,17 +874,92 @@ export type Database = {
         Row: {
           id: string
           name: string
+          country_code: string
           created_at: string | null
         }
         Insert: {
           id?: string
           name: string
+          country_code?: string
           created_at?: string | null
         }
         Update: {
           id?: string
           name?: string
+          country_code?: string
           created_at?: string | null
+        }
+        Relationships: []
+      }
+      lab_partner_connections: {
+        Row: {
+          id: string
+          practice_id: string
+          lab_partner: string
+          status: string
+          inbound_auth_token: string | null
+          doctor_snapshot: unknown
+          last_outreach_at: string | null
+          last_outreach_to: string | null
+          last_outreach_error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          lab_partner: string
+          status?: string
+          inbound_auth_token?: string | null
+          doctor_snapshot?: unknown
+          last_outreach_at?: string | null
+          last_outreach_to?: string | null
+          last_outreach_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          lab_partner?: string
+          status?: string
+          inbound_auth_token?: string | null
+          doctor_snapshot?: unknown
+          last_outreach_at?: string | null
+          last_outreach_to?: string | null
+          last_outreach_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      number_requests: {
+        Row: {
+          id: string
+          practice_id: string
+          country_code: string
+          status: string
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          country_code: string
+          status?: string
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          country_code?: string
+          status?: string
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -956,6 +1031,8 @@ export type Database = {
           profile_iv: string | null
           profile_version: number
           display_name_hint: string | null
+          phone_e164: string | null
+          profile_status: string
           created_by: string | null
           created_at: string
           updated_at: string
@@ -967,6 +1044,8 @@ export type Database = {
           profile_iv?: string | null
           profile_version?: number
           display_name_hint?: string | null
+          phone_e164?: string | null
+          profile_status?: string
           created_by?: string | null
           created_at?: string
           updated_at?: string
@@ -978,6 +1057,8 @@ export type Database = {
           profile_iv?: string | null
           profile_version?: number
           display_name_hint?: string | null
+          phone_e164?: string | null
+          profile_status?: string
           created_by?: string | null
           created_at?: string
           updated_at?: string
@@ -997,6 +1078,7 @@ export type Database = {
           state_ciphertext: string | null
           state_iv: string | null
           state_version: number
+          last_indexed_at: string | null
           created_at: string
           updated_at: string
         }
@@ -1012,6 +1094,7 @@ export type Database = {
           state_ciphertext?: string | null
           state_iv?: string | null
           state_version?: number
+          last_indexed_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -1027,6 +1110,7 @@ export type Database = {
           state_ciphertext?: string | null
           state_iv?: string | null
           state_version?: number
+          last_indexed_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -1156,6 +1240,7 @@ export type Database = {
           linked_consult_id: string | null
           payload_ciphertext: string | null
           payload_iv: string | null
+          metadata: Record<string, unknown>
           created_at: string
           updated_at: string
         }
@@ -1183,6 +1268,7 @@ export type Database = {
           linked_consult_id?: string | null
           payload_ciphertext?: string | null
           payload_iv?: string | null
+          metadata?: Record<string, unknown>
           created_at?: string
           updated_at?: string
         }
@@ -1210,8 +1296,354 @@ export type Database = {
           linked_consult_id?: string | null
           payload_ciphertext?: string | null
           payload_iv?: string | null
+          metadata?: Record<string, unknown>
           created_at?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      practice_channels: {
+        Row: {
+          id: string
+          practice_id: string
+          channel_type: string
+          provider: string
+          phone_number: string
+          phone_number_sid: string | null
+          whatsapp_sender_sid: string | null
+          whatsapp_waba_id: string | null
+          sender_display_name: string | null
+          sender_registered_at: string | null
+          vapi_assistant_id: string | null
+          vapi_phone_number_id: string | null
+          provider_config_encrypted: string | null
+          config_iv: string | null
+          status: string
+          webhook_url: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          channel_type: string
+          provider: string
+          phone_number: string
+          phone_number_sid?: string | null
+          whatsapp_sender_sid?: string | null
+          whatsapp_waba_id?: string | null
+          sender_display_name?: string | null
+          sender_registered_at?: string | null
+          vapi_assistant_id?: string | null
+          vapi_phone_number_id?: string | null
+          provider_config_encrypted?: string | null
+          config_iv?: string | null
+          status?: string
+          webhook_url?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          channel_type?: string
+          provider?: string
+          phone_number?: string
+          phone_number_sid?: string | null
+          whatsapp_sender_sid?: string | null
+          whatsapp_waba_id?: string | null
+          sender_display_name?: string | null
+          sender_registered_at?: string | null
+          vapi_assistant_id?: string | null
+          vapi_phone_number_id?: string | null
+          provider_config_encrypted?: string | null
+          config_iv?: string | null
+          status?: string
+          webhook_url?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      conversation_threads: {
+        Row: {
+          id: string
+          practice_id: string
+          channel: string
+          external_party: string
+          patient_id: string | null
+          status: string
+          priority: string
+          current_flow: string
+          flow_state: Json
+          last_message_at: string
+          session_expires_at: string | null
+          unread_count: number
+          assigned_staff_id: string | null
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          channel: string
+          external_party: string
+          patient_id?: string | null
+          status?: string
+          priority?: string
+          current_flow?: string
+          flow_state?: Json
+          last_message_at?: string
+          session_expires_at?: string | null
+          unread_count?: number
+          assigned_staff_id?: string | null
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          channel?: string
+          external_party?: string
+          patient_id?: string | null
+          status?: string
+          priority?: string
+          current_flow?: string
+          flow_state?: Json
+          last_message_at?: string
+          session_expires_at?: string | null
+          unread_count?: number
+          assigned_staff_id?: string | null
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      thread_messages: {
+        Row: {
+          id: string
+          thread_id: string
+          practice_id: string
+          direction: string
+          sender_type: string
+          content_type: string
+          body: string | null
+          media_url: string | null
+          media_mime_type: string | null
+          media_storage_path: string | null
+          template_name: string | null
+          interactive_payload: Json | null
+          provider_message_id: string | null
+          delivery_status: string
+          failure_reason: string | null
+          agent_tool_calls: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          thread_id: string
+          practice_id: string
+          direction: string
+          sender_type: string
+          content_type?: string
+          body?: string | null
+          media_url?: string | null
+          media_mime_type?: string | null
+          media_storage_path?: string | null
+          template_name?: string | null
+          interactive_payload?: Json | null
+          provider_message_id?: string | null
+          delivery_status?: string
+          failure_reason?: string | null
+          agent_tool_calls?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          thread_id?: string
+          practice_id?: string
+          direction?: string
+          sender_type?: string
+          content_type?: string
+          body?: string | null
+          media_url?: string | null
+          media_mime_type?: string | null
+          media_storage_path?: string | null
+          template_name?: string | null
+          interactive_payload?: Json | null
+          provider_message_id?: string | null
+          delivery_status?: string
+          failure_reason?: string | null
+          agent_tool_calls?: Json | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      voice_calls: {
+        Row: {
+          id: string
+          thread_id: string
+          practice_id: string
+          direction: string
+          vapi_call_id: string | null
+          twilio_call_sid: string | null
+          duration_seconds: number | null
+          recording_url: string | null
+          recording_storage_path: string | null
+          transcript: string | null
+          summary: string | null
+          tool_calls_log: Json | null
+          ended_reason: string | null
+          cost_cents: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          thread_id: string
+          practice_id: string
+          direction: string
+          vapi_call_id?: string | null
+          twilio_call_sid?: string | null
+          duration_seconds?: number | null
+          recording_url?: string | null
+          recording_storage_path?: string | null
+          transcript?: string | null
+          summary?: string | null
+          tool_calls_log?: Json | null
+          ended_reason?: string | null
+          cost_cents?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          thread_id?: string
+          practice_id?: string
+          direction?: string
+          vapi_call_id?: string | null
+          twilio_call_sid?: string | null
+          duration_seconds?: number | null
+          recording_url?: string | null
+          recording_storage_path?: string | null
+          transcript?: string | null
+          summary?: string | null
+          tool_calls_log?: Json | null
+          ended_reason?: string | null
+          cost_cents?: number | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      practice_hours: {
+        Row: {
+          id: string
+          practice_id: string
+          day_of_week: number
+          open_time: string
+          close_time: string
+          is_closed: boolean
+          label: string | null
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          day_of_week: number
+          open_time?: string
+          close_time?: string
+          is_closed?: boolean
+          label?: string | null
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          day_of_week?: number
+          open_time?: string
+          close_time?: string
+          is_closed?: boolean
+          label?: string | null
+        }
+        Relationships: []
+      }
+      practice_faqs: {
+        Row: {
+          id: string
+          practice_id: string
+          category: string
+          question: string
+          answer: string
+          keywords: string[] | null
+          sort_order: number
+          active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          category?: string
+          question: string
+          answer: string
+          keywords?: string[] | null
+          sort_order?: number
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          category?: string
+          question?: string
+          answer?: string
+          keywords?: string[] | null
+          sort_order?: number
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      practice_services: {
+        Row: {
+          id: string
+          practice_id: string
+          name: string
+          description: string | null
+          duration_minutes: number
+          fee: number | null
+          category: string | null
+          requires_referral: boolean
+          preparation_instructions: string | null
+          active: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          name: string
+          description?: string | null
+          duration_minutes?: number
+          fee?: number | null
+          category?: string | null
+          requires_referral?: boolean
+          preparation_instructions?: string | null
+          active?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          name?: string
+          description?: string | null
+          duration_minutes?: number
+          fee?: number | null
+          category?: string | null
+          requires_referral?: boolean
+          preparation_instructions?: string | null
+          active?: boolean
+          created_at?: string
         }
         Relationships: []
       }
@@ -1434,6 +1866,141 @@ export type Database = {
           content_tsv?: unknown
           chunk_body?: string | null
           created_at?: string
+        }
+        Relationships: []
+      }
+      medikredit_providers: {
+        Row: {
+          practice_id: string
+          vendor_id: string | null
+          bhf_number: string | null
+          hpc_number: string | null
+          group_practice_number: string | null
+          pc_number: string | null
+          works_number: string | null
+          prescriber_mem_acc_nbr: string | null
+          use_test_provider: boolean
+          extra_settings: Record<string, unknown>
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          practice_id: string
+          vendor_id?: string | null
+          bhf_number?: string | null
+          hpc_number?: string | null
+          group_practice_number?: string | null
+          pc_number?: string | null
+          works_number?: string | null
+          prescriber_mem_acc_nbr?: string | null
+          use_test_provider?: boolean
+          extra_settings?: Record<string, unknown>
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          practice_id?: string
+          vendor_id?: string | null
+          bhf_number?: string | null
+          hpc_number?: string | null
+          group_practice_number?: string | null
+          pc_number?: string | null
+          works_number?: string | null
+          prescriber_mem_acc_nbr?: string | null
+          use_test_provider?: boolean
+          extra_settings?: Record<string, unknown>
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      eligibility_checks: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          check_type: string
+          tx_nbr: string | null
+          res: string | null
+          response: Record<string, unknown>
+          raw_xml: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          check_type: string
+          tx_nbr?: string | null
+          res?: string | null
+          response?: Record<string, unknown>
+          raw_xml?: string | null
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          check_type?: string
+          tx_nbr?: string | null
+          res?: string | null
+          response?: Record<string, unknown>
+          raw_xml?: string | null
+          created_by?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      practice_claims: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          clinical_encounter_id: string | null
+          status: string
+          lines: unknown[]
+          medikredit_response: Record<string, unknown> | null
+          submission_fingerprint: string | null
+          tx_nbr: string | null
+          orig_code: string | null
+          raw_last_response_xml: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          clinical_encounter_id?: string | null
+          status?: string
+          lines?: unknown[]
+          medikredit_response?: Record<string, unknown> | null
+          submission_fingerprint?: string | null
+          tx_nbr?: string | null
+          orig_code?: string | null
+          raw_last_response_xml?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          clinical_encounter_id?: string | null
+          status?: string
+          lines?: unknown[]
+          medikredit_response?: Record<string, unknown> | null
+          submission_fingerprint?: string | null
+          tx_nbr?: string | null
+          orig_code?: string | null
+          raw_last_response_xml?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
