@@ -64,6 +64,12 @@ export interface SOAPNote {
   }
 }
 
+/** The four SOAP body fields (excludes `ghostText` metadata on SOAPNote). */
+export type SOAPBodySection = keyof Pick<
+  SOAPNote,
+  "subjective" | "objective" | "assessment" | "plan"
+>
+
 export interface PatientLifestyle {
   smoker?: boolean
   alcohol?: string
@@ -226,7 +232,7 @@ export interface ClinicalSource {
   snippet?: string
 }
 
-export type ShareTarget = "front_desk" | "patient_whatsapp" | "patient_email" | "specialist"
+export type ShareTarget = "front_desk" | "patient_rcs" | "patient_portal" | "patient_email" | "specialist"
 
 export interface PracticeFlowEntry {
   patientId: string
@@ -249,7 +255,6 @@ export type AdminTab =
   | "inventory"
   | "analytics"
   | "patients"
-  | "settings"
   | "channels"
 
 /** Practice team member — extended in Settings for roles / credential tracking */
@@ -276,6 +281,8 @@ export interface PracticePatient {
   emergencyContact?: { name: string; relationship: string; phone: string }
   medicalAidStatus: MedicalAidVerification
   medicalAidScheme?: string
+  /** Option / scheme code from `medical_schemes` when chosen from the catalog */
+  medicalAidSchemeCode?: string
   medicalAidPlan?: string
   memberNumber?: string
   dependentCode?: string
@@ -373,9 +380,17 @@ export interface PracticeProvider {
   email?: string
 }
 
+/** Operating hours for calendar + booking (from `practice_hours`). */
+export interface PracticeBusinessHour {
+  dayOfWeek: number
+  openTime: string
+  closeTime: string
+  isClosed: boolean
+}
+
 export interface InboxMessage {
   id: string
-  channel: "whatsapp" | "voice" | "sms" | "portal" | "lab" | "email"
+  channel: "rcs" | "voice" | "sms" | "portal" | "lab" | "email"
   from: string
   preview: string
   timestamp: string

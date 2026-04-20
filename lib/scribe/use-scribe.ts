@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { SOAPBodySection } from "@/lib/clinical-workspace/types"
 import { useWorkspaceStore, type ScribeSegment } from "@/lib/clinical-workspace/workspace-store"
 import { generateSOAPGhostText } from "./soap-mapper"
 import { EMPTY_EXTRACTED, type ExtractedEntities, type HighlightSpan } from "./entity-highlighter"
@@ -170,11 +171,7 @@ export function useScribe({ enabled, patientId }: UseScribeOptions) {
     const ghost = generateSOAPGhostText(state.scribeTranscript, patient.soapNote)
     for (const [section, text] of Object.entries(ghost)) {
       if (text) {
-        state.setSOAPGhostText(
-          patient.patientId,
-          section as keyof typeof patient.soapNote,
-          text
-        )
+        state.setSOAPGhostText(patient.patientId, section as SOAPBodySection, text)
       }
     }
   }, [patientId])

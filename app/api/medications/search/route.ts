@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getClinicalProxyBase } from "@/lib/clinical-proxy/url"
 
 const OPENFDA_LABEL_URL = "https://api.fda.gov/drug/label.json"
 const RXNAV_DRUGS_URL = "https://rxnav.nlm.nih.gov/REST/drugs.json"
@@ -16,13 +17,57 @@ function normalizeMedicationName(name: string): string {
 }
 
 /**
- * Optional Medprax (or compatible) product search. Set MEDPRAX_API_URL + MEDPRAX_API_KEY.
- * Response may be string[], { results: { name }[] }, or { suggestions: string[] }.
+ * Optional Medprax (or compatible) product search.
+ * - CLINICAL_PROXY_URL: POST /api/medication-search (see API_REQUESTS_MEDIKREDIT_MEDPRAX.md).
+ * - Else MEDPRAX_API_URL + MEDPRAX_API_KEY: GET /medicines/search?q=...
  */
 async function searchMedpraxMedications(
   query: string,
   limit: number
 ): Promise<string[]> {
+  const proxyBase = getClinicalProxyBase()
+  if (proxyBase) {
+    try {
+      const response = await fetch(`${proxyBase}/api/medication-search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ query }),
+        cache: "no-store",
+      })
+      if (!response.ok) return []
+
+      const data: unknown = await response.json()
+      const out: string[] = []
+
+      const pushName = (raw: unknown) => {
+        if (typeof raw === "string") {
+          const n = normalizeMedicationName(raw)
+          if (n) out.push(n)
+          return
+        }
+        if (raw && typeof raw === "object") {
+          const o = raw as Record<string, unknown>
+          const n =
+            o.name ?? o.fullDescription ?? o.productName ?? o.description ?? o.label
+          if (typeof n === "string") {
+            const x = normalizeMedicationName(n)
+            if (x) out.push(x)
+          }
+        }
+      }
+
+      if (data && typeof data === "object") {
+        const o = data as Record<string, unknown>
+        const meds = o.medications
+        if (Array.isArray(meds)) meds.forEach(pushName)
+      }
+
+      return [...new Set(out)].slice(0, limit)
+    } catch {
+      return []
+    }
+  }
+
   const base = process.env.MEDPRAX_API_URL?.replace(/\/$/, "")
   const key = process.env.MEDPRAX_API_KEY
   if (!base || !key) return []

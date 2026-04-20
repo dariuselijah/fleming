@@ -15,6 +15,7 @@ import {
   MessageContent,
 } from "@/components/prompt-kit/message"
 import { Button } from "@/components/ui/button"
+import { stripClientPromptContextForDisplay } from "@/lib/chat/user-message-display"
 import { stripUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
 import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"

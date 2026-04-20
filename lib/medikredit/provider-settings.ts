@@ -11,7 +11,10 @@ export function rowToSettings(row: ProviderRow | null): MedikreditProviderSettin
       extraSettings: {},
     }
   }
+  const extras = (row.extra_settings as Record<string, unknown>) ?? {}
+  const disciplineFromExtras = extras.discipline
   return {
+    providerDisplayName: row.provider_display_name,
     vendorId: row.vendor_id,
     bhfNumber: row.bhf_number,
     hpcNumber: row.hpc_number,
@@ -19,9 +22,12 @@ export function rowToSettings(row: ProviderRow | null): MedikreditProviderSettin
     pcNumber: row.pc_number,
     worksNumber: row.works_number,
     prescriberMemAccNbr: row.prescriber_mem_acc_nbr,
-    discipline: (row as Record<string, unknown>).discipline as string | null ?? null,
+    vendorVersion: row.vendor_version,
+    discipline:
+      row.discipline ??
+      (typeof disciplineFromExtras === "string" ? disciplineFromExtras : null),
     useTestProvider: row.use_test_provider,
-    extraSettings: (row.extra_settings as Record<string, unknown>) ?? {},
+    extraSettings: extras,
   }
 }
 

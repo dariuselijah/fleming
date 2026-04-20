@@ -24,7 +24,7 @@ export async function runPatientLookupFlow(
 
   switch (step) {
     case "ask_method":
-      return handleAskMethod(ctx, message, collected)
+      return await handleAskMethod(ctx, message, collected)
     case "collect_id":
       return handleCollectId(ctx, message, collected)
     case "collect_phone":
@@ -32,15 +32,15 @@ export async function runPatientLookupFlow(
     case "show_result":
       return handleShowResult(ctx, message, collected)
     default:
-      return handleAskMethod(ctx, message, collected)
+      return await handleAskMethod(ctx, message, collected)
   }
 }
 
-function handleAskMethod(
+async function handleAskMethod(
   ctx: CommsAgentContext,
   message: string,
   collected: PatientLookupFlowState["collected"]
-): CommsAgentResponse {
+): Promise<CommsAgentResponse> {
   const lower = message.toLowerCase()
 
   if (/\b\d{13}\b/.test(message.replace(/\s/g, ""))) {
@@ -175,8 +175,10 @@ async function searchPatientById(
 
   for (const p of patients) {
     const hint = (p.display_name_hint || "").toLowerCase()
-    if (hint.includes(idNumber)) return { id: p.id, displayNameHint: p.display_name_hint, createdAt: p.created_at }
-    if (hint.includes(lastFour) && hint.includes(firstSix)) return { id: p.id, displayNameHint: p.display_name_hint, createdAt: p.created_at }
+    if (hint.includes(idNumber))
+      return { id: p.id, displayNameHint: p.display_name_hint ?? "", createdAt: p.created_at }
+    if (hint.includes(lastFour) && hint.includes(firstSix))
+      return { id: p.id, displayNameHint: p.display_name_hint ?? "", createdAt: p.created_at }
   }
 
   return null
@@ -198,7 +200,8 @@ async function searchPatientByPhone(
 
   for (const p of patients) {
     const hint = (p.display_name_hint || "").toLowerCase()
-    if (hint.includes(cleanPhone)) return { id: p.id, displayNameHint: p.display_name_hint, createdAt: p.created_at }
+    if (hint.includes(cleanPhone))
+      return { id: p.id, displayNameHint: p.display_name_hint ?? "", createdAt: p.created_at }
   }
 
   return null

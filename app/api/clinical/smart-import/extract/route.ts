@@ -67,7 +67,9 @@ export async function POST(request: NextRequest) {
       const read = await readSmartImportDocument(
         buffer,
         file.type || "application/octet-stream",
-        file.name
+        file.name,
+        undefined,
+        mode
       )
       const structured = await structureSmartImport({
         mode,
@@ -107,10 +109,11 @@ export async function POST(request: NextRequest) {
               send({
                 type: "stage",
                 stage: "vision",
-                message: "Reading scan with GPT-5.2 vision…",
+                message: "Reading scan with vision…",
               })
             }
-          }
+          },
+          mode
         )
 
         send({ type: "stage", stage: "structure", message: "Parsing fields with AI…" })

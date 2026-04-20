@@ -113,7 +113,7 @@ export function LiveActivityFeed() {
           iconColor: "text-[#FFC107]",
           onClick: () => requestInboxScrollTo("labs"),
         })
-      } else if (m.channel === "whatsapp" || m.channel === "sms" || m.channel === "voice") {
+      } else if (m.channel === "rcs" || m.channel === "sms" || m.channel === "voice" || m.channel === "portal") {
         out.push({
           id: `msg-${m.id}`,
           at,

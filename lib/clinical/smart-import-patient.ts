@@ -128,10 +128,13 @@ export type PatientRegistrationPrefill = {
   email?: string
   hasMedicalAid?: boolean
   scheme?: string
-  plan?: string
   memberNumber?: string
   dependentCode?: string
   mainMemberName?: string
+  /** Benefit plan label from switch (PLAN@pln_descr), e.g. after eligibility / famcheck */
+  medicalAidPlan?: string
+  /** When known (principal / catalog) */
+  medicalAidSchemeCode?: string
 }
 
 function splitFullName(full: string): { firstName: string; lastName: string } {
@@ -204,7 +207,6 @@ export function buildPatientRegistrationPrefill(
     email: fields["Email"]?.trim() || undefined,
     hasMedicalAid: Boolean(scheme || member),
     scheme: scheme || undefined,
-    plan: fields["Plan"]?.trim() || undefined,
     memberNumber: member || undefined,
     dependentCode: fields["Dependent Code"]?.trim() || undefined,
     mainMemberName: fields["Main Member"]?.trim() || undefined,
@@ -235,7 +237,6 @@ export function buildPatientFromSmartImportFields(
     email: pre.email,
     medicalAidStatus: hasAid ? "pending" : "unknown",
     medicalAidScheme: hasAid ? medicalAidScheme : undefined,
-    medicalAidPlan: pre.plan,
     memberNumber: hasAid ? memberNumber : undefined,
     dependentCode: pre.dependentCode,
     mainMemberName: pre.mainMemberName,

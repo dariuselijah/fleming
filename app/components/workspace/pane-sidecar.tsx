@@ -410,12 +410,9 @@ function IntelligenceTab() {
     scribeTranscript,
     scribeEntityStatus,
     acceptScribeEntity,
-    addSessionMedication,
-    removeSessionMedication,
   } = useWorkspace()
   const scribeCtx = useScribeContext()
   const audioRef = useRef<HTMLInputElement>(null)
-  const [medQuickAdd, setMedQuickAdd] = useState("")
   const isSigned = activePatient?.consultSigned
   const isClaimSubmitted = activePatient?.claimSubmitted
   const isTranscribing = scribeCtx?.isTranscribing ?? false
@@ -429,7 +426,7 @@ function IntelligenceTab() {
   const pendingExtractionCount = useMemo(() => {
     let n = 0
     for (const { key } of ENTITY_SECTION_CONFIG) {
-      const items = (scribeEntities as Record<string, string[] | undefined>)[key]
+      const items = (scribeEntities as unknown as Record<string, string[] | undefined>)[key]
       if (!items?.length) continue
       for (const item of items) {
         const sk = `${key}:${item}`
@@ -444,7 +441,7 @@ function IntelligenceTab() {
     const pid = activePatient?.patientId
     if (!pid) return
     for (const { key, label } of ENTITY_SECTION_CONFIG) {
-      const items = (scribeEntities as Record<string, string[] | undefined>)[key]
+      const items = (scribeEntities as unknown as Record<string, string[] | undefined>)[key]
       if (!items?.length) continue
       for (const item of items) {
         const sk = `${key}:${item}`
@@ -508,70 +505,6 @@ function IntelligenceTab() {
               Claim {activePatient.claimId} submitted
             </div>
           )}
-        </div>
-      )}
-
-      {/* Encounter meds — same store as left chart Medications section */}
-      {activePatient && (
-        <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.04] p-2.5">
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <h4 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700/90 dark:text-sky-300/90">
-              <Pill className="size-3" weight="fill" />
-              Medications (chart)
-            </h4>
-            <span className="text-[9px] text-muted-foreground/80">Synced</span>
-          </div>
-          {(activePatient.activeMedications?.length ?? 0) === 0 ? (
-            <p className="text-[10px] text-muted-foreground/80">None — add from the left chart or here.</p>
-          ) : (
-            <ul className="space-y-1">
-              {(activePatient.activeMedications ?? []).map((m) => (
-                <li
-                  key={m.id}
-                  className="group/em flex items-start justify-between gap-2 rounded-md border border-border/40 bg-background/60 px-2 py-1"
-                >
-                  <span className="text-[11px] font-medium leading-snug">{m.name}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      activePatient.patientId && removeSessionMedication(activePatient.patientId, m.id)
-                    }
-                    className="shrink-0 rounded p-0.5 text-muted-foreground/40 opacity-0 transition hover:text-red-500 group-hover/em:opacity-100"
-                    aria-label="Remove"
-                  >
-                    <X className="size-3" weight="bold" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="mt-2 flex gap-1.5">
-            <input
-              value={medQuickAdd}
-              onChange={(e) => setMedQuickAdd(e.target.value)}
-              placeholder="Drug name…"
-              className="min-w-0 flex-1 rounded-md border border-border/50 bg-background/80 px-2 py-1 text-[10px] outline-none placeholder:text-muted-foreground/50"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && medQuickAdd.trim() && activePatient.patientId) {
-                  addSessionMedication(activePatient.patientId, { name: medQuickAdd.trim() })
-                  setMedQuickAdd("")
-                }
-              }}
-            />
-            <button
-              type="button"
-              disabled={!medQuickAdd.trim()}
-              onClick={() => {
-                if (medQuickAdd.trim() && activePatient.patientId) {
-                  addSessionMedication(activePatient.patientId, { name: medQuickAdd.trim() })
-                  setMedQuickAdd("")
-                }
-              }}
-              className="shrink-0 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-700 disabled:opacity-40 dark:text-sky-300"
-            >
-              Add
-            </button>
-          </div>
         </div>
       )}
 

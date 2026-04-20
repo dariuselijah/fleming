@@ -1,8 +1,10 @@
 export * from "./types"
-export { runCommsAgent } from "./agent"
+export { runCommsAgent, tryHandleReminderKeywordReply } from "./agent"
 export {
   getTwilioClient,
+  getTwilioMessagingServiceSid,
   validateTwilioSignature,
+  sendSmsMessage,
   sendWhatsAppMessage,
   sendWhatsAppTemplate,
   searchAvailableNumbers,
@@ -16,7 +18,15 @@ export {
   getWhatsAppSenderStatus,
   deleteWhatsAppSender,
 } from "./twilio"
-export { createOutboundCall, cloneAssistant, importTwilioNumber, deleteVapiPhoneNumber, validateVapiSignature } from "./vapi"
+export {
+  createOutboundCall,
+  cloneAssistant,
+  importTwilioNumber,
+  deleteVapiPhoneNumber,
+  validateVapiSignature,
+  updateAssistantServerUrl,
+  updateVapiPhoneNumberTwilioCredentials,
+} from "./vapi"
 export {
   getOrCreateThread,
   appendMessage,
@@ -25,6 +35,7 @@ export {
   getThreadMessages,
   resolvePracticeFromPhone,
   getPracticeWhatsAppNumber,
+  getPracticeMessagingNumber,
   resolvePatientByPhone,
   checkMessageIdempotency,
 } from "./threads"
@@ -38,6 +49,7 @@ export {
   getTemplatesForPractice,
   resolveContentSidForTemplate,
 } from "./templates"
+export { sendPatientTemplatedMessage, dispatchPostVoiceFollowUp } from "./communication-service"
 export {
   checkAvailability,
   bookAppointment,
@@ -50,4 +62,10 @@ export {
   getPracticeName,
 } from "./tools"
 export { normalizePhoneE164Za, findPatientByPracticePhone, resolvePatientPhoneE164 } from "./patient-phone"
+export {
+  resolvePatientIdForThread,
+  getUpcomingAppointments,
+  cancelAppointment,
+  rescheduleAppointment,
+} from "./appointment-actions"
 export { runPatientLookupFlow } from "./flows/patient-lookup"

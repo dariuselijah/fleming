@@ -32,8 +32,10 @@ export async function GET(req: NextRequest) {
     const baseUrl = rawBase.replace(/\/$/, "")
 
     const urls = {
-      whatsappInbound: `${baseUrl}/api/comms/whatsapp/webhook`,
-      whatsappStatus: `${baseUrl}/api/comms/whatsapp/status`,
+      messagingInbound: `${baseUrl}/api/comms/messaging/webhook`,
+      messagingStatus: `${baseUrl}/api/comms/messaging/status`,
+      whatsappInbound: `${baseUrl}/api/comms/messaging/webhook`,
+      whatsappStatus: `${baseUrl}/api/comms/messaging/status`,
       voiceInbound: `${baseUrl}/api/comms/voice/webhook`,
     }
 

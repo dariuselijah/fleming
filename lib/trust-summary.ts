@@ -147,7 +147,7 @@ function computeOverallGrade(citations: EvidenceCitation[]): { grade: GradeRatin
     const { grade, reason } = gradeFromEvidenceLevel(
       c.evidenceLevel || 5,
       c.studyType || "",
-      c.year
+      c.year ?? undefined
     )
     return { index: i + 1, grade, gradeReason: reason }
   })

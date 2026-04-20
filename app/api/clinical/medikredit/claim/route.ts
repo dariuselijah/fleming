@@ -2,8 +2,10 @@ import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { fingerprintClaimLines, resolveClaimDoctorOption, submitClaim } from "@/lib/medikredit/claim-service"
 import { validateMembershipFormat } from "@/lib/medikredit/doctor-option-catalog"
-import { getMedikreditEnv } from "@/lib/medikredit/env"
+import { isMedikreditConfigured } from "@/lib/medikredit/env"
 import { insertPracticeClaim } from "@/lib/medikredit/persist"
+import { createInvoiceFromClaim } from "@/lib/billing/invoices"
+import { zarToCents } from "@/lib/billing/money"
 import { assertPracticeMember } from "@/lib/medikredit/practice-guard"
 import { fetchMedikreditProviderSettings } from "@/lib/medikredit/provider-settings"
 import type { ClaimLineInput, MedikreditPatientPayload } from "@/lib/medikredit/types"
@@ -54,10 +56,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (e as Error).message }, { status })
   }
 
-  if (!getMedikreditEnv() && process.env.MEDIKREDIT_DRY_RUN !== "1") {
+  if (!isMedikreditConfigured()) {
     return NextResponse.json(
       {
-        error: "MediKredit is not configured on the server (set MEDIKREDIT_* env) or enable MEDIKREDIT_DRY_RUN=1 for development.",
+        error:
+          "MediKredit is not configured on the server (set CLINICAL_PROXY_URL, or MEDIKREDIT_* for direct SOAP, or MEDIKREDIT_DRY_RUN=1 for development).",
       },
       { status: 503 }
     )
@@ -87,6 +90,22 @@ export async function POST(req: Request) {
         clinicalEncounterId: body.clinicalEncounterId?.trim() || null,
       })
     }
+    if (claimId && result.patientResponsibility != null && result.patientResponsibility > 0) {
+      if (result.outcome === "approved" || result.outcome === "partially_approved") {
+        try {
+          await createInvoiceFromClaim(supabase, {
+            practiceId,
+            claimId,
+            billingMode: "split",
+            actorUserId: userId,
+            shortfallCents: zarToCents(result.patientResponsibility),
+          })
+        } catch (e) {
+          console.warn("[medikredit/claim] shortfall invoice", e)
+        }
+      }
+    }
+
     return NextResponse.json({
       result,
       claimId,

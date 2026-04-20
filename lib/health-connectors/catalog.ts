@@ -5,7 +5,8 @@ import type {
   HealthConnectorId,
 } from "./types"
 
-const HEALTH_CONNECTOR_DEFINITIONS: HealthConnectorDefinition[] = [
+/** Full catalog including wearables / FHIR — use {@link getHealthConnectorCatalog} for UI (evidence-only). */
+const ALL_HEALTH_CONNECTOR_DEFINITIONS: HealthConnectorDefinition[] = [
   {
     id: "pubmed",
     name: "PubMed",
@@ -226,12 +227,12 @@ const HEALTH_CONNECTOR_DEFINITIONS: HealthConnectorDefinition[] = [
     domain: "polar.com",
     isFeatured: false,
     requiredCredentials: [
-      { env: "POLAR_CLIENT_ID", label: "Polar Client ID" },
-      { env: "POLAR_CLIENT_SECRET", label: "Polar Client Secret", secret: true },
-      { env: "POLAR_REDIRECT_URI", label: "Polar Redirect URI" },
+      { env: "POLAR_FITNESS_CLIENT_ID", label: "Polar AccessLink Client ID" },
+      { env: "POLAR_FITNESS_CLIENT_SECRET", label: "Polar AccessLink Client Secret", secret: true },
+      { env: "POLAR_FITNESS_REDIRECT_URI", label: "Polar AccessLink Redirect URI" },
     ],
-    authorizationUrlEnv: "POLAR_AUTH_URL",
-    tokenUrlEnv: "POLAR_TOKEN_URL",
+    authorizationUrlEnv: "POLAR_FITNESS_AUTH_URL",
+    tokenUrlEnv: "POLAR_FITNESS_TOKEN_URL",
   },
   {
     id: "garmin",
@@ -450,26 +451,27 @@ const HEALTH_CONNECTOR_DEFINITIONS: HealthConnectorDefinition[] = [
   },
 ]
 
+/** Evidence / literature connectors only (settings UI and public catalog API). */
 export function getHealthConnectorCatalog(): HealthConnectorDefinition[] {
-  return HEALTH_CONNECTOR_DEFINITIONS
+  return ALL_HEALTH_CONNECTOR_DEFINITIONS.filter((c) => c.category === "evidence")
 }
 
 export function getHealthConnectorById(
   connectorId: string
 ): HealthConnectorDefinition | undefined {
-  return HEALTH_CONNECTOR_DEFINITIONS.find((connector) => connector.id === connectorId)
+  return ALL_HEALTH_CONNECTOR_DEFINITIONS.find((connector) => connector.id === connectorId)
 }
 
 export function getHealthConnectorsByCategory(
   category: HealthConnectorCategory
 ): HealthConnectorDefinition[] {
-  return HEALTH_CONNECTOR_DEFINITIONS.filter((connector) => connector.category === category)
+  return ALL_HEALTH_CONNECTOR_DEFINITIONS.filter((connector) => connector.category === category)
 }
 
 export function getHealthConnectorsByAvailability(
   availability: HealthConnectorAvailability
 ): HealthConnectorDefinition[] {
-  return HEALTH_CONNECTOR_DEFINITIONS.filter(
+  return ALL_HEALTH_CONNECTOR_DEFINITIONS.filter(
     (connector) => connector.availability === availability
   )
 }

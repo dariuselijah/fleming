@@ -19,6 +19,14 @@ import {
 } from "@phosphor-icons/react"
 import { motion, AnimatePresence } from "motion/react"
 import { useCallback, useMemo, useState, useRef, useEffect } from "react"
+import type { PracticeBusinessHour } from "@/lib/clinical-workspace/types"
+import {
+  clampStartTime,
+  dayViewSlotStarts,
+  resolveDayBounds,
+  validHourValues,
+  validMinuteValues,
+} from "@/lib/practice/appointment-hours"
 
 const SERVICE_CATALOG: { name: string; cpt: string; price: number }[] = [
   { name: "Consultation", cpt: "0191", price: 580 },
@@ -58,14 +66,6 @@ const STATUS_LABEL: Record<AppointmentStatus, string> = {
   no_show: "No Show",
   cancelled: "Cancelled",
 }
-
-const DAY_START = 8
-const DAY_END = 18
-const SLOT_COUNT = (DAY_END - DAY_START) * 2
-const HOURS = Array.from({ length: SLOT_COUNT }, (_, i) => ({
-  hour: DAY_START + Math.floor(i / 2),
-  minute: (i % 2) * 30,
-}))
 
 type ViewMode = "day" | "week"
 
@@ -144,6 +144,7 @@ export function BentoCalendar() {
     addAppointment,
     updateAppointment,
     practiceProviders,
+    practiceHours,
     selectedDate,
     setSelectedDate,
   } = useWorkspace()
@@ -193,6 +194,16 @@ export function BentoCalendar() {
     for (const a of dayAppointments) m.set(`${a.hour}:${a.minute}`, a)
     return m
   }, [dayAppointments])
+
+  const dayOfWeek = currentDate.getDay()
+  const { closed: dayClosed, openMin, closeMin } = useMemo(
+    () => resolveDayBounds(practiceHours, dayOfWeek),
+    [practiceHours, dayOfWeek]
+  )
+  const daySlots = useMemo(
+    () => (dayClosed ? [] : dayViewSlotStarts(openMin, closeMin)),
+    [dayClosed, openMin, closeMin]
+  )
 
   const handleOpenPatient = useCallback(
     (a: PracticeAppointment) => {
@@ -348,7 +359,7 @@ export function BentoCalendar() {
 
         {/* View */}
         {viewMode === "day" ? (
-          <DayView apptMap={apptMap} onSelect={setSelected} />
+          <DayView slots={daySlots} dayClosed={dayClosed} apptMap={apptMap} onSelect={setSelected} />
         ) : (
           <WeekView
             weekDates={weekDates}
@@ -393,6 +404,7 @@ export function BentoCalendar() {
             patients={patients}
             appointments={appointments}
             practiceProviders={practiceProviders}
+            practiceHours={practiceHours}
             initialDate={selectedDate}
             onClose={() => setShowCreate(false)}
             onCreate={(appt) => {
@@ -409,19 +421,36 @@ export function BentoCalendar() {
 /* ─── Day View ──────────────────────────────────────────── */
 
 function DayView({
+  slots,
+  dayClosed,
   apptMap,
   onSelect,
 }: {
+  slots: { hour: number; minute: number }[]
+  dayClosed: boolean
   apptMap: Map<string, PracticeAppointment>
   onSelect: (a: PracticeAppointment) => void
 }) {
+  if (dayClosed || slots.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 py-16">
+        <CalendarBlank className="mb-3 size-10 text-white/15" />
+        <p className="max-w-sm text-center text-[13px] leading-relaxed text-white/35">
+          {dayClosed
+            ? "This practice is closed on this day. Change operating hours in Settings → Practice."
+            : "No time slots — check open and close times in Practice settings."}
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div
       className="flex-1 overflow-y-auto rounded-2xl border border-white/[0.05] bg-white/[0.015]"
       style={{ scrollbarWidth: "none" }}
     >
       <div className="relative">
-        {HOURS.map(({ hour, minute }) => {
+        {slots.map(({ hour, minute }) => {
           const key = `${hour}:${minute}`
           const appt = apptMap.get(key)
           const ts = timeStr(hour, minute)
@@ -781,6 +810,7 @@ function CreateAppointmentModal({
   patients,
   appointments,
   practiceProviders,
+  practiceHours,
   initialDate,
   onClose,
   onCreate,
@@ -788,6 +818,7 @@ function CreateAppointmentModal({
   patients: PracticePatient[]
   appointments: PracticeAppointment[]
   practiceProviders: { id: string; name: string; specialty?: string }[]
+  practiceHours: PracticeBusinessHour[]
   initialDate: string
   onClose: () => void
   onCreate: (a: PracticeAppointment) => void
@@ -806,7 +837,7 @@ function CreateAppointmentModal({
   const [memberNumber, setMemberNumber] = useState("")
   const [coPay, setCoPay] = useState("")
   const [maAmount, setMaAmount] = useState("")
-  const [providerId, setProviderId] = useState(practiceProviders[0]?.id ?? "")
+  const [providerId, setProviderId] = useState("")
   const [icdCodes, setIcdCodes] = useState("")
   const [notes, setNotes] = useState("")
   const [reason, setReason] = useState("")
@@ -819,6 +850,46 @@ function CreateAppointmentModal({
   }, [patientSearch, patients])
 
   const selectedSvc = SERVICE_CATALOG.find((s) => s.name === service)
+
+  const dow = useMemo(() => new Date(date + "T12:00:00").getDay(), [date])
+  const { closed: modalDayClosed, openMin, closeMin } = useMemo(
+    () => resolveDayBounds(practiceHours, dow),
+    [practiceHours, dow]
+  )
+
+  const hourOptions = useMemo(
+    () =>
+      modalDayClosed
+        ? [9]
+        : validHourValues(openMin, closeMin, duration),
+    [modalDayClosed, openMin, closeMin, duration]
+  )
+
+  const minuteOptions = useMemo(
+    () =>
+      modalDayClosed
+        ? [0]
+        : validMinuteValues(selectedHour, openMin, closeMin, duration),
+    [modalDayClosed, selectedHour, openMin, closeMin, duration]
+  )
+
+  useEffect(() => {
+    if (practiceProviders.length === 0) return
+    setProviderId((prev) =>
+      prev && practiceProviders.some((p) => p.id === prev) ? prev : practiceProviders[0]!.id
+    )
+  }, [practiceProviders])
+
+  useEffect(() => {
+    if (modalDayClosed) return
+    const c = clampStartTime(selectedHour, selectedMinute, openMin, closeMin, duration)
+    const ho = validHourValues(openMin, closeMin, duration)
+    const h = ho.includes(c.hour) ? c.hour : ho[0] ?? c.hour
+    const mo = validMinuteValues(h, openMin, closeMin, duration)
+    const m = mo.includes(c.minute) ? c.minute : mo[0] ?? c.minute
+    if (h !== selectedHour) setSelectedHour(h)
+    if (m !== selectedMinute) setSelectedMinute(m)
+  }, [modalDayClosed, openMin, closeMin, duration, date, selectedHour, selectedMinute])
 
   const endHour = useMemo(() => {
     const totalMinutes = selectedHour * 60 + selectedMinute + duration
@@ -857,7 +928,7 @@ function CreateAppointmentModal({
   }, [showCalendar])
 
   const handleCreate = useCallback(() => {
-    if (!selectedPatient) return
+    if (!selectedPatient || modalDayClosed || !providerId) return
     const st = timeStr(selectedHour, selectedMinute)
     const et = timeStr(endHour.hour, endHour.minute)
     const codes = icdCodes
@@ -889,7 +960,7 @@ function CreateAppointmentModal({
   }, [
     selectedPatient, selectedHour, selectedMinute, endHour, duration,
     service, paymentType, medicalAid, memberNumber, providerId,
-    date, icdCodes, notes, reason, selectedSvc, onCreate,
+    date, icdCodes, notes, reason, selectedSvc, onCreate, modalDayClosed,
   ])
 
   return (
@@ -1021,25 +1092,31 @@ function CreateAppointmentModal({
 
             {/* Time picker */}
             <Field label="Time">
-              <div className="flex gap-2">
-                <ScrollTimePicker
-                  label="Hour"
-                  values={Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i)}
-                  selected={selectedHour}
-                  onSelect={setSelectedHour}
-                  format={(v) => String(v).padStart(2, "0")}
-                />
-                <ScrollTimePicker
-                  label="Min"
-                  values={[0, 15, 30, 45]}
-                  selected={selectedMinute}
-                  onSelect={setSelectedMinute}
-                  format={(v) => String(v).padStart(2, "0")}
-                />
-                <div className="flex items-end pb-1 pl-1 text-[11px] text-white/30">
-                  → {timeStr(endHour.hour, endHour.minute)}
+              {modalDayClosed ? (
+                <p className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[12px] text-white/35">
+                  Practice is closed this day — pick another date or update hours in Settings → Practice.
+                </p>
+              ) : (
+                <div className="flex gap-2">
+                  <ScrollTimePicker
+                    label="Hour"
+                    values={hourOptions}
+                    selected={selectedHour}
+                    onSelect={setSelectedHour}
+                    format={(v) => String(v).padStart(2, "0")}
+                  />
+                  <ScrollTimePicker
+                    label="Min"
+                    values={minuteOptions.length > 0 ? minuteOptions : [0, 15, 30, 45]}
+                    selected={minuteOptions.includes(selectedMinute) ? selectedMinute : minuteOptions[0] ?? 0}
+                    onSelect={setSelectedMinute}
+                    format={(v) => String(v).padStart(2, "0")}
+                  />
+                  <div className="flex items-end pb-1 pl-1 text-[11px] text-white/30">
+                    → {timeStr(endHour.hour, endHour.minute)}
+                  </div>
                 </div>
-              </div>
+              )}
             </Field>
 
             {/* Duration + Service */}
@@ -1153,18 +1230,25 @@ function CreateAppointmentModal({
 
             {/* Provider */}
             <Field label="Provider">
-              <select
-                value={providerId}
-                onChange={(e) => setProviderId(e.target.value)}
-                className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none focus:border-white/[0.15]"
-              >
-                {practiceProviders.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {p.specialty ? ` · ${p.specialty}` : ""}
-                  </option>
-                ))}
-              </select>
+              {practiceProviders.length === 0 ? (
+                <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200/90">
+                  No providers in this practice yet. A default profile is created when you load the workspace; refresh the
+                  page or add staff in Settings → Practice.
+                </p>
+              ) : (
+                <select
+                  value={providerId}
+                  onChange={(e) => setProviderId(e.target.value)}
+                  className="relative z-[60] w-full cursor-pointer rounded-lg border border-white/[0.08] bg-[#141414] px-3 py-2 text-[12px] text-foreground outline-none focus:border-white/[0.15]"
+                >
+                  {practiceProviders.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.specialty ? ` · ${p.specialty}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
             </Field>
 
             {/* Reason + ICD-10 */}
@@ -1223,10 +1307,10 @@ function CreateAppointmentModal({
             <button
               type="button"
               onClick={handleCreate}
-              disabled={!selectedPatient}
+              disabled={!selectedPatient || modalDayClosed || !providerId}
               className={cn(
                 "rounded-lg px-4 py-1.5 text-[11px] font-bold transition-opacity",
-                selectedPatient
+                selectedPatient && !modalDayClosed && providerId
                   ? "bg-foreground text-background hover:opacity-90"
                   : "cursor-not-allowed bg-white/[0.06] text-white/20"
               )}
@@ -1263,7 +1347,7 @@ function ScrollTimePicker({
     if (idx >= 0 && containerRef.current) {
       containerRef.current.scrollTo({ top: idx * ITEM_H, behavior: "smooth" })
     }
-  }, [])
+  }, [selected, values])
 
   return (
     <div className="flex flex-col">

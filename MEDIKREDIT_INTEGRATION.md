@@ -11,8 +11,12 @@ This document describes how the application integrates with **MediKredit** (Sout
 | Layer | Role |
 |--------|------|
 | **React app (browser)** | Calls **Next.js API routes** with `practiceId` + patient/claim JSON — never sees MediKredit passwords. |
-| **Next.js server** (`app/api/clinical/medikredit/*`) | Builds inner DOCUMENT XML + SOAP envelope (`lib/medikredit/soap-envelope.ts`), POSTs to `MEDIKREDIT_API_URL` with Basic auth, parses responses. |
-| **MediKredit** | HTTPS endpoint (e.g. `https://services.medikredit.co.za:4436`), S2PI `submit-*` style SOAP. |
+| **Next.js server** (`app/api/clinical/medikredit/*`) | Builds inner DOCUMENT XML; sends either **direct** SOAP to `MEDIKREDIT_API_URL` with Basic auth, or — when `CLINICAL_PROXY_URL` is set — JSON to the proxy’s `POST /api/medikredit` (`lib/medikredit/client.ts`). |
+| **MediKredit** | HTTPS endpoint (e.g. `https://services.medikredit.co.za:4436`), S2PI `submit-*` style SOAP (or reached via proxy). |
+
+### Clinical proxy (`CLINICAL_PROXY_URL`)
+
+When `CLINICAL_PROXY_URL` is set (e.g. `http://localhost:3001` for local xai-proxy), Fleming posts `{ action, xmlData }` to `POST /api/medikredit` instead of emitting SOAP on this server; the proxy wraps XML and holds switch credentials. Request/response shapes are documented in [API_REQUESTS_MEDIKREDIT_MEDPRAX.md](API_REQUESTS_MEDIKREDIT_MEDPRAX.md). Medication autocomplete (`app/api/medications/search`) uses `POST /api/medication-search` on the same base. Server helpers for other Medprax paths are in `lib/clinical-proxy/medprax.ts`.
 
 **SOAP actions** map to envelope roots: `submit-claim`, `submit-eligibility`, `submit-reversal` — see `soapActionHeaderValue` / `createSoapEnvelope`.
 
@@ -39,7 +43,7 @@ This document describes how the application integrates with **MediKredit** (Sout
 | Patient directory (live checks) | `app/components/admin/patient-directory.tsx` |
 | DB migration | `supabase/migrations/20260409180000_medikredit_integration.sql` |
 
-**Security:** Switch credentials live in **server env** (`MEDIKREDIT_API_URL`, `MEDIKREDIT_USERNAME`, `MEDIKREDIT_PASSWORD`). Use `MEDIKREDIT_DRY_RUN=1` for canned responses without calling the switch.
+**Security:** For direct SOAP, switch credentials live in **server env** (`MEDIKREDIT_API_URL`, `MEDIKREDIT_USERNAME`, `MEDIKREDIT_PASSWORD`). With `CLINICAL_PROXY_URL`, configure credentials on the proxy instead. Use `MEDIKREDIT_DRY_RUN=1` for canned responses without calling the switch.
 
 ---
 
@@ -61,8 +65,8 @@ Eligibility and famcheck XML are built in `lib/medikredit/build-document.ts` (`b
 ## 4. Request flow: browser → Next.js API → MediKredit
 
 1. **Browser** POSTs JSON to `/api/clinical/medikredit/*` with `practiceId` and patient / claim payloads (no raw credentials).
-2. **Server** loads `medikredit_providers` for BHF/HPC/etc., builds inner **DOCUMENT** XML, then **`createSoapEnvelope`** (`lib/medikredit/soap-envelope.ts`) — inner XML is **HTML-entity–escaped** inside `<request>...</request>`.
-3. **`sendMedikreditSoap`** (`lib/medikredit/client.ts`) POSTs to `MEDIKREDIT_API_URL` with `Content-Type: text/xml`, `SOAPAction: "submit-{action}"`, **Basic** authorization from env.
+2. **Server** loads `medikredit_providers` for BHF/HPC/etc., builds inner **DOCUMENT** XML. For **direct** SOAP it then wraps with **`createSoapEnvelope`** (`lib/medikredit/soap-envelope.ts`) — inner XML is **HTML-entity–escaped** inside `<request>...</request>`. For **`CLINICAL_PROXY_URL`**, that envelope is built on the proxy; Fleming sends only the inner XML as `xmlData`.
+3. **`sendMedikreditSoap`** (`lib/medikredit/client.ts`): **direct** → POST to `MEDIKREDIT_API_URL` with `Content-Type: text/xml`, `SOAPAction`, **Basic** auth; **proxy** → `POST {CLINICAL_PROXY_URL}/api/medikredit` with JSON `{ action, xmlData }`, then use the `response` string from the JSON body.
 4. **Response** is parsed on the server with **jsdom** (`parse-response.ts`): unwrap SOAP / `<reply>` / `<request>`, then read `<TX>`, `<RJ>`, `<ITEM>`, `<RMR>`, `<WARN>`, `<PAT>`.
 
 ---

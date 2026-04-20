@@ -5,7 +5,7 @@
 
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { sendWhatsAppMessage } from "@/lib/comms/twilio"
+import { sendSmsMessage, sendWhatsAppMessage } from "@/lib/comms/twilio"
 
 export const maxDuration = 60
 export const dynamic = "force-dynamic"
@@ -51,10 +51,17 @@ export async function GET(request: Request) {
       try {
         const payload = event.payload as Record<string, unknown>
 
-        if (event.event_type === "send_failed" && event.source === "twilio_whatsapp") {
+        if (event.event_type === "send_failed" && event.source === "twilio_messaging") {
+          const from = (payload.from as string) || ""
+          const to = payload.to as string
+          const body = payload.text as string
+          if (from && to) {
+            await sendSmsMessage({ from, to, body })
+          }
+        } else if (event.event_type === "send_failed" && event.source === "twilio_whatsapp") {
           await sendWhatsAppMessage({
             to: payload.to as string,
-            from: payload.from as string || "",
+            from: (payload.from as string) || "",
             body: payload.text as string,
           })
         }

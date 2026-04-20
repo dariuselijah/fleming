@@ -15,6 +15,7 @@ import type {
   InboxMessage,
   InventoryItem,
   PracticeAppointment,
+  PracticeBusinessHour,
   PracticeFlowEntry,
   PracticePatient,
   PracticeProvider,
@@ -123,7 +124,7 @@ function mapNotifRow(r: Record<string, unknown>): AdminNotification {
     timestamp: String(r.notif_at ?? r.created_at ?? new Date().toISOString()),
     read: Boolean(r.read_flag),
     actionRoute:
-      tab && ["inbox", "calendar", "billing", "inventory", "analytics", "patients", "settings"].includes(tab)
+      tab && ["inbox", "calendar", "billing", "inventory", "analytics", "patients", "channels"].includes(tab)
         ? { tab, entityId: r.action_entity_id ? String(r.action_entity_id) : undefined }
         : undefined,
   }
@@ -151,6 +152,15 @@ function mapStaffRow(r: Record<string, unknown>): PracticeProvider {
     role: r.role as PracticeProvider["role"],
     credentialStatus: r.credential_status as PracticeProvider["credentialStatus"],
     email: r.email ? String(r.email) : undefined,
+  }
+}
+
+function mapPracticeHourRow(r: Record<string, unknown>): PracticeBusinessHour {
+  return {
+    dayOfWeek: Number(r.day_of_week ?? 0),
+    openTime: String(r.open_time ?? "09:00"),
+    closeTime: String(r.close_time ?? "17:00"),
+    isClosed: Boolean(r.is_closed),
   }
 }
 
@@ -189,10 +199,24 @@ export function ClinicalDataBootstrap() {
           .select("*")
           .eq("practice_id", practiceId)
           .order("updated_at", { ascending: false })
-        const { data: staff } = await supabase
-          .from("practice_staff")
-          .select("*")
-          .eq("practice_id", practiceId)
+        let { data: staff } = await supabase.from("practice_staff").select("*").eq("practice_id", practiceId)
+
+        if (!cancelled && (!staff || staff.length === 0)) {
+          const displayName =
+            user.display_name?.trim() || user.email?.split("@")[0] || "Provider"
+          const { data: inserted } = await supabase
+            .from("practice_staff")
+            .insert({
+              practice_id: practiceId,
+              linked_user_id: user.id,
+              display_name: displayName,
+              role: "physician",
+            })
+            .select("*")
+          if (inserted?.length) staff = inserted
+        }
+
+        const { data: hrs } = await supabase.from("practice_hours").select("*").eq("practice_id", practiceId)
 
         const claims = await fetchPracticeClaimsForWorkspace(practiceId)
 
@@ -204,6 +228,7 @@ export function ClinicalDataBootstrap() {
           notifications: (notifs ?? []).map((r) => mapNotifRow(r as Record<string, unknown>)),
           practiceFlow: (flow ?? []).map((r) => mapFlowRow(r as Record<string, unknown>)),
           practiceProviders: (staff ?? []).map((r) => mapStaffRow(r as Record<string, unknown>)),
+          practiceHours: (hrs ?? []).map((r) => mapPracticeHourRow(r as Record<string, unknown>)),
           claims,
         })
       } catch (e) {
@@ -213,7 +238,7 @@ export function ClinicalDataBootstrap() {
     return () => {
       cancelled = true
     }
-  }, [user?.id, practiceId])
+  }, [user?.id, practiceId, user?.display_name, user?.email])
 
   useEffect(() => {
     if (!user?.id || !practiceId || !unlocked || !dekKey) return
@@ -260,6 +285,7 @@ export function ClinicalDataBootstrap() {
               emergencyContact: profile.emergencyContact,
               medicalAidStatus: profile.medicalAidStatus ?? "unknown",
               medicalAidScheme: profile.medicalAidScheme,
+              medicalAidSchemeCode: profile.medicalAidSchemeCode,
               memberNumber: profile.memberNumber,
               dependentCode: profile.dependentCode,
               mainMemberName: profile.mainMemberName,
@@ -270,6 +296,7 @@ export function ClinicalDataBootstrap() {
               lastVisit: profile.lastVisit,
               outstandingBalance: profile.outstandingBalance ?? 0,
               registeredAt: profile.registeredAt ?? new Date().toISOString().slice(0, 10),
+              profileIncomplete: profile.profileIncomplete,
             })
           } catch {
             /* skip row */

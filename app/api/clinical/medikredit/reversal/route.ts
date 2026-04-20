@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { reverseClaim, validateReversal } from "@/lib/medikredit/claim-service"
 import type { ClaimResponse } from "@/lib/medikredit/types"
-import { getMedikreditEnv } from "@/lib/medikredit/env"
+import { isMedikreditConfigured } from "@/lib/medikredit/env"
 import { assertPracticeMember } from "@/lib/medikredit/practice-guard"
 import { fetchMedikreditProviderSettings } from "@/lib/medikredit/provider-settings"
 import type { MedikreditPatientPayload } from "@/lib/medikredit/types"
@@ -48,10 +48,11 @@ export async function POST(req: Request) {
     }
   }
 
-  if (!getMedikreditEnv() && process.env.MEDIKREDIT_DRY_RUN !== "1") {
+  if (!isMedikreditConfigured()) {
     return NextResponse.json(
       {
-        error: "MediKredit is not configured on the server (set MEDIKREDIT_* env) or enable MEDIKREDIT_DRY_RUN=1 for development.",
+        error:
+          "MediKredit is not configured on the server (set CLINICAL_PROXY_URL, or MEDIKREDIT_* for direct SOAP, or MEDIKREDIT_DRY_RUN=1 for development).",
       },
       { status: 503 }
     )

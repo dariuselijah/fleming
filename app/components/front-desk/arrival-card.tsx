@@ -1,6 +1,6 @@
 "use client"
 
-import type { PracticeFlowEntry, ConsultStatus } from "@/lib/clinical-workspace"
+import { useWorkspace, type PracticeFlowEntry, type ConsultStatus } from "@/lib/clinical-workspace"
 import { cn } from "@/lib/utils"
 import {
   UserCircle,
@@ -37,6 +37,7 @@ export function ArrivalCard({
   entry: PracticeFlowEntry
   onOpen: () => void
 }) {
+  const { claims, requestBillingFocusClaim, setAdminTab } = useWorkspace()
   const [showEligibility, setShowEligibility] = useState(false)
   const config = STATUS_CONFIG[entry.status]
   const StatusIcon = config.icon
@@ -49,6 +50,24 @@ export function ArrivalCard({
     e.stopPropagation()
     setShowEligibility(!showEligibility)
   }, [showEligibility])
+
+  const billingClaim = [...claims]
+    .filter((c) => c.patientId === entry.patientId)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+
+  const showCopayCta =
+    !!billingClaim &&
+    billingClaim.status !== "paid" &&
+    (billingClaim.cashAmount > 0 || entry.status === "billing")
+
+  const goBilling = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (billingClaim) requestBillingFocusClaim(billingClaim.id)
+      else setAdminTab("billing")
+    },
+    [billingClaim, requestBillingFocusClaim, setAdminTab]
+  )
 
   return (
     <div className="rounded-2xl border border-border/50 bg-card transition-all hover:border-indigo-500/20 hover:shadow-sm">
@@ -106,6 +125,17 @@ export function ArrivalCard({
 
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-2">
+          {showCopayCta && (
+            <button
+              type="button"
+              onClick={goBilling}
+              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600/90 px-2.5 py-1.5 text-[10px] font-semibold text-white transition-colors hover:bg-emerald-600"
+              title="Open billing for patient portion"
+            >
+              <Receipt className="size-3.5" weight="fill" />
+              Copay
+            </button>
+          )}
           <button
             type="button"
             onClick={handleVerify}

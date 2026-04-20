@@ -1,8 +1,8 @@
 import { extractEntitiesByType } from "./entity-highlighter"
-import type { SOAPNote } from "@/lib/clinical-workspace/types"
+import type { SOAPBodySection, SOAPNote } from "@/lib/clinical-workspace/types"
 
 interface SOAPSuggestion {
-  section: keyof SOAPNote
+  section: SOAPBodySection
   text: string
   confidence: number
 }
@@ -54,7 +54,7 @@ export function mapTranscriptToSOAP(transcript: string): SOAPSuggestion[] {
   const suggestions: SOAPSuggestion[] = []
 
   for (const sentence of sentences) {
-    const scores: { section: keyof SOAPNote; score: number }[] = [
+    const scores: { section: SOAPBodySection; score: number }[] = [
       { section: "subjective", score: scoreSection(sentence, SUBJECTIVE_KEYWORDS) },
       { section: "objective", score: scoreSection(sentence, OBJECTIVE_KEYWORDS) },
       { section: "assessment", score: scoreSection(sentence, ASSESSMENT_KEYWORDS) },
@@ -79,13 +79,13 @@ export function mapTranscriptToSOAP(transcript: string): SOAPSuggestion[] {
 export function generateSOAPGhostText(
   transcript: string,
   currentNote: SOAPNote
-): Partial<Record<keyof SOAPNote, string>> {
+): Partial<Record<SOAPBodySection, string>> {
   const suggestions = mapTranscriptToSOAP(transcript)
   const entities = extractEntitiesByType(transcript)
-  const ghost: Partial<Record<keyof SOAPNote, string>> = {}
+  const ghost: Partial<Record<SOAPBodySection, string>> = {}
 
   // Group high-confidence suggestions by section
-  const bySections = new Map<keyof SOAPNote, string[]>()
+  const bySections = new Map<SOAPBodySection, string[]>()
   for (const s of suggestions) {
     if (s.confidence < 0.3) continue
     const existing = bySections.get(s.section) || []
@@ -95,13 +95,13 @@ export function generateSOAPGhostText(
 
   // Only suggest if current section is empty or the suggestion adds new content
   for (const [section, texts] of bySections) {
-    const currentContent = currentNote[section as keyof SOAPNote]
+    const currentContent = currentNote[section]
     if (typeof currentContent !== "string") continue
     const newText = texts
       .filter((t) => !currentContent.toLowerCase().includes(t.toLowerCase()))
       .join(". ")
     if (newText) {
-      ghost[section as keyof SOAPNote] = (currentContent ? "\n" : "") + newText + "."
+      ghost[section] = (currentContent ? "\n" : "") + newText + "."
     }
   }
 

@@ -52,11 +52,11 @@ export async function POST(req: NextRequest) {
       .from("practice_channels")
       .select("phone_number, status, sender_display_name")
       .eq("practice_id", membership.practice_id)
-      .eq("channel_type", "whatsapp")
+      .eq("channel_type", "rcs")
       .maybeSingle()
 
     if (!row?.phone_number) {
-      return NextResponse.json({ error: "No WhatsApp channel for this practice." }, { status: 400 })
+      return NextResponse.json({ error: "No messaging channel for this practice." }, { status: 400 })
     }
 
     if (row.status !== "pending_waba") {
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
         updated_at: new Date().toISOString(),
       })
       .eq("practice_id", membership.practice_id)
-      .eq("channel_type", "whatsapp")
+      .eq("channel_type", "rcs")
 
     return NextResponse.json({
       ok: true,

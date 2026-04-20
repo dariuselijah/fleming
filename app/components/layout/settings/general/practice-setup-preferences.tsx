@@ -83,8 +83,7 @@ export function PracticeSetupPreferences() {
 
         {profileDone && (
           <p className="text-muted-foreground text-xs leading-relaxed">
-            Services, messaging, labs, and AI options can be configured from the clinical Admin workspace and the
-            Connectors tab here.
+            Services, messaging, labs, and AI options can be configured from the clinical Admin workspace.
           </p>
         )}
       </CardContent>

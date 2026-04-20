@@ -9,15 +9,13 @@ import {
   listOwnedIncomingNumbers,
   resolveIncomingPhoneNumberSid,
   getTwilioClient,
-  registerWhatsAppSender,
-  TWILIO_WHATSAPP_VERTICAL_MEDICAL,
-  whatsAppEmbeddedSignupProvisioningEnabled,
 } from "@/lib/comms/twilio"
 import { getPracticeName } from "@/lib/comms/tools"
 import {
   seedPracticeHoursAndFaqsIfEmpty,
   ensureVoiceChannelForNumber,
 } from "@/lib/comms/provision-practice-defaults"
+import { updateVapiPhoneNumberTwilioCredentials } from "@/lib/comms/vapi"
 
 export async function POST(req: NextRequest) {
   try {
@@ -56,6 +54,7 @@ export async function POST(req: NextRequest) {
         | "search"
         | "provision"
         | "sync_webhooks"
+        | "sync_vapi_twilio"
         | "list_owned_numbers"
         | "attach_existing"
         | "request_number"
@@ -76,13 +75,13 @@ export async function POST(req: NextRequest) {
         .from("practice_channels")
         .select("phone_number_sid, phone_number")
         .eq("practice_id", practiceId)
-        .eq("channel_type", "whatsapp")
+        .eq("channel_type", "rcs")
         .maybeSingle()
 
       const sid = wa?.phone_number_sid as string | undefined
       if (!sid) {
         return NextResponse.json(
-          { error: "No WhatsApp channel or missing Twilio number SID. Provision a number first." },
+          { error: "No messaging (RCS/SMS) channel or missing Twilio number SID. Provision a number first." },
           { status: 400 }
         )
       }
@@ -92,18 +91,65 @@ export async function POST(req: NextRequest) {
       await db
         .from("practice_channels")
         .update({
-          webhook_url: urls.whatsappInbound,
+          webhook_url: urls.messagingInbound,
           updated_at: new Date().toISOString(),
         })
         .eq("practice_id", practiceId)
-        .eq("channel_type", "whatsapp")
+        .eq("channel_type", "rcs")
 
       return NextResponse.json({
         ok: true,
         twilio: twilioResult,
         urls,
+        message: "Twilio number webhooks updated for SMS and RCS (where supported by the carrier).",
+      })
+    }
+
+    if (action === "sync_vapi_twilio") {
+      const db = createAdminClient()
+      const sid = process.env.TWILIO_ACCOUNT_SID?.trim()
+      const token = process.env.TWILIO_AUTH_TOKEN?.trim()
+      if (!sid || !token) {
+        return NextResponse.json(
+          { error: "Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN on the server (same Twilio account that owns the number)." },
+          { status: 400 }
+        )
+      }
+
+      const { data: voice } = await db
+        .from("practice_channels")
+        .select("vapi_phone_number_id")
+        .eq("practice_id", practiceId)
+        .eq("channel_type", "voice")
+        .maybeSingle()
+
+      const phoneNumberId = voice?.vapi_phone_number_id as string | undefined
+      if (!phoneNumberId) {
+        return NextResponse.json(
+          { error: "No Vapi phone number ID on this practice. Finish voice provisioning first." },
+          { status: 400 }
+        )
+      }
+
+      try {
+        await updateVapiPhoneNumberTwilioCredentials({
+          phoneNumberId,
+          twilioAccountSid: sid,
+          twilioAuthToken: token,
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error("[provision] sync_vapi_twilio failed:", msg)
+        return NextResponse.json(
+          { error: `Vapi could not update this number: ${msg}` },
+          { status: 502 }
+        )
+      }
+
+      return NextResponse.json({
+        ok: true,
         message:
-          "Twilio number webhooks updated. WhatsApp Business still requires Meta/Twilio approval for this sender.",
+          "Twilio credentials on this Vapi phone number were refreshed from server env. Try your outbound test call again.",
       })
     }
 
@@ -164,41 +210,19 @@ export async function POST(req: NextRequest) {
       await syncPurchasedNumberWebhooks(sid!, webhookBase)
 
       const displayName = practiceDisplayName?.trim() || practiceName || "Medical Practice"
-      const useEmbedded = whatsAppEmbeddedSignupProvisioningEnabled()
-
-      let whatsappSenderSid: string | null = null
-      let whatsappSenderStatus: string | undefined
-      let whatsappStatus: "pending_waba" | "registering_sender"
-
-      if (useEmbedded) {
-        whatsappStatus = "pending_waba"
-      } else {
-        const sender = await registerWhatsAppSender({
-          phoneNumber: e164,
-          profile: {
-            name: displayName,
-            about: "Medical practice powered by Fleming",
-            vertical: TWILIO_WHATSAPP_VERTICAL_MEDICAL,
-          },
-          webhookBaseUrl: webhookBase,
-        })
-        whatsappSenderSid = sender.sid
-        whatsappSenderStatus = sender.status
-        whatsappStatus = "registering_sender"
-      }
 
       await db.from("practice_channels").upsert(
         {
           practice_id: practiceId,
-          channel_type: "whatsapp",
+          channel_type: "rcs",
           provider: "twilio",
           phone_number: e164,
           phone_number_sid: sid,
-          whatsapp_sender_sid: whatsappSenderSid,
-          status: whatsappStatus,
+          whatsapp_sender_sid: null,
+          whatsapp_waba_id: null,
+          status: "active",
           sender_display_name: displayName,
-          webhook_url: `${webhookBase}/api/comms/whatsapp/webhook`,
-          ...(useEmbedded ? { whatsapp_waba_id: null } : {}),
+          webhook_url: `${webhookBase}/api/comms/messaging/webhook`,
         },
         { onConflict: "practice_id,channel_type" }
       )
@@ -217,14 +241,9 @@ export async function POST(req: NextRequest) {
         ok: true,
         phoneNumber: e164,
         incomingPhoneNumberSid: sid,
-        whatsappSenderSid,
-        whatsappSenderStatus,
-        whatsappStatus,
         voiceStatus: voice.voiceStatus,
-        embeddedSignupNext: useEmbedded,
-        message: useEmbedded
-          ? "Number linked. Complete Meta Embedded Signup in Admin → Channels, then we register the sender with your WABA."
-          : "Number linked and WhatsApp sender registration submitted. Status will move to active once Meta approves (polled automatically).",
+        message:
+          "Number linked. Inbound SMS and RCS (carrier-dependent) route to your Inbox; voice uses the same line when Vapi is configured.",
       })
     }
 
@@ -239,41 +258,19 @@ export async function POST(req: NextRequest) {
       await syncPurchasedNumberWebhooks(purchased.sid, webhookBase)
 
       const displayName = practiceDisplayName?.trim() || practiceName || "Medical Practice"
-      const useEmbedded = whatsAppEmbeddedSignupProvisioningEnabled()
-
-      let whatsappSenderSid: string | null = null
-      let whatsappSenderStatus: string | undefined
-      let whatsappStatus: "pending_waba" | "registering_sender"
-
-      if (useEmbedded) {
-        whatsappStatus = "pending_waba"
-      } else {
-        const sender = await registerWhatsAppSender({
-          phoneNumber: purchased.phoneNumber,
-          profile: {
-            name: displayName,
-            about: "Medical practice powered by Fleming",
-            vertical: TWILIO_WHATSAPP_VERTICAL_MEDICAL,
-          },
-          webhookBaseUrl: webhookBase,
-        })
-        whatsappSenderSid = sender.sid
-        whatsappSenderStatus = sender.status
-        whatsappStatus = "registering_sender"
-      }
 
       await db.from("practice_channels").upsert(
         {
           practice_id: practiceId,
-          channel_type: "whatsapp",
+          channel_type: "rcs",
           provider: "twilio",
           phone_number: purchased.phoneNumber,
           phone_number_sid: purchased.sid,
-          whatsapp_sender_sid: whatsappSenderSid,
-          status: whatsappStatus,
+          whatsapp_sender_sid: null,
+          whatsapp_waba_id: null,
+          status: "active",
           sender_display_name: displayName,
-          webhook_url: `${webhookBase}/api/comms/whatsapp/webhook`,
-          ...(useEmbedded ? { whatsapp_waba_id: null } : {}),
+          webhook_url: `${webhookBase}/api/comms/messaging/webhook`,
         },
         { onConflict: "practice_id,channel_type" }
       )
@@ -291,11 +288,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         phoneNumber: purchased.phoneNumber,
-        whatsappSenderSid,
-        whatsappSenderStatus,
-        whatsappStatus,
         voiceStatus: voice.voiceStatus,
-        embeddedSignupNext: useEmbedded,
+        message:
+          "Number provisioned. Patient SMS/RCS and reminders use this line; inbound calls use Vapi when VAPI_DEFAULT_ASSISTANT_ID is set.",
       })
     }
 

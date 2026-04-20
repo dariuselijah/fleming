@@ -1,6 +1,7 @@
 "use client"
 
 import { useWorkspace, type AdminTab } from "@/lib/clinical-workspace"
+import { useAppSettingsDialog } from "@/lib/app-settings-dialog-store"
 import { cn } from "@/lib/utils"
 import {
   Tray,
@@ -23,6 +24,7 @@ const NAV_ITEMS: { id: AdminTab; icon: typeof Tray; label: string }[] = [
 
 export function AdminSidebar() {
   const { activeAdminTab, setAdminTab, setMode, notifications } = useWorkspace()
+  const openAppSettings = useAppSettingsDialog((s) => s.openSettings)
 
   const unreadCount = notifications.filter((n) => !n.read).length
 
@@ -59,18 +61,12 @@ export function AdminSidebar() {
         <button
           type="button"
           onClick={() => {
-            setMode("admin")
-            setAdminTab("settings")
+            openAppSettings()
           }}
-          title="Practice settings"
-          className={cn(
-            "flex size-9 items-center justify-center rounded-xl transition-colors",
-            activeAdminTab === "settings"
-              ? "bg-white/[0.08] text-foreground shadow-sm"
-              : "text-white/30 hover:bg-white/[0.04] hover:text-white/60"
-          )}
+          title="Practice & profile settings"
+          className="flex size-9 items-center justify-center rounded-xl text-white/30 transition-colors hover:bg-white/[0.04] hover:text-white/60"
         >
-          <Gear className="size-[18px]" weight={activeAdminTab === "settings" ? "fill" : "regular"} />
+          <Gear className="size-[18px]" />
         </button>
         <button
           type="button"

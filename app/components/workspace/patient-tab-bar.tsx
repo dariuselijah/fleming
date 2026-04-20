@@ -14,7 +14,6 @@ import {
   CurrencyDollar,
   CaretDown,
   UsersThree,
-  Gear,
   Plugs,
 } from "@phosphor-icons/react"
 import { FlemingIcon } from "@/components/icons/zola"
@@ -46,7 +45,6 @@ const ADMIN_TABS: { id: AdminTab; label: string; icon: typeof Tray }[] = [
   { id: "analytics", label: "Analytics", icon: ChartLineUp },
   { id: "patients", label: "Patients", icon: UsersThree },
   { id: "channels", label: "Channels", icon: Plugs },
-  { id: "settings", label: "Settings", icon: Gear },
 ]
 
 export function PatientTabBar() {

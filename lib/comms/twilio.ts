@@ -22,6 +22,61 @@ export function validateTwilioSignature(
   return twilio.validateRequest(token, signature, url, params)
 }
 
+/**
+ * South Africa E.164 is +27 plus exactly 9 digits (11 digits total without +). If the value was
+ * corrupted (extra digits concatenated), carriers may still deliver outbound SMS but **replies fail**
+ * with “Not Delivered” because the handset cannot route SMS back to a non-existent address.
+ */
+export function normalizeMessagingE164(addr: string): string {
+  const stripped = addr.replace(/^whatsapp:/i, "").trim().replace(/\s/g, "")
+  const digits = stripped.replace(/\D/g, "")
+  if (digits.startsWith("27") && digits.length > 11) {
+    console.warn(
+      "[twilio] ZA number has extra digits; clamping to E.164 (+27 + 9). Fix practice_channels.phone_number:",
+      addr
+    )
+    return `+${digits.slice(0, 11)}`
+  }
+  if (stripped.startsWith("+")) return stripped
+  if (digits.length > 0) return `+${digits}`
+  return stripped
+}
+
+/**
+ * When set (MG…), Twilio uses your Messaging Service sender pool — required for RCS-first delivery and
+ * automatic SMS/MMS fallback per Twilio. Add your long code + RCS sender to the service in Console.
+ * @see https://www.twilio.com/docs/rcs/send-an-rcs-message
+ */
+export function getTwilioMessagingServiceSid(): string | undefined {
+  const s = process.env.TWILIO_MESSAGING_SERVICE_SID?.trim()
+  return s || undefined
+}
+
+/** Plain SMS (E.164). Uses Messaging Service when TWILIO_MESSAGING_SERVICE_SID is set (RCS-capable path). */
+export async function sendSmsMessage(opts: {
+  to: string
+  from: string
+  body: string
+}): Promise<{ messageSid: string }> {
+  const client = getTwilioClient()
+  const to = normalizeMessagingE164(opts.to)
+  const ms = getTwilioMessagingServiceSid()
+  const msg = await client.messages.create(
+    ms
+      ? {
+          to,
+          messagingServiceSid: ms,
+          body: opts.body,
+        }
+      : {
+          to,
+          from: normalizeMessagingE164(opts.from),
+          body: opts.body,
+        }
+  )
+  return { messageSid: msg.sid }
+}
+
 export async function sendWhatsAppMessage(opts: {
   to: string
   from: string
@@ -76,8 +131,11 @@ export function buildInteractiveBody(payload: InteractivePayload): string {
 export function commsWebhookUrls(webhookBaseUrl: string) {
   const base = webhookBaseUrl.replace(/\/$/, "")
   return {
-    whatsappInbound: `${base}/api/comms/whatsapp/webhook`,
-    whatsappStatus: `${base}/api/comms/whatsapp/status`,
+    /** SMS + RCS + legacy WhatsApp inbound (Twilio Messaging) */
+    messagingInbound: `${base}/api/comms/messaging/webhook`,
+    messagingStatus: `${base}/api/comms/messaging/status`,
+    whatsappInbound: `${base}/api/comms/messaging/webhook`,
+    whatsappStatus: `${base}/api/comms/messaging/status`,
     voiceInbound: `${base}/api/comms/voice/webhook`,
   }
 }
@@ -93,9 +151,9 @@ export async function syncPurchasedNumberWebhooks(
   const client = getTwilioClient()
   const urls = commsWebhookUrls(webhookBaseUrl)
   const updated = await client.incomingPhoneNumbers(incomingPhoneNumberSid).update({
-    smsUrl: urls.whatsappInbound,
+    smsUrl: urls.messagingInbound,
     smsMethod: "POST",
-    statusCallback: urls.whatsappStatus,
+    statusCallback: urls.messagingStatus,
     statusCallbackMethod: "POST",
     voiceUrl: urls.voiceInbound,
     voiceMethod: "POST",
@@ -113,10 +171,14 @@ export async function searchAvailableNumbers(countryCode = "ZA", opts?: {
   limit?: number
 }): Promise<{ phoneNumber: string; friendlyName: string; capabilities: Record<string, boolean> }[]> {
   const client = getTwilioClient()
+  const area =
+    opts?.areaCode !== undefined && opts.areaCode !== ""
+      ? Number.parseInt(opts.areaCode, 10)
+      : undefined
   const numbers = await client.availablePhoneNumbers(countryCode).local.list({
     voiceEnabled: true,
     smsEnabled: true,
-    ...(opts?.areaCode ? { areaCode: opts.areaCode } : {}),
+    ...(typeof area === "number" && Number.isFinite(area) ? { areaCode: area } : {}),
     limit: opts?.limit ?? 5,
   })
   return numbers.map((n) => ({

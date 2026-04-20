@@ -19,7 +19,6 @@ import {
 } from "@/lib/clinical/smart-import-patient"
 import { cn } from "@/lib/utils"
 import {
-  WhatsappLogo,
   ChatText,
   Globe,
   Flask,
@@ -58,8 +57,8 @@ import { AnimatePresence, motion } from "motion/react"
 
 // ── Channel maps ──
 
-const CHANNEL_ICON: Record<string, typeof WhatsappLogo> = {
-  whatsapp: WhatsappLogo,
+const CHANNEL_ICON: Record<string, typeof ChatText> = {
+  rcs: ChatText,
   sms: ChatText,
   portal: Globe,
   lab: Flask,
@@ -67,7 +66,7 @@ const CHANNEL_ICON: Record<string, typeof WhatsappLogo> = {
 }
 
 const CHANNEL_COLOR: Record<string, string> = {
-  whatsapp: "text-green-500",
+  rcs: "text-emerald-400",
   sms: "text-blue-500",
   portal: "text-indigo-500",
   lab: "text-amber-500",
@@ -75,7 +74,7 @@ const CHANNEL_COLOR: Record<string, string> = {
 }
 
 const CHANNEL_BG: Record<string, string> = {
-  whatsapp: "bg-green-500/10",
+  rcs: "bg-emerald-500/10",
   sms: "bg-blue-500/10",
   portal: "bg-indigo-500/10",
   lab: "bg-amber-500/10",

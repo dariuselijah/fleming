@@ -1,12 +1,12 @@
 "use client"
 
-import { useSOAPNote, type SOAPNote } from "@/lib/clinical-workspace"
+import { useSOAPNote, type SOAPBodySection } from "@/lib/clinical-workspace"
 import { cn } from "@/lib/utils"
 import { Clipboard, Check } from "@phosphor-icons/react"
 import { motion } from "motion/react"
 import { useCallback, useRef, useState } from "react"
 
-const SECTIONS: { key: keyof SOAPNote; label: string; color: string; placeholder: string }[] = [
+const SECTIONS: { key: SOAPBodySection; label: string; color: string; placeholder: string }[] = [
   {
     key: "subjective",
     label: "S",
@@ -154,7 +154,7 @@ export function SOAPBlock() {
                 key={section.key}
                 section={section}
                 value={note[section.key] as string}
-                ghostText={note.ghostText?.[section.key]}
+                ghostText={(note as { ghostText?: Partial<Record<string, string>> }).ghostText?.[section.key]}
                 onChange={(v) => update(section.key, v)}
                 onAcceptGhost={() => acceptGhost(section.key)}
               />

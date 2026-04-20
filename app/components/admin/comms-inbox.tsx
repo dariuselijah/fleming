@@ -3,8 +3,8 @@
 import { useWorkspace, useWorkspaceStore, type InboxScrollTarget } from "@/lib/clinical-workspace"
 import { cn } from "@/lib/utils"
 import {
-  WhatsappLogo,
   Phone,
+  ChatCircle,
   ChatText,
   Envelope,
   ArrowLeft,
@@ -38,22 +38,22 @@ import { AnimatePresence, motion } from "motion/react"
 
 // ── Channel styling ──
 
-const CHANNEL_ICON: Record<string, typeof WhatsappLogo> = {
-  whatsapp: WhatsappLogo,
+const CHANNEL_ICON: Record<string, typeof ChatText> = {
+  rcs: ChatText,
   voice: Phone,
   sms: ChatText,
   email: Envelope,
 }
 
 const CHANNEL_COLOR: Record<string, string> = {
-  whatsapp: "text-green-500",
+  rcs: "text-emerald-400",
   voice: "text-purple-400",
   sms: "text-blue-500",
   email: "text-rose-400",
 }
 
 const CHANNEL_BG: Record<string, string> = {
-  whatsapp: "bg-green-500/10",
+  rcs: "bg-emerald-500/10",
   voice: "bg-purple-400/10",
   sms: "bg-blue-500/10",
   email: "bg-rose-400/10",
@@ -106,6 +106,16 @@ interface MessageItem {
   deliveryStatus: string
   agentToolCalls?: { tool: string; args: Record<string, unknown>; result?: unknown }[]
   createdAt: string
+}
+
+interface VoiceCallItem {
+  id: string
+  transcript: string | null
+  summary: string | null
+  durationSeconds: number | null
+  recordingUrl: string | null
+  intent: string | null
+  structuredOutcome: unknown
 }
 
 // ── Main component ──
@@ -205,6 +215,7 @@ export function CommsInbox() {
   const [threads, setThreads] = useState<ThreadItem[]>([])
   const [selectedThread, setSelectedThread] = useState<ThreadItem | null>(null)
   const [messages, setMessages] = useState<MessageItem[]>([])
+  const [voiceCalls, setVoiceCalls] = useState<VoiceCallItem[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [filter, setFilter] = useState<"all" | "unread" | "handoff">("all")
@@ -246,6 +257,7 @@ export function CommsInbox() {
       if (res.ok) {
         const data = await res.json()
         setMessages(data.messages || [])
+        setVoiceCalls(data.voiceCalls || [])
       }
     } catch {
       // silent
@@ -373,7 +385,7 @@ export function CommsInbox() {
                   ))}
                 </div>
                 <div className="mb-3 flex flex-wrap items-center gap-1">
-                  {(["all", "whatsapp"] as const).map((ch) => {
+                  {(["all", "rcs", "voice"] as const).map((ch) => {
                     const Icon = ch === "all" ? ChatText : CHANNEL_ICON[ch] || ChatText
                     return (
                       <button
@@ -405,7 +417,7 @@ export function CommsInbox() {
                       </div>
                       <p className="text-[11px] text-white/35">No conversations yet</p>
                       <p className="mt-1 max-w-[220px] text-[10px] leading-relaxed text-white/18">
-                        Messages appear when patients WhatsApp your practice number.
+                        Messages appear when patients text your practice number (SMS/RCS) or call.
                       </p>
                     </div>
                   ) : (
@@ -429,6 +441,7 @@ export function CommsInbox() {
                     key={selectedThread.id}
                     thread={selectedThread}
                     messages={messages}
+                    voiceCalls={voiceCalls}
                     loading={loadingMessages}
                     onBack={() => setSelectedThread(null)}
                     onRefresh={() => openThread(selectedThread)}
@@ -445,7 +458,7 @@ export function CommsInbox() {
                     </div>
                     <p className="text-[12px] text-white/35">Select a conversation</p>
                     <p className="mt-1 max-w-[240px] text-[10px] leading-relaxed text-white/18">
-                      WhatsApp and staff replies appear here.
+                      Patient messages and staff replies appear here.
                     </p>
                   </motion.div>
                 )}
@@ -511,10 +524,10 @@ export function CommsInbox() {
 }
 
 function PracticeNumberBanner({ channels }: { channels: PracticeChannelRow[] }) {
-  const wa = channels.find((c) => c.channel_type === "whatsapp")
+  const messaging = channels.find((c) => c.channel_type === "rcs")
   const voice = channels.find((c) => c.channel_type === "voice")
 
-  if (!wa && !voice) return null
+  if (!messaging && !voice) return null
 
   const STATUS_LABEL: Record<string, { text: string; color: string }> = {
     active: { text: "Live", color: "text-emerald-400" },
@@ -527,15 +540,15 @@ function PracticeNumberBanner({ channels }: { channels: PracticeChannelRow[] }) 
 
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
-      {wa && (
+      {messaging && (
         <div className="flex items-center gap-2">
-          <WhatsappLogo className="size-4 text-[#25D366]" weight="fill" />
-          <span className="font-mono text-sm text-white/75">{wa.phone_number}</span>
-          {wa.sender_display_name && (
-            <span className="text-[10px] text-white/30">({wa.sender_display_name})</span>
+          <ChatText className="size-4 text-emerald-400" weight="fill" />
+          <span className="font-mono text-sm text-white/75">{messaging.phone_number}</span>
+          {messaging.sender_display_name && (
+            <span className="text-[10px] text-white/30">({messaging.sender_display_name})</span>
           )}
-          <span className={cn("text-[10px] font-medium", STATUS_LABEL[wa.status]?.color || "text-white/40")}>
-            {STATUS_LABEL[wa.status]?.text || wa.status}
+          <span className={cn("text-[10px] font-medium", STATUS_LABEL[messaging.status]?.color || "text-white/40")}>
+            {STATUS_LABEL[messaging.status]?.text || messaging.status}
           </span>
         </div>
       )}
@@ -556,13 +569,13 @@ function InboxSetupEmptyState({ onOpenChannels }: { onOpenChannels: () => void }
   const steps = [
     { label: "Database", hint: "Run supabase/migrations/20260407120000_comms_platform.sql (Dashboard SQL or CLI)" },
     { label: "Environment", hint: "TWILIO_* · TWILIO_WEBHOOK_BASE_URL · SUPABASE_SERVICE_ROLE_KEY" },
-    { label: "Channels", hint: "Open Channels → provision WhatsApp number → set Twilio webhook URLs" },
+    { label: "Channels", hint: "Open Channels → link Twilio number → SMS/RCS webhooks + Vapi voice" },
   ]
 
   return (
     <BentoTile
       title="Patient messaging"
-      subtitle="WhatsApp inbox"
+      subtitle="SMS / RCS inbox"
       className={cn(
         "min-h-[min(520px,calc(100vh-320px))] overflow-hidden",
         "border border-white/[0.07] bg-gradient-to-b from-white/[0.02] to-transparent shadow-[0_0_0_1px_rgba(255,255,255,0.03)_inset]"
@@ -573,23 +586,23 @@ function InboxSetupEmptyState({ onOpenChannels }: { onOpenChannels: () => void }
           <div className="relative mb-5">
             <div
               className="absolute inset-0 rounded-[1.35rem] blur-2xl"
-              style={{ background: "radial-gradient(circle, rgba(37,211,102,0.22) 0%, transparent 68%)" }}
+              style={{ background: "radial-gradient(circle, rgba(14,165,233,0.2) 0%, transparent 68%)" }}
               aria-hidden
             />
-            <div className="relative flex size-[5.25rem] items-center justify-center rounded-[1.35rem] border border-[#25D366]/25 bg-[#0d1110] shadow-[0_12px_40px_-12px_rgba(37,211,102,0.35)]">
-              <WhatsappLogo className="size-[2.65rem] text-[#25D366]" weight="fill" aria-hidden />
+            <div className="relative flex size-[5.25rem] items-center justify-center rounded-[1.35rem] border border-sky-500/25 bg-[#0d1110] shadow-[0_12px_40px_-12px_rgba(14,165,233,0.35)]">
+              <ChatCircle className="size-[2.65rem] text-sky-400" weight="fill" aria-hidden />
             </div>
           </div>
           <h3 className="text-[1.05rem] font-semibold tracking-tight text-white/[0.92]">Ready when you are</h3>
           <p className="mt-2.5 max-w-[22rem] text-[11px] leading-[1.55] text-white/38">
-            Connect WhatsApp once. Patient threads, lab imports, and admin notifications land in this bento inbox.
+            Connect a Twilio line for SMS and RCS. Patient threads, lab imports, and admin notifications land here.
           </p>
           <button
             type="button"
             onClick={onOpenChannels}
-            className="mt-6 inline-flex items-center gap-2 rounded-xl border border-[#25D366]/35 bg-[#25D366]/12 px-5 py-2.5 text-[11px] font-semibold text-[#6ee7a8] transition-colors hover:border-[#25D366]/50 hover:bg-[#25D366]/18"
+            className="mt-6 inline-flex items-center gap-2 rounded-xl border border-sky-500/35 bg-sky-500/12 px-5 py-2.5 text-[11px] font-semibold text-sky-200 transition-colors hover:border-sky-400/50 hover:bg-sky-500/18"
           >
-            <WhatsappLogo className="size-4 text-[#25D366]" weight="fill" />
+            <ChatCircle className="size-4 text-sky-400" weight="fill" />
             Open Channels
           </button>
           <p className="mt-4 text-[9px] leading-relaxed text-white/22">
@@ -627,7 +640,7 @@ function InboxSetupEmptyState({ onOpenChannels }: { onOpenChannels: () => void }
 }
 
 function channelLabel(channel: string): string {
-  if (channel === "whatsapp") return "WhatsApp"
+  if (channel === "rcs") return "RCS / SMS"
   if (channel === "voice") return "Phone"
   if (channel === "sms") return "SMS"
   return channel
@@ -695,12 +708,14 @@ function ThreadRow({ thread, isSelected, onClick }: { thread: ThreadItem; isSele
 function ThreadDetail({
   thread,
   messages,
+  voiceCalls,
   loading,
   onBack,
   onRefresh,
 }: {
   thread: ThreadItem
   messages: MessageItem[]
+  voiceCalls: VoiceCallItem[]
   loading: boolean
   onBack: () => void
   onRefresh: () => void
@@ -721,7 +736,7 @@ function ThreadDetail({
     if (!compose.trim() || sending) return
     setSending(true)
     try {
-      await fetch("/api/comms/whatsapp/send", {
+      await fetch("/api/comms/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ threadId: thread.id, message: compose.trim() }),
@@ -768,7 +783,7 @@ function ThreadDetail({
           <button
             type="button"
             onClick={async () => {
-              await fetch("/api/comms/whatsapp/send", {
+              await fetch("/api/comms/send", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ threadId: thread.id, message: "__return_to_ai" }),
@@ -782,6 +797,34 @@ function ThreadDetail({
           </button>
         )}
       </div>
+
+      {thread.channel === "voice" && voiceCalls.length > 0 && (
+        <details className="mb-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-white/70">
+          <summary className="cursor-pointer select-none text-[11px] font-medium text-white/50">
+            Transcript ({voiceCalls.length} call{voiceCalls.length === 1 ? "" : "s"})
+          </summary>
+          <div className="mt-2 space-y-3 border-t border-white/[0.06] pt-2">
+            {voiceCalls.map((vc) => (
+              <div key={vc.id} className="space-y-1">
+                {vc.summary && (
+                  <p className="text-[10px] text-white/40">
+                    <span className="text-white/40">Summary</span>{" "}
+                    <span className="text-white/60">{vc.summary}</span>
+                  </p>
+                )}
+                {vc.transcript && (
+                  <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-white/45">
+                    {vc.transcript}
+                  </pre>
+                )}
+                {!vc.transcript && !vc.summary && (
+                  <p className="text-[10px] text-white/25">No transcript text yet.</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-1.5 pr-1" style={{ scrollbarWidth: "none" }}>
@@ -800,7 +843,7 @@ function ThreadDetail({
       </div>
 
       {/* Compose */}
-      {thread.channel === "whatsapp" && thread.status !== "closed" && (
+      {thread.channel === "rcs" && thread.status !== "closed" && (
         <div className="mt-3 flex items-end gap-2 border-t border-white/[0.06] pt-3">
           <input
             type="text"

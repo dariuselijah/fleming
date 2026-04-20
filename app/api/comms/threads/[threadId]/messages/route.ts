@@ -24,6 +24,41 @@ export async function GET(
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+    const { data: threadRow } = await supabase
+      .from("conversation_threads")
+      .select("channel")
+      .eq("id", threadId)
+      .maybeSingle()
+
+    let voiceCalls: Array<{
+      id: string
+      transcript: string | null
+      summary: string | null
+      durationSeconds: number | null
+      recordingUrl: string | null
+      intent: string | null
+      structuredOutcome: unknown
+    }> = []
+
+    if (threadRow?.channel === "voice") {
+      const { data: vc } = await supabase
+        .from("voice_calls")
+        .select("id, transcript, summary, duration_seconds, recording_url, intent, structured_outcome")
+        .eq("thread_id", threadId)
+        .order("created_at", { ascending: false })
+        .limit(20)
+
+      voiceCalls = (vc || []).map((r) => ({
+        id: r.id,
+        transcript: r.transcript,
+        summary: r.summary,
+        durationSeconds: r.duration_seconds,
+        recordingUrl: r.recording_url,
+        intent: r.intent,
+        structuredOutcome: r.structured_outcome,
+      }))
+    }
+
     // Mark thread as read
     await supabase
       .from("conversation_threads")
@@ -44,7 +79,7 @@ export async function GET(
       createdAt: m.created_at,
     }))
 
-    return NextResponse.json({ messages })
+    return NextResponse.json({ messages, voiceCalls })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }

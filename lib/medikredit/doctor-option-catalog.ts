@@ -583,6 +583,50 @@ export function resolveSchemeOptionCode(
   return resolveOption(schemeCode, claimType, acuteChronic)?.optionCode ?? null
 }
 
+function normalizePlanLabel(s: string): string {
+  return s.replace(/\s+/g, " ").trim().toUpperCase()
+}
+
+/**
+ * Resolve a catalog row by the full plan label (`medical_schemes.name` / doctor list “SCHEME / PLAN/ OPTIONS”).
+ * Use this when the 5-digit scheme code is unknown but the patient’s plan was chosen from that list.
+ * Picks the correct **6-digit option code** for the batch’s claim type (DD vs P&C), including when they
+ * differ (e.g. CDE PRIMARY … DD = 600138, P&C = 600139) or when DD/P&C share one code.
+ */
+export function resolveOptionByPlanName(
+  planName: string | undefined,
+  claimType: DoctorClaimType,
+  acuteChronic?: "acute" | "chronic"
+): DoctorOption | null {
+  if (!planName?.trim()) return null
+  const n = normalizePlanLabel(planName)
+  ensureIndex()
+  const opts = _allExpanded!.filter((o) => normalizePlanLabel(o.name) === n && o.claimType === claimType)
+  if (opts.length === 0) return null
+  if (opts.length === 1) return opts[0]
+  if (acuteChronic) {
+    const needle = acuteChronic.toUpperCase()
+    const match = opts.find((o) => o.name.toUpperCase().includes(needle))
+    if (match) return match
+  }
+  return opts[0]
+}
+
+/**
+ * TX@plan for eligibility (`tx_cd` 20/30): use stored `medicalAidSchemeCode` when present; otherwise infer the
+ * 6-digit doctor option from `medicalAidScheme` (plan label), matching the April 2026 list — e.g. POLMED DD → `624139`.
+ * Uses the **DD** row (same routing MediKredit expects for typical GP eligibility unless your cert says otherwise).
+ */
+export function resolveEligibilityPlanOptionCode(patient: {
+  medicalAidSchemeCode?: string
+  medicalAidScheme?: string
+}): string | null {
+  const explicit = patient.medicalAidSchemeCode?.trim()
+  if (explicit) return explicit
+  const opt = resolveOptionByPlanName(patient.medicalAidScheme, "DD")
+  return opt?.optionCode?.trim() ?? null
+}
+
 /**
  * Fuzzy search: find options whose name matches a search term.
  * Used for scheme selection UI lookups.

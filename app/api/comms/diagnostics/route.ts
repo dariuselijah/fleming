@@ -61,8 +61,8 @@ export async function GET(req: NextRequest) {
       twilioApiOk,
       twilioApiError,
       urls: {
-        whatsappInbound: `${baseUrl}/api/comms/whatsapp/webhook`,
-        whatsappStatus: `${baseUrl}/api/comms/whatsapp/status`,
+        messagingInbound: `${baseUrl}/api/comms/messaging/webhook`,
+        messagingStatus: `${baseUrl}/api/comms/messaging/status`,
       },
     })
   } catch (e) {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { checkEligibility } from "@/lib/medikredit/eligibility-service"
-import { getMedikreditEnv } from "@/lib/medikredit/env"
+import { isMedikreditConfigured } from "@/lib/medikredit/env"
 import { insertEligibilityCheck } from "@/lib/medikredit/persist"
 import { assertPracticeMember } from "@/lib/medikredit/practice-guard"
 import { fetchMedikreditProviderSettings } from "@/lib/medikredit/provider-settings"
@@ -36,10 +36,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (e as Error).message }, { status })
   }
 
-  if (!getMedikreditEnv() && process.env.MEDIKREDIT_DRY_RUN !== "1") {
+  if (!isMedikreditConfigured()) {
     return NextResponse.json(
       {
-        error: "MediKredit is not configured on the server (set MEDIKREDIT_* env) or enable MEDIKREDIT_DRY_RUN=1 for development.",
+        error:
+          "MediKredit is not configured on the server (set CLINICAL_PROXY_URL, or MEDIKREDIT_* for direct SOAP, or MEDIKREDIT_DRY_RUN=1 for development).",
       },
       { status: 503 }
     )

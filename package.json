@@ -63,7 +63,9 @@
     "benchmark:release:strict": "BENCH_STRICT_MODE=true npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/run-release-benchmarks.ts",
     "test:lms-media-platform": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-lms-media-platform-regressions.ts",
     "benchmark:lms-media": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/benchmark-lms-media-pipeline.ts",
-    "test:medikredit": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-medikredit-parse.ts"
+    "test:medikredit": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-medikredit-parse.ts",
+    "verify:clinical-proxy": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/verify-clinical-proxy.ts",
+    "test:cancel-reschedule": "npx ts-node --compiler-options '{\"module\":\"commonjs\"}' scripts/test-cancel-reschedule.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.10",

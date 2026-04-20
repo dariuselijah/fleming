@@ -1,7 +1,14 @@
-export type ChannelType = "whatsapp" | "voice" | "sms"
+export type ChannelType = "rcs" | "voice" | "sms" | "portal"
 export type ThreadStatus = "active" | "awaiting_input" | "handoff" | "closed"
 export type ThreadPriority = "low" | "normal" | "high" | "urgent"
-export type FlowType = "none" | "booking" | "onboarding" | "triage" | "faq" | "patient_lookup"
+export type FlowType =
+  | "none"
+  | "booking"
+  | "onboarding"
+  | "triage"
+  | "faq"
+  | "patient_lookup"
+  | "appointment_change"
 export type MessageDirection = "inbound" | "outbound"
 export type SenderType = "patient" | "agent" | "staff" | "system"
 export type ContentType = "text" | "audio" | "image" | "document" | "template" | "interactive" | "location"
@@ -215,6 +222,14 @@ export interface TriageFlowState extends FlowState {
     duration?: string
     severity?: string
     urgency?: "low" | "medium" | "high" | "emergency"
+  }
+}
+
+export interface AppointmentChangeFlowState extends FlowState {
+  step?: "reschedule_date" | "reschedule_time"
+  collected?: {
+    appointmentId?: string
+    newDate?: string
   }
 }
 

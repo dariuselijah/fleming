@@ -9,7 +9,9 @@ import {
   type ClaimStatus,
   type BillingSubTab,
 } from "@/lib/clinical-workspace"
+import type { BillingMode } from "@/lib/billing/types"
 import { usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-context"
+import { fetchPracticeClaimsForWorkspace } from "@/lib/clinical-workspace/refresh-practice-claims"
 import { fetchClient } from "@/lib/fetch"
 import { cn } from "@/lib/utils"
 import {
@@ -19,6 +21,7 @@ import {
   CaretRight,
   Check,
   CheckCircle,
+  Copy,
   CreditCard,
   CurrencyCircleDollar,
   FileText,
@@ -79,6 +82,7 @@ const SUB_TABS: { id: BillingSubTab; label: string }[] = [
 // ─── Main Component ──────────────────────────────────────────────
 
 export function BentoClaims() {
+  const { practiceId } = usePracticeCrypto()
   const {
     claims: storeClaims,
     updateClaimStatus,
@@ -93,6 +97,23 @@ export function BentoClaims() {
   const lastBillingFocusNonce = useRef(0)
 
   const allClaims = storeClaims
+
+  /** Billing mounts when the user opens this tab — always refresh from DB (drafts + submitted). */
+  useEffect(() => {
+    if (!practiceId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const rows = await fetchPracticeClaimsForWorkspace(practiceId)
+        if (!cancelled) useWorkspaceStore.getState().setClaims(rows)
+      } catch (e) {
+        console.warn("[BentoClaims] load claims", e)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [practiceId])
 
   const [sortKey, setSortKey] = useState<SortKey>("date")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
@@ -146,7 +167,9 @@ export function BentoClaims() {
 
   const filteredClaims = useMemo(() => {
     if (activeBillingSubTab === "outstanding")
-      return allClaims.filter((c) => ["draft", "submitted", "rejected"].includes(c.status))
+      return allClaims.filter((c) =>
+        ["draft", "submitted", "rejected", "partial"].includes(c.status)
+      )
     if (activeBillingSubTab === "payments")
       return allClaims.filter((c) => c.status === "paid")
     return allClaims
@@ -260,9 +283,7 @@ export function BentoClaims() {
         )}
 
         {/* Payments summary header */}
-        {activeBillingSubTab === "payments" && (
-          <PaymentsSummary claims={filteredClaims} />
-        )}
+        {activeBillingSubTab === "payments" && <PaymentsSummary />}
 
         {/* Outstanding aging buckets */}
         {activeBillingSubTab === "outstanding" && agingBuckets && (
@@ -291,15 +312,8 @@ export function BentoClaims() {
           </div>
         )}
 
-        {/* Invoices placeholder */}
         {activeBillingSubTab === "invoices" && (
-          <div className="flex flex-1 items-center justify-center rounded-2xl border border-white/[0.05] bg-white/[0.015]">
-            <div className="text-center">
-              <FileText className="mx-auto mb-2 size-8 text-white/15" />
-              <p className="text-[13px] font-medium text-white/30">Invoices</p>
-              <p className="mt-1 text-[11px] text-white/15">Invoice generation coming soon</p>
-            </div>
-          </div>
+          <InvoicesPanel practiceId={practiceId} />
         )}
 
         {/* Table (claims, outstanding, payments) */}
@@ -475,31 +489,531 @@ function PulseChip({ label, value, data, color }: { label: string; value: string
 
 // ─── Payments Summary ────────────────────────────────────────────
 
-function PaymentsSummary({ claims }: { claims: PracticeClaim[] }) {
-  const stats = useMemo(() => {
-    let total = 0
-    const methods: Record<string, number> = {}
-    for (const c of claims) {
-      total += c.totalAmount
-      const m = c.paymentMethod ?? "Unknown"
-      methods[m] = (methods[m] ?? 0) + c.totalAmount
+function PaymentsSummary() {
+  const { practiceId } = usePracticeCrypto()
+  const [rows, setRows] = useState<
+    { id: string; provider: string; method: string | null; amount_cents: number; status: string }[]
+  >([])
+
+  useEffect(() => {
+    if (!practiceId) return
+    let cancelled = false
+    ;(async () => {
+      const res = await fetchClient("/api/billing/payments")
+      if (!res.ok || cancelled) return
+      const j = (await res.json()) as {
+        payments?: { id: string; provider: string; method: string | null; amount_cents: number; status: string }[]
+      }
+      setRows(j.payments ?? [])
+    })()
+    return () => {
+      cancelled = true
     }
-    return { total, count: claims.length, methods }
-  }, [claims])
+  }, [practiceId])
+
+  const stats = useMemo(() => {
+    let totalZar = 0
+    let count = 0
+    const byProv: Record<string, number> = {}
+    for (const p of rows) {
+      if (p.status !== "succeeded" && p.status !== "partially_refunded") continue
+      const zar = p.amount_cents / 100
+      totalZar += zar
+      count += 1
+      byProv[p.provider] = (byProv[p.provider] ?? 0) + zar
+    }
+    return { totalZar, count, byProv }
+  }, [rows])
 
   return (
-    <div className="mb-3 flex gap-3">
-      <div className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+    <div className="mb-3 flex flex-wrap gap-3">
+      <div className="min-w-[140px] flex-1 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
         <p className="text-[9px] font-medium uppercase tracking-wider text-white/25">Total Received</p>
-        <p className="text-sm font-bold tabular-nums text-[#00E676]">R{stats.total.toLocaleString()}</p>
+        <p className="text-sm font-bold tabular-nums text-[#00E676]">R{stats.totalZar.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         <p className="text-[9px] text-white/20">{stats.count} payment{stats.count !== 1 ? "s" : ""}</p>
       </div>
-      {Object.entries(stats.methods).map(([method, amount]) => (
-        <div key={method} className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
-          <p className="text-[9px] font-medium uppercase tracking-wider text-white/25">{method}</p>
-          <p className="text-sm font-bold tabular-nums text-white/60">R{amount.toLocaleString()}</p>
+      {Object.entries(stats.byProv).map(([provider, amount]) => (
+        <div key={provider} className="min-w-[120px] flex-1 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+          <p className="text-[9px] font-medium uppercase tracking-wider text-white/25">{provider}</p>
+          <p className="text-sm font-bold tabular-nums text-white/60">R{amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         </div>
       ))}
+    </div>
+  )
+}
+
+type InvoiceRow = {
+  id: string
+  invoice_number: string | null
+  patient_id: string
+  claim_id: string | null
+  total_cents: number
+  amount_paid_cents: number | null
+  status: string
+  billing_mode: string | null
+  created_at: string
+  due_at: string | null
+  last_reminded_at: string | null
+  patient_snapshot: unknown
+}
+
+function InvoicesPanel({ practiceId }: { practiceId: string | null }) {
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!practiceId) return
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      try {
+        const res = await fetchClient("/api/billing/invoices")
+        if (!res.ok || cancelled) return
+        const j = (await res.json()) as { invoices?: InvoiceRow[] }
+        setInvoices(j.invoices ?? [])
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [practiceId])
+
+  if (!practiceId) {
+    return (
+      <div className="flex flex-1 items-center justify-center rounded-2xl border border-white/[0.05] bg-white/[0.015]">
+        <p className="text-[11px] text-white/25">Practice context required</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.05] bg-white/[0.015]">
+      <div className="flex items-center justify-between border-b border-white/[0.05] px-3 py-2">
+        <p className="text-[10px] font-medium uppercase tracking-wider text-white/25">Practice invoices</p>
+        {loading && <span className="text-[10px] text-white/40">Loading…</span>}
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto" style={{ scrollbarWidth: "none" }}>
+        <table className="w-full min-w-[720px] border-collapse text-left">
+          <thead>
+            <tr className="border-b border-white/[0.06]">
+              <th className="px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-white/25">#</th>
+              <th className="px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-white/25">Patient</th>
+              <th className="px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-white/25">Status</th>
+              <th className="px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-white/25">Mode</th>
+              <th className="px-3 py-2 text-right text-[10px] font-medium uppercase tracking-wider text-white/25">Total</th>
+              <th className="px-3 py-2 text-right text-[10px] font-medium uppercase tracking-wider text-white/25">Paid</th>
+              <th className="px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-white/25">Due</th>
+              <th className="w-24 px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-white/25">PDF</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoices.map((inv) => {
+              const snap = inv.patient_snapshot as { name?: string } | null
+              const name = snap?.name?.trim() || inv.patient_id.slice(0, 8)
+              const total = (inv.total_cents ?? 0) / 100
+              const paid = (inv.amount_paid_cents ?? 0) / 100
+              const overdue =
+                inv.due_at && new Date(inv.due_at) < new Date() && inv.status !== "paid" && inv.status !== "void"
+              return (
+                <tr key={inv.id} className="border-b border-white/[0.03]">
+                  <td className="px-3 py-2 font-mono text-[10px] text-white/40">{inv.invoice_number ?? inv.id.slice(0, 8)}</td>
+                  <td className="px-3 py-2 text-[11px] font-medium text-foreground">{name}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase",
+                        inv.status === "paid"
+                          ? "bg-[#00E676]/15 text-[#00E676]"
+                          : inv.status === "void"
+                            ? "bg-white/[0.06] text-white/35"
+                            : overdue
+                              ? "bg-amber-500/15 text-amber-400"
+                              : "bg-blue-500/15 text-blue-400"
+                      )}
+                    >
+                      {inv.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-[10px] text-white/40">{inv.billing_mode ?? "—"}</td>
+                  <td className="px-3 py-2 text-right text-[11px] tabular-nums">R{total.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-right text-[11px] tabular-nums text-white/50">R{paid.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-[10px] text-white/30">
+                    {inv.due_at ? new Date(inv.due_at).toLocaleDateString() : "—"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <a
+                      href={`/api/billing/invoices/${inv.id}/pdf`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] font-medium text-blue-400 hover:underline"
+                    >
+                      Open
+                    </a>
+                  </td>
+                </tr>
+              )
+            })}
+            {invoices.length === 0 && !loading && (
+              <tr>
+                <td colSpan={8} className="px-4 py-12 text-center text-[11px] text-white/20">
+                  No invoices yet
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ClaimBillingSection({
+  claimId,
+  practiceId,
+  cashAmount,
+  medicalAidAmount,
+}: {
+  claimId: string
+  practiceId: string | null
+  cashAmount: number
+  medicalAidAmount: number
+}) {
+  const [invoiceId, setInvoiceId] = useState<string | null>(null)
+  const [invoiceStatus, setInvoiceStatus] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [cashZar, setCashZar] = useState(cashAmount > 0 ? String(cashAmount) : "")
+  const [deliverEmail, setDeliverEmail] = useState(false)
+  const [deliverSms, setDeliverSms] = useState(false)
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null)
+  const [eftUrl, setEftUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    setCashZar(cashAmount > 0 ? String(cashAmount) : "")
+  }, [claimId, cashAmount])
+
+  useEffect(() => {
+    setInvoiceId(null)
+    setInvoiceStatus(null)
+    setMsg(null)
+    setCheckoutUrl(null)
+    setEftUrl(null)
+  }, [claimId])
+
+  useEffect(() => {
+    if (!practiceId) return
+    let cancelled = false
+    ;(async () => {
+      const res = await fetchClient("/api/billing/invoices")
+      if (!res.ok || cancelled) return
+      const j = (await res.json()) as { invoices?: { id: string; claim_id: string | null; status: string }[] }
+      const row = j.invoices?.find((i) => i.claim_id === claimId)
+      if (row) {
+        setInvoiceId(row.id)
+        setInvoiceStatus(row.status)
+      } else {
+        setInvoiceId(null)
+        setInvoiceStatus(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [claimId, practiceId])
+
+  const billingMode: BillingMode = useMemo(() => {
+    if (medicalAidAmount > 0 && cashAmount > 0) return "split"
+    if (medicalAidAmount > 0) return "scheme_only"
+    if (cashAmount > 0) return "cash"
+    return "card"
+  }, [cashAmount, medicalAidAmount])
+
+  const createInvoice = async () => {
+    if (!practiceId) return
+    setLoading(true)
+    setMsg(null)
+    try {
+      const res = await fetchClient("/api/billing/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claimId, billingMode }),
+      })
+      const j = (await res.json()) as { invoiceId?: string; error?: string }
+      if (!res.ok) throw new Error(j.error || "Failed")
+      setInvoiceId(j.invoiceId ?? null)
+      setInvoiceStatus("draft")
+      setMsg("Invoice created (draft)")
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const issueInvoice = async () => {
+    if (!invoiceId || !practiceId) return
+    setLoading(true)
+    setMsg(null)
+    try {
+      const res = await fetchClient(`/api/billing/invoices/${invoiceId}/issue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      const j = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(j.error || "Failed")
+      setInvoiceStatus("issued")
+      setMsg("Invoice issued")
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const payCash = async () => {
+    if (!invoiceId || !practiceId) return
+    const zar = parseFloat(cashZar.replace(",", "."))
+    const cents = Math.round(zar * 100)
+    if (!Number.isFinite(cents) || cents <= 0) {
+      setMsg("Enter a valid cash amount")
+      return
+    }
+    const idem = `cash-${invoiceId}-${crypto.randomUUID()}`
+    setLoading(true)
+    setMsg(null)
+    try {
+      const res = await fetchClient(`/api/billing/invoices/${invoiceId}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Idempotency-Key": idem },
+        body: JSON.stringify({
+          provider: "cash",
+          amountCents: cents,
+          deliverEmail,
+          deliverSms,
+        }),
+      })
+      const j = (await res.json()) as { error?: string; invoiceStatus?: string }
+      if (!res.ok) throw new Error(j.error || "Failed")
+      if (j.invoiceStatus) setInvoiceStatus(j.invoiceStatus)
+      setMsg("Cash recorded")
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const startCard = async () => {
+    if (!invoiceId || !practiceId) return
+    setLoading(true)
+    setMsg(null)
+    try {
+      const res = await fetchClient(`/api/billing/invoices/${invoiceId}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Idempotency-Key": `polar-${invoiceId}-${crypto.randomUUID()}` },
+        body: JSON.stringify({ provider: "polar" }),
+      })
+      const j = (await res.json()) as { checkoutUrl?: string; error?: string }
+      if (!res.ok) throw new Error(j.error || "Failed")
+      setCheckoutUrl(j.checkoutUrl ?? null)
+      setMsg("Checkout link ready")
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const startEft = async () => {
+    if (!invoiceId || !practiceId) return
+    setLoading(true)
+    setMsg(null)
+    try {
+      const res = await fetchClient(`/api/billing/invoices/${invoiceId}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Idempotency-Key": `stitch-${invoiceId}-${crypto.randomUUID()}` },
+        body: JSON.stringify({ provider: "stitch" }),
+      })
+      const j = (await res.json()) as { paymentUrl?: string; error?: string }
+      if (!res.ok) throw new Error(j.error || "Failed")
+      setEftUrl(j.paymentUrl ?? null)
+      setMsg("EFT link ready")
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const sendPortal = async () => {
+    if (!invoiceId || !practiceId) return
+    setLoading(true)
+    setMsg(null)
+    try {
+      const res = await fetchClient(`/api/billing/invoices/${invoiceId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channels: ["sms"], issueFirst: true }),
+      })
+      const j = (await res.json()) as { portalUrl?: string; error?: string }
+      if (!res.ok) throw new Error(j.error || "Failed")
+      setMsg(j.portalUrl ? `Portal: ${j.portalUrl}` : "Sent")
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const copyUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setMsg("Copied to clipboard")
+    } catch {
+      setMsg("Copy failed")
+    }
+  }
+
+  if (!practiceId) return null
+
+  return (
+    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium text-emerald-300">Patient billing</p>
+        {invoiceStatus && (
+          <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[9px] font-semibold uppercase text-white/40">
+            {invoiceStatus}
+          </span>
+        )}
+      </div>
+      {invoiceId ? <p className="text-[10px] text-white/35 font-mono break-all">Invoice: {invoiceId}</p> : null}
+      {msg && <p className="text-[10px] text-white/50">{msg}</p>}
+
+      <div className="flex flex-wrap gap-2">
+        {!invoiceId && (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void createInvoice()}
+            className="rounded-lg bg-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-50"
+          >
+            Create invoice
+          </button>
+        )}
+        {invoiceId && (
+          <>
+            <button
+              type="button"
+              disabled={loading || invoiceStatus !== "draft"}
+              onClick={() => void issueInvoice()}
+              className="rounded-lg bg-white/10 px-2.5 py-1.5 text-[10px] font-semibold text-white/80 hover:bg-white/15 disabled:opacity-40"
+            >
+              Issue
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void sendPortal()}
+              className="rounded-lg bg-blue-500/20 px-2.5 py-1.5 text-[10px] font-semibold text-blue-300 hover:bg-blue-500/30 disabled:opacity-50"
+            >
+              SMS pay link
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void startCard()}
+              className="inline-flex items-center gap-1 rounded-lg bg-indigo-500/20 px-2.5 py-1.5 text-[10px] font-semibold text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50"
+            >
+              <CreditCard className="size-3" />
+              Card link
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void startEft()}
+              className="rounded-lg bg-cyan-500/15 px-2.5 py-1.5 text-[10px] font-semibold text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-50"
+            >
+              EFT link
+            </button>
+          </>
+        )}
+      </div>
+
+      {(checkoutUrl || eftUrl) && (
+        <div className="space-y-1 rounded-lg border border-white/[0.06] bg-black/20 p-2">
+          {checkoutUrl && (
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 flex-1 break-all text-[9px] text-white/45">{checkoutUrl}</p>
+              <button
+                type="button"
+                className="shrink-0 rounded p-1 text-white/20 hover:bg-white/[0.06] hover:text-white/60"
+                onClick={() => void copyUrl(checkoutUrl)}
+                title="Copy"
+              >
+                <Copy className="size-3.5" />
+              </button>
+            </div>
+          )}
+          {eftUrl && (
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 flex-1 break-all text-[9px] text-white/45">{eftUrl}</p>
+              <button
+                type="button"
+                className="shrink-0 rounded p-1 text-white/20 hover:bg-white/[0.06] hover:text-white/60"
+                onClick={() => void copyUrl(eftUrl)}
+                title="Copy"
+              >
+                <Copy className="size-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {invoiceId && (
+        <div className="space-y-2 border-t border-white/[0.06] pt-2">
+          <p className="text-[9px] font-medium uppercase tracking-wider text-white/25">Record cash</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={cashZar}
+              onChange={(e) => setCashZar(e.target.value)}
+              placeholder="Amount (ZAR)"
+              className="w-28 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11px] tabular-nums outline-none focus:border-emerald-500/30"
+            />
+            <label className="flex items-center gap-1 text-[10px] text-white/40">
+              <input
+                type="checkbox"
+                checked={deliverEmail}
+                onChange={(e) => setDeliverEmail(e.target.checked)}
+                className="size-3 rounded accent-emerald-500"
+              />
+              Email receipt
+            </label>
+            <label className="flex items-center gap-1 text-[10px] text-white/40">
+              <input
+                type="checkbox"
+                checked={deliverSms}
+                onChange={(e) => setDeliverSms(e.target.checked)}
+                className="size-3 rounded accent-emerald-500"
+              />
+              SMS receipt
+            </label>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void payCash()}
+              className="rounded-lg bg-[#00E676]/15 px-2.5 py-1.5 text-[10px] font-semibold text-[#00E676] hover:bg-[#00E676]/25 disabled:opacity-50"
+            >
+              Post cash
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -722,6 +1236,13 @@ function ClaimDetailPanel({
           <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3">
             <StatusTimeline status={claim.status} />
           </div>
+
+          <ClaimBillingSection
+            claimId={claim.id}
+            practiceId={practiceId}
+            cashAmount={claim.cashAmount}
+            medicalAidAmount={claim.medicalAidAmount}
+          />
 
           {claim.status === "draft" && linesForResume.length > 0 && (
             <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.06] p-3">

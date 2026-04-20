@@ -11,6 +11,8 @@ export interface MedikreditEnvConfig {
 
 /** Practice row from `medikredit_providers` merged with defaults. */
 export interface MedikreditProviderSettings {
+  /** Practice label on MediKredit registration (optional). */
+  providerDisplayName?: string | null
   vendorId?: string | null
   bhfNumber?: string | null
   hpcNumber?: string | null
@@ -18,6 +20,8 @@ export interface MedikreditProviderSettings {
   pcNumber?: string | null
   worksNumber?: string | null
   prescriberMemAccNbr?: string | null
+  /** VEND@vend_ver in XML (often `"1"`). */
+  vendorVersion?: string | null
   /** PHISC discipline for modifier catalog lookup (e.g. "medical", "dental") */
   discipline?: string | null
   useTestProvider: boolean
@@ -31,6 +35,8 @@ export interface MedikreditPatientPayload {
   idNumber?: string
   memberNumber?: string
   medicalAidScheme?: string
+  /** Doctor option / plan code (6-digit) for TX@plan — required by the switch to resolve benefit option. */
+  medicalAidSchemeCode?: string
   dependentCode?: string
   mainMemberName?: string
   dateOfBirth?: string
@@ -79,19 +85,45 @@ export interface EligibilityResponse {
   remittanceMessages: MedikreditRemittanceMessage[]
   warnings: MedikreditWarning[]
   rawXml?: string
+  /** Inner DOCUMENT XML sent to MediKredit (SOAP body `request` content / proxy `xmlData`). */
+  requestInnerXml?: string
+  /** Full SOAP envelope sent when using direct MEDIKREDIT_API_URL (omitted when using CLINICAL_PROXY JSON API). */
+  requestSoapEnvelope?: string
+  /** Full raw HTTP body returned by MediKredit or the clinical proxy (before parser unwrap). */
+  responseRaw?: string
   /** Normalized from TX@res */
   res?: string
+  /** First PAT/PLAN@pln_descr when the switch returns a plan description (tx_cd 20/30). */
+  planDescription?: string
 }
 
 export interface FamilyDependentRow {
   dep_cd?: string
   relationshipLabel?: string
   id_nbr?: string
+  /** Display name: typically fname + sname from switch */
   name?: string
+  surname?: string
+  firstNames?: string
+  initials?: string
+  /** Switch gender: 1 male, 2 female */
+  gender?: string
+  /** Raw YYYYMMDD from PAT@dob */
+  dobYmd?: string
+  /** ISO yyyy-mm-dd when dobYmd is valid */
+  dateOfBirthIso?: string
+  /** PLAN@pln_descr (e.g. POLMED MARINE) */
+  planDescription?: string
+  /** PLAN@dt_join YYYYMMDD */
+  planJoinDateYmd?: string
 }
 
 export interface FamilyEligibilityResponse extends EligibilityResponse {
   dependents: FamilyDependentRow[]
+  /** MEM@ch_id — principal scheme id on household */
+  memberChId?: string
+  /** MEM@nbr_depn — number of dependants on file */
+  memberDependentCount?: string
 }
 
 export type ItemTypeIndicator = "01" | "02" | "03" | "04" | "05" | "06"

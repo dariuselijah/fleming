@@ -5,8 +5,9 @@
 
 const PBKDF2_ITERATIONS = 210_000
 
-function toHex(buf: ArrayBuffer): string {
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("")
+function toHex(buf: ArrayBuffer | Uint8Array): string {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
+  return [...u8].map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
 function fromHex(hex: string): Uint8Array {
@@ -67,8 +68,8 @@ export async function wrapDekWithPassphrase(
   const iv = await randomBytes(12)
   const wrappedBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, dekRaw)
   return {
-    salt: toHex(salt.buffer),
-    iv: toHex(iv.buffer),
+    salt: toHex(salt),
+    iv: toHex(iv),
     wrapped: toHex(wrappedBuf),
   }
 }
@@ -93,7 +94,7 @@ export async function encryptJson(
   const iv = await randomBytes(12)
   const bytes = new TextEncoder().encode(JSON.stringify(value))
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, dekKey, bytes)
-  return { ciphertext: toHex(ct), iv: toHex(iv.buffer) }
+  return { ciphertext: toHex(ct), iv: toHex(iv) }
 }
 
 export async function decryptJson<T = unknown>(

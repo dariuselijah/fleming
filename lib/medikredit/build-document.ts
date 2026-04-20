@@ -1,3 +1,6 @@
+import { splitPersonNameParts } from "@/lib/clinical/person-name"
+import { resolveEligibilityPlanOptionCode } from "./doctor-option-catalog"
+import { getMedikreditDefaultOptionCode } from "./env"
 import type { ClaimLineInput, MedikreditPatientPayload, MedikreditProviderSettings } from "./types"
 import { escapeXmlText } from "./xml-escape"
 
@@ -9,31 +12,130 @@ function attr(name: string, value: string | undefined | null): string {
 }
 
 function memAttrs(patient: MedikreditPatientPayload, prov: MedikreditProviderSettings): string {
+  const { fname, sname } = splitPersonNameParts(patient.name ?? "")
   return [
     attr("mem_acc_nbr", patient.memberNumber),
     attr("id_nbr", patient.idNumber),
-    attr("sname", patient.name?.split(/\s+/).slice(-1)[0]),
-    attr("fname", patient.name?.split(/\s+/)[0]),
+    attr("sname", sname),
+    attr("fname", fname),
     attr("bhf_nbr", prov.bhfNumber),
     attr("hpc_nbr", prov.hpcNumber),
   ].join("")
 }
 
 function patAttrs(patient: MedikreditPatientPayload): string {
-  return [attr("dep_cd", patient.dependentCode), attr("ch_id", patient.idNumber), attr("fname", patient.name?.split(/\s+/)[0])].join("")
+  const { fname } = splitPersonNameParts(patient.name ?? "")
+  return [attr("dep_cd", patient.dependentCode), attr("ch_id", patient.idNumber), attr("fname", fname)].join("")
 }
 
-/** tx_cd 20 — single-member eligibility */
+function ymdFromIsoDob(iso?: string): string | undefined {
+  if (!iso?.trim()) return undefined
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso.trim())
+  return m ? `${m[1]}${m[2]}${m[3]}` : undefined
+}
+
+/** Doctor option code on TX@plan — stored code → infer from plan label (e.g. POLMED DD → 624139) → env → test default. */
+function eligibilityPlanCode(patient: MedikreditPatientPayload): string {
+  const resolved = resolveEligibilityPlanOptionCode(patient)
+  if (resolved) return resolved
+  return getMedikreditDefaultOptionCode()?.trim() || "631372"
+}
+
+function eligibilityTxNbr(): string {
+  return `ELIG${Date.now()}`
+}
+
+/** MEM for tx_cd 20/30 — membership on MEM; ch_id follows scheme id, not PAT SA ID. */
+function memEligibilityAttrs(patient: MedikreditPatientPayload, prov: MedikreditProviderSettings): string {
+  const { fname, sname } = splitPersonNameParts(patient.name ?? "")
+  const memNbr = patient.memberNumber?.trim()
+  return [
+    attr("mem_acc_nbr", memNbr),
+    attr("ch_id", memNbr),
+    attr("id_nbr", patient.idNumber),
+    attr("fname", fname),
+    attr("sname", sname),
+    attr("bhf_nbr", prov.bhfNumber),
+    attr("hpc_nbr", prov.hpcNumber),
+  ].join("")
+}
+
+/** PAT for tx_cd 20/30 — dep_cd + demographics; do not put SA ID in ch_id (principal uses dep_cd only). */
+function patEligibilityAttrs(patient: MedikreditPatientPayload): string {
+  const { fname, sname, ini } = splitPersonNameParts(patient.name ?? "")
+  const dep = patient.dependentCode?.trim() || "00"
+  const dob = ymdFromIsoDob(patient.dateOfBirth)
+  const gend = patient.sex === "M" || patient.sex === "F" ? patient.sex : undefined
+  return [
+    attr("dep_cd", dep),
+    attr("fname", fname),
+    attr("ini", ini),
+    attr("sname", sname),
+    attr("dob", dob),
+    attr("gend", gend),
+  ].join("")
+}
+
+/**
+ * VEND inside TX before MEM — required for switch (RJ 2420 without vend_id).
+ * Attribute `wks_nbr` (not wrks_nbr). `hb_id` matches this transaction’s `tx_nbr`.
+ */
+function vendEligibilityBlock(prov: MedikreditProviderSettings, txNbr: string): string {
+  const vendId = prov.vendorId?.trim()
+  if (!vendId) return ""
+  const wks = prov.worksNumber?.trim() || "001"
+  const pc = prov.pcNumber?.trim() || "01"
+  const vver = prov.vendorVersion?.trim() || "1"
+  return `<VEND${attr("wks_nbr", wks)}${attr("vend_id", vendId)}${attr("vend_ver", vver)}${attr("pc_nbr", pc)}${attr("hb_id", txNbr)} />`
+}
+
+/**
+ * tx_cd 20/30 — aligned with certified eligibility template (plan + message profile).
+ * `plan` is always set (medicalAidSchemeCode → catalog by medicalAidScheme label → MEDIKREDIT_DEFAULT_OPTION_CODE → 631372).
+ */
+function txAttrsEligibility(
+  txCd: "20" | "30",
+  patient: MedikreditPatientPayload,
+  prov: MedikreditProviderSettings,
+  txNbr: string
+): string {
+  const ymd = todayYmd()
+  const plan = eligibilityPlanCode(patient)
+  return [
+    attr("dt_cr", ymd),
+    attr("dt_os", ymd),
+    attr("cl_tp", "0"),
+    attr("orig", "04"),
+    attr("bin", "2"),
+    attr("sect_cd", "PR"),
+    attr("sp_hpc", prov.hpcNumber),
+    attr("clm_orig", "P"),
+    attr("msg_fmt", "13"),
+    attr("pay_adv", "P"),
+    attr("grp_prac", prov.groupPracticeNumber),
+    attr("sp_bhf", prov.bhfNumber),
+    attr("tx_nbr", txNbr),
+    attr("plan", plan),
+    attr("amd_ind", "0"),
+    attr("cntry_cd", "ZA"),
+    attr("tx_cd", txCd),
+  ].join("")
+}
+
+/** tx_cd 20 — single-member eligibility (full DOCUMENT 3.53 shape: reply_tp, TX, VEND, MEM, PAT). */
 export function buildEligibilityDocument(
   patient: MedikreditPatientPayload,
   prov: MedikreditProviderSettings
 ): string {
-  const mem = `<MEM${memAttrs(patient, prov)} />`
-  const pat = `<PAT${patAttrs(patient)} />`
+  const txNbr = eligibilityTxNbr()
+  const mem = `<MEM${memEligibilityAttrs(patient, prov)} />`
+  const pat = `<PAT${patEligibilityAttrs(patient)} />`
+  const vend = vendEligibilityBlock(prov, txNbr)
+  const txA = txAttrsEligibility("20", patient, prov, txNbr)
   return `<?xml version="1.0" encoding="UTF-8"?>
-<DOCUMENT version="${DOC_VERSION}">
-  <TX tx_cd="20"${attr("dt", todayYmd())}${attr("tm", nowHm())}>
-    ${mem}
+<DOCUMENT reply_tp="1" version="${DOC_VERSION}">
+  <TX${txA}>
+    ${vend ? `${vend}\n    ` : ""}${mem}
     ${pat}
   </TX>
 </DOCUMENT>`
@@ -45,17 +147,20 @@ export function buildFamilyEligibilityDocument(
   prov: MedikreditProviderSettings,
   dependents?: MedikreditPatientPayload[]
 ): string {
-  const mem = `<MEM${memAttrs(mainMember, prov)} />`
-  const patMain = `<PAT${patAttrs(mainMember)} rel="00" />`
+  const txNbr = eligibilityTxNbr()
+  const mem = `<MEM${memEligibilityAttrs(mainMember, prov)} />`
+  const patMain = `<PAT${patEligibilityAttrs(mainMember)} rel="00" />`
   const extra =
     dependents?.map(
       (d, i) =>
-        `<PAT${patAttrs(d)} rel="${escapeXmlText(String(i + 1))}"${attr("dep_cd", d.dependentCode)} />`
+        `<PAT${patEligibilityAttrs(d)} rel="${escapeXmlText(String(i + 1))}" />`
     ) ?? []
+  const vend = vendEligibilityBlock(prov, txNbr)
+  const txA = txAttrsEligibility("30", mainMember, prov, txNbr)
   return `<?xml version="1.0" encoding="UTF-8"?>
-<DOCUMENT version="${DOC_VERSION}">
-  <TX tx_cd="30"${attr("dt", todayYmd())}${attr("tm", nowHm())}>
-    ${mem}
+<DOCUMENT reply_tp="1" version="${DOC_VERSION}">
+  <TX${txA}>
+    ${vend ? `${vend}\n    ` : ""}${mem}
     ${patMain}
     ${extra.join("\n    ")}
   </TX>

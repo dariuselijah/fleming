@@ -54,7 +54,7 @@ export function isOptOutKeyword(text: string): boolean {
 
 export function isConsentGrant(text: string): boolean {
   const normalized = text.trim().toUpperCase()
-  return ["YES", "I AGREE", "AGREE", "CONSENT", "OK", "ACCEPT", "Y"].includes(normalized)
+  return ["YES", "I AGREE", "AGREE", "CONSENT", "OK", "ACCEPT", "Y", "START"].includes(normalized)
 }
 
 export function getConsentPrompt(practiceName: string): string {

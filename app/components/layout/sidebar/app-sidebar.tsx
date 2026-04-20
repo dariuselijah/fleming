@@ -40,7 +40,6 @@ import {
   Bell,
   CalendarBlank,
   ChatCircle,
-  WhatsappLogo,
 } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useParams, usePathname, useRouter } from "next/navigation"
@@ -382,32 +381,7 @@ function AdminSidebarContent({ workspace }: { workspace: ReturnType<typeof useWo
       {activeAdminTab === "patients" && (
         <PatientsSidebarPanel patients={workspace.patients ?? []} />
       )}
-      {activeAdminTab === "settings" && <SettingsSidebarPanel />}
       {activeAdminTab === "channels" && <ChannelsSidebarPanel />}
-    </div>
-  )
-}
-
-function SettingsSidebarPanel() {
-  const practiceProviders = useWorkspaceStore((s) => s.practiceProviders)
-
-  return (
-    <div className="space-y-5">
-      <div className="px-1">
-        <p className="text-xs font-semibold text-foreground">Practice</p>
-        <p className="mt-1 text-[10px] leading-relaxed text-white/35">
-          Profile, HL7 endpoints, team credentials, and role access live in the main settings view.
-        </p>
-      </div>
-      <div>
-        <div className="mb-2 px-1">
-          <p className="text-xs font-semibold text-foreground">Team</p>
-        </div>
-        <p className="px-1 text-[11px] text-white/40">
-          <span className="font-bold tabular-nums text-foreground">{practiceProviders.length}</span> people · manage
-          HPCSA / BHF in the table →
-        </p>
-      </div>
     </div>
   )
 }
@@ -1061,7 +1035,7 @@ function InboxSidebarPanel() {
             onClick={() => requestInboxScrollTo("messages")}
             className="flex items-center gap-2 rounded-lg px-2 py-2 text-left text-[11px] text-white/60 transition-colors hover:bg-white/[0.04] hover:text-foreground"
           >
-            <WhatsappLogo className="size-3.5 shrink-0 text-[#25D366]" weight="fill" />
+            <ChatCircle className="size-3.5 shrink-0 text-emerald-400/90" weight="fill" />
             Inbox
           </button>
           <button

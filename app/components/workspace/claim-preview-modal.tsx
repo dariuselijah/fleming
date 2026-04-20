@@ -44,7 +44,7 @@ import {
   ArrowsClockwise,
   FloppyDisk,
 } from "@phosphor-icons/react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 const MAX_MODIFIERS_PER_LINE = 5
 
@@ -111,6 +111,73 @@ export function ClaimPreviewModal() {
   }, [shouldShow, activePatient, activeDoctorId, patientId, setClaimDraftLines])
 
   const lines = activePatient?.claimDraftLines ?? null
+
+  /**
+   * Persist a server draft as soon as the preview has lines so Billing always has a row
+   * (signing alone does not insert into practice_claims — only this API does).
+   */
+  const autoDraftKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!shouldShow) {
+      autoDraftKeyRef.current = null
+      return
+    }
+    if (!practiceId || !patientId || !activePatient?.clinicalEncounterId) return
+    if (activePatient.remoteDraftClaimId) return
+    if (!lines?.length) return
+
+    const key = `${patientId}:${activePatient.clinicalEncounterId}`
+    if (autoDraftKeyRef.current === key) return
+    autoDraftKeyRef.current = key
+
+    const timer = window.setTimeout(async () => {
+      const st = useWorkspaceStore.getState()
+      const p = st.openPatients.find((x) => x.patientId === patientId)
+      const latestLines = p?.claimDraftLines
+      if (!p?.clinicalEncounterId || !latestLines?.length) return
+      if (p.remoteDraftClaimId || p.claimSubmitted) return
+
+      try {
+        const res = await fetchClient("/api/clinical/practice-claims/draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            practiceId,
+            patientId,
+            clinicalEncounterId: p.clinicalEncounterId,
+            claimId: null,
+            lines: latestLines,
+          }),
+        })
+        const text = await res.text()
+        let j: { claimId?: string; error?: string }
+        try {
+          j = JSON.parse(text) as { claimId?: string; error?: string }
+        } catch {
+          throw new Error(text || "Auto-save draft failed")
+        }
+        if (!res.ok) throw new Error(j.error || text || "Auto-save draft failed")
+        if (j.claimId) setPatientRemoteDraftClaimId(patientId, j.claimId)
+        const nextClaims = await fetchPracticeClaimsForWorkspace(practiceId)
+        useWorkspaceStore.getState().setClaims(nextClaims)
+      } catch (e) {
+        console.warn("[ClaimPreviewModal] auto-draft", e)
+        autoDraftKeyRef.current = null
+      }
+    }, 900)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    shouldShow,
+    practiceId,
+    patientId,
+    activePatient?.clinicalEncounterId,
+    activePatient?.remoteDraftClaimId,
+    activePatient?.claimSubmitted,
+    lines?.length,
+    setPatientRemoteDraftClaimId,
+  ])
 
   // ── Validation ──
   const validationResults = useMemo<ValidationResult[]>(() => {

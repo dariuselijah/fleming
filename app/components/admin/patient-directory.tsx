@@ -11,6 +11,7 @@ import type {
 import {
   findDuplicatePatient,
   isPracticePatientProfileIncomplete,
+  normalizeSaIdDigits,
   type PatientRegistrationPrefill,
 } from "@/lib/clinical/smart-import-patient"
 import { encryptPatientProfile, usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-context"
@@ -24,7 +25,11 @@ import { decryptJson } from "@/lib/crypto/practice-e2ee"
 import { createClient } from "@/lib/supabase/client"
 import { useUser } from "@/lib/user-store/provider"
 import { useEligibilityCheck } from "@/lib/hooks/use-eligibility-check"
-import type { EligibilityResponse, FamilyEligibilityResponse } from "@/lib/medikredit/types"
+import type {
+  EligibilityResponse,
+  FamilyDependentRow,
+  FamilyEligibilityResponse,
+} from "@/lib/medikredit/types"
 import { MediKreditAccreditationModal } from "@/app/components/medikredit/medi-kredit-accreditation-modal"
 import { BentoTile } from "./bento-tile"
 import { cn } from "@/lib/utils"
@@ -59,6 +64,7 @@ import {
   SpinnerGap,
   CheckCircle,
   XCircle,
+  Sparkle,
 } from "@phosphor-icons/react"
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { AnimatePresence, motion } from "motion/react"
@@ -74,6 +80,12 @@ const STATUS_CONFIG: Record<MedicalAidVerification, { label: string; dot: string
 }
 
 const MA_SCHEMES = ["Discovery", "Bonitas", "Momentum", "GEMS", "Medihelp", "Bestmed", "Fedhealth"]
+
+type MedicalSchemeRow = { code: string; name: string; administrator: string | null }
+
+function fallbackMedicalSchemes(): MedicalSchemeRow[] {
+  return MA_SCHEMES.map((name) => ({ code: "", name, administrator: null }))
+}
 
 function ColHeader({
   label,
@@ -133,6 +145,84 @@ function calculateAge(dob: string): number {
   return age
 }
 
+/** Build Add Patient modal prefill from a famcheck PAT row + principal context. */
+/** Compare scheme dep codes (0 vs 00). */
+function normalizeFamilyDepCode(raw?: string): string | undefined {
+  if (raw == null || String(raw).trim() === "") return undefined
+  const n = parseInt(String(raw).replace(/\D/g, ""), 10)
+  if (Number.isNaN(n)) return String(raw).trim()
+  return String(n).padStart(2, "0")
+}
+
+/** Whether this PAT row is already the open patient, or another record in the directory (by SA ID). */
+function resolveFamilyRowInPractice(
+  row: FamilyDependentRow,
+  current: PracticePatient,
+  allPatients: PracticePatient[]
+): { state: "self" } | { state: "duplicate"; existing: PracticePatient } | { state: "new" } {
+  const rowId = normalizeSaIdDigits(row.id_nbr)
+  const curId = normalizeSaIdDigits(current.idNumber)
+  if (rowId && curId && rowId === curId) {
+    return { state: "self" }
+  }
+
+  const dup = findDuplicatePatient(allPatients, { idNumber: row.id_nbr })
+  if (dup) {
+    if (dup.id === current.id) return { state: "self" }
+    return { state: "duplicate", existing: dup }
+  }
+
+  const rd = normalizeFamilyDepCode(row.dep_cd)
+  const cd = normalizeFamilyDepCode(current.dependentCode)
+  if (rd !== undefined && cd !== undefined && rd === cd && !rowId && !curId) {
+    return { state: "self" }
+  }
+
+  return { state: "new" }
+}
+
+/** MediKredit YYYYMMDD (DOB or plan join) → e.g. 31 Jul 1972 */
+function formatMedikreditYmd(ymd: string | undefined): string | null {
+  if (!ymd || !/^\d{8}$/.test(ymd.trim())) return null
+  const y = Number(ymd.slice(0, 4))
+  const m = Number(ymd.slice(4, 6)) - 1
+  const d = Number(ymd.slice(6, 8))
+  const dt = new Date(y, m, d)
+  if (Number.isNaN(dt.getTime())) return null
+  return dt.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })
+}
+
+function medikreditFamilyRowToPrefill(
+  row: FamilyDependentRow,
+  ctx: { scheme?: string; schemeCode?: string; memberNumber?: string; mainMemberName?: string }
+): PatientRegistrationPrefill {
+  let firstName = row.firstNames?.trim()
+  let lastName = row.surname?.trim()
+  if ((!firstName || !lastName) && row.name?.trim()) {
+    const parts = row.name.trim().split(/\s+/).filter(Boolean)
+    if (parts.length === 1) {
+      firstName = firstName || parts[0]
+    } else {
+      lastName = lastName || parts[parts.length - 1]
+      firstName = firstName || parts.slice(0, -1).join(" ")
+    }
+  }
+  return {
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
+    idNumber: row.id_nbr?.replace(/\D/g, "").slice(0, 13),
+    dateOfBirth: row.dateOfBirthIso,
+    sex: row.gender === "1" ? "M" : row.gender === "2" ? "F" : undefined,
+    hasMedicalAid: true,
+    scheme: ctx.scheme,
+    medicalAidSchemeCode: ctx.schemeCode,
+    memberNumber: ctx.memberNumber,
+    dependentCode: row.dep_cd,
+    mainMemberName: ctx.mainMemberName,
+    medicalAidPlan: row.planDescription,
+  }
+}
+
 export type PracticePatientDraft = Omit<PracticePatient, "id">
 
 // ── Main Component ──
@@ -150,7 +240,7 @@ export function PatientDirectory() {
     updatePatient,
     beginNewVisitForPatient,
   } = useWorkspace()
-  const [schemeNames, setSchemeNames] = useState<string[]>(MA_SCHEMES)
+  const [medicalSchemes, setMedicalSchemes] = useState<MedicalSchemeRow[]>(() => fallbackMedicalSchemes())
   const [search, setSearch] = useState("")
   const [sortKey, setSortKey] = useState<SortKey>("name")
   const [sortDir, setSortDir] = useState<SortDir>("asc")
@@ -172,11 +262,17 @@ export function PatientDirectory() {
     let cancelled = false
     void supabase
       .from("medical_schemes")
-      .select("name")
+      .select("code,name,administrator")
       .order("name")
       .then(({ data }) => {
         if (cancelled || !data?.length) return
-        setSchemeNames(data.map((r) => String((r as { name: string }).name)))
+        setMedicalSchemes(
+          data.map((r) => ({
+            code: String((r as MedicalSchemeRow).code ?? ""),
+            name: String((r as MedicalSchemeRow).name ?? ""),
+            administrator: (r as MedicalSchemeRow).administrator ?? null,
+          }))
+        )
       })
     return () => {
       cancelled = true
@@ -339,6 +435,39 @@ export function PatientDirectory() {
   const handleViewPatient = useCallback((patient: PracticePatient) => {
     setSelectedPatientId(patient.id)
   }, [])
+
+  const handlePatientPersist = useCallback(
+    async (id: string, update: Partial<PracticePatient>) => {
+      const current = useWorkspaceStore.getState().patients.find((p) => p.id === id)
+      if (!current) return
+      const merged: PracticePatient = { ...current, ...update }
+      updatePatient(id, update)
+      const supabase = createClient()
+      if (!practiceId || !dekKey || !unlocked || !supabase) {
+        if (!dekKey || !unlocked) toast.error("Unlock the session to save patient changes to the server")
+        return
+      }
+      try {
+        const { id: _rowId, ...payload } = merged
+        const { ciphertext, iv } = await encryptPatientProfile(dekKey, payload as Record<string, unknown>)
+        const { error } = await supabase
+          .from("practice_patients")
+          .update({
+            profile_ciphertext: ciphertext,
+            profile_iv: iv,
+            display_name_hint: merged.name,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id)
+          .eq("practice_id", practiceId)
+        if (error) throw error
+      } catch (e) {
+        console.warn("[PatientDirectory] persist patient", e)
+        toast.error("Could not save patient to the server")
+      }
+    },
+    [practiceId, dekKey, unlocked, updatePatient]
+  )
 
   const handleCreatePatient = useCallback(
     async (draft: PracticePatientDraft) => {
@@ -572,7 +701,7 @@ export function PatientDirectory() {
       <AnimatePresence>
         {showRegister && (
           <AddPatientModal
-            schemeOptions={schemeNames}
+            medicalSchemes={medicalSchemes}
             smartImportPrefillNonce={patientAddModalOpenNonce}
             registrationError={registerError}
             onClose={() => {
@@ -589,9 +718,12 @@ export function PatientDirectory() {
         {selectedPatient && (
           <PatientFilePanel
             patient={selectedPatient}
+            directoryPatients={patients}
             claims={claims}
+            medicalSchemes={medicalSchemes}
             onClose={() => setSelectedPatientId(null)}
-            onUpdate={(id, update) => updatePatient(id, update)}
+            onUpdate={handlePatientPersist}
+            onSelectPatientInDirectory={(id) => setSelectedPatientId(id)}
           />
         )}
       </AnimatePresence>
@@ -750,10 +882,13 @@ interface ManualFormState {
   address: string
   hasMedicalAid: boolean
   scheme: string
-  plan: string
+  /** Set when user picks a row from `medical_schemes`; empty if free text */
+  medicalAidSchemeCode: string
   memberNumber: string
   dependentCode: string
   mainMemberName: string
+  /** Benefit plan label from MediKredit (PLAN pln_descr) — often filled from eligibility prefill */
+  medicalAidPlan: string
   emergencyName: string
   emergencyRelationship: string
   emergencyPhone: string
@@ -773,10 +908,11 @@ const INITIAL_FORM: ManualFormState = {
   address: "",
   hasMedicalAid: false,
   scheme: "",
-  plan: "",
+  medicalAidSchemeCode: "",
   memberNumber: "",
   dependentCode: "",
   mainMemberName: "",
+  medicalAidPlan: "",
   emergencyName: "",
   emergencyRelationship: "",
   emergencyPhone: "",
@@ -794,10 +930,11 @@ function registrationPrefillToManualForm(p: PatientRegistrationPrefill): Partial
   if (p.sex !== undefined) out.sex = p.sex
   if (p.email !== undefined) out.email = p.email
   if (p.scheme !== undefined) out.scheme = p.scheme
-  if (p.plan !== undefined) out.plan = p.plan
   if (p.memberNumber !== undefined) out.memberNumber = p.memberNumber
   if (p.dependentCode !== undefined) out.dependentCode = p.dependentCode
   if (p.mainMemberName !== undefined) out.mainMemberName = p.mainMemberName
+  if (p.medicalAidPlan !== undefined) out.medicalAidPlan = p.medicalAidPlan
+  if (p.medicalAidSchemeCode !== undefined) out.medicalAidSchemeCode = p.medicalAidSchemeCode
   if (p.hasMedicalAid !== undefined) {
     out.hasMedicalAid = p.hasMedicalAid
   } else if (p.scheme || p.memberNumber) {
@@ -817,13 +954,13 @@ function registrationPrefillToManualForm(p: PatientRegistrationPrefill): Partial
 function AddPatientModal({
   onClose,
   onCreate,
-  schemeOptions,
+  medicalSchemes,
   smartImportPrefillNonce = 0,
   registrationError,
 }: {
   onClose: () => void
   onCreate: (p: PracticePatientDraft) => void | Promise<void>
-  schemeOptions: string[]
+  medicalSchemes: MedicalSchemeRow[]
   smartImportPrefillNonce?: number
   registrationError?: string | null
 }) {
@@ -840,13 +977,22 @@ function AddPatientModal({
     if (smartImportPrefillNonce <= 0) return
     const prefill = useWorkspaceStore.getState().patientAddModalPrefill
     if (!prefill) return
-    setForm((f) => ({
-      ...INITIAL_FORM,
-      ...registrationPrefillToManualForm(prefill),
-    }))
+    const partial = registrationPrefillToManualForm(prefill)
+    setForm({ ...INITIAL_FORM, ...partial, medicalAidSchemeCode: "" })
     setTab("manual")
     useWorkspaceStore.getState().clearPatientAddModalPrefill()
   }, [smartImportPrefillNonce])
+
+  /** When the catalog loads after open, attach option code if scheme name matches a row */
+  useEffect(() => {
+    setForm((f) => {
+      if (!f.hasMedicalAid || !f.scheme.trim() || !medicalSchemes.length) return f
+      if (f.medicalAidSchemeCode.trim()) return f
+      const m = medicalSchemes.find((s) => s.name.toLowerCase() === f.scheme.trim().toLowerCase())
+      if (!m?.code) return f
+      return { ...f, medicalAidSchemeCode: m.code }
+    })
+  }, [medicalSchemes])
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -878,10 +1024,16 @@ function AddPatientModal({
     })
   }, [])
 
-  const schemeFiltered = useMemo(
-    () => schemeOptions.filter((s) => s.toLowerCase().includes(form.scheme.toLowerCase())),
-    [form.scheme, schemeOptions]
-  )
+  const schemeFiltered = useMemo(() => {
+    const schemeQuery = form.scheme.trim().toLowerCase()
+    if (!schemeQuery) return medicalSchemes.slice(0, 80)
+    return medicalSchemes.filter((s) => {
+      const name = s.name.toLowerCase()
+      const code = s.code.toLowerCase()
+      const adm = (s.administrator ?? "").toLowerCase()
+      return name.includes(schemeQuery) || code.includes(schemeQuery) || adm.includes(schemeQuery)
+    })
+  }, [form.scheme, medicalSchemes])
 
   const canCreate = form.firstName.trim() && form.lastName.trim()
 
@@ -906,7 +1058,11 @@ function AddPatientModal({
         : undefined,
       medicalAidStatus: form.hasMedicalAid ? "pending" : "unknown",
       medicalAidScheme: form.hasMedicalAid ? form.scheme || undefined : undefined,
-      medicalAidPlan: form.hasMedicalAid ? form.plan || undefined : undefined,
+      medicalAidSchemeCode:
+        form.hasMedicalAid && form.medicalAidSchemeCode.trim()
+          ? form.medicalAidSchemeCode.trim()
+          : undefined,
+      medicalAidPlan: form.hasMedicalAid && form.medicalAidPlan.trim() ? form.medicalAidPlan.trim() : undefined,
       memberNumber: form.hasMedicalAid ? form.memberNumber || undefined : undefined,
       dependentCode: form.hasMedicalAid ? form.dependentCode || undefined : undefined,
       mainMemberName: form.hasMedicalAid ? form.mainMemberName || undefined : undefined,
@@ -1083,39 +1239,60 @@ function AddPatientModal({
                     className="overflow-hidden"
                   >
                     <div className="space-y-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div ref={schemeRef} className="relative">
-                          <FieldLabel>Scheme</FieldLabel>
-                          <input
-                            type="text"
-                            value={form.scheme}
-                            onChange={(e) => { set("scheme", e.target.value); setSchemeOpen(true) }}
-                            onFocus={() => setSchemeOpen(true)}
-                            placeholder="Start typing..."
-                            className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-foreground placeholder:text-white/15 focus:border-white/[0.12] focus:outline-none"
-                          />
-                          {schemeOpen && schemeFiltered.length > 0 && (
-                            <div className="absolute left-0 top-full z-20 mt-1 w-full rounded-lg border border-white/[0.08] bg-[#111] py-1 shadow-xl">
-                              {schemeFiltered.map((s) => (
-                                <button
-                                  key={s}
-                                  type="button"
-                                  onClick={() => { set("scheme", s); setSchemeOpen(false) }}
-                                  className="block w-full px-3 py-1.5 text-left text-xs text-white/60 transition-colors hover:bg-white/[0.06] hover:text-white"
-                                >
-                                  {s}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <Field label="Plan" value={form.plan} onChange={(v) => set("plan", v)} placeholder="e.g. KeyCare Plus" />
+                      <div ref={schemeRef} className="relative">
+                        <FieldLabel>Scheme</FieldLabel>
+                        <input
+                          type="text"
+                          value={form.scheme}
+                          onChange={(e) => {
+                            set("scheme", e.target.value)
+                            set("medicalAidSchemeCode", "")
+                            setSchemeOpen(true)
+                          }}
+                          onFocus={() => setSchemeOpen(true)}
+                          placeholder="Search by scheme name or option code…"
+                          className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-foreground placeholder:text-white/15 focus:border-white/[0.12] focus:outline-none"
+                        />
+                        {schemeOpen && schemeFiltered.length > 0 && (
+                          <div className="absolute left-0 top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-white/[0.08] bg-[#111] py-1 shadow-xl">
+                            {schemeFiltered.map((s) => (
+                              <button
+                                key={`${s.code}|${s.name}`}
+                                type="button"
+                                onClick={() => {
+                                  set("scheme", s.name)
+                                  set("medicalAidSchemeCode", s.code)
+                                  setSchemeOpen(false)
+                                }}
+                                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                              >
+                                <div className="flex items-baseline gap-2">
+                                  {s.code ? (
+                                    <span className="shrink-0 font-mono text-[10px] font-medium tabular-nums text-[#00E676]/90">
+                                      {s.code}
+                                    </span>
+                                  ) : null}
+                                  <span className="text-xs text-white/80">{s.name}</span>
+                                </div>
+                                {s.administrator ? (
+                                  <span className="text-[10px] text-white/35">{s.administrator}</span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <Field label="Member Number" value={form.memberNumber} onChange={(v) => set("memberNumber", v)} placeholder="e.g. DH-12345678" />
                         <Field label="Dependent Code" value={form.dependentCode} onChange={(v) => set("dependentCode", v)} placeholder="e.g. 00" />
                       </div>
                       <Field label="Main Member Name" value={form.mainMemberName} onChange={(v) => set("mainMemberName", v)} placeholder="If dependent, enter main member name" />
+                      <Field
+                        label="Benefit plan (switch)"
+                        value={form.medicalAidPlan}
+                        onChange={(v) => set("medicalAidPlan", v)}
+                        placeholder="Filled from eligibility — e.g. POLMED MARINE"
+                      />
                     </div>
                   </motion.div>
                 )}
@@ -1246,6 +1423,7 @@ function patientToMedikreditPayload(p: PracticePatient) {
     idNumber: p.idNumber,
     memberNumber: p.memberNumber,
     medicalAidScheme: p.medicalAidScheme,
+    medicalAidSchemeCode: p.medicalAidSchemeCode,
     dependentCode: p.dependentCode,
     mainMemberName: p.mainMemberName,
     dateOfBirth: p.dateOfBirth,
@@ -1336,14 +1514,21 @@ type PanelTab = "overview" | "history" | "medications" | "billing"
 
 function PatientFilePanel({
   patient,
+  directoryPatients,
   claims,
+  medicalSchemes,
   onClose,
   onUpdate,
+  onSelectPatientInDirectory,
 }: {
   patient: PracticePatient
+  /** Full practice list — used to avoid duplicate registrations from family check. */
+  directoryPatients: PracticePatient[]
   claims: { id: string; patientId: string; patientName: string; totalAmount: number; status: string; createdAt: string; lines: { description: string; amount: number }[] }[]
+  medicalSchemes: MedicalSchemeRow[]
   onClose: () => void
-  onUpdate: (id: string, update: Partial<PracticePatient>) => void
+  onUpdate: (id: string, update: Partial<PracticePatient>) => void | Promise<void>
+  onSelectPatientInDirectory: (patientId: string) => void
 }) {
   const {
     appointments,
@@ -1360,15 +1545,25 @@ function PatientFilePanel({
 
   const { practiceId, dekKey, unlocked } = usePracticeCrypto()
   const { runEligibility, runFamily, loading: mkLoading, error: mkError } = useEligibilityCheck({ practiceId })
+  const openPatientAddModalWithPrefill = useWorkspaceStore((s) => s.openPatientAddModalWithPrefill)
 
   const [activeTab, setActiveTab] = useState<PanelTab>("overview")
   const [editing, setEditing] = useState(false)
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [schemeOpen, setSchemeOpen] = useState(false)
+  const schemeEditRef = useRef<HTMLDivElement>(null)
   const [editForm, setEditForm] = useState({
     phone: patient.phone ?? "",
     email: patient.email ?? "",
     address: patient.address ?? "",
     allergies: (patient.allergies ?? []).join(", "),
     chronicConditions: (patient.chronicConditions ?? []).join(", "),
+    medicalAidScheme: patient.medicalAidScheme ?? "",
+    medicalAidSchemeCode: patient.medicalAidSchemeCode ?? "",
+    memberNumber: patient.memberNumber ?? "",
+    dependentCode: patient.dependentCode ?? "",
+    mainMemberName: patient.mainMemberName ?? "",
+    medicalAidPlan: patient.medicalAidPlan ?? "",
   })
 
   const [quickPanel, setQuickPanel] = useState<null | "eligibility" | "family">(null)
@@ -1397,14 +1592,64 @@ function PatientFilePanel({
       address: patient.address ?? "",
       allergies: (patient.allergies ?? []).join(", "),
       chronicConditions: (patient.chronicConditions ?? []).join(", "),
+      medicalAidScheme: patient.medicalAidScheme ?? "",
+      medicalAidSchemeCode: patient.medicalAidSchemeCode ?? "",
+      memberNumber: patient.memberNumber ?? "",
+      dependentCode: patient.dependentCode ?? "",
+      mainMemberName: patient.mainMemberName ?? "",
+      medicalAidPlan: patient.medicalAidPlan ?? "",
     })
     setEditing(false)
+    setSchemeOpen(false)
     setQuickPanel(null)
     setEligibilityUi({ phase: "idle" })
     setFamilyUi({ phase: "idle" })
     setCheckInMessage(null)
     setAccreditation(null)
-  }, [patient.id, patient.phone, patient.email, patient.address, patient.allergies, patient.chronicConditions])
+  }, [
+    patient.id,
+    patient.phone,
+    patient.email,
+    patient.address,
+    patient.allergies,
+    patient.chronicConditions,
+    patient.medicalAidScheme,
+    patient.medicalAidSchemeCode,
+    patient.memberNumber,
+    patient.dependentCode,
+    patient.mainMemberName,
+    patient.medicalAidPlan,
+  ])
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (schemeEditRef.current && !schemeEditRef.current.contains(e.target as Node)) setSchemeOpen(false)
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [])
+
+  const schemeFilteredEdit = useMemo(() => {
+    const q = editForm.medicalAidScheme.trim().toLowerCase()
+    if (!q) return medicalSchemes.slice(0, 80)
+    return medicalSchemes.filter((s) => {
+      const name = s.name.toLowerCase()
+      const code = s.code.toLowerCase()
+      const adm = (s.administrator ?? "").toLowerCase()
+      return name.includes(q) || code.includes(q) || adm.includes(q)
+    })
+  }, [editForm.medicalAidScheme, medicalSchemes])
+
+  /** When catalog loads, attach option code if scheme label matches a row (same as registration). */
+  useEffect(() => {
+    setEditForm((f) => {
+      if (!f.medicalAidScheme.trim() || !medicalSchemes.length) return f
+      if (f.medicalAidSchemeCode.trim()) return f
+      const m = medicalSchemes.find((s) => s.name.toLowerCase() === f.medicalAidScheme.trim().toLowerCase())
+      if (!m?.code) return f
+      return { ...f, medicalAidSchemeCode: m.code }
+    })
+  }, [medicalSchemes])
 
   useEffect(() => {
     if (mkError) toast.error(mkError)
@@ -1445,13 +1690,18 @@ function PatientFilePanel({
     const api = await runEligibility(payload, true)
     if (api) {
       setEligibilityUi({ phase: "result", api })
-      if (api.status === "eligible" && api.ok) {
-        onUpdate(patient.id, { medicalAidStatus: "verified" })
-      }
+      const patch: Partial<PracticePatient> = {}
+      if (api.planDescription?.trim()) patch.medicalAidPlan = api.planDescription.trim()
+      if (api.status === "eligible" && api.ok) patch.medicalAidStatus = "verified"
+      if (Object.keys(patch).length > 0) await onUpdate(patient.id, patch)
     } else {
       setEligibilityUi({ phase: "idle" })
     }
   }, [patient, runEligibility, onUpdate])
+
+  const setEdit = useCallback(<K extends keyof typeof editForm>(key: K, value: (typeof editForm)[K]) => {
+    setEditForm((f) => ({ ...f, [key]: value }))
+  }, [])
 
   const runFamilyCheck = useCallback(async () => {
     setQuickPanel("family")
@@ -1460,10 +1710,23 @@ function PatientFilePanel({
     const api = await runFamily(payload, undefined, true)
     if (api) {
       setFamilyUi({ phase: "result", api })
+      const norm = (s: string | undefined) => (s ?? "").replace(/\D/g, "")
+      const plan =
+        api.dependents.find((d) => norm(d.id_nbr) && norm(d.id_nbr) === norm(patient.idNumber))?.planDescription ??
+        api.dependents.find(
+          (d) =>
+            (d.dep_cd ?? "").replace(/^0+/, "") === (patient.dependentCode ?? "").replace(/^0+/, "") &&
+            (d.dep_cd ?? "") !== ""
+        )?.planDescription ??
+        api.dependents[0]?.planDescription
+      const patch: Partial<PracticePatient> = {}
+      if (plan?.trim()) patch.medicalAidPlan = plan.trim()
+      if (api.status === "eligible" && api.ok) patch.medicalAidStatus = "verified"
+      if (Object.keys(patch).length > 0) await onUpdate(patient.id, patch)
     } else {
       setFamilyUi({ phase: "idle" })
     }
-  }, [patient, runFamily])
+  }, [patient, runFamily, onUpdate])
 
   const handleQuickCheckIn = useCallback(() => {
     setCheckInBusy(true)
@@ -1558,15 +1821,27 @@ function PatientFilePanel({
     updateAppointment,
   ])
 
-  const handleSaveEdit = useCallback(() => {
-    onUpdate(patient.id, {
-      phone: editForm.phone || undefined,
-      email: editForm.email || undefined,
-      address: editForm.address || undefined,
-      allergies: editForm.allergies.split(",").map((s) => s.trim()).filter(Boolean),
-      chronicConditions: editForm.chronicConditions.split(",").map((s) => s.trim()).filter(Boolean),
-    })
-    setEditing(false)
+  const handleSaveEdit = useCallback(async () => {
+    setSaveBusy(true)
+    try {
+      await onUpdate(patient.id, {
+        phone: editForm.phone.trim() || undefined,
+        email: editForm.email.trim() || undefined,
+        address: editForm.address.trim() || undefined,
+        allergies: editForm.allergies.split(",").map((s) => s.trim()).filter(Boolean),
+        chronicConditions: editForm.chronicConditions.split(",").map((s) => s.trim()).filter(Boolean),
+        medicalAidScheme: editForm.medicalAidScheme.trim() || undefined,
+        medicalAidSchemeCode: editForm.medicalAidSchemeCode.trim() || undefined,
+        memberNumber: editForm.memberNumber.trim() || undefined,
+        dependentCode: editForm.dependentCode.trim() || undefined,
+        mainMemberName: editForm.mainMemberName.trim() || undefined,
+        medicalAidPlan: editForm.medicalAidPlan.trim() || undefined,
+      })
+      toast.success("Patient saved")
+      setEditing(false)
+    } finally {
+      setSaveBusy(false)
+    }
   }, [patient.id, editForm, onUpdate])
 
   const patientClaims = useMemo(
@@ -1746,79 +2021,149 @@ function PatientFilePanel({
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+              <div className="mt-3 overflow-hidden rounded-2xl border border-white/[0.07] bg-gradient-to-b from-white/[0.05] to-transparent shadow-[0_12px_40px_-12px_rgba(0,0,0,0.8)]">
                 {eligibilityUi.phase === "checking" && (
-                  <div className="flex items-center gap-2 py-2 text-[11px] text-white/50">
-                    <SpinnerGap className="size-4 animate-spin text-emerald-400/80" />
-                    Running eligibility for {patient.name}…
+                  <div className="flex items-center gap-3 px-4 py-4">
+                    <div className="flex size-10 items-center justify-center rounded-xl bg-emerald-500/15">
+                      <SpinnerGap className="size-5 animate-spin text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium text-white/85">Checking eligibility</p>
+                      <p className="text-[10px] text-white/40">tx_cd 20 · {patient.name}</p>
+                    </div>
                   </div>
                 )}
                 {eligibilityUi.phase === "result" && elig && (
-                  <div>
-                    <div className="flex items-center gap-2">
-                      {elig.ok && elig.status === "eligible" ? (
-                        <CheckCircle className="size-4 text-[#00E676]" weight="fill" />
-                      ) : (
-                        <XCircle className="size-4 text-[#EF5350]" weight="fill" />
-                      )}
-                      <span
-                        className={cn(
-                          "text-xs font-semibold",
-                          elig.ok && elig.status === "eligible" ? "text-[#00E676]" : "text-[#EF5350]"
-                        )}
-                      >
-                        {elig.status === "eligible"
-                          ? "Eligible"
-                          : elig.status === "not_found"
-                            ? "Member not found"
-                            : elig.status === "pending"
-                              ? "Pending"
-                              : "Not eligible"}
-                      </span>
+                  <div className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={cn(
+                            "flex size-11 shrink-0 items-center justify-center rounded-2xl border",
+                            elig.ok && elig.status === "eligible"
+                              ? "border-emerald-500/35 bg-emerald-500/15"
+                              : "border-rose-500/30 bg-rose-500/10"
+                          )}
+                        >
+                          {elig.ok && elig.status === "eligible" ? (
+                            <CheckCircle className="size-6 text-emerald-400" weight="fill" />
+                          ) : (
+                            <XCircle className="size-6 text-rose-400" weight="fill" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={cn(
+                                "text-sm font-semibold tracking-tight",
+                                elig.ok && elig.status === "eligible" ? "text-emerald-300" : "text-rose-200"
+                              )}
+                            >
+                              {elig.status === "eligible"
+                                ? "Eligible"
+                                : elig.status === "not_found"
+                                  ? "Member not found"
+                                  : elig.status === "pending"
+                                    ? "Pending"
+                                    : "Not eligible"}
+                            </span>
+                            {(elig.res ?? elig.responseCode) ? (
+                              <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 font-mono text-[10px] text-white/70">
+                                res={elig.res ?? elig.responseCode}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-0.5 text-[10px] text-white/35">MediKredit switch · single-member check</p>
+                        </div>
+                      </div>
+                      <Sparkle className="size-4 shrink-0 text-emerald-400/40" weight="fill" />
                     </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                      {patient.medicalAidScheme && (
-                        <div>
-                          <span className="text-white/35">Scheme</span>
-                          <p className="font-medium text-white/75">{patient.medicalAidScheme}</p>
+
+                    {elig.planDescription ? (
+                      <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2.5">
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-emerald-200/60">Plan (PLAN pln_descr)</p>
+                        <p className="mt-0.5 text-sm font-medium text-emerald-100">{elig.planDescription}</p>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-[11px]">
+                      {elig.txNbr ? (
+                        <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
+                          <span className="text-[9px] uppercase tracking-wide text-white/35">Transaction</span>
+                          <p className="mt-0.5 font-mono text-[10px] text-white/80">{elig.txNbr}</p>
                         </div>
-                      )}
-                      {patient.memberNumber && (
-                        <div>
-                          <span className="text-white/35">Member #</span>
-                          <p className="font-medium tabular-nums text-white/75">{patient.memberNumber}</p>
+                      ) : null}
+                      {patient.medicalAidScheme ? (
+                        <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
+                          <span className="text-[9px] uppercase tracking-wide text-white/35">Scheme</span>
+                          <p className="mt-0.5 text-white/80">{patient.medicalAidScheme}</p>
                         </div>
-                      )}
-                      {elig.healthNetworkId && (
-                        <div>
-                          <span className="text-white/35">HNet / Jiffy</span>
-                          <p className="font-medium text-white/75">{elig.healthNetworkId}</p>
+                      ) : null}
+                      {patient.memberNumber ? (
+                        <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
+                          <span className="text-[9px] uppercase tracking-wide text-white/35">Member #</span>
+                          <p className="mt-0.5 tabular-nums text-white/80">{patient.memberNumber}</p>
                         </div>
-                      )}
-                      {elig.authNumber && (
-                        <div>
-                          <span className="text-white/35">Auth #</span>
-                          <p className="font-medium tabular-nums text-white/75">{elig.authNumber}</p>
+                      ) : null}
+                      <div className="col-span-2 rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
+                        <span className="text-[9px] uppercase tracking-wide text-white/35">HNet / Jiffy (AUTHS hnet)</span>
+                        <p
+                          className={cn(
+                            "mt-0.5 break-all font-mono text-[11px]",
+                            elig.healthNetworkId ? "text-emerald-300/95" : "text-white/25"
+                          )}
+                        >
+                          {elig.healthNetworkId ?? "—"}
+                        </p>
+                      </div>
+                      {elig.authNumber ? (
+                        <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
+                          <span className="text-[9px] uppercase tracking-wide text-white/35">Auth #</span>
+                          <p className="mt-0.5 tabular-nums text-white/80">{elig.authNumber}</p>
                         </div>
-                      )}
+                      ) : null}
                     </div>
-                    {(elig.rejectionDescription || elig.responseMessage) && (
-                      <p className="mt-2 text-[11px] text-[#EF5350]/90">{elig.rejectionDescription ?? elig.responseMessage}</p>
+
+                    {elig.status !== "eligible" && (elig.rejectionDescription || elig.responseMessage) && (
+                      <p className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200/95">
+                        {elig.rejectionDescription ?? elig.responseMessage}
+                      </p>
+                    )}
+                    {elig.rawXml && (
+                      <details className="mt-3 rounded-xl border border-white/[0.06] bg-black/30 px-3 py-2">
+                        <summary className="cursor-pointer text-[10px] font-medium text-white/45">Decoded switch reply</summary>
+                        <pre
+                          className={cn(
+                            "mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[9px] leading-relaxed",
+                            elig.status === "eligible" ? "text-emerald-200/55" : "text-rose-200/50"
+                          )}
+                        >
+                          {elig.rawXml}
+                        </pre>
+                      </details>
+                    )}
+                    {elig.responseRaw && (
+                      <details className="mt-2 rounded-xl border border-white/[0.06] bg-black/30 px-3 py-2">
+                        <summary className="cursor-pointer text-[10px] font-medium text-white/45">Full wire response</summary>
+                        <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap font-mono text-[9px] text-white/40">
+                          {elig.responseRaw}
+                        </pre>
+                      </details>
                     )}
                     {elig.remittanceMessages.length > 0 && (
-                      <ul className="mt-2 space-y-0.5 text-[10px] text-amber-200/80">
+                      <ul className="mt-3 space-y-1 text-[10px] text-amber-200/75">
                         {elig.remittanceMessages.slice(0, 4).map((r, i) => (
-                          <li key={i}>
-                            {r.code}: {r.description}
+                          <li key={i} className="rounded-md bg-amber-500/10 px-2 py-1">
+                            <span className="font-mono">{r.code}</span> — {r.description}
                           </li>
                         ))}
                       </ul>
                     )}
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2 border-t border-white/[0.06] pt-3">
                       <button
                         type="button"
                         onClick={() => void runEligibilityCheck()}
-                        className="text-[10px] font-medium text-white/45 hover:text-white/70"
+                        className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[10px] font-medium text-white/75 transition-colors hover:bg-white/[0.1]"
                       >
                         Re-check
                       </button>
@@ -1826,7 +2171,7 @@ function PatientFilePanel({
                         <button
                           type="button"
                           onClick={() => setAccreditation("eligibility")}
-                          className="text-[10px] font-medium text-sky-400/90 hover:text-sky-300"
+                          className="rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-1.5 text-[10px] font-medium text-sky-300 transition-colors hover:bg-sky-500/15"
                         >
                           Accreditation view
                         </button>
@@ -1845,52 +2190,185 @@ function PatientFilePanel({
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+              <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.02]">
                 {familyUi.phase === "checking" && (
-                  <div className="flex items-center gap-2 py-2 text-[11px] text-white/50">
-                    <SpinnerGap className="size-4 animate-spin text-sky-400/80" />
-                    Verifying dependants and household…
+                  <div className="flex items-center gap-3 px-4 py-3.5">
+                    <SpinnerGap className="size-4 shrink-0 animate-spin text-sky-400/90" />
+                    <p className="text-[11px] text-white/55">Checking household on scheme…</p>
                   </div>
                 )}
                 {familyUi.phase === "result" && fam && (
-                  <div className="space-y-2 text-[11px]">
-                    <div className="flex items-center gap-2">
-                      <UsersThree className="size-4 text-sky-400" weight="bold" />
-                      <span className="font-semibold text-white/85">Family check</span>
+                  <div className="p-4">
+                    <div className="flex flex-wrap items-end justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <UsersThree className="size-4 text-sky-400/90" weight="bold" />
+                          <span className="text-[13px] font-semibold tracking-tight text-white/90">Household</span>
+                          {(fam.res ?? fam.responseCode) ? (
+                            <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-white/60">
+                              {fam.res ?? fam.responseCode}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-white/35">
+                          {fam.memberDependentCount != null
+                            ? `${fam.memberDependentCount} on file`
+                            : `${fam.dependents.length} member${fam.dependents.length === 1 ? "" : "s"}`}
+                          {fam.txNbr ? ` · ${fam.txNbr}` : ""}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-white/55">
-                      {fam.dependents.length} PAT record{fam.dependents.length === 1 ? "" : "s"} · TX {fam.res ?? "—"}
-                    </p>
-                    {patient.dependentCode && (
-                      <p className="text-white/40">
-                        Dep code <span className="tabular-nums text-white/60">{patient.dependentCode}</span>
-                        {patient.mainMemberName ? ` · Main: ${patient.mainMemberName}` : ""}
-                      </p>
-                    )}
+
+                    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-b border-white/[0.05] pb-3 text-[10px]">
+                      <div>
+                        <span className="text-white/30">HNet </span>
+                        <span
+                          className={cn(
+                            "font-mono tabular-nums",
+                            fam.healthNetworkId ? "text-emerald-400/90" : "text-white/20"
+                          )}
+                        >
+                          {fam.healthNetworkId ?? "—"}
+                        </span>
+                      </div>
+                      {fam.memberChId ? (
+                        <div>
+                          <span className="text-white/30">ch_id </span>
+                          <span className="font-mono text-white/55">{fam.memberChId}</span>
+                        </div>
+                      ) : null}
+                    </div>
+
                     {fam.dependents.length > 0 && (
-                      <ul className="space-y-1 rounded-lg border border-white/[0.05] bg-black/20 p-2 text-[10px] text-white/50">
-                        {fam.dependents.map((d, i) => (
-                          <li key={i}>
-                            {d.dep_cd ?? "—"} · {d.name ?? d.id_nbr ?? "—"}
-                          </li>
-                        ))}
-                      </ul>
+                      <div className="mt-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-medium uppercase tracking-wider text-white/30">Dependants</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const famCtx = {
+                                scheme: patient.medicalAidScheme,
+                                schemeCode: patient.medicalAidSchemeCode,
+                                memberNumber: patient.memberNumber,
+                                mainMemberName: patient.mainMemberName ?? patient.name,
+                              }
+                              const toAdd = fam.dependents.filter(
+                                (row) => resolveFamilyRowInPractice(row, patient, directoryPatients).state === "new"
+                              )
+                              if (toAdd.length === 0) {
+                                toast.message("Everyone on this list is already in the practice")
+                                return
+                              }
+                              for (const row of toAdd) {
+                                openPatientAddModalWithPrefill(medikreditFamilyRowToPrefill(row, famCtx))
+                              }
+                              toast.success(`Opened ${toAdd.length} registration form(s)`)
+                            }}
+                            className="text-[10px] font-medium text-sky-400/90 transition-colors hover:text-sky-300"
+                          >
+                            Add missing only
+                          </button>
+                        </div>
+                        <ul className="divide-y divide-white/[0.05] rounded-lg border border-white/[0.06] bg-black/20">
+                          {fam.dependents.map((d, i) => {
+                            const label = (d.name ?? `${d.firstNames ?? ""} ${d.surname ?? ""}`.trim() ?? "Member").trim()
+                            const initials = label
+                              .split(/\s+/)
+                              .map((w) => w[0])
+                              .join("")
+                              .slice(0, 2)
+                              .toUpperCase()
+                            const resolved = resolveFamilyRowInPractice(d, patient, directoryPatients)
+                            const dobDisplay =
+                              d.dateOfBirthIso ??
+                              (d.dobYmd ? formatMedikreditYmd(d.dobYmd) ?? d.dobYmd : null)
+                            const joinDisplay = d.planJoinDateYmd ? formatMedikreditYmd(d.planJoinDateYmd) : null
+                            return (
+                              <li key={`${d.dep_cd ?? i}-${d.id_nbr ?? i}`} className="flex gap-3 px-3 py-2.5">
+                                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-[10px] font-semibold text-white/70">
+                                  {initials || "?"}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className="truncate text-[12px] font-medium text-white/90">{label}</p>
+                                    {resolved.state === "self" ? (
+                                      <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300/90">
+                                        <CheckCircle className="size-3" weight="bold" />
+                                        This patient
+                                      </span>
+                                    ) : resolved.state === "duplicate" ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => onSelectPatientInDirectory(resolved.existing.id)}
+                                        className="shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-white/75 transition-colors hover:bg-white/[0.09]"
+                                      >
+                                        Open
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          openPatientAddModalWithPrefill(
+                                            medikreditFamilyRowToPrefill(d, {
+                                              scheme: patient.medicalAidScheme,
+                                              schemeCode: patient.medicalAidSchemeCode,
+                                              memberNumber: patient.memberNumber,
+                                              mainMemberName: patient.mainMemberName ?? patient.name,
+                                            })
+                                          )
+                                          toast.success("Registration form opened — review and save")
+                                        }}
+                                        className="shrink-0 text-[10px] font-medium text-sky-400/90 transition-colors hover:text-sky-300"
+                                      >
+                                        Add
+                                      </button>
+                                    )}
+                                  </div>
+                                  <p className="mt-0.5 text-[10px] text-white/38">
+                                    Dep {d.dep_cd ?? "—"}
+                                    {d.id_nbr ? <span className="ml-2 font-mono tabular-nums">{d.id_nbr}</span> : null}
+                                    {dobDisplay ? <span className="ml-2">{dobDisplay}</span> : null}
+                                    {d.gender ? (
+                                      <span className="ml-2">{d.gender === "1" ? "M" : d.gender === "2" ? "F" : ""}</span>
+                                    ) : null}
+                                  </p>
+                                  {resolved.state === "duplicate" ? (
+                                    <p className="mt-1 text-[10px] text-white/35">
+                                      Matches <span className="text-white/55">{resolved.existing.name}</span> in directory
+                                    </p>
+                                  ) : null}
+                                  {d.planDescription ? (
+                                    <p className="mt-1.5 text-[10px] text-emerald-200/75">
+                                      <span className="text-white/30">Plan </span>
+                                      {d.planDescription}
+                                      {joinDisplay ? (
+                                        <span className="text-white/35"> · joined {joinDisplay}</span>
+                                      ) : null}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
                     )}
-                    <div className="flex flex-wrap gap-2">
+
+                    <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => void runFamilyCheck()}
-                        className="text-[10px] font-medium text-white/45 hover:text-white/70"
+                        className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[10px] font-medium text-white/70 transition-colors hover:bg-white/[0.07]"
                       >
-                        Re-run family check
+                        Re-run
                       </button>
                       {fam.rawXml && (
                         <button
                           type="button"
                           onClick={() => setAccreditation("family")}
-                          className="text-[10px] font-medium text-sky-400/90 hover:text-sky-300"
+                          className="rounded-lg border border-white/[0.08] px-3 py-1.5 text-[10px] font-medium text-white/45 transition-colors hover:text-white/65"
                         >
-                          Accreditation view
+                          Accreditation
                         </button>
                       )}
                     </div>
@@ -1935,11 +2413,18 @@ function PatientFilePanel({
               <SectionLabel>Demographics</SectionLabel>
               <button
                 type="button"
-                onClick={() => editing ? handleSaveEdit() : setEditing(true)}
-                className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white"
+                disabled={saveBusy}
+                onClick={() => (editing ? void handleSaveEdit() : setEditing(true))}
+                className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white disabled:opacity-40"
               >
-                {editing ? <Check className="size-3" weight="bold" /> : <PencilSimple className="size-3" />}
-                {editing ? "Save" : "Edit"}
+                {saveBusy ? (
+                  <SpinnerGap className="size-3 animate-spin" weight="bold" />
+                ) : editing ? (
+                  <Check className="size-3" weight="bold" />
+                ) : (
+                  <PencilSimple className="size-3" />
+                )}
+                {saveBusy ? "Saving…" : editing ? "Save" : "Edit"}
               </button>
             </div>
 
@@ -1974,10 +2459,95 @@ function PatientFilePanel({
                 <span className={cn("size-2 rounded-full", status.dot)} />
                 <span className={cn("text-xs font-medium", status.text)}>{status.label}</span>
               </div>
-              <InfoRow label="Scheme" value={patient.medicalAidScheme ?? "—"} />
-              <InfoRow label="Member #" value={patient.memberNumber ?? "—"} />
-              <InfoRow label="Dependent" value={patient.dependentCode ?? "—"} />
-              <InfoRow label="Main Member" value={patient.mainMemberName ?? "—"} />
+              {editing ? (
+                <>
+                  <div ref={schemeEditRef} className="relative">
+                    <FieldLabel>Scheme (search catalog)</FieldLabel>
+                    <input
+                      type="text"
+                      value={editForm.medicalAidScheme}
+                      onChange={(e) => {
+                        setEdit("medicalAidScheme", e.target.value)
+                        setEdit("medicalAidSchemeCode", "")
+                        setSchemeOpen(true)
+                      }}
+                      onFocus={() => setSchemeOpen(true)}
+                      placeholder="Name or option code…"
+                      className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-foreground placeholder:text-white/15 focus:border-white/[0.12] focus:outline-none"
+                    />
+                    {schemeOpen && schemeFilteredEdit.length > 0 && (
+                      <div className="absolute left-0 top-full z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-white/[0.08] bg-[#111] py-1 shadow-xl">
+                        {schemeFilteredEdit.map((s) => (
+                          <button
+                            key={`${s.code}|${s.name}`}
+                            type="button"
+                            onClick={() => {
+                              setEdit("medicalAidScheme", s.name)
+                              setEdit("medicalAidSchemeCode", s.code)
+                              setSchemeOpen(false)
+                            }}
+                            className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                          >
+                            <div className="flex items-baseline gap-2">
+                              {s.code ? (
+                                <span className="shrink-0 font-mono text-[10px] font-medium tabular-nums text-[#00E676]/90">
+                                  {s.code}
+                                </span>
+                              ) : null}
+                              <span className="text-xs text-white/80">{s.name}</span>
+                            </div>
+                            {s.administrator ? (
+                              <span className="text-[10px] text-white/35">{s.administrator}</span>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {editForm.medicalAidSchemeCode ? (
+                    <p className="text-[10px] text-[#00E676]/80">
+                      Option code (TX plan): <span className="font-mono tabular-nums">{editForm.medicalAidSchemeCode}</span>
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-amber-400/70">Pick a catalog row to store the 6-digit option code for MediKredit.</p>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <EditableRow label="Member #" value={editForm.memberNumber} onChange={(v) => setEdit("memberNumber", v)} />
+                    <EditableRow label="Dependent code" value={editForm.dependentCode} onChange={(v) => setEdit("dependentCode", v)} />
+                  </div>
+                  <EditableRow label="Main member name" value={editForm.mainMemberName} onChange={(v) => setEdit("mainMemberName", v)} />
+                  <div>
+                    <EditableRow
+                      label="Benefit plan (switch)"
+                      value={editForm.medicalAidPlan}
+                      onChange={(v) => setEdit("medicalAidPlan", v)}
+                    />
+                    <p className="mt-1 text-[9px] text-white/30">
+                      Populated from MediKredit eligibility or family check (PLAN pln_descr). You can clear or edit if needed.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <InfoRow
+                    label="Scheme"
+                    value={
+                      patient.medicalAidScheme
+                        ? `${patient.medicalAidScheme}${patient.medicalAidSchemeCode ? ` · ${patient.medicalAidSchemeCode}` : ""}`
+                        : "—"
+                    }
+                  />
+                  <InfoRow label="Member #" value={patient.memberNumber ?? "—"} />
+                  <InfoRow label="Dependent" value={patient.dependentCode ?? "—"} />
+                  <InfoRow label="Main Member" value={patient.mainMemberName ?? "—"} />
+                  <div>
+                    <InfoRow label="Benefit plan (switch)" value={patient.medicalAidPlan?.trim() ? patient.medicalAidPlan : "—"} />
+                    {!patient.medicalAidPlan?.trim() ? (
+                      <p className="mt-1 text-[9px] text-white/28">Run eligibility or family check to pull plan from the switch.</p>
+                    ) : null}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Allergies & Chronic */}
@@ -2114,8 +2684,12 @@ function PatientFilePanel({
       transactionType={accreditation === "family" ? "famcheck" : "eligibility"}
       title={accreditation === "family" ? "Family eligibility (tx_cd 30)" : "Eligibility (tx_cd 20)"}
       rawXml={accreditation === "family" ? fam?.rawXml : elig?.rawXml}
+      requestInnerXml={accreditation === "family" ? fam?.requestInnerXml : elig?.requestInnerXml}
+      requestSoapEnvelope={accreditation === "family" ? fam?.requestSoapEnvelope : elig?.requestSoapEnvelope}
+      responseRaw={accreditation === "family" ? fam?.responseRaw : elig?.responseRaw}
       res={accreditation === "family" ? fam?.res : elig?.res}
       txNbr={accreditation === "family" ? fam?.txNbr : elig?.txNbr}
+      healthNetworkId={accreditation === "family" ? fam?.healthNetworkId : elig?.healthNetworkId}
       rejectionCode={accreditation === "family" ? fam?.rejectionCode : elig?.rejectionCode}
       rejectionDescription={accreditation === "family" ? fam?.rejectionDescription : elig?.rejectionDescription}
       remittanceMessages={accreditation === "family" ? fam?.remittanceMessages : elig?.remittanceMessages}

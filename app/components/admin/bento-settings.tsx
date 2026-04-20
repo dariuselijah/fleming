@@ -1,14 +1,10 @@
 "use client"
 
 import { useWorkspace, type PracticeProvider, type PracticeStaffRole } from "@/lib/clinical-workspace"
-import { usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-context"
-import { decryptJson, encryptJson } from "@/lib/crypto/practice-e2ee"
-import { createClient } from "@/lib/supabase/client"
+import { usePracticeProfileForm } from "@/lib/practice/use-practice-profile-form"
 import { cn } from "@/lib/utils"
 import { Buildings, ShieldCheck, UsersThree, LockKey, Info, FloppyDisk, Spinner } from "@phosphor-icons/react"
 import { BentoTile } from "./bento-tile"
-import { useUserPreferences } from "@/lib/user-preference-store/provider"
-import { useCallback, useEffect, useState } from "react"
 
 const ROLE_LABEL: Record<PracticeStaffRole, string> = {
   owner: "Owner",
@@ -51,111 +47,27 @@ function CredentialBadge({ status }: { status?: PracticeProvider["credentialStat
   )
 }
 
-type BillingExtras = {
-  practiceNoBhf?: string
-  timezone?: string
-  hl7Endpoint?: string
-}
-
+/** Retained for embedded use; primary practice editing is in Settings → General. */
 export function BentoSettings() {
   const { practiceProviders } = useWorkspace()
-  const { practiceId, dekKey, unlocked } = usePracticeCrypto()
-  const { updatePreferences } = useUserPreferences()
-  const [practiceName, setPracticeName] = useState("")
-  const [providerName, setProviderName] = useState("")
-  const [bhf, setBhf] = useState("")
-  const [timezone, setTimezone] = useState("Africa/Johannesburg")
-  const [hl7Endpoint, setHl7Endpoint] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!practiceId || !dekKey || !unlocked) return
-    const sb = createClient()
-    if (!sb) return
-    let cancelled = false
-    setLoading(true)
-    setLoadError(null)
-    ;(async () => {
-      try {
-        const { data: pr, error: e1 } = await sb.from("practices").select("name").eq("id", practiceId).maybeSingle()
-        if (e1) throw e1
-        const { data: bill, error: e2 } = await sb
-          .from("practice_billing_settings")
-          .select("provider_name, billing_ciphertext, billing_iv")
-          .eq("practice_id", practiceId)
-          .maybeSingle()
-        if (e2) throw e2
-        if (cancelled) return
-        if (pr?.name) setPracticeName(String(pr.name))
-        if (bill?.provider_name) setProviderName(String(bill.provider_name))
-        if (bill?.billing_ciphertext && bill?.billing_iv) {
-          try {
-            const extra = await decryptJson<BillingExtras>(
-              dekKey,
-              String(bill.billing_ciphertext),
-              String(bill.billing_iv)
-            )
-            setBhf(extra.practiceNoBhf ?? "")
-            setTimezone(extra.timezone ?? "Africa/Johannesburg")
-            setHl7Endpoint(extra.hl7Endpoint ?? "")
-          } catch {
-            /* first load or legacy row */
-          }
-        }
-      } catch (e) {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to load settings")
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [practiceId, dekKey, unlocked])
-
-  const handleSavePractice = useCallback(async () => {
-    if (!practiceId || !dekKey) return
-    const sb = createClient()
-    if (!sb) return
-    setSaving(true)
-    try {
-      const extras: BillingExtras = {
-        practiceNoBhf: bhf || undefined,
-        timezone: timezone || undefined,
-        hl7Endpoint: hl7Endpoint || undefined,
-      }
-      const { ciphertext, iv } = await encryptJson(dekKey, extras)
-      const { error: e1 } = await sb.from("practices").update({ name: practiceName }).eq("id", practiceId)
-      if (e1) throw e1
-      const { error: e2 } = await sb.from("practice_billing_settings").upsert(
-        {
-          practice_id: practiceId,
-          provider_name: providerName || practiceName || "Practice",
-          billing_ciphertext: ciphertext,
-          billing_iv: iv,
-          billing_version: 1,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "practice_id" }
-      )
-      if (e2) throw e2
-      const nameOk = practiceName.trim().length > 2
-      const bhfOk = bhf.trim().length > 2
-      if (nameOk && bhfOk) {
-        try {
-          await updatePreferences({ practiceProfileCompleted: true })
-        } catch (prefErr) {
-          console.warn("[BentoSettings] practice profile preference", prefErr)
-        }
-      }
-    } catch (e) {
-      console.warn("[BentoSettings] save", e)
-    } finally {
-      setSaving(false)
-    }
-  }, [bhf, dekKey, hl7Endpoint, practiceId, practiceName, providerName, timezone, updatePreferences])
+  const {
+    practiceId,
+    unlocked,
+    practiceName,
+    setPracticeName,
+    providerName,
+    setProviderName,
+    bhf,
+    setBhf,
+    timezone,
+    setTimezone,
+    hl7Endpoint,
+    setHl7Endpoint,
+    loading,
+    saving,
+    loadError,
+    save,
+  } = usePracticeProfileForm()
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 pb-8">
@@ -238,7 +150,7 @@ export function BentoSettings() {
               <button
                 type="button"
                 disabled={!unlocked || !practiceId || saving}
-                onClick={() => void handleSavePractice()}
+                onClick={() => void save()}
                 className="flex items-center gap-2 rounded-lg border border-white/[0.1] bg-white/[0.06] px-3 py-1.5 text-[11px] font-medium text-white/80 transition-colors hover:bg-white/[0.1] disabled:opacity-40"
               >
                 {saving ? <Spinner className="size-3.5 animate-spin" /> : <FloppyDisk className="size-3.5" />}

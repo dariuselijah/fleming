@@ -2,7 +2,7 @@ import { buildClaimDocument, buildReversalDocument } from "./build-document"
 import { sendMedikreditSoapMaybeDryRun } from "./client"
 import { mergeClaimResponses } from "./claim-response-merger"
 import { analyzeAndSplit } from "./claim-splitter"
-import { resolveOption, resolveSchemeOptionCode } from "./doctor-option-catalog"
+import { resolveOption, resolveOptionByPlanName, resolveSchemeOptionCode } from "./doctor-option-catalog"
 import type { DoctorClaimType, DoctorOption } from "./doctor-option-catalog"
 import { parseClaimXml } from "./parse-response"
 import type { ClaimLineInput, ClaimResponse, ClaimSubmitInput, MedikreditPatientPayload, MedikreditProviderSettings } from "./types"
@@ -11,13 +11,18 @@ const CHRONIC_OPTION = "631364"
 
 /**
  * Resolve the medical scheme option code for the MEM@scheme_opt attribute.
- * Priority: explicit override > auto-resolve from schemeCode + batch claim type > undefined.
+ * Priority: explicit override > 5-digit schemeCode + claim type > exact plan name + claim type.
+ * Plan-name resolution matches the doctor option list row (DD vs P&C can have different 6-digit codes).
  */
 function resolveOptionCode(input: ClaimSubmitInput, batchClaimType?: DoctorClaimType): string | undefined {
   if (input.medicalSchemeOptionCode) return input.medicalSchemeOptionCode
-  if (!input.schemeCode) return undefined
+  const fromPatient = input.patient.medicalAidSchemeCode?.trim()
+  if (fromPatient) return fromPatient
   const ct = batchClaimType ?? (input.lines.some((l) => l.tp === 1) ? "DD" : "P&C")
-  return resolveSchemeOptionCode(input.schemeCode, ct, input.acuteChronic) ?? undefined
+  if (input.schemeCode?.trim()) {
+    return resolveSchemeOptionCode(input.schemeCode.trim(), ct, input.acuteChronic) ?? undefined
+  }
+  return resolveOptionByPlanName(input.patient.medicalAidScheme, ct, input.acuteChronic)?.optionCode ?? undefined
 }
 
 /**
@@ -25,9 +30,11 @@ function resolveOptionCode(input: ClaimSubmitInput, batchClaimType?: DoctorClaim
  * Returns null when no schemeCode is provided or the code is not in the catalog.
  */
 export function resolveClaimDoctorOption(input: ClaimSubmitInput, batchClaimType?: DoctorClaimType): DoctorOption | null {
-  if (!input.schemeCode) return null
   const ct = batchClaimType ?? (input.lines.some((l) => l.tp === 1) ? "DD" : "P&C")
-  return resolveOption(input.schemeCode, ct, input.acuteChronic)
+  if (input.schemeCode?.trim()) {
+    return resolveOption(input.schemeCode.trim(), ct, input.acuteChronic)
+  }
+  return resolveOptionByPlanName(input.patient.medicalAidScheme, ct, input.acuteChronic)
 }
 
 /**
@@ -70,9 +77,11 @@ export async function submitClaim(input: ClaimSubmitInput): Promise<ClaimRespons
       /chronic option/i.test(parsed.responseMessage ?? "")
 
     if (chronicHint && optionCode !== CHRONIC_OPTION) {
-      const chronicCode = input.schemeCode
-        ? resolveSchemeOptionCode(input.schemeCode, batchCt, "chronic") ?? CHRONIC_OPTION
-        : CHRONIC_OPTION
+      const chronicCode =
+        (input.schemeCode?.trim()
+          ? resolveSchemeOptionCode(input.schemeCode.trim(), batchCt, "chronic")
+          : resolveOptionByPlanName(input.patient.medicalAidScheme, batchCt, "chronic")?.optionCode) ??
+        CHRONIC_OPTION
       const retryXml = buildClaimDocument(input.patient, input.provider, batch.lines, {
         transactionIdSuffix: `${batch.transactionIdSuffix}C`,
         medicalSchemeOptionCode: chronicCode,

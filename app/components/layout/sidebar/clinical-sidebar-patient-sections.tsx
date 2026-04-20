@@ -1,7 +1,7 @@
 "use client"
 
 import { useWorkspace } from "@/lib/clinical-workspace"
-import type { MedicalBlock, VitalReading } from "@/lib/clinical-workspace/types"
+import type { MedicalBlock, PatientMedication, VitalReading } from "@/lib/clinical-workspace/types"
 import { searchChronicConditionCatalog } from "@/lib/clinical-workspace/chronic-condition-catalog"
 import {
   buildImagingOrderBlock,
@@ -580,14 +580,38 @@ export function ClinicalSidebarChronicSection() {
 /* ── medications ──────────────────────────────────────────────── */
 
 export function ClinicalSidebarMedicationsSection() {
-  const { activePatient, addSessionMedication, removeSessionMedication } = useWorkspace()
+  const { activePatient, addSessionMedication, removeSessionMedication, updateSessionMedication } =
+    useWorkspace()
   const [pickerOpen, setPickerOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [suggestions, setSuggestions] = useState<string[]>([])
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState("")
+  const [editDosage, setEditDosage] = useState("")
+  const [editFreq, setEditFreq] = useState("")
 
   const pid = activePatient?.patientId
   const meds = activePatient?.activeMedications ?? []
+
+  const startEdit = useCallback((m: PatientMedication) => {
+    setEditingId(m.id)
+    setEditName(m.name)
+    setEditDosage(m.dosage ?? "")
+    setEditFreq(m.frequency ?? "")
+  }, [])
+
+  const commitEdit = useCallback(() => {
+    if (!pid || !editingId) return
+    const n = editName.trim()
+    if (!n) return
+    updateSessionMedication(pid, editingId, {
+      name: n,
+      dosage: editDosage,
+      frequency: editFreq,
+    })
+    setEditingId(null)
+  }, [editDosage, editFreq, editName, editingId, pid, updateSessionMedication])
 
   useEffect(() => {
     if (!pickerOpen || query.trim().length < 2) {
@@ -648,22 +672,77 @@ export function ClinicalSidebarMedicationsSection() {
                 key={m.id}
                 className="group/med flex items-start gap-2 rounded-md px-1 py-1 transition-colors hover:bg-white/[0.03]"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-medium text-white/80">{m.name}</p>
-                  {(m.dosage || m.frequency) && (
-                    <p className="text-[9px] text-white/30">
-                      {[m.dosage, m.frequency].filter(Boolean).join(" · ")}
-                    </p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => pid && removeSessionMedication(pid, m.id)}
-                  className="mt-0.5 shrink-0 rounded p-0.5 text-white/15 opacity-0 transition hover:text-red-300 group-hover/med:opacity-100"
-                  aria-label="Remove"
-                >
-                  <X className="size-3" weight="bold" />
-                </button>
+                {editingId === m.id ? (
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <input
+                      autoFocus
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitEdit()
+                        if (e.key === "Escape") setEditingId(null)
+                      }}
+                      className="w-full rounded border border-white/[0.12] bg-white/[0.04] px-2 py-1 text-[11px] text-white/90 outline-none"
+                      placeholder="Drug name"
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <input
+                        value={editDosage}
+                        onChange={(e) => setEditDosage(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEdit()
+                          if (e.key === "Escape") setEditingId(null)
+                        }}
+                        className="min-w-0 flex-1 rounded border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] text-white/80 outline-none"
+                        placeholder="Dose"
+                      />
+                      <input
+                        value={editFreq}
+                        onChange={(e) => setEditFreq(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEdit()
+                          if (e.key === "Escape") setEditingId(null)
+                        }}
+                        className="min-w-0 flex-1 rounded border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] text-white/80 outline-none"
+                        placeholder="Frequency"
+                      />
+                      <button
+                        type="button"
+                        onClick={commitEdit}
+                        className="rounded bg-white/[0.08] px-2 py-0.5 text-[10px] font-medium text-white/70 hover:bg-white/[0.12]"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-medium text-white/80">{m.name}</p>
+                      {(m.dosage || m.frequency) && (
+                        <p className="text-[9px] text-white/30">
+                          {[m.dosage, m.frequency].filter(Boolean).join(" · ")}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => startEdit(m)}
+                      className="mt-0.5 shrink-0 rounded p-0.5 text-white/15 opacity-0 transition hover:text-white/70 group-hover/med:opacity-100"
+                      aria-label="Edit"
+                    >
+                      <PencilSimple className="size-3" weight="bold" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => pid && removeSessionMedication(pid, m.id)}
+                      className="mt-0.5 shrink-0 rounded p-0.5 text-white/15 opacity-0 transition hover:text-red-300 group-hover/med:opacity-100"
+                      aria-label="Remove"
+                    >
+                      <X className="size-3" weight="bold" />
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>

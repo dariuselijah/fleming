@@ -1,0 +1,1 @@
+{"project_id":"uuycidirxveglnpypaly","query":"CREATE INDEX IF NOT EXISTS medical_schemes_code_idx ON public.medical_schemes (code);\n"}

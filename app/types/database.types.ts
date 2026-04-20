@@ -987,6 +987,45 @@ export type Database = {
         }
         Relationships: []
       }
+      practice_invitations: {
+        Row: {
+          id: string
+          practice_id: string
+          email: string
+          role: string
+          invited_by: string
+          token_hash: string
+          expires_at: string
+          accepted_at: string | null
+          revoked_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          email: string
+          role: string
+          invited_by: string
+          token_hash: string
+          expires_at: string
+          accepted_at?: string | null
+          revoked_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          email?: string
+          role?: string
+          invited_by?: string
+          token_hash?: string
+          expires_at?: string
+          accepted_at?: string | null
+          revoked_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       practice_crypto_wrappers: {
         Row: {
           id: string
@@ -1498,6 +1537,9 @@ export type Database = {
           tool_calls_log: Json | null
           ended_reason: string | null
           cost_cents: number | null
+          intent: string | null
+          structured_outcome: Json | null
+          appointment_id: string | null
           created_at: string
         }
         Insert: {
@@ -1515,6 +1557,9 @@ export type Database = {
           tool_calls_log?: Json | null
           ended_reason?: string | null
           cost_cents?: number | null
+          intent?: string | null
+          structured_outcome?: Json | null
+          appointment_id?: string | null
           created_at?: string
         }
         Update: {
@@ -1532,6 +1577,297 @@ export type Database = {
           tool_calls_log?: Json | null
           ended_reason?: string | null
           cost_cents?: number | null
+          intent?: string | null
+          structured_outcome?: Json | null
+          appointment_id?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      communication_interactions: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string | null
+          appointment_id: string | null
+          thread_id: string | null
+          voice_call_id: string | null
+          portal_session_id: string | null
+          channel: string
+          event_type: string
+          provider: string | null
+          provider_event_id: string | null
+          payload: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id?: string | null
+          appointment_id?: string | null
+          thread_id?: string | null
+          voice_call_id?: string | null
+          portal_session_id?: string | null
+          channel: string
+          event_type: string
+          provider?: string | null
+          provider_event_id?: string | null
+          payload?: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string | null
+          appointment_id?: string | null
+          thread_id?: string | null
+          voice_call_id?: string | null
+          portal_session_id?: string | null
+          channel?: string
+          event_type?: string
+          provider?: string | null
+          provider_event_id?: string | null
+          payload?: Json
+          created_at?: string
+        }
+        Relationships: []
+      }
+      message_templates: {
+        Row: {
+          id: string
+          practice_id: string
+          template_key: string
+          channel: string
+          provider: string
+          provider_template_id: string | null
+          body_template: string
+          rich_card_payload: Json | null
+          variables: Json | null
+          status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          template_key: string
+          channel: string
+          provider?: string
+          provider_template_id?: string | null
+          body_template: string
+          rich_card_payload?: Json | null
+          variables?: Json | null
+          status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          template_key?: string
+          channel?: string
+          provider?: string
+          provider_template_id?: string | null
+          body_template?: string
+          rich_card_payload?: Json | null
+          variables?: Json | null
+          status?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      patient_access_tokens: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          token_hash: string
+          purpose: string
+          appointment_id: string | null
+          invoice_id: string | null
+          expires_at: string
+          used_at: string | null
+          elevated_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          token_hash: string
+          purpose: string
+          appointment_id?: string | null
+          invoice_id?: string | null
+          expires_at: string
+          used_at?: string | null
+          elevated_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          token_hash?: string
+          purpose?: string
+          appointment_id?: string | null
+          invoice_id?: string | null
+          expires_at?: string
+          used_at?: string | null
+          elevated_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      patient_consent: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string | null
+          external_party: string
+          channel: string
+          consent_type: string
+          granted: boolean
+          granted_at: string | null
+          revoked_at: string | null
+          evidence_message_id: string | null
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id?: string | null
+          external_party: string
+          channel: string
+          consent_type: string
+          granted?: boolean
+          granted_at?: string | null
+          revoked_at?: string | null
+          evidence_message_id?: string | null
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string | null
+          external_party?: string
+          channel?: string
+          consent_type?: string
+          granted?: boolean
+          granted_at?: string | null
+          revoked_at?: string | null
+          evidence_message_id?: string | null
+        }
+        Relationships: []
+      }
+      portal_sessions: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          access_token_id: string
+          purpose: string
+          started_at: string
+          last_activity_at: string
+          elevated: boolean
+          ip_address: string | null
+          user_agent: string | null
+          ended_at: string | null
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          access_token_id: string
+          purpose: string
+          started_at?: string
+          last_activity_at?: string
+          elevated?: boolean
+          ip_address?: string | null
+          user_agent?: string | null
+          ended_at?: string | null
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          access_token_id?: string
+          purpose?: string
+          started_at?: string
+          last_activity_at?: string
+          elevated?: boolean
+          ip_address?: string | null
+          user_agent?: string | null
+          ended_at?: string | null
+        }
+        Relationships: []
+      }
+      rcs_agents: {
+        Row: {
+          id: string
+          practice_id: string
+          provider: string
+          agent_id: string | null
+          brand_name: string | null
+          verification_status: string | null
+          metadata: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          provider?: string
+          agent_id?: string | null
+          brand_name?: string | null
+          verification_status?: string | null
+          metadata?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          provider?: string
+          agent_id?: string | null
+          brand_name?: string | null
+          verification_status?: string | null
+          metadata?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      webhook_events: {
+        Row: {
+          id: string
+          practice_id: string | null
+          source: string
+          event_type: string | null
+          payload: Json
+          error_message: string | null
+          retry_count: number
+          next_retry_at: string | null
+          status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id?: string | null
+          source: string
+          event_type?: string | null
+          payload: Json
+          error_message?: string | null
+          retry_count?: number
+          next_retry_at?: string | null
+          status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string | null
+          source?: string
+          event_type?: string | null
+          payload?: Json
+          error_message?: string | null
+          retry_count?: number
+          next_retry_at?: string | null
+          status?: string
           created_at?: string
         }
         Relationships: []
@@ -1879,6 +2215,9 @@ export type Database = {
           pc_number: string | null
           works_number: string | null
           prescriber_mem_acc_nbr: string | null
+          discipline: string | null
+          vendor_version: string | null
+          provider_display_name: string | null
           use_test_provider: boolean
           extra_settings: Record<string, unknown>
           created_at: string
@@ -1893,6 +2232,9 @@ export type Database = {
           pc_number?: string | null
           works_number?: string | null
           prescriber_mem_acc_nbr?: string | null
+          discipline?: string | null
+          vendor_version?: string | null
+          provider_display_name?: string | null
           use_test_provider?: boolean
           extra_settings?: Record<string, unknown>
           created_at?: string
@@ -1907,6 +2249,9 @@ export type Database = {
           pc_number?: string | null
           works_number?: string | null
           prescriber_mem_acc_nbr?: string | null
+          discipline?: string | null
+          vendor_version?: string | null
+          provider_display_name?: string | null
           use_test_provider?: boolean
           extra_settings?: Record<string, unknown>
           created_at?: string
@@ -2004,6 +2349,385 @@ export type Database = {
         }
         Relationships: []
       }
+      practice_invoices: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string | null
+          claim_id: string | null
+          clinical_encounter_id: string | null
+          appointment_id: string | null
+          invoice_number: string
+          currency: string
+          subtotal_cents: number
+          vat_cents: number
+          total_cents: number
+          amount_paid_cents: number
+          amount_due_cents: number
+          billing_mode: string
+          status: string
+          practice_snapshot: Record<string, unknown>
+          patient_snapshot: Record<string, unknown>
+          line_items: unknown[]
+          notes: string | null
+          pdf_storage_path: string | null
+          issued_at: string | null
+          due_at: string | null
+          last_reminded_at: string | null
+          paid_at: string | null
+          voided_at: string | null
+          write_off_reason: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id?: string | null
+          claim_id?: string | null
+          clinical_encounter_id?: string | null
+          appointment_id?: string | null
+          invoice_number: string
+          currency?: string
+          subtotal_cents?: number
+          vat_cents?: number
+          total_cents?: number
+          amount_paid_cents?: number
+          billing_mode?: string
+          status?: string
+          practice_snapshot?: Record<string, unknown>
+          patient_snapshot?: Record<string, unknown>
+          line_items?: unknown[]
+          notes?: string | null
+          pdf_storage_path?: string | null
+          issued_at?: string | null
+          due_at?: string | null
+          last_reminded_at?: string | null
+          paid_at?: string | null
+          voided_at?: string | null
+          write_off_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string | null
+          claim_id?: string | null
+          clinical_encounter_id?: string | null
+          appointment_id?: string | null
+          invoice_number?: string
+          currency?: string
+          subtotal_cents?: number
+          vat_cents?: number
+          total_cents?: number
+          amount_paid_cents?: number
+          billing_mode?: string
+          status?: string
+          practice_snapshot?: Record<string, unknown>
+          patient_snapshot?: Record<string, unknown>
+          line_items?: unknown[]
+          notes?: string | null
+          pdf_storage_path?: string | null
+          issued_at?: string | null
+          due_at?: string | null
+          last_reminded_at?: string | null
+          paid_at?: string | null
+          voided_at?: string | null
+          write_off_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      practice_payments: {
+        Row: {
+          id: string
+          practice_id: string
+          invoice_id: string
+          provider: string
+          method: string | null
+          amount_cents: number
+          currency: string
+          status: string
+          provider_checkout_id: string | null
+          provider_order_id: string | null
+          provider_payment_intent: string | null
+          provider_customer_id: string | null
+          provider_raw: Record<string, unknown> | null
+          received_by_user_id: string | null
+          cash_drawer_session_id: string | null
+          reference: string | null
+          idempotency_key: string | null
+          failure_reason: string | null
+          created_at: string
+          updated_at: string
+          succeeded_at: string | null
+          refunded_at: string | null
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          invoice_id: string
+          provider: string
+          method?: string | null
+          amount_cents: number
+          currency?: string
+          status?: string
+          provider_checkout_id?: string | null
+          provider_order_id?: string | null
+          provider_payment_intent?: string | null
+          provider_customer_id?: string | null
+          provider_raw?: Record<string, unknown> | null
+          received_by_user_id?: string | null
+          cash_drawer_session_id?: string | null
+          reference?: string | null
+          idempotency_key?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+          succeeded_at?: string | null
+          refunded_at?: string | null
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          invoice_id?: string
+          provider?: string
+          method?: string | null
+          amount_cents?: number
+          currency?: string
+          status?: string
+          provider_checkout_id?: string | null
+          provider_order_id?: string | null
+          provider_payment_intent?: string | null
+          provider_customer_id?: string | null
+          provider_raw?: Record<string, unknown> | null
+          received_by_user_id?: string | null
+          cash_drawer_session_id?: string | null
+          reference?: string | null
+          idempotency_key?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+          succeeded_at?: string | null
+          refunded_at?: string | null
+        }
+        Relationships: []
+      }
+      practice_receipts: {
+        Row: {
+          id: string
+          practice_id: string
+          invoice_id: string
+          payment_id: string
+          receipt_number: string
+          pdf_storage_path: string | null
+          snapshot: Record<string, unknown>
+          delivered_email_at: string | null
+          delivered_sms_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          invoice_id: string
+          payment_id: string
+          receipt_number: string
+          pdf_storage_path?: string | null
+          snapshot?: Record<string, unknown>
+          delivered_email_at?: string | null
+          delivered_sms_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          invoice_id?: string
+          payment_id?: string
+          receipt_number?: string
+          pdf_storage_path?: string | null
+          snapshot?: Record<string, unknown>
+          delivered_email_at?: string | null
+          delivered_sms_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      practice_credit_notes: {
+        Row: {
+          id: string
+          practice_id: string
+          invoice_id: string
+          payment_id: string | null
+          credit_note_number: string
+          amount_cents: number
+          currency: string
+          reason: string | null
+          pdf_storage_path: string | null
+          snapshot: Record<string, unknown>
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          invoice_id: string
+          payment_id?: string | null
+          credit_note_number: string
+          amount_cents: number
+          currency?: string
+          reason?: string | null
+          pdf_storage_path?: string | null
+          snapshot?: Record<string, unknown>
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          invoice_id?: string
+          payment_id?: string | null
+          credit_note_number?: string
+          amount_cents?: number
+          currency?: string
+          reason?: string | null
+          pdf_storage_path?: string | null
+          snapshot?: Record<string, unknown>
+          created_at?: string
+        }
+        Relationships: []
+      }
+      practice_billing_sequences: {
+        Row: {
+          practice_id: string
+          kind: string
+          next_value: number
+          prefix: string
+        }
+        Insert: {
+          practice_id: string
+          kind: string
+          next_value?: number
+          prefix?: string
+        }
+        Update: {
+          practice_id?: string
+          kind?: string
+          next_value?: number
+          prefix?: string
+        }
+        Relationships: []
+      }
+      payment_provider_events: {
+        Row: {
+          id: string
+          provider: string
+          provider_event_id: string
+          event_type: string
+          signature_valid: boolean
+          payload: Record<string, unknown>
+          processed_at: string | null
+          received_at: string
+        }
+        Insert: {
+          id?: string
+          provider: string
+          provider_event_id: string
+          event_type: string
+          signature_valid?: boolean
+          payload?: Record<string, unknown>
+          processed_at?: string | null
+          received_at?: string
+        }
+        Update: {
+          id?: string
+          provider?: string
+          provider_event_id?: string
+          event_type?: string
+          signature_valid?: boolean
+          payload?: Record<string, unknown>
+          processed_at?: string | null
+          received_at?: string
+        }
+        Relationships: []
+      }
+      billing_audit_log: {
+        Row: {
+          id: string
+          practice_id: string
+          actor_user_id: string | null
+          entity_type: string
+          entity_id: string
+          action: string
+          diff: Record<string, unknown> | null
+          reason: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          actor_user_id?: string | null
+          entity_type: string
+          entity_id: string
+          action: string
+          diff?: Record<string, unknown> | null
+          reason?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          actor_user_id?: string | null
+          entity_type?: string
+          entity_id?: string
+          action?: string
+          diff?: Record<string, unknown> | null
+          reason?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      cash_drawer_sessions: {
+        Row: {
+          id: string
+          practice_id: string
+          opened_by: string
+          opened_at: string
+          opening_float_cents: number
+          closed_by: string | null
+          closed_at: string | null
+          counted_cash_cents: number | null
+          variance_cents: number | null
+          notes: string | null
+          z_report_storage_path: string | null
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          opened_by: string
+          opened_at?: string
+          opening_float_cents?: number
+          closed_by?: string | null
+          closed_at?: string | null
+          counted_cash_cents?: number | null
+          variance_cents?: number | null
+          notes?: string | null
+          z_report_storage_path?: string | null
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          opened_by?: string
+          opened_at?: string
+          opening_float_cents?: number
+          closed_by?: string | null
+          closed_at?: string | null
+          counted_cash_cents?: number | null
+          variance_cents?: number | null
+          notes?: string | null
+          z_report_storage_path?: string | null
+        }
+        Relationships: []
+      }
       practice_billing_settings: {
         Row: {
           practice_id: string
@@ -2039,7 +2763,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      next_billing_number: {
+        Args: {
+          p_practice_id: string
+          p_kind: string
+          p_default_prefix?: string
+        }
+        Returns: string
+      }
     }
     Enums: Record<string, never>
     CompositeTypes: {

@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { cloneAssistant, importTwilioNumber } from "@/lib/comms/vapi"
+import { cloneAssistant, importTwilioNumber, updateAssistantServerUrl } from "@/lib/comms/vapi"
 
 type AdminDb = ReturnType<typeof createAdminClient>
 
@@ -78,13 +78,32 @@ export async function ensureVoiceChannelForNumber(opts: {
   phoneNumberSid: string
   webhookBase: string
 }): Promise<{ vapiAssistantId?: string; voiceStatus: "active" | "not_configured" }> {
-  const defaultAssistant = process.env.VAPI_DEFAULT_ASSISTANT_ID
+  const defaultAssistant = process.env.VAPI_DEFAULT_ASSISTANT_ID?.trim()
   let vapiAssistantId: string | undefined
   let vapiPhoneNumberId: string | undefined
 
   if (!defaultAssistant) return { voiceStatus: "not_configured" }
 
   const voiceServerUrl = `${opts.webhookBase}/api/comms/voice/webhook`
+
+  const { data: existingVoice } = await opts.db
+    .from("practice_channels")
+    .select("vapi_assistant_id, webhook_url")
+    .eq("practice_id", opts.practiceId)
+    .eq("channel_type", "voice")
+    .maybeSingle()
+
+  if (
+    existingVoice?.vapi_assistant_id &&
+    existingVoice.webhook_url &&
+    existingVoice.webhook_url !== voiceServerUrl
+  ) {
+    try {
+      await updateAssistantServerUrl(existingVoice.vapi_assistant_id, voiceServerUrl)
+    } catch (err) {
+      console.error("[provision] Failed to PATCH Vapi assistant serverUrl:", err)
+    }
+  }
 
   try {
     const cloned = await cloneAssistant({
@@ -96,21 +115,34 @@ export async function ensureVoiceChannelForNumber(opts: {
     vapiAssistantId = cloned.id
   } catch (err) {
     console.error("[provision] Vapi clone failed:", err)
-    return { voiceStatus: "not_configured" }
+    // Shared platform assistant + one Twilio number imported in Vapi (same IDs for all practices)
+    const sharedPhoneId = process.env.VAPI_PHONE_NUMBER_ID?.trim()
+    if (defaultAssistant && sharedPhoneId) {
+      vapiAssistantId = defaultAssistant
+      vapiPhoneNumberId = sharedPhoneId
+    } else {
+      return { voiceStatus: "not_configured" }
+    }
   }
 
-  // Auto-import the Twilio number into Vapi (smsEnabled=false to preserve WhatsApp webhooks)
-  try {
-    const imported = await importTwilioNumber({
-      phoneNumber: opts.phoneNumber,
-      name: `${opts.practiceName} Line`,
-      assistantId: vapiAssistantId,
-      serverUrl: voiceServerUrl,
-    })
-    vapiPhoneNumberId = imported.id
-  } catch (err) {
-    console.error("[provision] Vapi Twilio import failed, falling back to env:", err)
-    vapiPhoneNumberId = process.env.VAPI_PHONE_NUMBER_ID || undefined
+  // Auto-import the Twilio number into Vapi for inbound voice (Messaging webhooks stay on Twilio for SMS/RCS).
+  if (!vapiPhoneNumberId) {
+    try {
+      const imported = await importTwilioNumber({
+        phoneNumber: opts.phoneNumber,
+        name: `${opts.practiceName} Line`,
+        assistantId: vapiAssistantId!,
+        serverUrl: voiceServerUrl,
+      })
+      vapiPhoneNumberId = imported.id
+    } catch (err) {
+      console.error("[provision] Vapi Twilio import failed, falling back to env:", err)
+      vapiPhoneNumberId = process.env.VAPI_PHONE_NUMBER_ID || undefined
+    }
+  }
+
+  if (!vapiAssistantId || !vapiPhoneNumberId) {
+    return { voiceStatus: "not_configured" }
   }
 
   await opts.db.from("practice_channels").upsert(

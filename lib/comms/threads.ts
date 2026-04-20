@@ -1,3 +1,4 @@
+import type { Json } from "@/app/types/database.types"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type {
   ChannelType,
@@ -22,22 +23,34 @@ export async function resolvePracticeFromPhone(phoneNumber: string): Promise<str
     .from("practice_channels")
     .select("practice_id")
     .eq("phone_number", cleanNum)
-    .in("status", ["active", "pending_wa_approval", "registering_sender"])
+    .in("status", [
+      "active",
+      "pending_wa_approval",
+      "registering_sender",
+      "pending_waba",
+      "provisioning",
+    ])
     .limit(1)
     .maybeSingle()
   return data?.practice_id ?? null
 }
 
-export async function getPracticeWhatsAppNumber(practiceId: string): Promise<string | null> {
+/** Twilio E.164 for SMS/RCS patient messaging (replaces legacy WhatsApp sender row). */
+export async function getPracticeMessagingNumber(practiceId: string): Promise<string | null> {
   const { data } = await supabase()
     .from("practice_channels")
     .select("phone_number")
     .eq("practice_id", practiceId)
-    .eq("channel_type", "whatsapp")
+    .eq("channel_type", "rcs")
     .in("status", ["active", "pending_wa_approval", "registering_sender"])
     .limit(1)
     .maybeSingle()
   return data?.phone_number ?? null
+}
+
+/** @deprecated Use getPracticeMessagingNumber */
+export async function getPracticeWhatsAppNumber(practiceId: string): Promise<string | null> {
+  return getPracticeMessagingNumber(practiceId)
 }
 
 export async function getOrCreateThread(
@@ -58,17 +71,6 @@ export async function getOrCreateThread(
     .maybeSingle()
 
   if (existing) {
-    const sessionExpiry = channel === "whatsapp"
-      ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      : undefined
-
-    if (sessionExpiry) {
-      await db
-        .from("conversation_threads")
-        .update({ session_expires_at: sessionExpiry, updated_at: new Date().toISOString() })
-        .eq("id", existing.id)
-    }
-
     return _threadFromRow(existing as Record<string, unknown>)
   }
 
@@ -87,9 +89,7 @@ export async function getOrCreateThread(
       current_flow: "none",
       flow_state: {},
       last_message_at: new Date().toISOString(),
-      session_expires_at: channel === "whatsapp"
-        ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-        : undefined,
+      session_expires_at: undefined,
       unread_count: 0,
       metadata: {},
     })
@@ -131,10 +131,11 @@ export async function appendMessage(opts: {
       media_mime_type: opts.mediaMimeType,
       media_storage_path: opts.mediaStoragePath,
       template_name: opts.templateName,
-      interactive_payload: opts.interactivePayload,
+      interactive_payload: (opts.interactivePayload ?? null) as Json | null,
       provider_message_id: opts.providerMessageId,
       delivery_status: opts.deliveryStatus || (opts.direction === "outbound" ? "queued" : "delivered"),
-      agent_tool_calls: opts.agentToolCalls,
+      agent_tool_calls:
+        opts.agentToolCalls === undefined ? null : (opts.agentToolCalls as Json),
     })
     .select("*")
     .single()
@@ -147,7 +148,6 @@ export async function appendMessage(opts: {
     updated_at: new Date().toISOString(),
   }
   if (opts.direction === "inbound") {
-    await db.rpc("", {}).catch(() => {})
     // Increment unread
     const { data: thread } = await db
       .from("conversation_threads")
@@ -171,7 +171,7 @@ export async function updateThreadFlow(
     .from("conversation_threads")
     .update({
       current_flow: currentFlow,
-      flow_state: flowState,
+      flow_state: flowState as Json,
       updated_at: new Date().toISOString(),
     })
     .eq("id", threadId)

@@ -1,3 +1,4 @@
+import { getClinicalProxyBase } from "@/lib/clinical-proxy/url"
 import type { MedikreditEnvConfig } from "./types"
 
 export function getMedikreditEnv(): MedikreditEnvConfig | null {
@@ -8,6 +9,13 @@ export function getMedikreditEnv(): MedikreditEnvConfig | null {
   return { apiUrl, username, password }
 }
 
+/** True when direct MediKredit env, JSON proxy base, or dry-run is available. */
+export function isMedikreditConfigured(): boolean {
+  if (process.env.MEDIKREDIT_DRY_RUN === "1") return true
+  if (getClinicalProxyBase()) return true
+  return getMedikreditEnv() !== null
+}
+
 export function requireMedikreditEnv(): MedikreditEnvConfig {
   const c = getMedikreditEnv()
   if (!c) {
@@ -16,4 +24,10 @@ export function requireMedikreditEnv(): MedikreditEnvConfig {
     )
   }
   return c
+}
+
+/** Fallback TX@plan when the patient has no `medicalAidSchemeCode` (e.g. MediKredit test option 631372). */
+export function getMedikreditDefaultOptionCode(): string | undefined {
+  const v = process.env.MEDIKREDIT_DEFAULT_OPTION_CODE?.trim()
+  return v || undefined
 }

@@ -1,8 +1,14 @@
 import { generateText } from "ai"
 import { openproviders } from "@/lib/openproviders"
 
-/** High-accuracy vision + structuring for Smart Import (no Azure). */
-export const SMART_IMPORT_VISION_MODEL = "gpt-5.2" as const
+/**
+ * Vision OCR for scans/photos/PDF-as-file — GPT-4o is much faster than flagship
+ * models while staying strong on small text (IDs, cards).
+ */
+export const SMART_IMPORT_TRANSCRIBE_MODEL = "gpt-4o" as const
+
+/** @deprecated Use SMART_IMPORT_TRANSCRIBE_MODEL — kept for any stray imports. */
+export const SMART_IMPORT_VISION_MODEL = SMART_IMPORT_TRANSCRIBE_MODEL
 
 const TRANSCRIBE_SYSTEM = `You transcribe identity documents, passports, driver's licences, and medical aid cards for clinical data entry.
 
@@ -31,7 +37,7 @@ export async function transcribeImagesWithGptVision(opts: {
     return { text: "" }
   }
 
-  const model = openproviders(SMART_IMPORT_VISION_MODEL)
+  const model = openproviders(SMART_IMPORT_TRANSCRIBE_MODEL)
 
   const content: Array<
     { type: "text"; text: string } | { type: "image"; image: Buffer }
@@ -102,7 +108,8 @@ export async function transcribePdfBufferWithOpenAi(
       return { text: "", detail: "OpenAI file upload returned no file id." }
     }
 
-    const models = [SMART_IMPORT_VISION_MODEL, "gpt-4o"] as const
+    /** Prefer 4o for PDF; mini as fallback if the account/model combo rejects the request. */
+    const models = [SMART_IMPORT_TRANSCRIBE_MODEL, "gpt-4o-mini"] as const
     let lastErr = ""
     for (const model of models) {
       const chat = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -140,7 +147,7 @@ export async function transcribePdfBufferWithOpenAi(
 
       lastErr = await chat.text()
       const retry =
-        model === SMART_IMPORT_VISION_MODEL &&
+        model === SMART_IMPORT_TRANSCRIBE_MODEL &&
         (chat.status === 400 || chat.status === 404 || chat.status === 422)
       if (!retry) {
         break

@@ -3,13 +3,26 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchClient } from "@/lib/fetch"
 
+/** Minimal shapes for Web Speech API (DOM lib may omit these in some TS configs). */
+type SpeechRecognitionResultListLike = {
+  length: number
+  [i: number]: { isFinal: boolean; 0: { transcript: string } }
+}
+
+type SpeechRecognitionResultEventLike = {
+  resultIndex: number
+  results: SpeechRecognitionResultListLike
+}
+
+type SpeechRecognitionErrorEventLike = { error: string; message?: string }
+
 type SpeechRecognitionLike = {
   lang: string
   continuous: boolean
   interimResults: boolean
   maxAlternatives: number
-  onresult: ((ev: SpeechRecognitionEvent) => void) | null
-  onerror: ((ev: SpeechRecognitionErrorEvent) => void) | null
+  onresult: ((ev: SpeechRecognitionResultEventLike) => void) | null
+  onerror: ((ev: SpeechRecognitionErrorEventLike) => void) | null
   onend: (() => void) | null
   start: () => void
   stop: () => void
@@ -119,10 +132,7 @@ export function useChatDictation({ onAppendText, language = "en-US" }: UseChatDi
       rec.continuous = true
       rec.interimResults = true
       rec.maxAlternatives = 1
-      rec.onresult = (event: {
-        resultIndex: number
-        results: { length: number; [i: number]: { isFinal: boolean; 0: { transcript: string } } }
-      }) => {
+      rec.onresult = (event: SpeechRecognitionResultEventLike) => {
         let interim = ""
         let finals = ""
         for (let i = event.resultIndex; i < event.results.length; i++) {

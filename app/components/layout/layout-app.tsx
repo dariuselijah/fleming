@@ -14,6 +14,7 @@ import { ClinicalUnlockGate } from "@/app/components/workspace/clinical-unlock-g
 import { ClinicalPersistence } from "@/app/components/workspace/clinical-persistence"
 import { ClaimPreviewModal } from "@/app/components/workspace/claim-preview-modal"
 import { OnboardingChecklist } from "@/app/components/onboarding/onboarding-checklist"
+import { AppSettingsDialogHost } from "@/app/components/layout/settings/app-settings-dialog-host"
 
 export function LayoutApp({ children }: { children: React.ReactNode }) {
   const { preferences } = useUserPreferences()
@@ -24,6 +25,7 @@ export function LayoutApp({ children }: { children: React.ReactNode }) {
     return (
       <PracticeCryptoProvider>
         <WorkspaceProvider>
+          <AppSettingsDialogHost />
           <PracticeIdBootstrap />
           <ClinicalUnlockGate>
             <ClinicalDataBootstrap />
@@ -49,6 +51,7 @@ export function LayoutApp({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="bg-background flex h-dvh w-full overflow-hidden">
+      <AppSettingsDialogHost />
       {hasSidebar && <AppSidebar />}
       <main className="@container relative h-dvh w-0 flex-shrink flex-grow overflow-y-auto">
         <Header hasSidebar={hasSidebar} />

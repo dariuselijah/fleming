@@ -17,6 +17,7 @@ import {
   ArrowsOutSimple,
   CaretDown,
   CaretRight,
+  ChatCircle,
   Check,
   ClockCounterClockwise,
   FileXls,
@@ -27,52 +28,17 @@ import {
   Spinner,
   Stethoscope,
   Upload,
-  WhatsappLogo,
   X,
 } from "@phosphor-icons/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import type { Database } from "@/app/types/database.types"
-import type { SupabaseClient } from "@supabase/supabase-js"
-
-/** Merge into `medikredit_providers` without wiping columns omitted from `patch`. */
-async function upsertMedikreditProviderPatch(
-  sb: SupabaseClient<Database>,
-  practiceId: string,
-  patch: Partial<Database["public"]["Tables"]["medikredit_providers"]["Insert"]>
-) {
-  const { data: row } = await sb
-    .from("medikredit_providers")
-    .select("*")
-    .eq("practice_id", practiceId)
-    .maybeSingle()
-  const merged: Database["public"]["Tables"]["medikredit_providers"]["Insert"] = {
-    practice_id: practiceId,
-    vendor_id: patch.vendor_id !== undefined ? patch.vendor_id : row?.vendor_id ?? null,
-    bhf_number: patch.bhf_number !== undefined ? patch.bhf_number : row?.bhf_number ?? null,
-    hpc_number: patch.hpc_number !== undefined ? patch.hpc_number : row?.hpc_number ?? null,
-    group_practice_number:
-      patch.group_practice_number !== undefined ? patch.group_practice_number : row?.group_practice_number ?? null,
-    pc_number: patch.pc_number !== undefined ? patch.pc_number : row?.pc_number ?? null,
-    works_number: patch.works_number !== undefined ? patch.works_number : row?.works_number ?? null,
-    prescriber_mem_acc_nbr:
-      patch.prescriber_mem_acc_nbr !== undefined ? patch.prescriber_mem_acc_nbr : row?.prescriber_mem_acc_nbr ?? null,
-    use_test_provider:
-      patch.use_test_provider !== undefined ? patch.use_test_provider : row?.use_test_provider ?? false,
-    extra_settings:
-      patch.extra_settings !== undefined
-        ? (patch.extra_settings as Database["public"]["Tables"]["medikredit_providers"]["Insert"]["extra_settings"])
-        : row?.extra_settings ?? {},
-    updated_at: new Date().toISOString(),
-  }
-  const { error } = await sb.from("medikredit_providers").upsert(merged, { onConflict: "practice_id" })
-  if (error) console.warn("[upsertMedikreditProviderPatch]", error.message)
-}
+import { MedikreditProviderSettingsForm } from "@/app/components/medikredit/medikredit-provider-settings-form"
+import { upsertMedikreditProviderPatch } from "@/lib/medikredit/upsert-medikredit-provider-patch"
 
 const STEP_ICONS: Record<ChecklistStepId, typeof Stethoscope> = {
   profile: Stethoscope,
   services: FileXls,
-  whatsapp: WhatsappLogo,
+  patient_messaging: ChatCircle,
   voice: Phone,
   labs: Plugs,
   medikredit: ShieldCheck,
@@ -93,7 +59,7 @@ const fade = { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const }
 const STEP_ORDER: ChecklistStepId[] = [
   "profile",
   "services",
-  "whatsapp",
+  "patient_messaging",
   "voice",
   "labs",
   "medikredit",
@@ -336,7 +302,7 @@ export function OnboardingChecklist() {
 }
 
 function CompactStepRow({ step, onOpen }: { step: ChecklistStep; onOpen: () => void }) {
-  const Icon = STEP_ICONS[step.id]
+  const Icon = STEP_ICONS[step.id] ?? ChatCircle
   return (
     <motion.li
       variants={{
@@ -452,7 +418,7 @@ function SetupPanelOverlay({
           </div>
           <nav className="flex max-h-[40vh] flex-row gap-1 overflow-x-auto p-2 sm:max-h-none sm:flex-col sm:overflow-y-auto sm:py-3" style={{ scrollbarWidth: "thin" }}>
             {steps.map((step) => {
-              const Icon = STEP_ICONS[step.id]
+              const Icon = STEP_ICONS[step.id] ?? ChatCircle
               const isActive = active === step.id
               return (
                 <motion.button
@@ -525,8 +491,8 @@ function StepContent({ stepId, layout }: { stepId: ChecklistStepId; layout: "pan
       return <ProfileStep layout={layout} />
     case "services":
       return <ServicesStep layout={layout} />
-    case "whatsapp":
-      return <WhatsAppStep layout={layout} />
+    case "patient_messaging":
+      return <PatientMessagingStep layout={layout} />
     case "voice":
       return <VoiceAgentStep layout={layout} />
     case "labs":
@@ -606,10 +572,14 @@ function ProfileStep({ layout }: { layout: "panel" }) {
         },
         { onConflict: "practice_id" }
       )
-      await upsertMedikreditProviderPatch(sb, practiceId, {
-        bhf_number: bhf.trim(),
-        hpc_number: hpcsa.trim(),
-      })
+      try {
+        await upsertMedikreditProviderPatch(sb, practiceId, {
+          bhf_number: bhf.trim(),
+          hpc_number: hpcsa.trim(),
+        })
+      } catch (mkErr) {
+        console.warn("[ProfileStep] medikredit_providers", mkErr)
+      }
       setStatus("profile", "done")
       await updatePreferences({ practiceProfileCompleted: true })
       closePanel()
@@ -837,9 +807,9 @@ function ServicesStep({ layout }: { layout: "panel" }) {
 }
 
 // ---------------------------------------------------------------------------
-// Step: WhatsApp Agent
+// Step: Patient messaging (SMS / RCS)
 // ---------------------------------------------------------------------------
-function WhatsAppStep({ layout }: { layout: "panel" }) {
+function PatientMessagingStep({ layout }: { layout: "panel" }) {
   const setStatus = useChecklistStore((s) => s.setStepStatus)
   const [mode, setMode] = useState<"connect" | "new">("connect")
   const [waNumber, setWaNumber] = useState("")
@@ -848,7 +818,8 @@ function WhatsAppStep({ layout }: { layout: "panel" }) {
   return (
     <div className={cn("space-y-5", comfy && "max-w-2xl")}>
       <p className="text-sm leading-relaxed text-white/40">
-        Patients message your practice on WhatsApp. An AI agent handles bookings, FAQs, and routes urgent messages to you.
+        Patients text your practice number; messages use SMS everywhere and RCS rich features when the handset and carrier
+        support them. The AI agent handles bookings, FAQs, and urgent routing.
       </p>
       <div className="flex flex-wrap gap-2">
         <TabButton active={mode === "connect"} onClick={() => setMode("connect")} comfortable={comfy}>
@@ -860,7 +831,7 @@ function WhatsAppStep({ layout }: { layout: "panel" }) {
       </div>
       {mode === "connect" ? (
         <div className="space-y-3">
-          <Field label="WhatsApp number" value={waNumber} onChange={setWaNumber} placeholder="+27 82 000 0000" comfortable={comfy} />
+          <Field label="Practice mobile number" value={waNumber} onChange={setWaNumber} placeholder="+27 82 000 0000" comfortable={comfy} />
           <p className="text-xs text-white/25">We send a verification code via Twilio.</p>
         </div>
       ) : (
@@ -895,10 +866,10 @@ function WhatsAppStep({ layout }: { layout: "panel" }) {
         disabled={mode === "connect" && waNumber.trim().length < 10}
         saving={false}
         onClick={() => {
-          setStatus("whatsapp", "done")
-          advanceAfterComplete("whatsapp")
+          setStatus("patient_messaging", "done")
+          advanceAfterComplete("patient_messaging")
         }}
-        label="Enable WhatsApp"
+        label="Enable patient messaging"
         comfortable={comfy}
       />
     </div>
@@ -1058,162 +1029,36 @@ function LabsStep({ layout }: { layout: "panel" }) {
 // ---------------------------------------------------------------------------
 // Step: Medikredit Verification
 // ---------------------------------------------------------------------------
-function MedikreditStep({ layout }: { layout: "panel" }) {
+function MedikreditStep({ layout: _layout }: { layout: "panel" }) {
   const setStatus = useChecklistStore((s) => s.setStepStatus)
   const step = useChecklistStore((s) => s.steps.find((x) => x.id === "medikredit"))
   const { practiceId } = usePracticeCrypto()
-  const [submitted, setSubmitted] = useState(step?.status === "waiting")
-  const [saving, setSaving] = useState(false)
-  const [vendorId, setVendorId] = useState("")
-  const [bhf, setBhf] = useState("")
-  const [hpc, setHpc] = useState("")
-  const [groupNum, setGroupNum] = useState("")
-  const [pcNum, setPcNum] = useState("")
-  const [worksNum, setWorksNum] = useState("")
-  const [prescriberAcc, setPrescriberAcc] = useState("")
-  const [useTest, setUseTest] = useState(false)
-  const comfy = layout === "panel"
+  const isWaiting = step?.status === "waiting"
 
-  useEffect(() => {
-    if (!practiceId) return
-    const sb = createClient()
-    if (!sb) return
-    let cancelled = false
-    void sb
-      .from("medikredit_providers")
-      .select("*")
-      .eq("practice_id", practiceId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (cancelled || !data) return
-        setVendorId(data.vendor_id ?? "")
-        setBhf(data.bhf_number ?? "")
-        setHpc(data.hpc_number ?? "")
-        setGroupNum(data.group_practice_number ?? "")
-        setPcNum(data.pc_number ?? "")
-        setWorksNum(data.works_number ?? "")
-        setPrescriberAcc(data.prescriber_mem_acc_nbr ?? "")
-        setUseTest(data.use_test_provider ?? false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [practiceId])
+  const waitingBanner =
+    isWaiting && step?.waitingSince
+      ? { waitingSince: step.waitingSince, waitDays: step.waitDays ?? 4 }
+      : isWaiting
+        ? { waitingSince: new Date().toISOString(), waitDays: step?.waitDays ?? 4 }
+        : null
 
-  const canSubmit = bhf.trim().length > 2 && hpc.trim().length > 2
-
-  const handleSubmit = useCallback(async () => {
-    if (!canSubmit || !practiceId) return
-    const sb = createClient()
-    if (!sb) return
-    setSaving(true)
-    try {
-      await upsertMedikreditProviderPatch(sb, practiceId, {
-        vendor_id: vendorId.trim() || null,
-        bhf_number: bhf.trim(),
-        hpc_number: hpc.trim(),
-        group_practice_number: groupNum.trim() || null,
-        pc_number: pcNum.trim() || null,
-        works_number: worksNum.trim() || null,
-        prescriber_mem_acc_nbr: prescriberAcc.trim() || null,
-        use_test_provider: useTest,
-      })
-      setSubmitted(true)
+  const onSuccessfulSave = useCallback(() => {
+    const st = useChecklistStore.getState().steps.find((x) => x.id === "medikredit")
+    if (!st || st.status !== "waiting") {
       setStatus("medikredit", "waiting", {
         waitingSince: new Date().toISOString(),
         waitDays: 4,
       })
-    } catch (e) {
-      console.warn("[MedikreditStep]", e)
-    } finally {
-      setSaving(false)
     }
-  }, [
-    bhf,
-    canSubmit,
-    groupNum,
-    hpc,
-    pcNum,
-    practiceId,
-    prescriberAcc,
-    setStatus,
-    useTest,
-    vendorId,
-    worksNum,
-  ])
-
-  if (submitted || step?.status === "waiting") {
-    const since = step?.waitingSince ? new Date(step.waitingSince) : new Date()
-    const daysPassed = Math.floor((Date.now() - since.getTime()) / 86_400_000)
-    const remaining = Math.max(0, (step?.waitDays ?? 4) - daysPassed)
-
-    return (
-      <motion.div
-        initial={{ opacity: 0, scale: 0.97 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={springSnappy}
-        className="flex flex-col items-center gap-4 py-8 text-center"
-      >
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-          className="flex size-14 items-center justify-center rounded-full border border-amber-400/25 bg-amber-400/10"
-        >
-          <ClockCounterClockwise className="size-7 text-amber-400" />
-        </motion.div>
-        <div>
-          <p className="text-base font-medium text-white/80">Verification in progress</p>
-          <p className="mt-2 max-w-md text-sm text-white/40">
-            Submitted to Medikredit for switch clearance. We&apos;ll email you when it clears.
-          </p>
-        </div>
-        <p className="flex items-center gap-2 text-xs text-white/30">
-          <Spinner className="size-3.5 animate-spin" />
-          ~{remaining} day{remaining !== 1 ? "s" : ""} remaining (typical 3–4)
-        </p>
-      </motion.div>
-    )
-  }
+  }, [setStatus])
 
   return (
-    <div className={cn("space-y-5", comfy && "max-w-2xl")}>
-      <p className="text-sm text-white/40">
-        These fields are stored for MediKredit XML (eligibility & claims) and were pre-filled from your practice profile when
-        available. Submit when ready — switch clearance typically follows in 3–4 business days.
-      </p>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Vendor / switch ID" value={vendorId} onChange={setVendorId} placeholder="Optional" comfortable={comfy} />
-        <Field label="BHF number" value={bhf} onChange={setBhf} placeholder="0437621" comfortable={comfy} />
-        <Field label="HPCSA / provider ID (HPC)" value={hpc} onChange={setHpc} placeholder="MP0123456" comfortable={comfy} />
-        <Field label="Group practice number" value={groupNum} onChange={setGroupNum} placeholder="Optional" comfortable={comfy} />
-        <Field label="PC number" value={pcNum} onChange={setPcNum} placeholder="Optional" comfortable={comfy} />
-        <Field label="Works number" value={worksNum} onChange={setWorksNum} placeholder="Optional" comfortable={comfy} />
-        <Field
-          label="Prescriber MEM account"
-          value={prescriberAcc}
-          onChange={setPrescriberAcc}
-          placeholder="e.g. ACC_001"
-          comfortable={comfy}
-        />
-      </div>
-      <ToggleRow
-        label="Use test provider fixtures"
-        description="Send MediKredit test flags when your switch account is in UAT"
-        enabled={useTest}
-        onToggle={() => setUseTest(!useTest)}
-        comfortable={comfy}
-      />
-      {!practiceId && (
-        <p className="text-sm text-amber-200/80">Join or create a practice first to save MediKredit settings.</p>
-      )}
-      <SaveButton
-        saving={saving}
-        disabled={!canSubmit || !practiceId || saving}
-        onClick={() => void handleSubmit()}
-        label="Submit to Medikredit"
-        comfortable={comfy}
-      />
-    </div>
+    <MedikreditProviderSettingsForm
+      practiceId={practiceId}
+      variant="onboarding"
+      waitingBanner={waitingBanner}
+      onSuccessfulSave={onSuccessfulSave}
+    />
   )
 }
 

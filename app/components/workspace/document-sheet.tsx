@@ -36,7 +36,8 @@ import {
   Warning,
   Microphone,
   Hospital,
-  WhatsappLogo,
+  ChatText,
+  Globe,
   EnvelopeSimple,
   UserCircle,
   Check,
@@ -218,7 +219,8 @@ const DOC_LABELS: Record<ClinicalDocType, string> = {
 
 const SHARE_TARGETS: { id: ShareTarget; label: string; icon: React.ComponentType<any>; description: string }[] = [
   { id: "front_desk", label: "Front Desk", icon: Hospital, description: "Send to reception" },
-  { id: "patient_whatsapp", label: "Patient (WhatsApp)", icon: WhatsappLogo, description: "Via WhatsApp" },
+  { id: "patient_rcs", label: "Patient (SMS/RCS)", icon: ChatText, description: "Via messaging" },
+  { id: "patient_portal", label: "Patient (Portal)", icon: Globe, description: "Secure link" },
   { id: "patient_email", label: "Patient (Email)", icon: EnvelopeSimple, description: "Via email" },
   { id: "specialist", label: "Referring Specialist", icon: UserCircle, description: "With referral letter" },
 ]

@@ -2,7 +2,7 @@ import { generateText } from "ai"
 import pdfParse from "pdf-parse/lib/pdf-parse.js"
 import { openproviders } from "@/lib/openproviders"
 import {
-  SMART_IMPORT_VISION_MODEL,
+  SMART_IMPORT_TRANSCRIBE_MODEL,
   transcribeImagesWithGptVision,
   transcribePdfBufferWithOpenAi,
 } from "@/lib/clinical/smart-import-vision-transcribe"
@@ -12,7 +12,11 @@ export type SmartImportClientMode = "auto" | "patient_file" | "attach"
 const MAX_FILE_BYTES = 15 * 1024 * 1024
 const MAX_TEXT_FOR_LLM = 24_000
 
-const STRUCTURE_MODEL = SMART_IMPORT_VISION_MODEL
+/** Text-only JSON from extracted/plain text — low latency. */
+const STRUCTURE_TEXT_MODEL = "gpt-4o-mini" as const
+
+/** Image → JSON when OCR text is too thin; keep same vision model as transcribe for consistency. */
+const STRUCTURE_VISION_MODEL = SMART_IMPORT_TRANSCRIBE_MODEL
 
 const STRUCTURE_SYSTEM = `You extract structured fields from document text for a South African medical practice (IDs, passports, medical aid cards, letters).
 
@@ -55,7 +59,12 @@ export async function readSmartImportDocument(
   buffer: Buffer,
   mimeType: string,
   fileName: string,
-  onProgress?: (stage: SmartImportReadProgress) => void
+  onProgress?: (stage: SmartImportReadProgress) => void,
+  /**
+   * When not `attach`, image uploads skip a separate OCR pass — `structureSmartImport`
+   * runs a single vision JSON step (faster). Attach mode still transcribes first for summaries.
+   */
+  clientMode: SmartImportClientMode = "auto"
 ) {
   const warnings: string[] = []
   const normalizedMime = mimeType.toLowerCase().split(";")[0]?.trim() || "application/octet-stream"
@@ -88,19 +97,24 @@ export async function readSmartImportDocument(
     }
   } else if (normalizedMime.startsWith("image/")) {
     onProgress?.("vision")
-    try {
-      const { text: visionText } = await transcribeImagesWithGptVision({
-        images: [buffer],
-        fileLabel: fileName,
-      })
-      text = visionText.trim()
-      if (!text) {
-        warnings.push("GPT vision returned no text — try a sharper photo or better lighting.")
+    if (clientMode === "attach") {
+      try {
+        const { text: visionText } = await transcribeImagesWithGptVision({
+          images: [buffer],
+          fileLabel: fileName,
+        })
+        text = visionText.trim()
+        if (!text) {
+          warnings.push("Vision returned no text — try a sharper photo or better lighting.")
+        }
+      } catch (e) {
+        warnings.push(
+          e instanceof Error ? `Vision transcription failed: ${e.message}` : "Vision transcription failed."
+        )
       }
-    } catch (e) {
-      warnings.push(
-        e instanceof Error ? `Vision transcription failed: ${e.message}` : "Vision transcription failed."
-      )
+    } else {
+      /** Fast path: structured extraction reads the image directly (no duplicate vision OCR). */
+      text = ""
     }
   } else {
     throw new Error("Unsupported type. Use PDF or an image (JPEG, PNG, WebP).")
@@ -159,7 +173,7 @@ function parseStructureJson(raw: string): { detectedLabel: string; fields: Recor
 }
 
 async function structureFromTextPrompt(system: string, userPrompt: string) {
-  const model = openproviders(STRUCTURE_MODEL)
+  const model = openproviders(STRUCTURE_TEXT_MODEL)
   const result = await generateText({
     model,
     system,
@@ -220,7 +234,7 @@ For this request the mode is ATTACH: focus on Title (use filename only if the do
 
   if (canVisionStructure && opts.imageBuffer && opts.imageMime) {
     try {
-      const model = openproviders(SMART_IMPORT_VISION_MODEL)
+      const model = openproviders(STRUCTURE_VISION_MODEL)
       const result = await generateText({
         model,
         system: VISION_STRUCTURE_SYSTEM,
@@ -254,7 +268,7 @@ For this request the mode is ATTACH: focus on Title (use filename only if the do
             ? heuristics
             : {
                 Summary:
-                  "Could not complete structured vision extraction. Verify OpenAI credentials and model access for gpt-5.2.",
+                  "Could not complete structured vision extraction. Verify OpenAI credentials and model access.",
               },
       }
     }

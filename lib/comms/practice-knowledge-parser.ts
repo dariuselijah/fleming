@@ -113,8 +113,8 @@ export async function parsePracticeKnowledgeFromText(
         is_closed: Boolean(h.is_closed),
       }
     })
-    .filter(Boolean)
-    .filter((h, i, arr) => arr.findIndex((x) => x.day_of_week === h.day_of_week) === i) as ParsedPracticeHour[]
+    .filter((h): h is ParsedPracticeHour => h !== null)
+    .filter((h, i, arr) => arr.findIndex((x) => x.day_of_week === h.day_of_week) === i)
 
   const faqs: ParsedPracticeFaq[] = faqsRaw
     .map((f: Record<string, unknown>) => {

@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import {
-  WhatsappLogo,
+  ChatCircle,
   CheckCircle,
   CircleNotch,
   Clock,
@@ -20,7 +20,7 @@ import {
   ArrowClockwise,
 } from "@phosphor-icons/react"
 import { BentoTile } from "./bento-tile"
-import { WhatsAppEmbeddedConnect, type EmbeddedSignupFlags } from "./whatsapp-embedded-connect"
+import { ChannelTestLab } from "./channel-test-lab"
 import { useState, useEffect, useCallback, useRef } from "react"
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -57,6 +57,15 @@ function truncateId(id: string | undefined | null, head = 10, tail = 6): string 
   return `${id.slice(0, head)}…${id.slice(-tail)}`
 }
 
+/** RCS/SMS is usable once Twilio has linked the number (SID); legacy statuses are treated as live. */
+function isMessagingLive(c: ChannelInfo | undefined): boolean {
+  if (!c || c.channel_type !== "rcs") return false
+  if (c.status === "suspended") return false
+  if (c.status === "provisioning" && !c.phone_number_sid) return false
+  if (c.status === "active") return true
+  return !!(c.phone_number_sid && c.phone_number?.trim())
+}
+
 export function ChannelSetup() {
   const [channels, setChannels] = useState<ChannelInfo[]>([])
   const [hours, setHours] = useState<HoursRow[]>([])
@@ -67,6 +76,8 @@ export function ChannelSetup() {
   const [searchingNumbers, setSearchingNumbers] = useState(false)
   const [syncWebhookBusy, setSyncWebhookBusy] = useState(false)
   const [syncWebhookMessage, setSyncWebhookMessage] = useState<string | null>(null)
+  const [vapiTwilioSyncBusy, setVapiTwilioSyncBusy] = useState(false)
+  const [vapiTwilioSyncMessage, setVapiTwilioSyncMessage] = useState<string | null>(null)
   const [waSetupMode, setWaSetupMode] = useState<"new" | "existing">("new")
   const [ownedNumbers, setOwnedNumbers] = useState<
     { sid: string; phoneNumber: string; friendlyName: string }[]
@@ -79,11 +90,6 @@ export function ChannelSetup() {
   const [requestingNumber, setRequestingNumber] = useState(false)
   const [numberRequested, setNumberRequested] = useState(false)
   const [searchedOnce, setSearchedOnce] = useState(false)
-  const [embeddedSignup, setEmbeddedSignup] = useState<EmbeddedSignupFlags>({
-    provisioningEnabled: false,
-    facebookSdkConfigured: false,
-  })
-
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/comms/provision/status")
@@ -92,8 +98,6 @@ export function ChannelSetup() {
         setChannels(data.channels || [])
         setHours(data.hours || [])
         setFaqs(data.faqs || [])
-        const es = data.embeddedSignup as EmbeddedSignupFlags | undefined
-        if (es) setEmbeddedSignup(es)
       }
     } catch {
       /* silent */
@@ -261,7 +265,32 @@ export function ChannelSetup() {
     }
   }, [fetchStatus])
 
-  const whatsappChannel = channels.find((c) => c.channel_type === "whatsapp")
+  const syncVapiTwilioCredentials = useCallback(async () => {
+    setVapiTwilioSyncBusy(true)
+    setVapiTwilioSyncMessage(null)
+    try {
+      const res = await fetch("/api/comms/provision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sync_vapi_twilio" }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setVapiTwilioSyncMessage(typeof data.error === "string" ? data.error : "Sync failed")
+        return
+      }
+      setVapiTwilioSyncMessage(
+        typeof data.message === "string" ? data.message : "Vapi Twilio credentials updated."
+      )
+      await fetchStatus()
+    } catch {
+      setVapiTwilioSyncMessage("Network error")
+    } finally {
+      setVapiTwilioSyncBusy(false)
+    }
+  }, [fetchStatus])
+
+  const messagingChannel = channels.find((c) => c.channel_type === "rcs")
   const voiceChannel = channels.find((c) => c.channel_type === "voice")
   const voiceReady =
     !!voiceChannel?.vapi_assistant_id && !!voiceChannel?.vapi_phone_number_id
@@ -279,19 +308,22 @@ export function ChannelSetup() {
       <header className="flex flex-col gap-4 border-b border-white/[0.06] pb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">Channels</h1>
-          <p className="mt-0.5 text-sm text-white/40">WhatsApp and phone for your practice.</p>
+          <p className="mt-0.5 text-sm text-white/40">Patient messaging (SMS / RCS) and AI voice on one line.</p>
         </div>
         <div className="flex flex-shrink-0 flex-wrap gap-2">
           <StatusChip
-            label="WhatsApp"
-            ok={whatsappChannel?.status === "active"}
+            label="Messaging"
+            ok={isMessagingLive(messagingChannel)}
             pending={
-              whatsappChannel?.status === "pending_waba" ||
-              whatsappChannel?.status === "pending_wa_approval" ||
-              whatsappChannel?.status === "registering_sender"
+              !!messagingChannel &&
+              !isMessagingLive(messagingChannel) &&
+              (messagingChannel.status === "pending_waba" ||
+                messagingChannel.status === "pending_wa_approval" ||
+                messagingChannel.status === "registering_sender" ||
+                messagingChannel.status === "provisioning")
             }
-            registering={whatsappChannel?.status === "registering_sender"}
-            idle={!whatsappChannel}
+            registering={messagingChannel?.status === "registering_sender"}
+            idle={!messagingChannel}
           />
           <StatusChip
             label="Voice"
@@ -305,32 +337,24 @@ export function ChannelSetup() {
       {/* Primary grid: messaging + voice */}
       <div className="grid gap-5 lg:grid-cols-2 lg:items-stretch">
         <BentoTile
-          title="WhatsApp"
-          icon={<WhatsappLogo className="size-4 text-[#25D366]" weight="fill" />}
-          subtitle="Patient messaging"
-          glow={whatsappChannel?.status === "active" ? "green" : undefined}
+          title="Patient messaging"
+          icon={<ChatCircle className="size-4 text-sky-400" weight="fill" />}
+          subtitle="SMS & RCS via Twilio"
+          glow={isMessagingLive(messagingChannel) ? "green" : undefined}
           className="min-h-[280px]"
         >
-          {whatsappChannel ? (
+          {messagingChannel ? (
             <div className="space-y-4">
-              <ChannelStatusCard channel={whatsappChannel} />
-              {whatsappChannel.status === "pending_waba" && (
-                <>
-                  <WhatsAppOnboardingWorkflow embeddedSignup={embeddedSignup} />
-                  <WhatsAppEmbeddedConnect
-                    channelStatus={whatsappChannel.status}
-                    embeddedSignup={embeddedSignup}
-                    onComplete={() => void fetchStatus()}
-                  />
-                </>
-              )}
+              <ChannelStatusCard channel={messagingChannel} />
               <div className="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-[11px] text-white/45">Inbound messages route to Inbox automatically.</p>
+                  <p className="text-[11px] text-white/45">
+                    Two-way SMS: replies to your Twilio number are delivered to Inbox (same thread as outbound).
+                  </p>
                   <button
                     type="button"
                     onClick={() => void syncTwilioWebhooks()}
-                    disabled={syncWebhookBusy || !whatsappChannel.phone_number_sid}
+                    disabled={syncWebhookBusy || !messagingChannel.phone_number_sid}
                     className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 py-1.5 text-[10px] font-medium text-white/55 transition-colors hover:border-white/18 hover:bg-white/[0.07] hover:text-white/75 disabled:opacity-40"
                   >
                     {syncWebhookBusy ? (
@@ -348,15 +372,13 @@ export function ChannelSetup() {
             </div>
           ) : (
             <div className="flex flex-col py-2">
-              <div className="mb-4 flex size-14 shrink-0 items-center justify-center self-center rounded-2xl border border-[#25D366]/25 bg-[#25D366]/[0.07] shadow-[0_0_40px_-12px_rgba(37,211,102,0.45)]">
-                <WhatsappLogo className="size-8 text-[#25D366]" weight="fill" />
+              <div className="mb-4 flex size-14 shrink-0 items-center justify-center self-center rounded-2xl border border-sky-500/25 bg-sky-500/[0.07] shadow-[0_0_40px_-12px_rgba(14,165,233,0.35)]">
+                <ChatCircle className="size-8 text-sky-400" weight="fill" />
               </div>
-              <p className="mb-1 text-center text-sm font-medium text-white/80">Connect WhatsApp</p>
+              <p className="mb-1 text-center text-sm font-medium text-white/80">Connect messaging</p>
               <p className="mb-4 text-center text-xs leading-relaxed text-white/35">
-                Add a new number or link one already in your Twilio project.
-                {embeddedSignup.provisioningEnabled && (
-                  <span className="text-white/45"> Then finish business setup in Meta when prompted.</span>
-                )}
+                Add a Twilio number or link one already in your project. SMS always works; RCS appears on supported
+                handsets and carriers.
               </p>
 
               <div className="mb-4 flex rounded-xl bg-black/25 p-0.5">
@@ -369,7 +391,7 @@ export function ChannelSetup() {
                   className={cn(
                     "flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold transition-colors",
                     waSetupMode === "new"
-                      ? "bg-[#25D366]/20 text-[#86efac]"
+                      ? "bg-sky-500/20 text-sky-200"
                       : "text-white/40 hover:text-white/60"
                   )}
                 >
@@ -384,7 +406,7 @@ export function ChannelSetup() {
                   className={cn(
                     "flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold transition-colors",
                     waSetupMode === "existing"
-                      ? "bg-[#25D366]/20 text-[#86efac]"
+                      ? "bg-sky-500/20 text-sky-200"
                       : "text-white/40 hover:text-white/60"
                   )}
                 >
@@ -400,17 +422,17 @@ export function ChannelSetup() {
 
               <div className="mb-4">
                 <label className="mb-1.5 block text-[11px] font-medium text-white/50">
-                  WhatsApp display name
+                  Sender display name
                 </label>
                 <input
                   type="text"
                   value={practiceDisplayName}
                   onChange={(e) => setPracticeDisplayName(e.target.value)}
                   placeholder="e.g. Dr Smith Family Practice"
-                  className="w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm text-white/85 placeholder:text-white/25 focus:border-[#25D366]/35 focus:outline-none focus:ring-1 focus:ring-[#25D366]/20"
+                  className="w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm text-white/85 placeholder:text-white/25 focus:border-sky-500/35 focus:outline-none focus:ring-1 focus:ring-sky-500/20"
                 />
                 <p className="mt-1 text-[10px] text-white/30">
-                  Patients see this as the WhatsApp profile name. Falls back to the practice name in the database.
+                  Shown on outbound SMS where the carrier supports a sender label; otherwise your practice name is used.
                 </p>
               </div>
 
@@ -431,7 +453,7 @@ export function ChannelSetup() {
                         setAvailableNumbers([])
                         setNumberRequested(false)
                       }}
-                      className="w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm text-white/85 focus:border-[#25D366]/35 focus:outline-none focus:ring-1 focus:ring-[#25D366]/20"
+                      className="w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm text-white/85 focus:border-sky-500/35 focus:outline-none focus:ring-1 focus:ring-sky-500/20"
                     >
                       <option value="ZA">South Africa (+27)</option>
                       <option value="US">United States (+1)</option>
@@ -451,7 +473,7 @@ export function ChannelSetup() {
                       type="button"
                       onClick={searchNumbers}
                       disabled={searchingNumbers}
-                      className="inline-flex items-center gap-2 rounded-xl border border-[#25D366]/35 bg-[#25D366]/12 px-5 py-2.5 text-xs font-semibold text-[#86efac] transition-colors hover:border-[#25D366]/50 hover:bg-[#25D366]/18 disabled:opacity-50"
+                      className="inline-flex items-center gap-2 rounded-xl border border-sky-500/35 bg-sky-500/12 px-5 py-2.5 text-xs font-semibold text-sky-200 transition-colors hover:border-sky-400/50 hover:bg-sky-500/18 disabled:opacity-50"
                     >
                       {searchingNumbers ? (
                         <CircleNotch className="size-4 animate-spin" />
@@ -477,7 +499,7 @@ export function ChannelSetup() {
                     {loadingOwnedNumbers ? (
                       <CircleNotch className="size-4 animate-spin" />
                     ) : (
-                      <Phone className="size-4 text-[#25D366]" weight="fill" />
+                      <Phone className="size-4 text-sky-400" weight="fill" />
                     )}
                     Load numbers from Twilio
                   </button>
@@ -489,7 +511,7 @@ export function ChannelSetup() {
                             type="button"
                             disabled={!!attachingSid}
                             onClick={() => void attachExistingNumber(n.sid)}
-                            className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-left transition-colors hover:border-[#25D366]/30 hover:bg-[#25D366]/[0.06] disabled:opacity-50"
+                            className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-left transition-colors hover:border-sky-500/30 hover:bg-sky-500/[0.06] disabled:opacity-50"
                           >
                             <div className="min-w-0">
                               <p className="font-mono text-sm text-white/85">{n.phoneNumber}</p>
@@ -498,7 +520,7 @@ export function ChannelSetup() {
                             {attachingSid === n.sid ? (
                               <CircleNotch className="size-4 shrink-0 animate-spin text-white/40" />
                             ) : (
-                              <span className="shrink-0 rounded-lg bg-[#25D366]/15 px-2 py-1 text-[10px] font-semibold text-[#86efac]">
+                              <span className="shrink-0 rounded-lg bg-sky-500/15 px-2 py-1 text-[10px] font-semibold text-sky-200">
                                 Link to practice
                               </span>
                             )}
@@ -560,7 +582,7 @@ export function ChannelSetup() {
                   ) : (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-400">
                       <Warning className="size-3" weight="fill" />
-                      Finish Vapi setup
+                      Finish voice setup
                     </span>
                   )}
                 </div>
@@ -585,12 +607,41 @@ export function ChannelSetup() {
                     assistant.
                   </p>
                 )}
+                {voiceReady && voiceChannel.vapi_phone_number_id && (
+                  <div className="space-y-2 border-t border-white/[0.06] pt-3">
+                    <p className="text-[10px] leading-relaxed text-white/35">
+                      Outbound calls fail with Twilio “Authenticate” if the Auth Token in Vapi is stale (e.g. after
+                      rotating it in Twilio). Update{" "}
+                      <span className="font-mono text-white/45">TWILIO_ACCOUNT_SID</span> /{" "}
+                      <span className="font-mono text-white/45">TWILIO_AUTH_TOKEN</span> in your deployment, then
+                      refresh Vapi&apos;s copy:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void syncVapiTwilioCredentials()}
+                      disabled={vapiTwilioSyncBusy}
+                      className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[11px] font-semibold text-violet-100 transition-colors hover:bg-violet-500/18 disabled:opacity-50 sm:w-auto"
+                    >
+                      {vapiTwilioSyncBusy ? (
+                        <CircleNotch className="size-3.5 animate-spin" />
+                      ) : (
+                        <ArrowClockwise className="size-3.5" />
+                      )}
+                      Sync Twilio credentials to Vapi
+                    </button>
+                    {vapiTwilioSyncMessage && (
+                      <p className="text-[10px] text-white/45">{vapiTwilioSyncMessage}</p>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-5 text-center">
-                <p className="text-sm text-white/50">Voice not active yet</p>
-                <p className="mt-2 text-xs leading-relaxed text-white/30">
-                  Connect WhatsApp first. Voice is enabled for your workspace when your plan includes it.
+                <p className="text-sm text-white/55">Voice for this line</p>
+                <p className="mt-2 text-xs leading-relaxed text-white/35">
+                  {messagingChannel
+                    ? "Linking your phone line to the voice assistant. Refresh this page in a moment, or contact support if voice status doesn’t appear after your number is connected."
+                    : "Add a patient messaging number first. Inbound calls to that Twilio number can then use your workspace voice assistant."}
                 </p>
               </div>
             )}
@@ -601,15 +652,21 @@ export function ChannelSetup() {
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-xs font-medium text-violet-300/90 transition-colors hover:text-violet-200"
             >
-              Open Vapi dashboard
+              Voice provider dashboard
               <ArrowSquareOut className="size-3.5" />
             </a>
           </div>
         </BentoTile>
       </div>
 
+      <ChannelTestLab
+        messagingReady={isMessagingLive(messagingChannel)}
+        voiceReady={voiceReady}
+        voiceInboundNumber={voiceChannel?.phone_number?.trim() || null}
+      />
+
       {/* Number picker or request flow */}
-      {(availableNumbers.length > 0 || (searchingNumbers === false && availableNumbers.length === 0 && !whatsappChannel && searchedOnce)) && (
+      {(availableNumbers.length > 0 || (searchingNumbers === false && availableNumbers.length === 0 && !messagingChannel && searchedOnce)) && (
         <BentoTile
           title={availableNumbers.length > 0 ? "Choose a number" : "No numbers available"}
           subtitle={availableNumbers.length > 0 ? `${selectedCountry} inventory` : `No inventory for ${selectedCountry}`}
@@ -933,59 +990,6 @@ function PracticeKnowledgeIngest({ onApplied }: { onApplied: () => void }) {
   )
 }
 
-function WhatsAppOnboardingWorkflow({ embeddedSignup }: { embeddedSignup: EmbeddedSignupFlags }) {
-  return (
-    <details className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 py-2.5">
-      <summary className="cursor-pointer select-none text-[11px] font-semibold text-white/55">
-        How WhatsApp onboarding works
-        {embeddedSignup.provisioningEnabled ? " (Embedded Signup)" : ""}
-      </summary>
-      <div className="mt-3 space-y-3 text-[10px] leading-relaxed text-white/40">
-        <ol className="list-decimal space-y-2 pl-4">
-          <li>
-            <span className="font-medium text-white/55">Twilio number</span> — Fleming purchases or links an
-            SMS-capable number in your Twilio project and points inbound + status webhooks at this app.
-          </li>
-          <li>
-            <span className="font-medium text-white/55">Meta / WABA</span> — The practice admin uses{" "}
-            <span className="text-white/50">Continue with Meta</span> (when Embedded Signup is enabled). In the
-            popup they sign in to Facebook, pick or create a{" "}
-            <span className="text-white/50">Business Portfolio</span>, and create or select a{" "}
-            <span className="text-white/50">WhatsApp Business Account (WABA)</span>.
-          </li>
-          <li>
-            <span className="font-medium text-white/55">Twilio Senders API</span> — Fleming receives the{" "}
-            <span className="font-mono text-[9px] text-white/45">waba_id</span> from Meta and registers the
-            WhatsApp sender with <span className="text-white/45">configuration.waba_id</span>. Twilio completes
-            OTP for your Twilio-hosted number.
-          </li>
-          <li>
-            <span className="font-medium text-white/55">Go live</span> — Status moves to{" "}
-            <span className="text-white/45">Registering</span>, then <span className="text-white/45">Active</span>{" "}
-            when Twilio reports the sender ONLINE (cron polls automatically).
-          </li>
-        </ol>
-        <p className="border-t border-white/[0.06] pt-2 text-white/30">
-          Prerequisites: enroll in Twilio&apos;s{" "}
-          <a
-            href="https://www.twilio.com/docs/whatsapp/isv/tech-provider-program"
-            target="_blank"
-            rel="noreferrer"
-            className="text-sky-400/90 underline-offset-2 hover:underline"
-          >
-            WhatsApp Tech Provider
-          </a>{" "}
-          program, add Twilio&apos;s Partner Solution to your Meta app, and create a{" "}
-          <span className="text-white/45">Facebook Login for Business</span> configuration (WhatsApp Embedded
-          Signup). One Twilio account maps to{" "}
-          <span className="text-white/45">one WABA</span>; multiple independent practices usually need a{" "}
-          <span className="text-white/45">Twilio subaccount per practice</span> (see Twilio ISV guide).
-        </p>
-      </div>
-    </details>
-  )
-}
-
 function StatusChip({
   label,
   ok,
@@ -1018,7 +1022,7 @@ function StatusChip({
       ) : null}
       {label}
       {idle && " — not connected"}
-      {registering && " — registering with WhatsApp"}
+      {registering && " — connecting messaging"}
       {pending && !registering && !idle && " — action needed"}
       {ok && " — live"}
     </span>
@@ -1028,14 +1032,17 @@ function StatusChip({
 function ChannelStatusCard({ channel }: { channel: ChannelInfo }) {
   const statusMap: Record<string, { icon: typeof CheckCircle; color: string; label: string; spin?: boolean }> = {
     active: { icon: CheckCircle, color: "text-emerald-400", label: "Active" },
-    registering_sender: { icon: CircleNotch, color: "text-sky-400", label: "Registering with WhatsApp…", spin: true },
-    pending_waba: { icon: Clock, color: "text-amber-400", label: "Waiting for Meta (Embedded Signup)" },
-    pending_wa_approval: { icon: Clock, color: "text-amber-400", label: "Pending WhatsApp approval" },
+    registering_sender: { icon: CircleNotch, color: "text-sky-400", label: "Provisioning messaging…", spin: true },
+    pending_waba: { icon: Clock, color: "text-amber-400", label: "Finish setup (legacy status)" },
+    pending_wa_approval: { icon: Clock, color: "text-amber-400", label: "Awaiting carrier (legacy status)" },
     provisioning: { icon: CircleNotch, color: "text-blue-400", label: "Setting up…", spin: true },
     suspended: { icon: Warning, color: "text-red-400", label: "Suspended" },
   }
 
-  const info = statusMap[channel.status] || statusMap.provisioning
+  const live = isMessagingLive(channel)
+  const info = live
+    ? statusMap.active
+    : statusMap[channel.status] || statusMap.provisioning
   const StatusIcon = info.icon
 
   return (
@@ -1050,7 +1057,7 @@ function ChannelStatusCard({ channel }: { channel: ChannelInfo }) {
       <p className="font-mono text-base text-white/75">{channel.phone_number}</p>
       <p className="text-[11px] text-white/30">
         Provider: <span className="capitalize text-white/45">{channel.provider}</span>
-        {channel.channel_type === "whatsapp" && (
+        {channel.channel_type === "rcs" && (
           <span className="text-white/25"> · Messages flow to Inbox</span>
         )}
       </p>

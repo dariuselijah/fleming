@@ -50,13 +50,15 @@ export function buildDeltaQuery(options: {
  * Fetch recent PubMed IDs for delta sync via E-utilities esearch.
  */
 export async function fetchDeltaPmids(options: {
+  /** Full PubMed query term (overrides built-in delta query when set). */
+  term?: string
   relDays?: number
   highEvidence?: boolean
   meshTerms?: string[]
   maxResults?: number
   apiKey?: string
 }): Promise<string[]> {
-  const query = buildDeltaQuery(options)
+  const query = options.term?.trim() ? options.term : buildDeltaQuery(options)
   const maxResults = options.maxResults ?? 500
   const url = new URL(
     "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",

@@ -1,5 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { sendWhatsAppMessage, sendWhatsAppTemplate } from "./twilio"
+import {
+  getTwilioClient,
+  sendSmsMessage,
+  normalizeMessagingE164,
+  getTwilioMessagingServiceSid,
+} from "./twilio"
 
 export function interpolateTemplate(
   template: string,
@@ -12,7 +17,7 @@ export function interpolateTemplate(
 
 export async function getTemplatesForPractice(practiceId: string) {
   const { data } = await createAdminClient()
-    .from("whatsapp_templates")
+    .from("message_templates")
     .select("*")
     .eq("practice_id", practiceId)
     .eq("status", "approved")
@@ -64,21 +69,40 @@ export const BUILTIN_TEMPLATES = {
     body: "Hi {{1}}, your lab results are ready at {{2}}. Please call us or reply here to discuss with your doctor.",
     variables: ["patient_name", "practice_name"],
   },
+  invoice_issued: {
+    name: "invoice_issued",
+    category: "utility" as const,
+    body: "Your invoice: R{{1}} from {{2}}. Pay securely: {{3}}",
+    variables: ["amount", "practice_name", "pay_link"],
+  },
+  payment_received: {
+    name: "payment_received",
+    category: "utility" as const,
+    body: "Payment of R{{1}} received. Receipt: {{2}}",
+    variables: ["amount", "receipt_link"],
+  },
+  payment_failed: {
+    name: "payment_failed",
+    category: "utility" as const,
+    body: "We could not process your payment. Try again: {{1}}",
+    variables: ["pay_link"],
+  },
 } as const
 
 /**
- * Resolve Twilio Content Template SID: env JSON map first, then approved `whatsapp_templates` row.
- * Env: `TWILIO_WHATSAPP_CONTENT_SIDS_JSON={"appointment_reminder_24h":"HXxxxx",...}`
+ * Resolve Twilio Content Template SID: env JSON map first, then approved `message_templates` row
+ * (`provider_template_id` for SMS/RCS).
+ * Env: `TWILIO_WHATSAPP_CONTENT_SIDS_JSON={"appointment_reminder_24h":"HXxxxx",...}` (legacy key name)
  */
 export async function resolveContentSidForTemplate(
   practiceId: string,
-  templateName: string
+  templateKey: string
 ): Promise<string | null> {
   const raw = process.env.TWILIO_WHATSAPP_CONTENT_SIDS_JSON?.trim()
   if (raw) {
     try {
       const map = JSON.parse(raw) as Record<string, string>
-      const sid = map[templateName]?.trim()
+      const sid = map[templateKey]?.trim()
       if (sid) return sid
     } catch {
       /* ignore invalid JSON */
@@ -86,17 +110,25 @@ export async function resolveContentSidForTemplate(
   }
 
   const { data } = await createAdminClient()
-    .from("whatsapp_templates")
-    .select("template_sid")
+    .from("message_templates")
+    .select("provider_template_id")
     .eq("practice_id", practiceId)
-    .eq("template_name", templateName)
+    .eq("template_key", templateKey)
     .eq("status", "approved")
-    .not("template_sid", "is", null)
+    .not("provider_template_id", "is", null)
     .limit(1)
     .maybeSingle()
 
-  const sid = data?.template_sid?.trim()
+  const sid = data?.provider_template_id?.trim()
   return sid || null
+}
+
+/**
+ * When `true`, skip Twilio Content (`contentSid`) and send interpolated text as plain SMS only.
+ * Default is `false`: use Content template SIDs when configured (RCS where supported + SMS fallback).
+ */
+function forcePlainSmsForTemplates(): boolean {
+  return process.env.TWILIO_PREFER_PLAIN_SMS_FOR_TEMPLATES === "true"
 }
 
 export async function sendTemplateMessage(opts: {
@@ -108,23 +140,28 @@ export async function sendTemplateMessage(opts: {
 }): Promise<string> {
   const tmpl = BUILTIN_TEMPLATES[opts.templateKey]
   const body = interpolateTemplate(tmpl.body, opts.variables)
-  const contentSid = await resolveContentSidForTemplate(opts.practiceId, tmpl.name)
+
+  const to = normalizeMessagingE164(opts.to)
+  const from = normalizeMessagingE164(opts.from)
+
+  const contentSid = forcePlainSmsForTemplates()
+    ? null
+    : await resolveContentSidForTemplate(opts.practiceId, tmpl.name)
 
   if (contentSid) {
-    const { messageSid } = await sendWhatsAppTemplate({
-      to: opts.to,
-      from: opts.from,
+    const client = getTwilioClient()
+    const ms = getTwilioMessagingServiceSid()
+    const msg = await client.messages.create({
+      to,
+      ...(ms ? { messagingServiceSid: ms } : { from }),
       contentSid,
-      contentVariables: opts.variables,
+      ...(Object.keys(opts.variables).length > 0
+        ? { contentVariables: JSON.stringify(opts.variables) }
+        : {}),
     })
-    return messageSid
+    return msg.sid
   }
 
-  const { messageSid } = await sendWhatsAppMessage({
-    to: opts.to,
-    from: opts.from,
-    body,
-  })
-
+  const { messageSid } = await sendSmsMessage({ to, from, body })
   return messageSid
 }

@@ -15,11 +15,47 @@ import {
   findPatientByPracticePhone,
   updateThreadStatus,
   updateThreadFlow,
-  getPracticeWhatsAppNumber,
 } from "@/lib/comms"
-import { sendTemplateMessage } from "@/lib/comms/templates"
+import { extractVoiceCallOutcome, outcomeToJson } from "@/lib/comms/voice-outcome"
+import type { VoiceCallOutcome } from "@/lib/comms/voice-outcome"
+import { dispatchPostVoiceFollowUp, sendPatientTemplatedMessage } from "@/lib/comms/communication-service"
+import { logCommunicationInteraction } from "@/lib/comms/interactions"
 import { mergePracticeAppointmentMetadata } from "@/lib/comms/appointment-metadata"
+import {
+  resolvePatientIdForThread,
+  getUpcomingAppointments,
+  cancelAppointment,
+  rescheduleAppointment,
+} from "@/lib/comms/appointment-actions"
+import { notifyAdmins, addInboxStripMessage } from "@/lib/comms/notify"
+import { createPatientAccessToken } from "@/lib/portal/tokens"
+import type { PortalTokenPurpose } from "@/lib/portal/tokens"
 import type { Json } from "@/app/types/database.types"
+
+function extractEndOfCallFields(msg: Record<string, unknown>) {
+  const artifact = (msg.artifact as Record<string, unknown>) || {}
+  const analysis = (msg.analysis as Record<string, unknown>) || {}
+  const transcript =
+    (msg.transcript as string) ||
+    (artifact.transcript as string) ||
+    (analysis.transcript as string) ||
+    undefined
+  const summary =
+    (msg.summary as string) ||
+    (analysis.summary as string) ||
+    (artifact.summary as string) ||
+    undefined
+  const recordingUrl =
+    (msg.recordingUrl as string) ||
+    (artifact.recordingUrl as string) ||
+    undefined
+  const toolCalls =
+    (msg.toolCalls as Json) ||
+    (artifact.toolCalls as Json) ||
+    (artifact.messages as Json) ||
+    undefined
+  return { transcript, summary, recordingUrl, toolCalls }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -33,6 +69,8 @@ export async function POST(req: NextRequest) {
     const payload = JSON.parse(rawBody) as Record<string, unknown>
     const messageType =
       (payload.message as Record<string, unknown> | undefined)?.type || payload.type
+
+    console.log("[voice-webhook] payload type", messageType)
 
     switch (messageType) {
       case "assistant-request":
@@ -276,6 +314,8 @@ Before booking an appointment:
 2. If not registered, ask for their full name and call registerCallerStub with that name.
 3. Then use checkAvailability and bookAppointment. Pass patientId from resolveCallerPatient or registerCallerStub into bookAppointment when available.
 
+If the caller wants to reschedule or cancel, first call getUpcomingAppointments to read their current bookings, repeat the date and time back to them, and only then call cancelAppointment or rescheduleAppointment.
+
 Key rules:
 - Be warm, concise, and helpful
 - NEVER provide medical advice or diagnoses
@@ -358,6 +398,45 @@ Key rules:
               name: "getHours",
               description: "Get practice operating hours",
               parameters: { type: "object", properties: {} },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "getUpcomingAppointments",
+              description: "List this patient's upcoming booked appointments before cancel or reschedule",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "cancelAppointment",
+              description: "Cancel an upcoming appointment for this patient",
+              parameters: {
+                type: "object",
+                properties: {
+                  appointmentId: { type: "string", description: "UUID of appointment to cancel" },
+                  reason: { type: "string", description: "Optional reason" },
+                },
+                required: [],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "rescheduleAppointment",
+              description: "Move an existing appointment to a new date and time",
+              parameters: {
+                type: "object",
+                properties: {
+                  appointmentId: { type: "string", description: "UUID of appointment to move" },
+                  newDate: { type: "string", description: "New date YYYY-MM-DD" },
+                  newStartTime: { type: "string", description: "New start time HH:MM" },
+                },
+                required: ["newDate", "newStartTime"],
+              },
             },
           },
           {
@@ -477,6 +556,87 @@ async function handleFunctionCall(payload: Record<string, unknown>) {
       })
     }
 
+    case "getUpcomingAppointments": {
+      const thread = await getOrCreateThread(practiceId, "voice", customerNumber)
+      const patientId = await resolvePatientIdForThread(practiceId, thread.patientId, customerNumber)
+      if (!patientId) {
+        return NextResponse.json({
+          result: JSON.stringify({
+            appointments: [],
+            message: "No patient record for this number yet. Ask for their name and call registerCallerStub first.",
+          }),
+        })
+      }
+      const list = await getUpcomingAppointments(practiceId, patientId, 5)
+      return NextResponse.json({
+        result: JSON.stringify({
+          appointments: list.map((a) => ({
+            id: a.id,
+            date: a.appt_date,
+            startTime: a.start_time,
+            service: a.service || "Appointment",
+          })),
+        }),
+      })
+    }
+
+    case "cancelAppointment": {
+      const thread = await getOrCreateThread(practiceId, "voice", customerNumber)
+      const patientId = await resolvePatientIdForThread(practiceId, thread.patientId, customerNumber)
+      if (!patientId) {
+        return NextResponse.json({
+          result: "We need to identify the patient first. Ask for their name and call registerCallerStub.",
+        })
+      }
+      const res = await cancelAppointment({
+        practiceId,
+        patientId,
+        appointmentId: args.appointmentId as string | undefined,
+        cancellationChannel: "voice",
+        cancellationReason: args.reason as string | undefined,
+      })
+      if (res.ok && res.appointmentId) {
+        await notifyAdmins({
+          practiceId,
+          type: "appointment_reminder",
+          title: "Appointment cancelled (voice)",
+          detail: res.message,
+          actionTab: "calendar",
+          actionEntityId: res.appointmentId,
+        })
+      }
+      return NextResponse.json({ result: res.message })
+    }
+
+    case "rescheduleAppointment": {
+      const thread = await getOrCreateThread(practiceId, "voice", customerNumber)
+      const patientId = await resolvePatientIdForThread(practiceId, thread.patientId, customerNumber)
+      if (!patientId) {
+        return NextResponse.json({
+          result: "We need to identify the patient first. Ask for their name and call registerCallerStub.",
+        })
+      }
+      const res = await rescheduleAppointment({
+        practiceId,
+        patientId,
+        appointmentId: args.appointmentId as string | undefined,
+        newDate: args.newDate as string,
+        newStartTime: args.newStartTime as string,
+        channel: "voice",
+      })
+      if (res.ok && res.appointmentId) {
+        await notifyAdmins({
+          practiceId,
+          type: "appointment_reminder",
+          title: "Appointment rescheduled (voice)",
+          detail: res.message,
+          actionTab: "calendar",
+          actionEntityId: res.appointmentId,
+        })
+      }
+      return NextResponse.json({ result: res.message })
+    }
+
     case "recordCheckinAttendance": {
       const appointmentId = meta.appointmentId as string | undefined
       if (!appointmentId) {
@@ -524,19 +684,36 @@ async function handleEndOfCall(payload: Record<string, unknown>) {
   const thread = await getOrCreateThread(practiceId, "voice", customerNumber)
   const db = createAdminClient()
 
-  await db.from("voice_calls").insert({
+  const { transcript, summary, recordingUrl, toolCalls } = extractEndOfCallFields(msg as Record<string, unknown>)
+
+  const outcome = await extractVoiceCallOutcome({
+    transcript,
+    summary,
+  })
+
+  const appointmentId = outcome.appointmentId || null
+
+  const row = {
     thread_id: thread.id,
     practice_id: practiceId,
     direction: (call?.direction as string) || "inbound",
     vapi_call_id: callId,
     duration_seconds: (msg.durationSeconds as number) || undefined,
-    recording_url: (msg.recordingUrl as string) || undefined,
-    transcript: (msg.transcript as string) || undefined,
-    summary: (msg.summary as string) || undefined,
-    tool_calls_log: (msg.toolCalls as Json) ?? undefined,
+    recording_url: recordingUrl,
+    transcript,
+    summary,
+    tool_calls_log: toolCalls ?? undefined,
     ended_reason: (msg.endedReason as string) || undefined,
     cost_cents: msg.cost ? Math.round((msg.cost as number) * 100) : undefined,
-  })
+    intent: outcome.intent,
+    structured_outcome: outcomeToJson(outcome),
+    ...(appointmentId ? { appointment_id: appointmentId } : {}),
+  }
+
+  const { data: vcRow, error: insertErr } = await db.from("voice_calls").insert(row).select("id").single()
+  if (insertErr) {
+    console.error("[voice-webhook] voice_calls insert:", insertErr)
+  }
 
   await appendMessage({
     threadId: thread.id,
@@ -544,52 +721,178 @@ async function handleEndOfCall(payload: Record<string, unknown>) {
     direction: "inbound",
     senderType: "patient",
     contentType: "audio",
-    body: (msg.summary as string) || (msg.transcript as string) || "[Voice call]",
+    body: summary || transcript || "[Voice call]",
     providerMessageId: callId,
   })
 
   const patientRow = await findPatientByPracticePhone(practiceId, customerNumber)
   const voiceMeta = (thread.metadata as Record<string, unknown>) || {}
-  const alreadySent = Boolean(voiceMeta.profile_completion_wa_sent_at)
+  const alreadySent = Boolean(
+    voiceMeta.profile_completion_rcs_sent_at || voiceMeta.profile_completion_wa_sent_at
+  )
 
-  if (patientRow?.profile_status === "incomplete" && !alreadySent) {
-    const practiceNumber = await getPracticeWhatsAppNumber(practiceId)
-    if (practiceNumber) {
-      const namePart = (patientRow.display_name_hint || "").split("|")[0]?.trim() || "there"
-      const practiceName = await getPracticeName(practiceId)
-      try {
-        const messageSid = await sendTemplateMessage({
-          practiceId,
-          from: practiceNumber,
-          to: customerNumber,
-          templateKey: "welcome_onboarding",
-          variables: { "1": namePart, "2": practiceName },
-        })
-        const waThread = await getOrCreateThread(practiceId, "whatsapp", customerNumber)
-        if (!waThread.patientId && patientRow.id) {
-          await updateThreadStatus(waThread.id, { patientId: patientRow.id })
-        }
-        await updateThreadFlow(waThread.id, "onboarding", { step: "collect_name", collected: {} })
-        await appendMessage({
-          threadId: waThread.id,
-          practiceId,
-          direction: "outbound",
-          senderType: "system",
-          contentType: "text",
-          body: `We sent a WhatsApp message to complete your profile. Message ID: ${messageSid}`,
-          providerMessageId: messageSid,
-          deliveryStatus: "sent",
-        })
+  const callerLabel = (customer?.name as string) || customerNumber
+
+  await notifyAdmins({
+    practiceId,
+    type: "patient_message",
+    title: `Call ended — ${callerLabel}`,
+    detail: summary || transcript?.slice(0, 240) || undefined,
+    actionTab: "inbox",
+    actionEntityId: thread.id,
+  })
+  await addInboxStripMessage({
+    practiceId,
+    channel: "voice",
+    fromLabel: callerLabel,
+    preview: summary || transcript?.slice(0, 120) || "Voice call",
+    patientId: patientRow?.id ?? null,
+  })
+
+  const handoffIntents = new Set(["cancel", "reschedule", "triage", "payment"])
+  if (outcome.requiresStaffHandoff || handoffIntents.has(outcome.intent)) {
+    await updateThreadStatus(thread.id, { status: "handoff", priority: "high" })
+  }
+
+  if (vcRow?.id) {
+    await logCommunicationInteraction({
+      practiceId,
+      patientId: patientRow?.id ?? null,
+      channel: "voice",
+      eventType: "call_completed",
+      provider: "vapi",
+      voiceCallId: vcRow.id,
+      threadId: thread.id,
+      payload: { outcome, vapiCallId: callId },
+    })
+  }
+
+  await dispatchVoiceRecommendedNextAction({
+    practiceId,
+    customerE164: customerNumber,
+    patientId: patientRow?.id ?? null,
+    threadId: thread.id,
+    outcome,
+  })
+
+  if (patientRow?.profile_status === "incomplete" && !alreadySent && patientRow.id) {
+    const namePart = (patientRow.display_name_hint || "").split("|")[0]?.trim() || "there"
+    try {
+      const sent = await dispatchPostVoiceFollowUp({
+        practiceId,
+        customerE164: customerNumber,
+        patientId: patientRow.id,
+        profileIncomplete: true,
+        patientDisplayName: namePart,
+        outcome,
+      })
+      if (sent) {
         await updateThreadStatus(thread.id, {
-          metadataPatch: { profile_completion_wa_sent_at: new Date().toISOString() },
+          metadataPatch: { profile_completion_rcs_sent_at: new Date().toISOString() },
         })
-      } catch (err) {
-        console.error("[voice-webhook] WhatsApp profile prompt failed:", err)
       }
+    } catch (err) {
+      console.error("[voice-webhook] RCS/SMS profile prompt failed:", err)
     }
   }
 
   return NextResponse.json({ ok: true })
+}
+
+async function dispatchVoiceRecommendedNextAction(opts: {
+  practiceId: string
+  customerE164: string
+  patientId: string | null
+  threadId: string
+  outcome: VoiceCallOutcome
+}) {
+  const { outcome, practiceId, customerE164, patientId, threadId } = opts
+  switch (outcome.recommendedNextAction) {
+    case "send_confirmation": {
+      if (!outcome.appointmentId || !patientId) return
+      const db = createAdminClient()
+      const { data: appt } = await db
+        .from("practice_appointments")
+        .select("service, appt_date, start_time, patient_name_snapshot")
+        .eq("id", outcome.appointmentId)
+        .eq("practice_id", practiceId)
+        .maybeSingle()
+      if (!appt) return
+      const { data: staff } = await db
+        .from("practice_staff")
+        .select("display_name")
+        .eq("practice_id", practiceId)
+        .in("role", ["owner", "physician"])
+        .limit(1)
+        .maybeSingle()
+      try {
+        await sendPatientTemplatedMessage({
+          practiceId,
+          toE164: customerE164,
+          templateKey: "appointment_confirmation",
+          variables: {
+            "1": appt.service || "Visit",
+            "2": appt.appt_date,
+            "3": appt.start_time,
+            "4": staff?.display_name || "your doctor",
+          },
+          patientId,
+          appointmentId: outcome.appointmentId,
+        })
+      } catch (err) {
+        console.error("[voice-webhook] send_confirmation template failed:", err)
+      }
+      return
+    }
+    case "send_portal_link": {
+      if (!patientId) return
+      const purposeMap: Record<string, PortalTokenPurpose> = {
+        check_in: "check_in",
+        intake: "intake",
+        billing: "billing",
+        lab_results: "lab_results",
+        reschedule: "general",
+      }
+      const purpose = outcome.portalPurpose
+        ? purposeMap[outcome.portalPurpose] || "general"
+        : "general"
+      try {
+        const { portalUrl } = await createPatientAccessToken({
+          practiceId,
+          patientId,
+          purpose,
+          appointmentId: outcome.appointmentId ?? null,
+        })
+        const { sendSmsMessage } = await import("@/lib/comms/twilio")
+        const { getPracticeMessagingNumber } = await import("@/lib/comms/threads")
+        const from = await getPracticeMessagingNumber(practiceId)
+        if (!from) return
+        await sendSmsMessage({
+          from,
+          to: customerE164.replace(/^whatsapp:/, ""),
+          body: `Here's your secure link: ${portalUrl}`,
+        })
+      } catch (err) {
+        console.error("[voice-webhook] send_portal_link failed:", err)
+      }
+      return
+    }
+    case "staff_callback": {
+      await notifyAdmins({
+        practiceId,
+        type: "alert",
+        title: "Patient needs callback",
+        detail: "Voice assistant requested staff follow-up.",
+        actionTab: "inbox",
+        actionEntityId: threadId,
+      })
+      await updateThreadStatus(threadId, { status: "handoff", priority: "high" })
+      return
+    }
+    case "send_onboarding":
+    default:
+      return
+  }
 }
 
 async function handleStatusUpdate(_payload: Record<string, unknown>) {

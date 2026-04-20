@@ -45,8 +45,8 @@ export async function GET(request: Request) {
     for (const query of queries) {
       try {
         const pmids = await fetchDeltaPmids({
-          query,
-          daysBack: days,
+          term: query,
+          relDays: days,
           apiKey: apiKey || undefined,
           maxResults: 500,
         })

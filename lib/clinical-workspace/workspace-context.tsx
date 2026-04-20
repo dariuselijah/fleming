@@ -30,10 +30,12 @@ import type {
   PracticeClaim,
   PracticeFlowEntry,
   PracticePatient,
+  PracticeBusinessHour,
   PracticeProvider,
   PatientMedication,
   SessionDocument,
   SidecarPayload,
+  SOAPBodySection,
   SOAPNote,
   VitalReading,
   WorkspaceMode,
@@ -50,6 +52,7 @@ interface WorkspaceContextValue {
   activeBillingSubTab: BillingSubTab
   activeDoctorId: string | null
   practiceProviders: PracticeProvider[]
+  practiceHours: PracticeBusinessHour[]
   claims: PracticeClaim[]
   inventory: InventoryItem[]
   inboxMessages: InboxMessage[]
@@ -143,9 +146,19 @@ interface WorkspaceContextValue {
       Partial<Pick<PatientMedication, "id" | "startDate">>
   ) => void
   removeSessionMedication: (patientId: string, medicationId: string) => void
-  updateSOAPNote: (patientId: string, section: keyof SOAPNote, value: string) => void
-  setSOAPGhostText: (patientId: string, section: keyof SOAPNote, text: string) => void
-  acceptGhostText: (patientId: string, section: keyof SOAPNote) => void
+  updateSessionMedication: (
+    patientId: string,
+    medicationId: string,
+    patch: Partial<
+      Pick<
+        PatientMedication,
+        "name" | "dosage" | "frequency" | "prescribedBy" | "refillsRemaining"
+      >
+    >
+  ) => void
+  updateSOAPNote: (patientId: string, section: SOAPBodySection, value: string) => void
+  setSOAPGhostText: (patientId: string, section: SOAPBodySection, text: string) => void
+  acceptGhostText: (patientId: string, section: SOAPBodySection) => void
   addVitalReading: (patientId: string, vital: VitalReading) => void
   commitVital: (patientId: string, vitalId: string) => void
   addBlock: (patientId: string, block: MedicalBlock) => void
@@ -257,6 +270,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeBillingSubTab: store.activeBillingSubTab,
       activeDoctorId: store.activeDoctorId,
       practiceProviders: store.practiceProviders,
+      practiceHours: store.practiceHours,
       claims: store.claims,
       inventory: store.inventory,
       inboxMessages: store.inboxMessages,
@@ -324,6 +338,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setPatientEvidenceDeepDive: store.setPatientEvidenceDeepDive,
       addSessionMedication: store.addSessionMedication,
       removeSessionMedication: store.removeSessionMedication,
+      updateSessionMedication: store.updateSessionMedication,
       updateSOAPNote: store.updateSOAPNote,
       setSOAPGhostText: store.setSOAPGhostText,
       acceptGhostText: store.acceptGhostText,
@@ -423,8 +438,8 @@ export function useActivePatient(): PatientSession | null {
 
 export function useSOAPNote(): {
   note: SOAPNote
-  update: (section: keyof SOAPNote, value: string) => void
-  acceptGhost: (section: keyof SOAPNote) => void
+  update: (section: SOAPBodySection, value: string) => void
+  acceptGhost: (section: SOAPBodySection) => void
 } {
   const { activePatient, updateSOAPNote, acceptGhostText } = useWorkspace()
 
@@ -436,7 +451,7 @@ export function useSOAPNote(): {
   }
 
   const update = useCallback(
-    (section: keyof SOAPNote, value: string) => {
+    (section: SOAPBodySection, value: string) => {
       if (!activePatient) return
       updateSOAPNote(activePatient.patientId, section, value)
     },
@@ -444,7 +459,7 @@ export function useSOAPNote(): {
   )
 
   const acceptGhost = useCallback(
-    (section: keyof SOAPNote) => {
+    (section: SOAPBodySection) => {
       if (!activePatient) return
       acceptGhostText(activePatient.patientId, section)
     },

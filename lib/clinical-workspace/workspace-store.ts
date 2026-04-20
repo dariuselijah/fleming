@@ -18,9 +18,11 @@ import type {
   PracticeAppointment,
   PracticeClaim,
   PracticeFlowEntry,
+  PracticeBusinessHour,
   PracticeProvider,
   SessionDocument,
   SidecarPayload,
+  SOAPBodySection,
   SOAPNote,
   VitalReading,
   WorkspaceMode,
@@ -148,6 +150,7 @@ interface WorkspaceState {
   activeBillingSubTab: BillingSubTab
   activeDoctorId: string | null
   practiceProviders: PracticeProvider[]
+  practiceHours: PracticeBusinessHour[]
   claims: PracticeClaim[]
   inventory: InventoryItem[]
   appointments: PracticeAppointment[]
@@ -214,9 +217,19 @@ interface WorkspaceState {
       Partial<Pick<PatientMedication, "id" | "startDate">>
   ) => void
   removeSessionMedication: (patientId: string, medicationId: string) => void
-  updateSOAPNote: (patientId: string, section: keyof SOAPNote, value: string) => void
-  setSOAPGhostText: (patientId: string, section: keyof SOAPNote, text: string) => void
-  acceptGhostText: (patientId: string, section: keyof SOAPNote) => void
+  updateSessionMedication: (
+    patientId: string,
+    medicationId: string,
+    patch: Partial<
+      Pick<
+        PatientMedication,
+        "name" | "dosage" | "frequency" | "prescribedBy" | "refillsRemaining"
+      >
+    >
+  ) => void
+  updateSOAPNote: (patientId: string, section: SOAPBodySection, value: string) => void
+  setSOAPGhostText: (patientId: string, section: SOAPBodySection, text: string) => void
+  acceptGhostText: (patientId: string, section: SOAPBodySection) => void
   addVitalReading: (patientId: string, vital: VitalReading) => void
   commitVital: (patientId: string, vitalId: string) => void
   addBlock: (patientId: string, block: MedicalBlock) => void
@@ -369,6 +382,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       activeDoctorId: null,
       selectedDate: new Date().toISOString().slice(0, 10),
       practiceProviders: [],
+      practiceHours: [],
       claims: [],
       inventory: [],
       appointments: [],
@@ -545,6 +559,41 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                   ),
                 }
           ),
+        }))
+      },
+
+      updateSessionMedication: (patientId, medicationId, patch) => {
+        if ("name" in patch) {
+          const t = patch.name?.trim() ?? ""
+          if (!t) return
+        }
+        set((state) => ({
+          openPatients: state.openPatients.map((p) => {
+            if (p.patientId !== patientId) return p
+            return {
+              ...p,
+              activeMedications: (p.activeMedications ?? []).map((m) => {
+                if (m.id !== medicationId) return m
+                let next = { ...m }
+                if ("name" in patch && patch.name !== undefined) {
+                  next.name = patch.name.trim()
+                }
+                if ("dosage" in patch) {
+                  next.dosage = patch.dosage?.trim() || undefined
+                }
+                if ("frequency" in patch) {
+                  next.frequency = patch.frequency?.trim() || undefined
+                }
+                if ("prescribedBy" in patch) {
+                  next.prescribedBy = patch.prescribedBy?.trim() || undefined
+                }
+                if ("refillsRemaining" in patch) {
+                  next.refillsRemaining = patch.refillsRemaining
+                }
+                return next
+              }),
+            }
+          }),
         }))
       },
 
@@ -1592,6 +1641,14 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           key: () => null,
         } satisfies Storage
       }),
+      merge: (persisted, current) => {
+        const p = persisted as Partial<WorkspaceState> | undefined
+        const merged = { ...current, ...p } as WorkspaceState
+        if ((merged.activeAdminTab as string) === "settings") {
+          merged.activeAdminTab = "calendar"
+        }
+        return merged
+      },
       partialize: (state) => ({
         mode: state.mode,
         activePatientId: state.activePatientId,

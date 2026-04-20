@@ -13,10 +13,7 @@ import {
   ArrowRight,
 } from "@phosphor-icons/react"
 
-export const BLOCK_ICONS: Record<
-  MedicalBlockType,
-  ComponentType<{ className?: string; weight?: string }>
-> = {
+export const BLOCK_ICONS: Record<MedicalBlockType, ComponentType<Record<string, unknown>>> = {
   LAB: Flask,
   VITAL: Heartbeat,
   NOTE: FileText,

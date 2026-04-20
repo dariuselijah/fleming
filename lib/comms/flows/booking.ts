@@ -1,4 +1,15 @@
-import type { CommsAgentContext, CommsAgentResponse, FlowState, BookingFlowState, InteractivePayload } from "../types"
+import type {
+  CommsAgentContext,
+  CommsAgentResponse,
+  FlowState,
+  BookingFlowState,
+  InteractivePayload,
+} from "../types"
+
+type BookingSelectedSlot = Exclude<
+  NonNullable<BookingFlowState["collected"]>["selectedSlot"],
+  undefined
+>
 import { checkAvailability, bookAppointment, getServices, createPatientRecord } from "../tools"
 import { findPatientByPracticePhone } from "../patient-phone"
 
@@ -138,10 +149,10 @@ async function handleOfferSlots(
   message: string,
   collected: BookingFlowState["collected"]
 ): Promise<CommsAgentResponse> {
-  let selectedSlot: BookingFlowState["collected"] extends { selectedSlot?: infer T } ? T : never
+  let selectedSlot: BookingSelectedSlot
 
   try {
-    selectedSlot = JSON.parse(message)
+    selectedSlot = JSON.parse(message) as BookingSelectedSlot
   } catch {
     // User typed a response instead of tapping
     return {
@@ -155,12 +166,12 @@ async function handleOfferSlots(
 
   const updatedCollected = { ...collected, selectedSlot }
 
-  const date = new Date((selectedSlot as { date: string }).date)
+  const date = new Date(selectedSlot.date)
   const dayName = DAY_NAMES[date.getDay()]
   const dateLabel = `${dayName} ${date.getDate()}/${date.getMonth() + 1}`
 
   return {
-    text: `Please confirm your booking:\n\n📋 *${collected?.serviceName || collected?.reason || "Appointment"}*\n📅 ${dateLabel} at ${(selectedSlot as { startTime: string }).startTime}\n\nShall I confirm this?`,
+    text: `Please confirm your booking:\n\n📋 *${collected?.serviceName || collected?.reason || "Appointment"}*\n📅 ${dateLabel} at ${selectedSlot.startTime}\n\nShall I confirm this?`,
     interactive: {
       type: "buttons",
       buttons: [

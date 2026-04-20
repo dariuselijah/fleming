@@ -6,7 +6,7 @@ import { persist, createJSONStorage } from "zustand/middleware"
 export type ChecklistStepId =
   | "profile"
   | "services"
-  | "whatsapp"
+  | "patient_messaging"
   | "voice"
   | "labs"
   | "medikredit"
@@ -39,9 +39,9 @@ const DEFAULT_STEPS: ChecklistStep[] = [
     status: "pending",
   },
   {
-    id: "whatsapp",
-    label: "WhatsApp agent",
-    description: "Connect WhatsApp for patient comms",
+    id: "patient_messaging",
+    label: "Patient messaging",
+    description: "Connect SMS/RCS for patient comms",
     status: "pending",
   },
   {

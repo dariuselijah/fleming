@@ -1,19 +1,36 @@
 /**
- * Cron endpoint for appointment reminders (24h and 1h before).
- * Schedule: every 15 minutes — see vercel.json crons.
- *
- * External: curl -H "Authorization: Bearer $CRON_SECRET" …/api/cron/appointment-reminders
+ * Appointment reminders (24h and 1h before) via SMS/RCS (Twilio Messaging).
+ * Schedule: vercel.json every 15 minutes. Requires patient mobile on file and status booked|confirmed.
+ * Appointment times are interpreted in SAST (UTC+2) — align with practice_appointments storage.
  */
-
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { sendTemplateMessage, BUILTIN_TEMPLATES } from "@/lib/comms/templates"
-import { getPracticeWhatsAppNumber } from "@/lib/comms/threads"
-import { appendMessage, getOrCreateThread } from "@/lib/comms/threads"
-import { getPracticeName } from "@/lib/comms/tools"
+import { sendPatientTemplatedMessage } from "@/lib/comms/communication-service"
+import { mergePracticeAppointmentMetadata } from "@/lib/comms/appointment-metadata"
+import { normalizePhoneE164Za } from "@/lib/comms/patient-phone"
 
 export const maxDuration = 120
 export const dynamic = "force-dynamic"
+
+/** Build local appointment instant (practice data is SAST for ZA deployments). */
+function appointmentStartSast(apptDate: string, startTime: string | null | undefined): Date {
+  let t = (startTime || "09:00:00").trim()
+  if (t.length === 5) t = `${t}:00`
+  const parts = t.split(":")
+  const h = (parts[0] || "9").padStart(2, "0")
+  const m = (parts[1] || "00").padStart(2, "0")
+  const s = (parts[2] || "00").padStart(2, "0")
+  return new Date(`${apptDate}T${h}:${m}:${s}+02:00`)
+}
+
+/** HH:MM for template variable {{1}} (e.g. "09:30"). */
+function clockLabel(startTime: string | null | undefined): string {
+  const t = (startTime || "09:00:00").trim()
+  const parts = t.split(":")
+  const h = (parts[0] || "9").padStart(2, "0")
+  const m = (parts[1] || "00").padStart(2, "0")
+  return `${h}:${m}`
+}
 
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET
@@ -29,9 +46,8 @@ export async function GET(request: Request) {
     const now = new Date()
     const stats = { checked: 0, sent24h: 0, sent1h: 0, errors: 0 }
 
-    // Fetch all appointments in the next 25 hours that haven't been reminded
-    const windowStart = new Date(now.getTime() + 30 * 60 * 1000) // 30 min from now
-    const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000) // 25h from now
+    const windowStart = new Date(now.getTime() + 30 * 60 * 1000)
+    const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000)
 
     const { data: appointments } = await db
       .from("practice_appointments")
@@ -52,30 +68,24 @@ export async function GET(request: Request) {
       stats.checked++
 
       try {
-        const apptDateTime = new Date(`${appt.appt_date}T${appt.start_time}:00+02:00`) // SAST
+        const apptDateTime = appointmentStartSast(appt.appt_date as string, appt.start_time as string | null)
         const hoursUntil = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60)
 
         const metadata = (appt.metadata as Record<string, unknown>) || {}
         const reminded24h = metadata.reminded_24h as boolean
         const reminded1h = metadata.reminded_1h as boolean
 
-        // 24h reminder: send between 23-25 hours before
         const should24h = hoursUntil >= 23 && hoursUntil <= 25 && !reminded24h
-        // 1h reminder: send between 0.5-1.5 hours before
         const should1h = hoursUntil >= 0.5 && hoursUntil <= 1.5 && !reminded1h
 
         if (!should24h && !should1h) continue
 
-        // Resolve patient phone from thread or patient record
         const phone = await resolvePatientPhone(db, appt.practice_id, appt.patient_id)
         if (!phone) continue
 
-        const practiceNumber = await getPracticeWhatsAppNumber(appt.practice_id)
-        if (!practiceNumber) continue
-
+        const { getPracticeName } = await import("@/lib/comms/tools")
         const practiceName = await getPracticeName(appt.practice_id)
 
-        // Resolve provider name
         let providerName = "your doctor"
         if (appt.provider_staff_id) {
           const { data: staff } = await db
@@ -87,68 +97,57 @@ export async function GET(request: Request) {
         }
 
         if (should24h) {
-          const messageSid = await sendTemplateMessage({
+          await sendPatientTemplatedMessage({
             practiceId: appt.practice_id,
-            from: practiceNumber,
-            to: phone,
+            toE164: phone,
             templateKey: "appointment_reminder_24h",
             variables: {
-              "1": appt.start_time,
+              "1": clockLabel(appt.start_time as string | null),
               "2": providerName,
               "3": practiceName,
             },
+            patientId: appt.patient_id,
+            appointmentId: appt.id,
+            portalLink:
+              appt.patient_id ?
+                {
+                  patientId: appt.patient_id,
+                  purpose: "appointment",
+                  appointmentId: appt.id,
+                }
+              : undefined,
           })
 
-          const thread = await getOrCreateThread(appt.practice_id, "whatsapp", phone)
-          await appendMessage({
-            threadId: thread.id,
-            practiceId: appt.practice_id,
-            direction: "outbound",
-            senderType: "system",
-            contentType: "template",
-            body: BUILTIN_TEMPLATES.appointment_reminder_24h.body
-              .replace("{{1}}", appt.start_time)
-              .replace("{{2}}", providerName)
-              .replace("{{3}}", practiceName),
-            templateName: "appointment_reminder_24h",
-            providerMessageId: messageSid,
-            deliveryStatus: "sent",
+          await mergePracticeAppointmentMetadata(appt.id, {
+            reminded_24h: true,
+            reminded_24h_at: now.toISOString(),
           })
-
-          await db
-            .from("practice_appointments")
-            .update({ metadata: { ...metadata, reminded_24h: true, reminded_24h_at: now.toISOString() } })
-            .eq("id", appt.id)
 
           stats.sent24h++
         }
 
         if (should1h) {
-          const messageSid = await sendTemplateMessage({
+          await sendPatientTemplatedMessage({
             practiceId: appt.practice_id,
-            from: practiceNumber,
-            to: phone,
+            toE164: phone,
             templateKey: "appointment_reminder_1h",
             variables: { "1": practiceName },
+            patientId: appt.patient_id,
+            appointmentId: appt.id,
+            portalLink:
+              appt.patient_id ?
+                {
+                  patientId: appt.patient_id,
+                  purpose: "check_in",
+                  appointmentId: appt.id,
+                }
+              : undefined,
           })
 
-          const thread = await getOrCreateThread(appt.practice_id, "whatsapp", phone)
-          await appendMessage({
-            threadId: thread.id,
-            practiceId: appt.practice_id,
-            direction: "outbound",
-            senderType: "system",
-            contentType: "template",
-            body: BUILTIN_TEMPLATES.appointment_reminder_1h.body.replace("{{1}}", practiceName),
-            templateName: "appointment_reminder_1h",
-            providerMessageId: messageSid,
-            deliveryStatus: "sent",
+          await mergePracticeAppointmentMetadata(appt.id, {
+            reminded_1h: true,
+            reminded_1h_at: now.toISOString(),
           })
-
-          await db
-            .from("practice_appointments")
-            .update({ metadata: { ...metadata, reminded_1h: true, reminded_1h_at: now.toISOString() } })
-            .eq("id", appt.id)
 
           stats.sent1h++
         }
@@ -170,33 +169,36 @@ async function resolvePatientPhone(
   practiceId: string,
   patientId: string | null
 ): Promise<string | null> {
-  // First try: find an existing WhatsApp thread linked to this patient
-  if (patientId) {
-    const { data: thread } = await db
-      .from("conversation_threads")
-      .select("external_party")
-      .eq("practice_id", practiceId)
-      .eq("patient_id", patientId)
-      .eq("channel", "whatsapp")
-      .order("last_message_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
+  if (!patientId) return null
 
-    if (thread?.external_party) return thread.external_party
+  const { data: patient } = await db
+    .from("practice_patients")
+    .select("display_name_hint, phone_e164")
+    .eq("id", patientId)
+    .eq("practice_id", practiceId)
+    .maybeSingle()
+
+  if (patient?.phone_e164?.trim()) {
+    return normalizePhoneE164Za(patient.phone_e164)
   }
 
-  // Second try: extract phone from display_name_hint
-  if (patientId) {
-    const { data: patient } = await db
-      .from("practice_patients")
-      .select("display_name_hint")
-      .eq("id", patientId)
-      .single()
+  const { data: thread } = await db
+    .from("conversation_threads")
+    .select("external_party")
+    .eq("practice_id", practiceId)
+    .eq("patient_id", patientId)
+    .eq("channel", "rcs")
+    .order("last_message_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
-    if (patient?.display_name_hint) {
-      const phoneMatch = patient.display_name_hint.match(/\+?\d[\d\s-]{8,}/)
-      if (phoneMatch) return phoneMatch[0].replace(/[\s-]/g, "")
-    }
+  if (thread?.external_party) {
+    return normalizePhoneE164Za(thread.external_party)
+  }
+
+  if (patient?.display_name_hint) {
+    const phoneMatch = patient.display_name_hint.match(/\+?\d[\d\s-]{8,}/)
+    if (phoneMatch) return normalizePhoneE164Za(phoneMatch[0])
   }
 
   return null
