@@ -4,14 +4,22 @@ import {
   MessageActions,
 } from "@/components/prompt-kit/message"
 import { ProcessingLoader } from "@/components/prompt-kit/processing-loader"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { ENABLE_CHAT_ACTIVITY_TIMELINE_V2 } from "@/lib/config"
+import {
+  ENABLE_CHAT_ACTIVITY_TIMELINE_V2,
+  ENABLE_CHART_DRILLDOWN_SUBLOOP,
+} from "@/lib/config"
 import type { Message as MessageAISDK } from "@ai-sdk/react"
-import { ArrowClockwise, Check, Copy } from "@phosphor-icons/react"
+import { ArrowClockwise, Check, Copy, ClipboardText } from "@phosphor-icons/react"
+import type { ChartDrilldownPayload } from "../charts/chat-chart"
 import { AssistantInlineParts } from "./assistant-inline-parts"
 import { ActivityTimeline } from "./activity/activity-timeline"
 import { buildChatActivityTimeline } from "./activity/build-timeline"
-import type { ReferencedUploadStatus } from "./activity/types"
+import type {
+  OptimisticTaskBoardState,
+  ReferencedUploadStatus,
+} from "./activity/types"
 import { getSources } from "./get-sources"
 import { SearchImages } from "./search-images"
 import { YouTubeResults, type YouTubeResultItem } from "./youtube-results"
@@ -21,15 +29,32 @@ import { extractCitationsFromSources, extractCitationsFromWebSearch, extractJour
 import type { CitationData } from "./citation-popup"
 import type { EvidenceCitation } from "@/lib/evidence/types"
 import { parseCitationMarkers, getUniqueCitationIndices } from "@/lib/citations/parser"
-import { useMemo, useCallback, useEffect, useState, useRef } from "react"
+import { useMemo, useCallback, useEffect, useState, useRef, useReducer } from "react"
 import { parseLearningCard } from "@/lib/medical-student-learning"
 import { LearningCard } from "./learning-card"
+import { detectClinicalCommand } from "@/app/components/clinical-blocks/clinical-response-block"
+import { ClinicalDocumentCard } from "@/app/components/clinical-blocks/clinical-document-card"
+import { PrescriptionCard } from "@/app/components/clinical-blocks/prescription-card"
+import { detectCommandFromUserMessage, buildClinicalDocument } from "@/lib/clinical-workspace"
+import { useWorkspaceStore } from "@/lib/clinical-workspace"
 import type { DocumentArtifact, QuizArtifact } from "@/lib/uploads/artifacts"
 import { splitTrailingSourceAppendix } from "./source-appendix"
 import {
   DocumentArtifactCard,
   InteractiveQuizArtifactCard,
 } from "./generated-artifact-cards"
+import { DrilldownPanel } from "./drilldown-panel"
+import {
+  buildDataPointId,
+  getDrilldownCacheEntry,
+  markDrilldownEntryAdded,
+  setDrilldownCacheEntry,
+  useDrilldownCacheStore,
+} from "./drilldown-cache-store"
+import {
+  drilldownStateReducer,
+  INITIAL_DRILLDOWN_STATE,
+} from "./use-drilldown-state"
 
 function parseArtifactFromToolResult(
   result: unknown
@@ -69,6 +94,50 @@ function parseFilenameFromContentDisposition(value: string | null): string | nul
   return match?.[1] || null
 }
 
+type DrilldownApiResponse = {
+  query?: unknown
+  response?: unknown
+  citations?: unknown
+  error?: unknown
+}
+
+function buildDrilldownQuery(payload: ChartDrilldownPayload): string {
+  const series = payload.seriesLabel || payload.seriesKey || "Selected datapoint"
+  const xSegment =
+    typeof payload.xValue === "string" || typeof payload.xValue === "number"
+      ? `${payload.xKey}=${payload.xValue}`
+      : payload.xKey
+  const valueSegment =
+    typeof payload.value === "string" || typeof payload.value === "number"
+      ? `value=${payload.value}`
+      : "value=selected"
+  const dataLabel = `${series} (${xSegment}, ${valueSegment})`
+  const source = payload.source || payload.chartTitle || "the chart source"
+  return `Analyze this specific data point: ${dataLabel} from ${source}. Provide the underlying clinical trial evidence.`
+}
+
+function normalizeDrilldownCitations(raw: unknown): EvidenceCitation[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((item): item is EvidenceCitation => Boolean(item && typeof item === "object"))
+    .map((item, index) => ({
+      ...item,
+      index: typeof item.index === "number" ? item.index : index + 1,
+      title: typeof item.title === "string" ? item.title : `Citation ${index + 1}`,
+      journal:
+        typeof item.journal === "string"
+          ? item.journal
+          : typeof item.sourceLabel === "string"
+            ? item.sourceLabel
+            : "Source",
+      authors: Array.isArray(item.authors) ? item.authors : [],
+      evidenceLevel: typeof item.evidenceLevel === "number" ? item.evidenceLevel : 3,
+      meshTerms: Array.isArray(item.meshTerms) ? item.meshTerms : [],
+      sourceType:
+        typeof item.sourceType === "string" ? item.sourceType : "medical_evidence",
+    }))
+}
+
 type MessageAssistantProps = {
   messageId: string
   children: string
@@ -86,7 +155,16 @@ type MessageAssistantProps = {
   evidenceCitations?: EvidenceCitation[]
   contextPrompt?: string
   streamIntroPreview?: string | null
+  optimisticTaskBoard?: OptimisticTaskBoardState | null
   referencedUploads?: ReferencedUploadStatus[]
+  onDrilldownInsightAdd?: (input: {
+    pointId: string
+    payload: ChartDrilldownPayload
+    query: string
+    response: string
+    citations: EvidenceCitation[]
+  }) => Promise<boolean> | boolean
+  discussionInsightCount?: number
 }
 
 type ArtifactRefinementChoice = {
@@ -112,6 +190,7 @@ function buildAppendixCitationEntry(
   const title = entry.note ? `${entry.title} (${entry.note})` : entry.title
   return {
     index,
+    sourceId: `pmid:${entry.pmid}`,
     title: title || `PMID ${entry.pmid}`,
     authors: [],
     journal: entry.title || "PubMed",
@@ -135,6 +214,7 @@ function mergeAppendixCitations(
     merged.set(index, citation)
     maxIndex = Math.max(maxIndex, index)
     const key =
+      (citation.sourceId && `source:${citation.sourceId}`) ||
       (citation.pmid && `pmid:${citation.pmid}`) ||
       (citation.url && `url:${citation.url}`) ||
       `title:${(citation.title || "").toLowerCase()}`
@@ -155,6 +235,7 @@ function mergeAppendixCitations(
 function toCitationDataFromEvidence(citation: EvidenceCitation): CitationData {
   return {
     index: citation.index,
+    sourceId: citation.sourceId || undefined,
     title: citation.title,
     authors: citation.authors || [],
     journal: citation.journal,
@@ -170,6 +251,99 @@ function toCitationDataFromEvidence(citation: EvidenceCitation): CitationData {
   } as CitationData
 }
 
+function isPlaceholderCitationLabel(value: string | null | undefined): boolean {
+  const normalized = (value || "").trim()
+  if (!normalized) return true
+  return /^Citation\s+\d+$/i.test(normalized) || /^Source$/i.test(normalized)
+}
+
+function isMeaningfulEvidenceCitation(citation: EvidenceCitation): boolean {
+  const hasStableLocator = Boolean(
+    citation.sourceId?.trim() ||
+      citation.pmid?.trim() ||
+      citation.doi?.trim() ||
+      citation.url?.trim() ||
+      citation.uploadId?.trim() ||
+      citation.sourceUnitId?.trim()
+  )
+  const hasNamedSource =
+    !isPlaceholderCitationLabel(citation.title) ||
+    !isPlaceholderCitationLabel(citation.journal) ||
+    !isPlaceholderCitationLabel(citation.sourceLabel)
+  const hasContext =
+    Boolean(citation.snippet?.trim()) ||
+    (Array.isArray(citation.authors) && citation.authors.length > 0) ||
+    typeof citation.year === "number" ||
+    Boolean(citation.studyType?.trim())
+
+  const indexedMedicalEvidence =
+    typeof citation.index === "number" &&
+    citation.index > 0 &&
+    (citation.sourceType === "medical_evidence" ||
+      (typeof citation.evidenceLevel === "number" && citation.evidenceLevel >= 1))
+
+  return (
+    hasStableLocator ||
+    (hasNamedSource && hasContext) ||
+    indexedMedicalEvidence
+  )
+}
+
+function isMeaningfulCitationData(citation: CitationData): boolean {
+  const extendedCitation = citation as CitationData & {
+    studyType?: string
+    snippet?: string
+  }
+  const hasStableLocator = Boolean(
+    citation.sourceId?.trim() ||
+      citation.pmid?.trim() ||
+      citation.doi?.trim() ||
+      citation.url?.trim()
+  )
+  const hasNamedSource =
+    !isPlaceholderCitationLabel(citation.title) || !isPlaceholderCitationLabel(citation.journal)
+  const hasContext =
+    (Array.isArray(citation.authors) && citation.authors.length > 0) ||
+    Boolean(citation.year?.trim()) ||
+    Boolean(extendedCitation.studyType?.trim()) ||
+    Boolean(extendedCitation.snippet?.trim())
+
+  return hasStableLocator || (hasNamedSource && hasContext)
+}
+
+function evidenceCitationMetadataScore(citation: EvidenceCitation): number {
+  let score = 0
+  if (citation.title?.trim()) score += 3
+  if (citation.journal?.trim()) score += 2
+  if (citation.url?.trim()) score += 3
+  if (citation.sourceId?.trim()) score += 2
+  if (citation.pmid?.trim()) score += 2
+  if (citation.doi?.trim()) score += 1
+  if (citation.sourceLabel?.trim()) score += 2
+  if (citation.sourceType?.trim()) score += 1
+  if (citation.studyType?.trim()) score += 1
+  if (citation.snippet?.trim()) score += 1
+  if (Array.isArray(citation.authors) && citation.authors.length > 0) score += 1
+  return score
+}
+
+function evidenceCitationSetScore(citations: EvidenceCitation[]): number {
+  return citations.reduce((total, citation) => total + evidenceCitationMetadataScore(citation), 0)
+}
+
+function shouldReplaceEvidenceCitationSet(
+  current: EvidenceCitation[],
+  incoming: EvidenceCitation[]
+): boolean {
+  if (incoming.length === 0) return false
+  if (current.length === 0) return true
+  const currentScore = evidenceCitationSetScore(current)
+  const incomingScore = evidenceCitationSetScore(incoming)
+  if (incomingScore > currentScore + 1) return true
+  if (incomingScore >= currentScore && incoming.length > current.length) return true
+  return false
+}
+
 function mergeEvidenceIntoCitations(
   baseCitations: Map<number, CitationData>,
   evidenceCitations: EvidenceCitation[]
@@ -178,29 +352,48 @@ function mergeEvidenceIntoCitations(
 
   const merged = new Map<number, CitationData>()
   const seen = new Set<string>()
+  const indexByKey = new Map<string, number>()
   let maxIndex = 0
 
   baseCitations.forEach((citation, index) => {
     merged.set(index, citation)
     maxIndex = Math.max(maxIndex, index)
     const citationKey =
+      (citation.sourceId && `source:${citation.sourceId}`) ||
       (citation.pmid && `pmid:${citation.pmid}`) ||
       (citation.url && `url:${citation.url}`) ||
       `title:${(citation.title || "").toLowerCase()}`
     seen.add(citationKey)
+    indexByKey.set(citationKey, index)
   })
 
   evidenceCitations.forEach((citation) => {
     const key =
+      (citation.sourceId && `source:${citation.sourceId}`) ||
       (citation.pmid && `pmid:${citation.pmid}`) ||
       (citation.url && `url:${citation.url}`) ||
       `title:${(citation.title || "").toLowerCase()}`
-    if (seen.has(key)) return
-
-    maxIndex += 1
     const mapped = toCitationDataFromEvidence(citation)
-    merged.set(maxIndex, { ...mapped, index: maxIndex })
+    const existingIndex = indexByKey.get(key)
+    if (typeof existingIndex === "number") {
+      const existing = merged.get(existingIndex)
+      merged.set(existingIndex, {
+        ...(existing || {}),
+        ...mapped,
+        index: existingIndex,
+      })
+      return
+    }
+
+    const preferredIndex =
+      typeof mapped.index === "number" && Number.isFinite(mapped.index) && mapped.index > 0
+        ? mapped.index
+        : maxIndex + 1
+    const targetIndex = merged.has(preferredIndex) ? maxIndex + 1 : preferredIndex
+    maxIndex = Math.max(maxIndex, targetIndex)
+    merged.set(targetIndex, { ...mapped, index: targetIndex })
     seen.add(key)
+    indexByKey.set(key, targetIndex)
   })
 
   return merged
@@ -292,6 +485,54 @@ function stripToolCitationArtifacts(text: string): string {
     .replace(/[ \t]{2,}/g, " ")
 }
 
+function extractInlinePmidCandidates(text: string): string[] {
+  if (!text) return []
+  const pmids = new Set<string>()
+
+  const explicitPmidPattern = /\bPMID\s*:\s*(\d{6,10})\b/gi
+  let explicitMatch: RegExpExecArray | null
+  while ((explicitMatch = explicitPmidPattern.exec(text)) !== null) {
+    if (explicitMatch[1]) pmids.add(explicitMatch[1])
+  }
+
+  const bracketNumericPattern = /\[(\d+(?:\s*,\s*\d+)*)\]/g
+  let bracketMatch: RegExpExecArray | null
+  while ((bracketMatch = bracketNumericPattern.exec(text)) !== null) {
+    const values = bracketMatch[1]
+      .split(/\s*,\s*/)
+      .map((value) => value.trim())
+      .filter(Boolean)
+    values.forEach((value) => {
+      if (/^\d{6,10}$/.test(value)) {
+        pmids.add(value)
+      }
+    })
+  }
+
+  return Array.from(pmids)
+}
+
+function extractInlineSourceIdCandidates(text: string): string[] {
+  if (!text) return []
+  const sourceIds = new Set<string>()
+  const sourceIdPattern = /\[CITE[_:]([^\]]+)\]/gi
+  let match: RegExpExecArray | null
+  while ((match = sourceIdPattern.exec(text)) !== null) {
+    const values = (match[1] || "")
+      .split(/\s*,\s*/)
+      .map((value) =>
+        value
+          .trim()
+          .replace(/^CITE[_:]/i, "")
+          .replace(/^["']|["']$/g, "")
+          .toLowerCase()
+      )
+      .filter(Boolean)
+    values.forEach((value) => sourceIds.add(value))
+  }
+  return Array.from(sourceIds)
+}
+
 export function MessageAssistant({
   messageId,
   children,
@@ -309,7 +550,10 @@ export function MessageAssistant({
   evidenceCitations = [],
   contextPrompt,
   streamIntroPreview,
+  optimisticTaskBoard = null,
   referencedUploads = [],
+  onDrilldownInsightAdd,
+  discussionInsightCount = 0,
 }: MessageAssistantProps) {
   const { card: learningCard, cleanContent } = useMemo(
     () => parseLearningCard(children || ""),
@@ -335,6 +579,145 @@ export function MessageAssistant({
   
   const contentNullOrEmpty = contentToRender === null || contentToRender === ""
   const isLastStreaming = status === "streaming" && isLast
+
+  const clinicalDocType = useMemo(
+    () => contextPrompt ? detectCommandFromUserMessage(contextPrompt) : null,
+    [contextPrompt]
+  )
+
+  const documentSheetOpen = useWorkspaceStore((s) => s.documentSheet.isOpen)
+  const documentSheetDoc = useWorkspaceStore((s) => s.documentSheet.contentDocument)
+
+  const stableClinicalDocumentId = useMemo(() => {
+    if (!documentSheetOpen || !documentSheetDoc || !clinicalDocType) return null
+    if (clinicalDocType !== documentSheetDoc.type) return null
+    return documentSheetDoc.id
+  }, [documentSheetOpen, documentSheetDoc, clinicalDocType])
+
+  const clinicalDocument = useMemo(() => {
+    if (!clinicalDocType || contentToRender === null || contentToRender === undefined)
+      return null
+    if (contentToRender === "" && clinicalDocType !== "prescribe") return null
+    const doc = buildClinicalDocument(
+      messageId,
+      clinicalDocType,
+      contentToRender,
+      !!isLastStreaming,
+      undefined,
+      stableClinicalDocumentId,
+      {
+        sourcesParseInput: sanitizedContent,
+        trailingPmidSources:
+          trailingSourceEntries.length > 0 ? trailingSourceEntries : undefined,
+      },
+    )
+    const rx = doc.prescriptionItems?.length ?? 0
+    const bodyLen = doc.content.trim().length
+    if (isLastStreaming) {
+      if (bodyLen < 12 && rx === 0) return null
+      return doc
+    }
+    if (bodyLen <= 50 && rx === 0) return null
+    return doc
+  }, [
+    clinicalDocType,
+    contentToRender,
+    messageId,
+    isLastStreaming,
+    stableClinicalDocumentId,
+    sanitizedContent,
+    trailingSourceEntries,
+  ])
+
+  const openDocumentContent = useWorkspaceStore((s) => s.openDocumentContent)
+  const updateDocumentContent = useWorkspaceStore((s) => s.updateDocumentContent)
+  const upsertSessionDocument = useWorkspaceStore((s) => s.upsertSessionDocument)
+  const ingestClinicalNoteText = useWorkspaceStore((s) => s.ingestClinicalNoteText)
+  const setPatientEvidenceDeepDive = useWorkspaceStore((s) => s.setPatientEvidenceDeepDive)
+  const docSheetIsOpen = useWorkspaceStore((s) => s.documentSheet.isOpen)
+  const docSheetContentId = useWorkspaceStore((s) => s.documentSheet.contentDocument?.id)
+
+  useEffect(() => {
+    if (!clinicalDocument || !isLast) return
+    if (docSheetIsOpen && docSheetContentId === clinicalDocument.id) {
+      updateDocumentContent(clinicalDocument.content, !!isLastStreaming, {
+        sources: clinicalDocument.sources,
+        prescriptionItems: clinicalDocument.prescriptionItems,
+      })
+    }
+  }, [clinicalDocument, isLast, isLastStreaming, docSheetIsOpen, docSheetContentId, updateDocumentContent])
+
+  const sessionDocRegisteredRef = useRef<string | null>(null)
+  const evidenceDeepDiveSyncedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!clinicalDocument || isLastStreaming || !isLast) return
+    const registrationKey = `${messageId}:${clinicalDocument.id}`
+    if (sessionDocRegisteredRef.current === registrationKey) return
+    sessionDocRegisteredRef.current = registrationKey
+    const pid = useWorkspaceStore.getState().activePatientId
+    if (!pid) return
+    upsertSessionDocument(pid, {
+      id: clinicalDocument.id,
+      messageId,
+      status: "draft",
+      document: { ...clinicalDocument, isStreaming: false },
+      updatedAt: new Date().toISOString(),
+    })
+    if (clinicalDocument.content?.trim()) {
+      ingestClinicalNoteText(pid, clinicalDocument.content, "Assistant note")
+    }
+  }, [
+    clinicalDocument,
+    ingestClinicalNoteText,
+    isLast,
+    isLastStreaming,
+    messageId,
+    upsertSessionDocument,
+  ])
+
+  useEffect(() => {
+    if (clinicalDocType !== "evidence" || !clinicalDocument || isLastStreaming || !isLast) return
+    const src = clinicalDocument.sources
+    if (!src?.length) return
+    const pid = useWorkspaceStore.getState().activePatientId
+    if (!pid) return
+    const key = `${messageId}:evidence-dive`
+    if (evidenceDeepDiveSyncedRef.current === key) return
+    evidenceDeepDiveSyncedRef.current = key
+
+    const fromPrompt =
+      contextPrompt &&
+      /^\[\/evidence\]\s*Evidence-based answer for:\s*([^.]+)/i.exec(contextPrompt)?.[1]?.trim()
+
+    setPatientEvidenceDeepDive(pid, {
+      query: fromPrompt || "Evidence review",
+      synthesis: clinicalDocument.content?.trim() ?? "",
+      results: src.map((s) => ({
+        id: `chat-src-${s.index}-${messageId}`,
+        title: s.title,
+        journal: s.journal,
+        year: s.year ? parseInt(s.year, 10) : undefined,
+        url: s.url ?? (s.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${s.pmid}/` : undefined),
+        evidenceLevel: 3,
+        keyFindings: s.snippet?.trim() || s.title,
+      })),
+      updatedAt: new Date().toISOString(),
+      stages: [{ label: "From /evidence chat", done: true }],
+    })
+  }, [
+    clinicalDocType,
+    clinicalDocument,
+    contextPrompt,
+    isLast,
+    isLastStreaming,
+    messageId,
+    setPatientEvidenceDeepDive,
+  ])
+
+  const handleExpandDocument = useCallback((doc: typeof clinicalDocument) => {
+    if (doc) openDocumentContent(doc)
+  }, [openDocumentContent])
+
   const hasRenderableTimelineParts = useMemo(
     () =>
       Array.isArray(parts) &&
@@ -347,8 +730,19 @@ export function MessageAssistant({
     [parts]
   )
   
-  // Track evidence citations attached to this message payload.
-  const hasAttachedEvidenceCitations = evidenceCitations.length > 0
+  // Keep evidence citations sticky through post-stream state transitions.
+  const [stickyEvidenceCitations, setStickyEvidenceCitations] = useState<EvidenceCitation[]>([])
+  useEffect(() => {
+    if (evidenceCitations.length === 0) return
+    setStickyEvidenceCitations((previous) =>
+      shouldReplaceEvidenceCitationSet(previous, evidenceCitations)
+        ? evidenceCitations
+        : previous
+    )
+  }, [evidenceCitations])
+  const effectiveEvidenceCitations =
+    evidenceCitations.length > 0 ? evidenceCitations : stickyEvidenceCitations
+  const hasAttachedEvidenceCitations = effectiveEvidenceCitations.length > 0
   const referencedEvidenceCitations = useMemo(() => {
     if (!hasAttachedEvidenceCitations || !contentToRender) {
       return []
@@ -369,19 +763,23 @@ export function MessageAssistant({
       return []
     }
 
-    return evidenceCitations.filter((citation) => {
+    return effectiveEvidenceCitations.filter((citation) => {
       const citationPmid = typeof citation.pmid === "string" ? citation.pmid.trim() : ""
       return referencedIndices.has(citation.index) || (citationPmid.length > 0 && referencedPmids.has(citationPmid))
     })
-  }, [contentToRender, evidenceCitations, hasAttachedEvidenceCitations])
+  }, [contentToRender, effectiveEvidenceCitations, hasAttachedEvidenceCitations])
   const displayEvidenceCitations = useMemo(
     () =>
       referencedEvidenceCitations.length > 0
         ? referencedEvidenceCitations
-        : evidenceCitations,
-    [evidenceCitations, referencedEvidenceCitations]
+        : effectiveEvidenceCitations,
+    [effectiveEvidenceCitations, referencedEvidenceCitations]
   )
-  const hasEvidenceCitations = displayEvidenceCitations.length > 0
+  const meaningfulEvidenceCitations = useMemo(
+    () => displayEvidenceCitations.filter(isMeaningfulEvidenceCitation),
+    [displayEvidenceCitations]
+  )
+  const hasEvidenceCitations = meaningfulEvidenceCitations.length > 0
   const artifactRefinement = useMemo(
     () => parseArtifactRefinementPayload(annotations),
     [annotations]
@@ -428,6 +826,270 @@ export function MessageAssistant({
     "idle" | "submitting" | "submitted"
   >("idle")
   const isRefinementLocked = refinementSubmitState !== "idle"
+  const [drilldownState, drilldownDispatch] = useReducer(
+    drilldownStateReducer,
+    INITIAL_DRILLDOWN_STATE
+  )
+  const drilldownAbortRef = useRef<AbortController | null>(null)
+  const [isAddingDrilldownInsight, setIsAddingDrilldownInsight] = useState(false)
+  const [didAddDrilldownInsight, setDidAddDrilldownInsight] = useState(false)
+  const drilldownCacheEntries = useDrilldownCacheStore((state) => state.entries)
+  const latestAddedPointId = useDrilldownCacheStore((state) => state.latestAddedPointId)
+  const touchLatestAdded = useDrilldownCacheStore((state) => state.touchLatestAdded)
+  const syncedInsightCount = useMemo(
+    () =>
+      Object.values(drilldownCacheEntries).filter((entry) => entry.isAddedToDiscussion)
+        .length,
+    [drilldownCacheEntries]
+  )
+  const latestAddedDrilldownEntry = useMemo(
+    () =>
+      latestAddedPointId && drilldownCacheEntries[latestAddedPointId]
+        ? drilldownCacheEntries[latestAddedPointId]
+        : null,
+    [drilldownCacheEntries, latestAddedPointId]
+  )
+  const isActiveDrilldownSynced = useMemo(
+    () =>
+      Boolean(
+        drilldownState.pointId &&
+          drilldownCacheEntries[drilldownState.pointId]?.isAddedToDiscussion
+      ),
+    [drilldownCacheEntries, drilldownState.pointId]
+  )
+  const [shouldPulseInsightPill, setShouldPulseInsightPill] = useState(false)
+  const lastPulsedInsightPointIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const currentPointId = latestAddedDrilldownEntry?.pointId
+    if (!currentPointId) return
+    if (lastPulsedInsightPointIdRef.current === currentPointId) return
+    lastPulsedInsightPointIdRef.current = currentPointId
+    setShouldPulseInsightPill(true)
+    const timeoutId = window.setTimeout(() => {
+      setShouldPulseInsightPill(false)
+    }, 1800)
+    return () => window.clearTimeout(timeoutId)
+  }, [latestAddedDrilldownEntry?.pointId])
+
+  useEffect(() => {
+    return () => {
+      drilldownAbortRef.current?.abort()
+      drilldownAbortRef.current = null
+    }
+  }, [])
+
+  const runDrilldownAnalysis = useCallback(
+    async (
+      payload: ChartDrilldownPayload,
+      options?: {
+        forceRefresh?: boolean
+      }
+    ) => {
+      if (!ENABLE_CHART_DRILLDOWN_SUBLOOP) return
+      const pointId = buildDataPointId(payload)
+      if (!options?.forceRefresh) {
+        const cached = getDrilldownCacheEntry(pointId)
+        if (cached) {
+          drilldownDispatch({
+            type: "HYDRATE_DRILLDOWN_CACHE",
+            payload: {
+              runId: `cached-${cached.cachedAt}`,
+              pointId,
+              context: payload,
+              query: cached.query,
+              response: cached.response,
+              citations: cached.citations,
+            },
+          })
+          touchLatestAdded(cached.isAddedToDiscussion ? cached.pointId : latestAddedPointId)
+          return
+        }
+      }
+      const runId = `${messageId}-drilldown-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+      const query = buildDrilldownQuery(payload)
+
+      drilldownDispatch({
+        type: "SET_DRILLDOWN_CONTEXT",
+        payload: { runId, pointId, context: payload, query },
+      })
+      setIsAddingDrilldownInsight(false)
+      setDidAddDrilldownInsight(false)
+
+      drilldownAbortRef.current?.abort()
+      const controller = new AbortController()
+      drilldownAbortRef.current = controller
+
+      try {
+        drilldownDispatch({
+          type: "SET_DRILLDOWN_PHASE",
+          payload: { phase: "retrieving" },
+        })
+        const response = await fetch("/api/chat/drilldown", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          signal: controller.signal,
+          body: JSON.stringify({
+            payload,
+            parentPrompt: contextPrompt || null,
+          }),
+        })
+
+        drilldownDispatch({
+          type: "SET_DRILLDOWN_PHASE",
+          payload: { phase: "appraising" },
+        })
+
+        const data = (await response.json()) as DrilldownApiResponse
+        if (!response.ok) {
+          const errorText =
+            typeof data?.error === "string" && data.error.trim().length > 0
+              ? data.error
+              : "Drill-down analysis failed."
+          throw new Error(errorText)
+        }
+
+        if (drilldownAbortRef.current !== controller) return
+
+        drilldownDispatch({
+          type: "SET_DRILLDOWN_PHASE",
+          payload: { phase: "synthesizing" },
+        })
+
+        const responseText = typeof data?.response === "string" ? data.response : ""
+        const citationsFromApi = normalizeDrilldownCitations(data?.citations)
+        setDrilldownCacheEntry({
+          pointId,
+          payload,
+          query: typeof data?.query === "string" ? data.query : query,
+          response: responseText,
+          citations: citationsFromApi,
+          cachedAt: Date.now(),
+        })
+        drilldownDispatch({
+          type: "SET_DRILLDOWN_RESULT",
+          payload: {
+            response: responseText,
+            citations: citationsFromApi,
+          },
+        })
+      } catch (error) {
+        if (controller.signal.aborted) return
+        const errorText =
+          error instanceof Error ? error.message : "Unable to complete drill-down analysis."
+        drilldownDispatch({
+          type: "SET_DRILLDOWN_ERROR",
+          payload: { error: errorText },
+        })
+      } finally {
+        if (drilldownAbortRef.current === controller) {
+          drilldownAbortRef.current = null
+        }
+      }
+    },
+    [contextPrompt, latestAddedPointId, messageId, touchLatestAdded]
+  )
+
+  const handleChartDrilldown = useCallback(
+    (payload: ChartDrilldownPayload) => {
+      void runDrilldownAnalysis(payload)
+    },
+    [runDrilldownAnalysis]
+  )
+
+  const handleRetryDrilldown = useCallback(() => {
+    if (!drilldownState.context) return
+    void runDrilldownAnalysis(drilldownState.context, { forceRefresh: true })
+  }, [drilldownState.context, runDrilldownAnalysis])
+
+  const handleOpenSyncedInsight = useCallback(() => {
+    if (!latestAddedDrilldownEntry) return
+    touchLatestAdded(latestAddedDrilldownEntry.pointId)
+    void runDrilldownAnalysis(latestAddedDrilldownEntry.payload)
+  }, [latestAddedDrilldownEntry, runDrilldownAnalysis, touchLatestAdded])
+
+  const handlePromoteDrilldownToChat = useCallback(() => {
+    if (isAddingDrilldownInsight || didAddDrilldownInsight) return
+    if (drilldownState.response.trim().length === 0 || !drilldownState.context) return
+    const pointId =
+      drilldownState.pointId || buildDataPointId(drilldownState.context)
+    const query = drilldownState.query || "Drill-down insight"
+    const response = drilldownState.response.trim()
+    const citations = drilldownState.citations
+
+    const fallbackSubmit = onWorkflowSuggestion || onSuggestion
+
+    setIsAddingDrilldownInsight(true)
+    ;(async () => {
+      try {
+        let integrated = false
+        if (onDrilldownInsightAdd) {
+          integrated = await Promise.resolve(
+            onDrilldownInsightAdd({
+              pointId,
+              payload: drilldownState.context!,
+              query,
+              response,
+              citations,
+            })
+          )
+        } else if (fallbackSubmit) {
+          fallbackSubmit(
+            [
+              "Add this drill-down insight to the main discussion:",
+              "",
+              `Drill-down request: ${query}`,
+              "",
+              response,
+            ].join("\n")
+          )
+          integrated = true
+        }
+
+        if (!integrated) {
+          setIsAddingDrilldownInsight(false)
+          return
+        }
+
+        markDrilldownEntryAdded(pointId, true)
+        touchLatestAdded(pointId)
+        setDidAddDrilldownInsight(true)
+        setIsAddingDrilldownInsight(false)
+        setTimeout(() => {
+          drilldownAbortRef.current?.abort()
+          drilldownAbortRef.current = null
+          drilldownDispatch({ type: "CLOSE_DRILLDOWN_PANEL" })
+          setDidAddDrilldownInsight(false)
+        }, 800)
+      } catch {
+        setIsAddingDrilldownInsight(false)
+      }
+    })()
+  }, [
+    didAddDrilldownInsight,
+    drilldownState.citations,
+    drilldownState.context,
+    drilldownState.pointId,
+    drilldownState.query,
+    drilldownState.response,
+    isAddingDrilldownInsight,
+    onDrilldownInsightAdd,
+    onSuggestion,
+    onWorkflowSuggestion,
+    touchLatestAdded,
+  ])
+
+  const handleDrilldownPanelOpenChange = useCallback((open: boolean) => {
+    if (open) return
+    drilldownAbortRef.current?.abort()
+    drilldownAbortRef.current = null
+    drilldownDispatch({ type: "CLOSE_DRILLDOWN_PANEL" })
+    setIsAddingDrilldownInsight(false)
+    setDidAddDrilldownInsight(false)
+  }, [])
 
   useEffect(() => {
     setCustomRefinementInput("")
@@ -479,7 +1141,10 @@ export function MessageAssistant({
     // If so, this is an evidence-backed response and we should NOT extract from web sources
     // even if evidenceCitations state is temporarily empty (e.g., during restore)
     const hasEvidenceMarkers =
-      contentToRender && (/\[\d+\]/.test(contentToRender) || /\[PMID\s*:\s*\d+\]/i.test(contentToRender))
+      contentToRender &&
+      (/\[\d+\]/.test(contentToRender) ||
+        /\[PMID\s*:\s*\d+\]/i.test(contentToRender) ||
+        /\[CITE[_:][^\]]+\]/i.test(contentToRender))
     const hasCITATIONMarkers =
       contentToRender && /\[CITATION:\d+/.test(contentToRender)
     
@@ -487,18 +1152,15 @@ export function MessageAssistant({
     // Evidence markers indicate this response came from evidence mode, so we should wait
     // for evidence citations to be restored rather than extracting from web sources
     if (hasAttachedEvidenceCitations) {
-      console.log('[MessageAssistant] Skipping source extraction - using evidence citations:', evidenceCitations.length)
+      console.log('[MessageAssistant] Skipping source extraction - using evidence citations:', effectiveEvidenceCitations.length)
       return
     }
 
-    // If evidence markers are present and we also have tool/source metadata,
-    // allow source extraction to map those markers onto real citations.
-    if (hasEvidenceMarkers && sources.length === 0) {
-      return
-    }
-    
-    // If we have evidence markers but no citations yet, check sessionStorage
-    // This handles the case where state was reset but citations exist in storage
+    const hasPmidStyleMarkers =
+      Boolean(contentToRender) && /\[\s*\d{6,10}(?:\s*[,;]\s*\d{6,10})*\s*\]/.test(contentToRender)
+
+    // If we have ordinal evidence markers like [1], [2] but no citations yet, check sessionStorage.
+    // For PMID-style markers like [1578956], we should NOT block fallback synthesis from text.
     if (hasEvidenceMarkers && !hasCITATIONMarkers) {
       let hasStoredEvidenceCitations = false
       if (typeof window !== 'undefined') {
@@ -519,7 +1181,7 @@ export function MessageAssistant({
         }
       }
       
-      if (hasStoredEvidenceCitations) {
+      if (hasStoredEvidenceCitations && !hasPmidStyleMarkers) {
         // Don't extract from sources - evidence citations will be restored soon
         return
       }
@@ -586,6 +1248,8 @@ export function MessageAssistant({
       const markers = parseCitationMarkers(contentToRender || "")
       const uniqueIndices = getUniqueCitationIndices(markers)
       const placeholderCitations = new Map<number, CitationData>()
+      const inlinePmids = extractInlinePmidCandidates(contentToRender || "")
+      const inlineSourceIds = extractInlineSourceIdCandidates(contentToRender || "")
       
       // Try to extract URLs from the text - be more aggressive
       const urlPattern = /https?:\/\/[^\s\)\]\[]+/g
@@ -606,11 +1270,18 @@ export function MessageAssistant({
       
       const medicalUrls = [...pubmedUrls, ...jamaUrls, ...nejmUrls, ...domainUrls, ...allUrls]
       const uniqueUrls = Array.from(new Set(medicalUrls))
+      const hasLikelyPmidOnlyCitations =
+        uniqueIndices.length > 0 && uniqueIndices.every((idx) => idx >= 100000 && idx <= 9999999999)
       
       uniqueIndices.forEach((idx, i) => {
         const url = uniqueUrls[i] || uniqueUrls[idx - 1] || undefined
         
         let finalUrl = url
+        let inferredPmid: string | undefined
+        if (idx >= 100000 && idx <= 9999999999) {
+          inferredPmid = String(idx)
+          finalUrl = finalUrl || `https://pubmed.ncbi.nlm.nih.gov/${idx}/`
+        }
         if (!finalUrl) {
           // Look for PMID in the citation context
           const marker = markers.find(m => m.indices.includes(idx))
@@ -619,10 +1290,12 @@ export function MessageAssistant({
             const end = Math.min(contentToRender.length, marker.endIndex + 200)
             const citationContext = contentToRender?.substring(start, end) || ""
             const pmidMatch = citationContext.match(/PMID[:\s]+(\d+)/i) || 
-                            citationContext.match(/(\d{8})/)?.[1] ||
-                            citationContext.match(/pubmed[^\d]*(\d{8,})/i)?.[1]
+                            citationContext.match(/(\d{6,10})/)?.[1] ||
+                            citationContext.match(/pubmed[^\d]*(\d{6,10})/i)?.[1]
             if (pmidMatch) {
-              finalUrl = `https://pubmed.ncbi.nlm.nih.gov/${pmidMatch}`
+              const pmid = Array.isArray(pmidMatch) ? pmidMatch[1] : pmidMatch
+              inferredPmid = pmid
+              finalUrl = `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`
             }
           }
         } else if (!finalUrl.startsWith('http')) {
@@ -630,17 +1303,113 @@ export function MessageAssistant({
           finalUrl = `https://${finalUrl}`
         }
         
+        if (!inferredPmid && finalUrl?.includes("pubmed.ncbi.nlm.nih.gov")) {
+          const pmidFromUrl = finalUrl.match(/pubmed\.ncbi\.nlm\.nih\.gov\/(\d{6,10})/i)?.[1]
+          if (pmidFromUrl) inferredPmid = pmidFromUrl
+        }
+
         const journalName = finalUrl ? extractJournalFromUrl(finalUrl) : undefined
         
         placeholderCitations.set(idx, {
           index: idx,
-          title: journalName ? `View on ${journalName}` : `Citation ${idx}`,
+          sourceId: inferredPmid ? `pmid:${inferredPmid}` : undefined,
+          title:
+            inferredPmid
+              ? `PMID ${inferredPmid}`
+              : journalName
+                ? `View on ${journalName}`
+                : hasLikelyPmidOnlyCitations
+                  ? `PMID ${idx}`
+                  : `Citation ${idx}`,
           authors: [],
-          journal: journalName || `Citation ${idx}`,
+          journal:
+            inferredPmid || hasLikelyPmidOnlyCitations
+              ? "PubMed"
+              : journalName || `Citation ${idx}`,
           year: finalUrl ? extractYearFromUrl(finalUrl) || '' : '',
           url: finalUrl,
+          pmid: inferredPmid,
         })
       })
+
+      // If marker parsing failed but explicit PMIDs exist, still synthesize citations.
+      if (placeholderCitations.size === 0 && inlinePmids.length > 0) {
+        inlinePmids.forEach((pmid) => {
+          const index = Number.parseInt(pmid, 10)
+          placeholderCitations.set(index, {
+            index,
+            sourceId: `pmid:${pmid}`,
+            title: `PMID ${pmid}`,
+            authors: [],
+            journal: "PubMed",
+            year: "",
+            url: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
+            pmid,
+          })
+        })
+      }
+
+      if (placeholderCitations.size === 0 && inlineSourceIds.length > 0) {
+        inlineSourceIds.forEach((sourceId, i) => {
+          const fallbackIndex = i + 1
+          if (sourceId.startsWith("pmid:")) {
+            const pmid = sourceId.replace(/^pmid:/, "").trim()
+            if (!/^\d{6,10}$/.test(pmid)) return
+            const index = Number.parseInt(pmid, 10)
+            placeholderCitations.set(index, {
+              index,
+              sourceId: `pmid:${pmid}`,
+              title: `PMID ${pmid}`,
+              authors: [],
+              journal: "PubMed",
+              year: "",
+              url: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
+              pmid,
+            })
+            return
+          }
+          if (sourceId.startsWith("doi:")) {
+            const doi = sourceId.replace(/^doi:/, "").trim()
+            if (!doi) return
+            placeholderCitations.set(fallbackIndex, {
+              index: fallbackIndex,
+              sourceId: `doi:${doi}`,
+              title: `DOI ${doi}`,
+              authors: [],
+              journal: "DOI Source",
+              year: "",
+              url: `https://doi.org/${doi}`,
+              doi,
+            })
+            return
+          }
+          if (sourceId.startsWith("url:")) {
+            const rawUrl = sourceId.replace(/^url:/, "").trim()
+            if (!rawUrl) return
+            const normalizedUrl = /^https?:\/\//i.test(rawUrl)
+              ? rawUrl
+              : `https://${rawUrl}`
+            placeholderCitations.set(fallbackIndex, {
+              index: fallbackIndex,
+              sourceId: `url:${rawUrl}`,
+              title: "Source",
+              authors: [],
+              journal: extractJournalFromUrl(normalizedUrl) || "Source",
+              year: extractYearFromUrl(normalizedUrl) || "",
+              url: normalizedUrl,
+            })
+            return
+          }
+          placeholderCitations.set(fallbackIndex, {
+            index: fallbackIndex,
+            sourceId,
+            title: sourceId,
+            authors: [],
+            journal: "Source",
+            year: "",
+          })
+        })
+      }
       
       if (placeholderCitations.size > 0) {
         setCitations(placeholderCitations)
@@ -654,7 +1423,7 @@ export function MessageAssistant({
       }
     }
     // Include evidenceCitations to ensure we re-check when they arrive
-  }, [contentToRender, evidenceCitations, hasAttachedEvidenceCitations, sources])
+  }, [contentToRender, effectiveEvidenceCitations, hasAttachedEvidenceCitations, sources])
   
   const mergedCitations = useMemo(
     () => mergeAppendixCitations(citations, trailingSourceEntries),
@@ -667,13 +1436,22 @@ export function MessageAssistant({
     () => mergeEvidenceIntoCitations(mergedCitations, displayEvidenceCitations),
     [displayEvidenceCitations, mergedCitations]
   )
+  const meaningfulSourcesCitations = useMemo(() => {
+    const filtered = new Map<number, CitationData>()
+    sourcesCitations.forEach((citation, index) => {
+      if (isMeaningfulCitationData(citation)) {
+        filtered.set(index, citation)
+      }
+    })
+    return filtered
+  }, [sourcesCitations])
 
   // Hide dedicated sources section when all fallback entries
   // are placeholders like "Citation 1" with no real metadata.
   const hasOnlyPlaceholderCitations = useMemo(() => {
-    if (sourcesCitations.size === 0) return false
+    if (meaningfulSourcesCitations.size === 0) return false
 
-    return Array.from(sourcesCitations.values()).every((citation) => {
+    return Array.from(meaningfulSourcesCitations.values()).every((citation) => {
       const title = (citation.title || "").trim()
       const journal = (citation.journal || "").trim()
       const placeholderPattern = /^Citation\s+\d+$/i
@@ -682,7 +1460,7 @@ export function MessageAssistant({
         placeholderPattern.test(journal)
       )
     })
-  }, [sourcesCitations])
+  }, [meaningfulSourcesCitations])
   
   // Check if message has citations or sources
   const hasCitations = activeCitations.size > 0
@@ -692,12 +1470,13 @@ export function MessageAssistant({
     Boolean(contentToRender) &&
     (/\[CITATION:\d+/.test(contentToRender) ||
       /\[\d+\]/.test(contentToRender) ||
-      /\[PMID\s*:\s*\d+\]/i.test(contentToRender))
+      /\[PMID\s*:\s*\d+\]/i.test(contentToRender) ||
+      /\[CITE[_:][^\]]+\]/i.test(contentToRender))
   // Show citations if we have them, have sources, or have citation markers in text
   const shouldShowCitations = hasCitations || hasSources || hasCitationMarkers
   const showSourcesSection =
     status === "ready" &&
-    sourcesCitations.size > 0 &&
+    meaningfulSourcesCitations.size > 0 &&
     !isLastStreaming &&
     !hasOnlyPlaceholderCitations
   const showTrustSummary =
@@ -886,7 +1665,9 @@ export function MessageAssistant({
         parts,
         annotations: (annotations || []) as any,
         fallbackText: inlineFallbackText,
+        status,
         streamIntroPreview,
+        optimisticTaskBoard,
         referencedUploads,
       }),
     [
@@ -894,7 +1675,9 @@ export function MessageAssistant({
       inlineFallbackText,
       messageId,
       parts,
+      optimisticTaskBoard,
       referencedUploads,
+      status,
       streamIntroPreview,
     ]
   )
@@ -945,28 +1728,109 @@ export function MessageAssistant({
     if (copyToClipboard) copyToClipboard()
   }, [copyToClipboard])
 
+  const [fullAnalysisCopied, setFullAnalysisCopied] = useState(false)
+  const handleCopyFullAnalysis = useCallback(() => {
+    const citations = displayEvidenceCitations.length > 0 ? displayEvidenceCitations : []
+    // Build an index mapping from original citation index to sequential number
+    const indexMap = new Map<number, number>()
+    const sortedCitations = [...citations].sort((a, b) => a.index - b.index)
+    sortedCitations.forEach((c, i) => indexMap.set(c.index, i + 1))
+
+    // Remap citation markers in response text to sequential numbering
+    let responseText = contentToRender || children || ""
+    indexMap.forEach((newIdx, oldIdx) => {
+      responseText = responseText.replace(
+        new RegExp(`\\[${oldIdx}\\]`, "g"),
+        `[__SEQ_${newIdx}__]`
+      )
+    })
+    responseText = responseText.replace(/__SEQ_(\d+)__/g, "$1")
+
+    const lines: string[] = []
+    lines.push("=== FLEMING FULL RESPONSE ===\n")
+    lines.push(responseText)
+    lines.push("\n\n=== EVIDENCE SOURCES (" + sortedCitations.length + ") ===\n")
+    sortedCitations.forEach((c, i) => {
+      const seqNum = i + 1
+      lines.push(`[${seqNum}] ${c.title || "Untitled"}`)
+      const meta: string[] = []
+      if (c.journal) meta.push(`Journal: ${c.journal}`)
+      if (c.year) meta.push(`Year: ${c.year}`)
+      if (c.evidenceLevel) meta.push(`Evidence Level: L${c.evidenceLevel}`)
+      if (c.studyType) meta.push(`Study Type: ${c.studyType}`)
+      if (c.pmid) meta.push(`PMID: ${c.pmid}`)
+      if (c.doi) meta.push(`DOI: ${c.doi}`)
+      if (c.url) meta.push(`URL: ${c.url}`)
+      if (c.sourceId) meta.push(`Source ID: ${c.sourceId}`)
+      if (c.sourceType) meta.push(`Source Type: ${c.sourceType}`)
+      if (c.sourceLabel) meta.push(`Source Label: ${c.sourceLabel}`)
+      if (Array.isArray(c.authors) && c.authors.length > 0) meta.push(`Authors: ${c.authors.join(", ")}`)
+      if (c.sampleSize) meta.push(`Sample Size: ${c.sampleSize}`)
+      if (Array.isArray(c.meshTerms) && c.meshTerms.length > 0) meta.push(`MeSH: ${c.meshTerms.join(", ")}`)
+      if (c.snippet) meta.push(`Snippet: ${c.snippet.slice(0, 200)}`)
+      if (meta.length > 0) lines.push("  " + meta.join(" | "))
+      lines.push("")
+    })
+    lines.push("=== END ===")
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setFullAnalysisCopied(true)
+      setTimeout(() => setFullAnalysisCopied(false), 2000)
+    })
+  }, [contentToRender, children, displayEvidenceCitations])
+
   const memoizedOnReload = useCallback(() => {
     if (onReload) onReload()
   }, [onReload])
 
+  const totalSyncedInsightCount = Math.max(
+    discussionInsightCount,
+    syncedInsightCount
+  )
+
   return (
-    <Message
-      className={cn(
-        "group flex w-full max-w-3xl flex-1 items-start gap-4 px-6 pb-2",
-        hasScrollAnchor && "min-h-scroll-anchor",
-        className
-      )}
-    >
-      <div className={cn("flex min-w-full flex-col gap-2", isLast && "pb-8")}>
+    <>
+      <Message
+        className={cn(
+          "group flex w-full max-w-3xl flex-1 items-start gap-4 px-6 pb-2",
+          hasScrollAnchor && "min-h-scroll-anchor",
+          className
+        )}
+      >
+        <div className={cn("flex min-w-full flex-col gap-2", isLast && "pb-8")}>
         {searchImageResults.length > 0 && (
           <SearchImages results={searchImageResults} />
         )}
 
         {learningCard && <LearningCard card={learningCard} />}
 
-        {contentNullOrEmpty && !hasRenderableActivityTimeline ? (
-        isLastStreaming ? <div
-            className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
+        {clinicalDocument &&
+        (clinicalDocument.content.trim().length > 50 ||
+          clinicalDocument.isStreaming ||
+          (clinicalDocument.type === "prescribe" &&
+            (clinicalDocument.prescriptionItems?.length ?? 0) > 0)) ? (
+          <>
+            {clinicalDocument.type === "prescribe" &&
+              (clinicalDocument.prescriptionItems?.length ?? 0) > 0 && (
+                <PrescriptionCard
+                  items={clinicalDocument.prescriptionItems!}
+                  narrativeContent={clinicalDocument.content}
+                  isStreaming={clinicalDocument.isStreaming}
+                />
+              )}
+            {(clinicalDocument.type !== "prescribe" ||
+              !(clinicalDocument.prescriptionItems?.length ?? 0)) &&
+              (clinicalDocument.content.trim().length > 50 ||
+                clinicalDocument.isStreaming) && (
+              <ClinicalDocumentCard
+                document={clinicalDocument}
+                onExpand={handleExpandDocument}
+                messageId={messageId}
+              />
+            )}
+          </>
+        ) : contentNullOrEmpty && !hasRenderableActivityTimeline ? (
+          isLastStreaming ? (
+            <div className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">
               {streamIntroPreview ? (
                 <div className="text-muted-foreground text-sm leading-6">
                   {streamIntroPreview}
@@ -974,7 +1838,8 @@ export function MessageAssistant({
               ) : (
                 <ProcessingLoader />
               )}
-            </div> : null
+            </div>
+          ) : null
         ) : (
           ENABLE_CHAT_ACTIVITY_TIMELINE_V2 ? (
             <ActivityTimeline
@@ -982,6 +1847,10 @@ export function MessageAssistant({
               status={status}
               onSuggestion={onSuggestion}
               onWorkflowSuggestion={onWorkflowSuggestion}
+              onChartDrilldown={handleChartDrilldown}
+              isDrilldownModeActive={
+                drilldownState.open && drilldownState.status === "running"
+              }
               shouldShowCitations={shouldShowCitations}
               citations={activeCitations}
               evidenceCitations={hasEvidenceCitations ? displayEvidenceCitations : undefined}
@@ -999,6 +1868,7 @@ export function MessageAssistant({
               citations={activeCitations}
               evidenceCitations={hasEvidenceCitations ? displayEvidenceCitations : undefined}
               streamIntroPreview={streamIntroPreview}
+              onChartDrilldown={handleChartDrilldown}
             />
           )
         )}
@@ -1148,15 +2018,33 @@ export function MessageAssistant({
           <YouTubeResults results={effectiveYoutubeResults} />
         )}
 
+        {isLast &&
+        latestAddedDrilldownEntry &&
+        totalSyncedInsightCount > 0 ? (
+          <Button
+            type="button"
+            variant="glass"
+            size="sm"
+            onClick={handleOpenSyncedInsight}
+            className={cn(
+              "h-7 rounded-full px-3 text-[11px] font-medium text-foreground/90 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.55)]",
+              shouldPulseInsightPill && "animate-pulse"
+            )}
+          >
+            <Check className="size-3.5" weight="bold" />
+            Insight Added • {totalSyncedInsightCount}
+          </Button>
+        ) : null}
+
         {showTrustSummary && (
           <TrustSummaryCard
             content={contentToRender}
-            citations={displayEvidenceCitations}
+            citations={meaningfulEvidenceCitations}
             prompt={contextPrompt}
           />
         )}
         {showSourcesSection && (
-          <ReferencesSection citations={sourcesCitations} title="Sources" />
+          <ReferencesSection citations={meaningfulSourcesCitations} title="Sources" />
         )}
 
         {Boolean(isLastStreaming || contentNullOrEmpty) ? null : (
@@ -1182,6 +2070,25 @@ export function MessageAssistant({
                 )}
               </button>
             </MessageAction>
+            {hasEvidenceCitations && (
+              <MessageAction
+                tooltip={fullAnalysisCopied ? "Copied with sources!" : "Copy with all sources"}
+                side="bottom"
+              >
+                <button
+                  className="hover:bg-accent/60 text-muted-foreground hover:text-foreground flex size-7.5 items-center justify-center rounded-full bg-transparent transition"
+                  aria-label="Copy full analysis with sources"
+                  onClick={handleCopyFullAnalysis}
+                  type="button"
+                >
+                  {fullAnalysisCopied ? (
+                    <Check className="size-4 text-emerald-500" />
+                  ) : (
+                    <ClipboardText className="size-4" />
+                  )}
+                </button>
+              </MessageAction>
+            )}
             {isLast ? (
               <MessageAction
                 tooltip="Regenerate"
@@ -1200,7 +2107,24 @@ export function MessageAssistant({
             ) : null}
           </MessageActions>
         )}
-      </div>
-    </Message>
+        </div>
+      </Message>
+      <DrilldownPanel
+        open={drilldownState.open}
+        onOpenChange={handleDrilldownPanelOpenChange}
+        context={drilldownState.context}
+        query={drilldownState.query}
+        status={drilldownState.status}
+        response={drilldownState.response}
+        citations={drilldownState.citations}
+        error={drilldownState.error}
+        tasks={drilldownState.tasks}
+        onRetry={handleRetryDrilldown}
+        onPromoteToChat={handlePromoteDrilldownToChat}
+        isAddingInsight={isAddingDrilldownInsight}
+        didAddInsight={didAddDrilldownInsight}
+        isSyncedToDiscussion={isActiveDrilldownSynced}
+      />
+    </>
   )
 }

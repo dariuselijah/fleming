@@ -1,14 +1,29 @@
 import type { UserUploadDetail, UserUploadListItem } from "./types"
 import { createClient } from "@/lib/supabase/client"
+import type {
+  UploadBatchInitPayload,
+  UploadBatchStatusPayload,
+  UploadCollectionSummary,
+} from "@/lib/student-workspace/types"
 
 type UploadProgressCallback = (progress: number) => void
 type UploadStateCallback = (upload: UserUploadListItem) => void
+type BatchProgressCallback = (payload: {
+  fileName: string
+  fileProgress: number
+  uploadedCount: number
+  totalFiles: number
+  overallProgress: number
+}) => void
 const REQUEST_TIMEOUT_MS = 20000
-const STORAGE_UPLOAD_TIMEOUT_MS = 4 * 60 * 1000
+const STORAGE_UPLOAD_TIMEOUT_MS = 30 * 60 * 1000
 const UPLOAD_LIST_CACHE_KEY = "fleming:uploads:list:v2"
 const UPLOAD_LIST_MEMORY_MAX_AGE_MS = 60_000
 const UPLOAD_LIST_STORAGE_MAX_AGE_MS = 10 * 60 * 1000
 const UPLOAD_LIST_MAX_ITEMS = 120
+const SUPABASE_RESUMABLE_UPLOAD_CHUNK_SIZE_BYTES = 6 * 1024 * 1024
+const SUPABASE_RESUMABLE_UPLOAD_RETRY_DELAYS_MS = [0, 3000, 5000, 10000, 20000]
+const MIN_SUPPORTED_STORAGE_OBJECT_LIMIT_MB = 512
 
 type UploadListCachePayload = {
   savedAt: number
@@ -24,14 +39,18 @@ type ListUserUploadsOptions = {
 
 let uploadListMemoryCache: UploadListCachePayload | null = null
 let uploadListRefreshPromise: Promise<UserUploadListItem[]> | null = null
-const SUPABASE_STORAGE_OBJECT_LIMIT_MB = Number.parseInt(
-  process.env.NEXT_PUBLIC_SUPABASE_STORAGE_OBJECT_LIMIT_MB || "50",
+const configuredStorageObjectLimitMb = Number.parseInt(
+  process.env.NEXT_PUBLIC_SUPABASE_STORAGE_OBJECT_LIMIT_MB || `${MIN_SUPPORTED_STORAGE_OBJECT_LIMIT_MB}`,
   10
 )
+const SUPABASE_STORAGE_OBJECT_LIMIT_MB =
+  Number.isFinite(configuredStorageObjectLimitMb) && configuredStorageObjectLimitMb > 0
+    ? Math.max(configuredStorageObjectLimitMb, MIN_SUPPORTED_STORAGE_OBJECT_LIMIT_MB)
+    : MIN_SUPPORTED_STORAGE_OBJECT_LIMIT_MB
 const SUPABASE_STORAGE_OBJECT_LIMIT_BYTES =
   Number.isFinite(SUPABASE_STORAGE_OBJECT_LIMIT_MB) && SUPABASE_STORAGE_OBJECT_LIMIT_MB > 0
     ? SUPABASE_STORAGE_OBJECT_LIMIT_MB * 1024 * 1024
-    : 50 * 1024 * 1024
+    : MIN_SUPPORTED_STORAGE_OBJECT_LIMIT_MB * 1024 * 1024
 
 async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const controller = new AbortController()
@@ -43,6 +62,19 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): P
     })
   } finally {
     clearTimeout(timeoutId)
+  }
+}
+
+function buildResumableUploadEndpoint(projectUrl: string): string {
+  try {
+    const parsed = new URL(projectUrl)
+    const directHost = parsed.hostname.endsWith(".supabase.co")
+      ? parsed.hostname.replace(/\.supabase\.co$/i, ".storage.supabase.co")
+      : parsed.hostname
+    return `${parsed.protocol}//${directHost}/storage/v1/upload/resumable`
+  } catch {
+    const trimmed = projectUrl.replace(/\/+$/, "")
+    return `${trimmed}/storage/v1/upload/resumable`
   }
 }
 
@@ -116,22 +148,29 @@ export async function getUserUploadDetail(uploadId: string): Promise<UserUploadD
   return result.upload
 }
 
-export async function uploadKnowledgeFile(
+export type PendingKnowledgeUpload = {
+  uploadId: string
+  bucket: string
+  filePath: string
+  fileName: string
+  mimeType: string
+  fileSize: number
+  title?: string
+}
+
+export async function initKnowledgeUpload(
   file: File,
-  title?: string,
-  options?: {
-    onProgress?: UploadProgressCallback
-    onUploadState?: UploadStateCallback
-  }
-): Promise<UserUploadListItem> {
+  title?: string
+): Promise<PendingKnowledgeUpload> {
   invalidateUploadListCache()
   if (file.size > SUPABASE_STORAGE_OBJECT_LIMIT_BYTES) {
     const limitMb = Math.round(SUPABASE_STORAGE_OBJECT_LIMIT_BYTES / (1024 * 1024))
     const sizeMb = Math.round(file.size / (1024 * 1024))
     throw new Error(
-      `This file is too large for direct upload (${sizeMb}MB). Maximum supported size is ${limitMb}MB.`
+      `This file is too large (${sizeMb}MB). Maximum supported size is ${limitMb}MB.`
     )
   }
+
   const initResponse = await fetch("/api/uploads/init", {
     method: "POST",
     headers: {
@@ -158,6 +197,24 @@ export async function uploadKnowledgeFile(
     filePath: string
   }
 
+  return {
+    uploadId: pendingUpload.uploadId,
+    bucket: pendingUpload.bucket,
+    filePath: pendingUpload.filePath,
+    fileName: file.name,
+    mimeType: file.type || "application/octet-stream",
+    fileSize: file.size,
+    title,
+  }
+}
+
+export async function uploadKnowledgeFileData(
+  pendingUpload: PendingKnowledgeUpload,
+  file: File,
+  options?: {
+    onProgress?: UploadProgressCallback
+  }
+): Promise<void> {
   const supabase = createClient()
   if (!supabase) {
     throw new Error("Supabase is not available in this environment")
@@ -170,9 +227,16 @@ export async function uploadKnowledgeFile(
     file,
     options?.onProgress
   )
+}
 
-  const stopPolling = startUploadPolling(pendingUpload.uploadId, options?.onUploadState)
-  const response = await fetch(`/api/uploads/${pendingUpload.uploadId}/ingest`, {
+export async function startKnowledgeIngest(
+  uploadId: string,
+  options?: {
+    onUploadState?: UploadStateCallback
+  }
+): Promise<UserUploadListItem | null> {
+  const stopPolling = startUploadPolling(uploadId, options?.onUploadState)
+  const response = await fetch(`/api/uploads/${uploadId}/ingest`, {
     method: "POST",
     credentials: "include",
     keepalive: true,
@@ -190,6 +254,28 @@ export async function uploadKnowledgeFile(
       // Keep this non-blocking. Polling/UI refresh will still update state.
     })
     return result.upload as UserUploadListItem
+  }
+
+  return null
+}
+
+export async function uploadKnowledgeFile(
+  file: File,
+  title?: string,
+  options?: {
+    onProgress?: UploadProgressCallback
+    onUploadState?: UploadStateCallback
+  }
+): Promise<UserUploadListItem> {
+  const pendingUpload = await initKnowledgeUpload(file, title)
+  await uploadKnowledgeFileData(pendingUpload, file, {
+    onProgress: options?.onProgress,
+  })
+  const result = await startKnowledgeIngest(pendingUpload.uploadId, {
+    onUploadState: options?.onUploadState,
+  })
+  if (result) {
+    return result
   }
 
   const uploads = await listUserUploads({ forceRefresh: true })
@@ -239,6 +325,203 @@ export async function reprocessKnowledgeFile(uploadId: string): Promise<UserUplo
     return updated
   }
   throw new Error("Reprocess started, but upload list item was not found")
+}
+
+export async function listUploadCollections(): Promise<UploadCollectionSummary[]> {
+  let response: Response
+  try {
+    response = await fetchWithTimeout("/api/uploads/collections", {
+      method: "GET",
+      credentials: "include",
+    })
+  } catch (error) {
+    const isAbort = error instanceof Error && error.name === "AbortError"
+    throw new Error(isAbort ? "Collection fetch timed out" : "Failed to load upload collections")
+  }
+
+  if (!response.ok) {
+    const payload = await safeJson(response)
+    throw new Error(payload?.error || "Failed to load upload collections")
+  }
+  const result = await response.json()
+  return Array.isArray(result.collections) ? (result.collections as UploadCollectionSummary[]) : []
+}
+
+export async function initUploadBatch(
+  files: File[],
+  options?: {
+    collectionName?: string
+    description?: string
+    maxConcurrency?: number
+  }
+): Promise<UploadBatchInitPayload> {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error("At least one file is required to initialize a batch upload")
+  }
+
+  const response = await fetch("/api/uploads/batch/init", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify({
+      collectionName: options?.collectionName,
+      description: options?.description,
+      maxConcurrency: options?.maxConcurrency,
+      files: files.map((file) => ({
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        fileSize: file.size,
+      })),
+    }),
+  })
+
+  if (!response.ok) {
+    const payload = await safeJson(response)
+    throw new Error(payload?.error || "Batch initialization failed")
+  }
+
+  return (await response.json()) as UploadBatchInitPayload
+}
+
+export async function startUploadBatchIngest(
+  batchId: string,
+  options?: {
+    maxConcurrency?: number
+    reprocessFailed?: boolean
+  }
+): Promise<UploadBatchStatusPayload> {
+  const response = await fetch(`/api/uploads/batch/${batchId}/ingest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    keepalive: true,
+    body: JSON.stringify({
+      maxConcurrency: options?.maxConcurrency,
+      reprocessFailed: options?.reprocessFailed,
+    }),
+  })
+
+  if (!response.ok) {
+    const payload = await safeJson(response)
+    throw new Error(payload?.error || "Failed to start batch ingest")
+  }
+  return (await response.json()) as UploadBatchStatusPayload
+}
+
+export async function getUploadBatchStatus(batchId: string): Promise<UploadBatchStatusPayload> {
+  let response: Response
+  try {
+    response = await fetchWithTimeout(`/api/uploads/batch/${batchId}`, {
+      method: "GET",
+      credentials: "include",
+    })
+  } catch (error) {
+    const isAbort = error instanceof Error && error.name === "AbortError"
+    throw new Error(isAbort ? "Batch status request timed out" : "Failed to fetch batch status")
+  }
+
+  if (!response.ok) {
+    const payload = await safeJson(response)
+    throw new Error(payload?.error || "Failed to fetch batch status")
+  }
+
+  return (await response.json()) as UploadBatchStatusPayload
+}
+
+export async function uploadKnowledgeFilesBatch(
+  files: File[],
+  options?: {
+    collectionName?: string
+    description?: string
+    maxConcurrency?: number
+    onProgress?: BatchProgressCallback
+    pollIntervalMs?: number
+    pollTimeoutMs?: number
+  }
+): Promise<UploadBatchStatusPayload> {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error("No files selected for batch upload")
+  }
+  invalidateUploadListCache()
+
+  const oversized = files.find((file) => file.size > SUPABASE_STORAGE_OBJECT_LIMIT_BYTES)
+  if (oversized) {
+    const limitMb = Math.round(SUPABASE_STORAGE_OBJECT_LIMIT_BYTES / (1024 * 1024))
+    throw new Error(`"${oversized.name}" exceeds the storage object limit (${limitMb}MB)`)
+  }
+
+  const initPayload = await initUploadBatch(files, {
+    collectionName: options?.collectionName,
+    description: options?.description,
+    maxConcurrency: options?.maxConcurrency,
+  })
+
+  const supabase = createClient()
+  if (!supabase) {
+    throw new Error("Supabase is not available in this environment")
+  }
+
+  const perFileProgress = new Array(files.length).fill(0)
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index]
+    const token = initPayload.uploads[index]
+    if (!token) {
+      throw new Error("Batch initialization token mismatch")
+    }
+    await uploadFileToStorageWithProgress(
+      supabase,
+      token.bucket,
+      token.filePath,
+      file,
+      (progress) => {
+        perFileProgress[index] = progress
+        const uploadedCount = perFileProgress.filter((value) => value >= 100).length
+        const overallProgress = Math.round(
+          perFileProgress.reduce((sum, value) => sum + value, 0) / Math.max(1, files.length)
+        )
+        options?.onProgress?.({
+          fileName: file.name,
+          fileProgress: progress,
+          uploadedCount,
+          totalFiles: files.length,
+          overallProgress,
+        })
+      }
+    )
+  }
+
+  const accepted = await startUploadBatchIngest(initPayload.batch.id, {
+    maxConcurrency: options?.maxConcurrency,
+  })
+
+  const pollIntervalMs = Math.max(1000, options?.pollIntervalMs ?? 2000)
+  const pollTimeoutMs = Math.max(20_000, options?.pollTimeoutMs ?? 10 * 60_000)
+  const deadline = Date.now() + pollTimeoutMs
+
+  let lastStatus: UploadBatchStatusPayload = accepted
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+    const status = await getUploadBatchStatus(initPayload.batch.id)
+    lastStatus = status
+    if (
+      status.batch.status === "completed" ||
+      status.batch.status === "partial" ||
+      status.batch.status === "failed" ||
+      status.batch.status === "cancelled"
+    ) {
+      break
+    }
+  }
+
+  void refreshUploadListCache().catch(() => {
+    // Non-blocking refresh after batch ingest.
+  })
+
+  return lastStatus
 }
 
 async function safeJson(response: Response) {
@@ -389,60 +672,69 @@ async function uploadFileToStorageWithProgress(
   if (!projectUrl || !anonKey) {
     throw new Error("Supabase client environment is incomplete")
   }
-
-  const encodedPath = filePath
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")
-
-  const uploadUrl = `${projectUrl}/storage/v1/object/${bucket}/${encodedPath}`
+  const endpoint = buildResumableUploadEndpoint(projectUrl)
+  const uploadId = `${bucket}/${filePath}`
+  const { Upload: TusUpload } = await import("tus-js-client")
 
   await new Promise<void>((resolve, reject) => {
-    const request = new XMLHttpRequest()
-    request.open("POST", uploadUrl)
-    request.timeout = STORAGE_UPLOAD_TIMEOUT_MS
-    request.setRequestHeader("Authorization", `Bearer ${session.access_token}`)
-    request.setRequestHeader("apikey", anonKey)
-    request.setRequestHeader("x-upsert", "true")
-    request.setRequestHeader("Content-Type", file.type || "application/octet-stream")
-
-    request.upload.onprogress = (event) => {
-      if (!event.lengthComputable || !onProgress) return
-      const progress = Math.min(100, Math.round((event.loaded / event.total) * 100))
-      onProgress(progress)
-    }
-
-    request.onerror = () => {
-      reject(new Error("Failed to upload file to storage"))
-    }
-
-    request.ontimeout = () => {
-      reject(new Error("Upload timed out while sending to storage"))
-    }
-
-    request.onload = () => {
-      if (request.status >= 200 && request.status < 300) {
+    const upload = new TusUpload(file, {
+      endpoint,
+      retryDelays: SUPABASE_RESUMABLE_UPLOAD_RETRY_DELAYS_MS,
+      headers: {
+        authorization: `Bearer ${session.access_token}`,
+        apikey: anonKey,
+        "x-upsert": "true",
+      },
+      metadata: {
+        bucketName: bucket,
+        objectName: filePath,
+        contentType: file.type || "application/octet-stream",
+        cacheControl: "3600",
+        metadata: JSON.stringify({
+          uploadId,
+        }),
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      chunkSize: SUPABASE_RESUMABLE_UPLOAD_CHUNK_SIZE_BYTES,
+      onError: (error) => {
+        clearTimeout(timeoutId)
+        const message = error instanceof Error ? error.message : String(error)
+        if (/maximum allowed size|object exceeded/i.test(message)) {
+          const limitMb = Math.round(SUPABASE_STORAGE_OBJECT_LIMIT_BYTES / (1024 * 1024))
+          reject(new Error(`This file exceeds the storage object limit (${limitMb}MB).`))
+          return
+        }
+        reject(new Error(message || "Failed to upload file to storage"))
+      },
+      onProgress: (bytesUploaded, bytesTotal) => {
+        if (!onProgress || bytesTotal <= 0) return
+        const progress = Math.min(100, Math.round((bytesUploaded / bytesTotal) * 100))
+        onProgress(progress)
+      },
+      onSuccess: () => {
+        clearTimeout(timeoutId)
         onProgress?.(100)
         resolve()
-        return
-      }
+      },
+    })
 
-      let errorMessage = "Failed to upload file to storage"
-      try {
-        const payload = JSON.parse(request.responseText)
-        errorMessage = payload.message || payload.error || errorMessage
-      } catch {
-        if (request.responseText) {
-          errorMessage = request.responseText
+    const timeoutId = setTimeout(() => {
+      void upload.abort(true)
+      reject(new Error("Upload timed out while sending to storage"))
+    }, STORAGE_UPLOAD_TIMEOUT_MS)
+
+    upload
+      .findPreviousUploads()
+      .then((previousUploads) => {
+        if (previousUploads.length > 0) {
+          upload.resumeFromPreviousUpload(previousUploads[0]!)
         }
-      }
-      if (/maximum allowed size|object exceeded/i.test(errorMessage)) {
-        const limitMb = Math.round(SUPABASE_STORAGE_OBJECT_LIMIT_BYTES / (1024 * 1024))
-        errorMessage = `This file exceeds the storage object limit (${limitMb}MB).`
-      }
-      reject(new Error(errorMessage))
-    }
-
-    request.send(file)
+        upload.start()
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      })
   })
 }

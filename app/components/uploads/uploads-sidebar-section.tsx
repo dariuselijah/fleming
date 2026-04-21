@@ -30,6 +30,14 @@ const ACCEPTED_KNOWLEDGE_UPLOADS = [
   "image/png",
   "image/webp",
   "image/gif",
+  ".mp4",
+  ".mov",
+  ".m4v",
+  ".webm",
+  ".mkv",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
 ].join(",")
 
 const formatBytes = (value: number) => {
@@ -388,7 +396,7 @@ export function UploadsSidebarSection() {
           </AnimatePresence>
           {uploads.length === 0 ? (
             <div className="text-muted-foreground rounded-xl border border-dashed border-border px-3 py-3 text-xs">
-              Upload a PDF, PPTX, DOCX, or image to make it searchable in chat.
+              Upload a PDF, PPTX, DOCX, image, or lecture video to make it searchable in chat.
             </div>
           ) : null}
           {uploads.map((upload) => {

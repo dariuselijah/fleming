@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getClinicalProxyBase } from "@/lib/clinical-proxy/url"
 
 const OPENFDA_LABEL_URL = "https://api.fda.gov/drug/label.json"
 const RXNAV_DRUGS_URL = "https://rxnav.nlm.nih.gov/REST/drugs.json"
@@ -13,6 +14,107 @@ type OpenFdaRecord = {
 
 function normalizeMedicationName(name: string): string {
   return name.replace(/\s+/g, " ").trim()
+}
+
+/**
+ * Optional Medprax (or compatible) product search.
+ * - CLINICAL_PROXY_URL: POST /api/medication-search (see API_REQUESTS_MEDIKREDIT_MEDPRAX.md).
+ * - Else MEDPRAX_API_URL + MEDPRAX_API_KEY: GET /medicines/search?q=...
+ */
+async function searchMedpraxMedications(
+  query: string,
+  limit: number
+): Promise<string[]> {
+  const proxyBase = getClinicalProxyBase()
+  if (proxyBase) {
+    try {
+      const response = await fetch(`${proxyBase}/api/medication-search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ query }),
+        cache: "no-store",
+      })
+      if (!response.ok) return []
+
+      const data: unknown = await response.json()
+      const out: string[] = []
+
+      const pushName = (raw: unknown) => {
+        if (typeof raw === "string") {
+          const n = normalizeMedicationName(raw)
+          if (n) out.push(n)
+          return
+        }
+        if (raw && typeof raw === "object") {
+          const o = raw as Record<string, unknown>
+          const n =
+            o.name ?? o.fullDescription ?? o.productName ?? o.description ?? o.label
+          if (typeof n === "string") {
+            const x = normalizeMedicationName(n)
+            if (x) out.push(x)
+          }
+        }
+      }
+
+      if (data && typeof data === "object") {
+        const o = data as Record<string, unknown>
+        const meds = o.medications
+        if (Array.isArray(meds)) meds.forEach(pushName)
+      }
+
+      return [...new Set(out)].slice(0, limit)
+    } catch {
+      return []
+    }
+  }
+
+  const base = process.env.MEDPRAX_API_URL?.replace(/\/$/, "")
+  const key = process.env.MEDPRAX_API_KEY
+  if (!base || !key) return []
+
+  try {
+    const url = `${base}/medicines/search?q=${encodeURIComponent(query)}`
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${key}`,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    })
+    if (!response.ok) return []
+
+    const data: unknown = await response.json()
+    const out: string[] = []
+
+    const pushName = (raw: unknown) => {
+      if (typeof raw === "string") {
+        const n = normalizeMedicationName(raw)
+        if (n) out.push(n)
+        return
+      }
+      if (raw && typeof raw === "object") {
+        const o = raw as Record<string, unknown>
+        const n =
+          o.name ?? o.productName ?? o.description ?? o.label
+        if (typeof n === "string") {
+          const x = normalizeMedicationName(n)
+          if (x) out.push(x)
+        }
+      }
+    }
+
+    if (Array.isArray(data)) {
+      data.forEach(pushName)
+    } else if (data && typeof data === "object") {
+      const o = data as Record<string, unknown>
+      const arr = o.results ?? o.suggestions ?? o.items ?? o.medicines
+      if (Array.isArray(arr)) arr.forEach(pushName)
+    }
+
+    return [...new Set(out)].slice(0, limit)
+  } catch {
+    return []
+  }
 }
 
 function rankMedicationNames(names: string[], query: string): string[] {
@@ -112,7 +214,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ suggestions: [], sources: [] }, { status: 200 })
   }
 
-  const [openFdaResult, rxNavResult] = await Promise.allSettled([
+  const [medpraxResult, openFdaResult, rxNavResult] = await Promise.allSettled([
+    searchMedpraxMedications(query, limit),
     searchOpenFdaMedications(query, limit),
     searchRxNavMedications(query, limit),
   ])
@@ -120,6 +223,10 @@ export async function GET(req: Request) {
   const sourceNames: string[] = []
   const merged = new Set<string>()
 
+  if (medpraxResult.status === "fulfilled" && medpraxResult.value.length > 0) {
+    sourceNames.push("Medprax")
+    for (const name of medpraxResult.value) merged.add(name)
+  }
   if (openFdaResult.status === "fulfilled") {
     sourceNames.push("OpenFDA")
     for (const name of openFdaResult.value) merged.add(name)

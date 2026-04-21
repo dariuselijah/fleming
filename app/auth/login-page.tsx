@@ -5,10 +5,17 @@ import { signInWithGoogle } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 import Image from "next/image"
 import Link from "next/link"
-import { useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { useMemo, useState } from "react"
 import { HeaderGoBack } from "../components/header-go-back"
 
 export default function LoginPage() {
+  const searchParams = useSearchParams()
+  const nextPath = useMemo(() => {
+    const n = searchParams.get("next")?.trim()
+    return n?.startsWith("/") && !n.includes("//") ? n : "/"
+  }, [searchParams])
+
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -23,7 +30,7 @@ export default function LoginPage() {
       setIsLoading(true)
       setError(null)
 
-      const data = await signInWithGoogle(supabase)
+      const data = await signInWithGoogle(supabase, { next: nextPath })
 
       // Redirect to the provider URL
       if (data?.url) {

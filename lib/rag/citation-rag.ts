@@ -333,7 +333,7 @@ ${citation.chunk_text.substring(0, 500)}${citation.chunk_text.length > 500 ? '..
 1. You MUST only use information from the provided citations below
 2. Every factual claim MUST be followed by [CITATION:X] where X is the citation number
 3. You CANNOT make claims not supported by the citations
-4. If information is not in the citations, say "This information is not available in the provided sources"
+4. If information is not in the citations, either rewrite the claim using the closest available evidence or omit the claim entirely. Never add disclaimers about missing sources.
 5. Direct quotes should be marked as [CITATION:X:QUOTE:"exact text"]
 
 **Available Citations:**

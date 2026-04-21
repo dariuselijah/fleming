@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS user_uploads (
   storage_bucket TEXT NOT NULL DEFAULT 'chat-attachments',
   original_file_path TEXT NOT NULL UNIQUE,
   upload_kind TEXT NOT NULL CHECK (
-    upload_kind IN ('pdf', 'pptx', 'docx', 'image', 'text', 'other')
+    upload_kind IN ('pdf', 'pptx', 'docx', 'image', 'text', 'video', 'other')
   ),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (
     status IN ('pending', 'processing', 'completed', 'failed')

@@ -5,32 +5,31 @@ import { DrawerClose } from "@/components/ui/drawer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { cn } from "@/lib/utils"
-import {
-  GearSixIcon,
-  PaintBrushIcon,
-  PlugsConnectedIcon,
-  XIcon,
-} from "@phosphor-icons/react"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import { Buildings, GearSixIcon, PaintBrushIcon, XIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 import { InteractionPreferences } from "./appearance/interaction-preferences"
 import { LayoutSettings } from "./appearance/layout-settings"
 import { ThemeSelection } from "./appearance/theme-selection"
-import { ConnectorsSettings } from "./connectors/connectors-settings"
 import { AccountManagement } from "./general/account-management"
 import { UserProfile } from "./general/user-profile"
 import { HealthContext } from "./general/health-context"
 import { UserRoleSelection } from "./general/user-role-selection"
+import { PracticeSettingsTab } from "./general/practice-settings-tab"
 
 type SettingsContentProps = {
   isDrawer?: boolean
 }
 
-type TabType = "general" | "appearance" | "connectors"
+type TabType = "general" | "appearance" | "practice"
 
 export function SettingsContent({
   isDrawer = false,
 }: SettingsContentProps) {
   const [activeTab, setActiveTab] = useState<TabType>("general")
+  const { preferences } = useUserPreferences()
+  const showHealthContext = preferences.userRole === "general"
+  const showPracticeTab = preferences.userRole === "doctor"
 
   return (
     <div
@@ -59,7 +58,6 @@ export function SettingsContent({
         )}
       >
         {isDrawer ? (
-          // Mobile version - tabs on top
           <div className="w-full items-start justify-start overflow-hidden py-4">
             <div>
               <TabsList className="mb-4 flex w-full min-w-0 flex-nowrap items-center justify-start overflow-x-auto bg-transparent px-0">
@@ -77,26 +75,20 @@ export function SettingsContent({
                   <PaintBrushIcon className="size-4" />
                   <span>Appearance</span>
                 </TabsTrigger>
-                <TabsTrigger
-                  value="connectors"
-                  className="flex shrink-0 items-center gap-2"
-                >
-                  <PlugsConnectedIcon className="size-4" />
-                  <span>Connectors</span>
-                </TabsTrigger>
+                {showPracticeTab && (
+                  <TabsTrigger value="practice" className="flex shrink-0 items-center gap-2">
+                    <Buildings className="size-4" />
+                    <span>Practice</span>
+                  </TabsTrigger>
+                )}
               </TabsList>
             </div>
 
-            {/* Mobile tabs content */}
             <TabsContent value="general" className="space-y-6 px-6">
               <UserProfile />
               <UserRoleSelection />
-              <HealthContext />
-              {isSupabaseEnabled && (
-                <>
-                  <AccountManagement />
-                </>
-              )}
+              {showHealthContext && <HealthContext />}
+              {isSupabaseEnabled && <AccountManagement />}
             </TabsContent>
 
             <TabsContent value="appearance" className="space-y-6 px-6">
@@ -105,12 +97,13 @@ export function SettingsContent({
               <InteractionPreferences />
             </TabsContent>
 
-            <TabsContent value="connectors" className="space-y-6 px-6">
-              <ConnectorsSettings />
-            </TabsContent>
+            {showPracticeTab && (
+              <TabsContent value="practice" className="space-y-6 px-6">
+                <PracticeSettingsTab />
+              </TabsContent>
+            )}
           </div>
         ) : (
-          // Desktop version - tabs on left
           <>
             <TabsList className="block w-48 rounded-none bg-transparent px-3 pt-4">
               <div className="flex w-full flex-col gap-1">
@@ -134,29 +127,23 @@ export function SettingsContent({
                   </div>
                 </TabsTrigger>
 
-                <TabsTrigger
-                  value="connectors"
-                  className="w-full justify-start rounded-md px-3 py-2 text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <PlugsConnectedIcon className="size-4" />
-                    <span>Connectors</span>
-                  </div>
-                </TabsTrigger>
+                {showPracticeTab && (
+                  <TabsTrigger value="practice" className="w-full justify-start rounded-md px-3 py-2 text-left">
+                    <div className="flex items-center gap-2">
+                      <Buildings className="size-4" />
+                      <span>Practice</span>
+                    </div>
+                  </TabsTrigger>
+                )}
               </div>
             </TabsList>
 
-            {/* Desktop tabs content */}
             <div className="flex-1 overflow-auto px-6 pt-4">
               <TabsContent value="general" className="mt-0 space-y-6">
                 <UserProfile />
                 <UserRoleSelection />
-                <HealthContext />
-                {isSupabaseEnabled && (
-                  <>
-                    <AccountManagement />
-                  </>
-                )}
+                {showHealthContext && <HealthContext />}
+                {isSupabaseEnabled && <AccountManagement />}
               </TabsContent>
 
               <TabsContent value="appearance" className="mt-0 space-y-6">
@@ -165,9 +152,11 @@ export function SettingsContent({
                 <InteractionPreferences />
               </TabsContent>
 
-              <TabsContent value="connectors" className="mt-0 space-y-6">
-                <ConnectorsSettings />
-              </TabsContent>
+              {showPracticeTab && (
+                <TabsContent value="practice" className="mt-0 space-y-6">
+                  <PracticeSettingsTab />
+                </TabsContent>
+              )}
             </div>
           </>
         )}

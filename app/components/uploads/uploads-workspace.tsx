@@ -9,6 +9,7 @@ import {
   listUserUploads,
   reprocessKnowledgeFile,
   uploadKnowledgeFile,
+  uploadKnowledgeFilesBatch,
 } from "@/lib/uploads/api"
 import { buildUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
 import type { UploadProgressStage, UserUploadListItem } from "@/lib/uploads/types"
@@ -21,6 +22,7 @@ import {
   FilePdf,
   FilePpt,
   FileText,
+  FileVideo,
   FolderOpen,
   ImageSquare,
   SpinnerGap,
@@ -41,6 +43,14 @@ const ACCEPTED_KNOWLEDGE_UPLOADS = [
   "image/png",
   "image/webp",
   "image/gif",
+  ".mp4",
+  ".mov",
+  ".m4v",
+  ".webm",
+  ".mkv",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
 ].join(",")
 
 const PIPELINE_STAGE_SEQUENCE: Array<{
@@ -76,6 +86,7 @@ function fileIcon(kind: UserUploadListItem["uploadKind"]) {
   if (kind === "docx") return FileDoc
   if (kind === "image") return ImageSquare
   if (kind === "text") return FileText
+  if (kind === "video") return FileVideo
   return FolderOpen
 }
 
@@ -178,7 +189,7 @@ function UploadPipelineCard({ state }: { state: ActiveUploadState }) {
   )
 }
 
-export function UploadsWorkspace() {
+export function UploadsWorkspace({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useUser()
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -267,8 +278,46 @@ export function UploadsWorkspace() {
 
   const handleFileSelection = async (files: FileList | null) => {
     if (!files || files.length === 0) return
+    const selectedFiles = Array.from(files)
 
-    for (const file of Array.from(files)) {
+    if (selectedFiles.length > 1) {
+      try {
+        setActiveUpload({
+          name: `${selectedFiles.length} files`,
+          size: selectedFiles.reduce((sum, file) => sum + file.size, 0),
+          uploadProgress: 0,
+          stage: "uploading",
+          ingestProgress: 72,
+        })
+
+        await uploadKnowledgeFilesBatch(selectedFiles, {
+          onProgress: (payload) => {
+            const activeFile = selectedFiles.find((file) => file.name === payload.fileName)
+            setActiveUpload({
+              name: payload.fileName,
+              size: activeFile?.size ?? 0,
+              uploadProgress: payload.overallProgress,
+              stage: payload.overallProgress >= 100 ? "extracting_pages" : "uploading",
+              ingestProgress: payload.overallProgress >= 100 ? 72 : payload.overallProgress,
+            })
+          },
+        })
+        await refreshUploads()
+      } catch (error) {
+        toast({
+          title: error instanceof Error ? error.message : "Failed to upload files",
+          status: "error",
+        })
+      } finally {
+        setActiveUpload(null)
+        if (inputRef.current) {
+          inputRef.current.value = ""
+        }
+      }
+      return
+    }
+
+    for (const file of selectedFiles) {
       let uploadFailed = false
       try {
         setActiveUpload({
@@ -400,7 +449,13 @@ export function UploadsWorkspace() {
   )
 
   return (
-    <div className="mx-auto mt-16 w-full max-w-7xl px-4 pb-8 sm:px-6">
+    <div
+      className={
+        embedded
+          ? "w-full"
+          : "mx-auto mt-16 w-full max-w-7xl px-4 pb-8 sm:px-6"
+      }
+    >
       <div className="rounded-3xl border border-border/60 bg-background p-6 shadow-xs sm:p-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>

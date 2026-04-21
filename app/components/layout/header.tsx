@@ -13,7 +13,6 @@ import { useUser } from "@/lib/user-store/provider"
 import { Info } from "@phosphor-icons/react"
 import Link from "next/link"
 import { SavedClinicianQuestionsDialog } from "../chat-input/saved-clinician-questions-dialog"
-import { DialogPublish } from "./dialog-publish"
 import { HeaderSidebarTrigger } from "./header-sidebar-trigger"
 
 export function Header({ hasSidebar }: { hasSidebar: boolean }) {
@@ -21,8 +20,12 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
   const { user } = useUser()
   const { preferences } = useUserPreferences()
 
-
   const isLoggedIn = !!user
+  const isClinicalMode = preferences.userRole === "doctor"
+
+  if (isClinicalMode && isLoggedIn) {
+    return null
+  }
 
   return (
     <header className="h-app-header pointer-events-none fixed top-0 right-0 left-0 z-50">
@@ -64,7 +67,6 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
             </div>
           ) : (
             <div className="pointer-events-auto flex flex-1 items-center justify-end gap-2">
-      
               <ButtonNewChat />
               {!hasSidebar && <HistoryTrigger hasSidebar={hasSidebar} />}
               {preferences.userRole === "doctor" && (

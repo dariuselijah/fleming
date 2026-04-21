@@ -1,0 +1,159 @@
+acute coronary syndrome STEMI management guideline AHA ACC
+NSTEMI risk stratification GRACE score guideline
+hypertension first-line treatment guideline JNC AHA ACC
+resistant hypertension aldosterone antagonist guideline
+hypertensive emergency IV labetalol nicardipine guideline
+heart failure reduced ejection fraction GDMT guideline AHA ACC
+heart failure preserved ejection fraction HFpEF treatment guideline
+atrial fibrillation rate control rhythm control guideline ESC AHA
+atrial fibrillation anticoagulation CHA2DS2-VASc guideline
+venous thromboembolism DVT PE treatment guideline CHEST
+pulmonary embolism risk stratification thrombolysis guideline
+aortic stenosis transcatheter aortic valve replacement TAVR guideline
+stable angina chronic coronary disease management guideline
+peripheral artery disease claudication revascularization guideline
+infective endocarditis prophylaxis treatment guideline AHA
+cardiac arrest ACLS algorithm guideline AHA
+post-cardiac arrest targeted temperature management guideline
+lipid management high-intensity statin guideline ACC AHA
+familial hypercholesterolemia PCSK9 inhibitor guideline
+type 2 diabetes initial treatment metformin guideline ADA
+type 2 diabetes GLP-1 receptor agonist SGLT2 guideline ADA
+diabetic ketoacidosis DKA management insulin guideline
+hypoglycemia management inpatient guideline
+thyroid nodule workup fine-needle aspiration guideline ATA
+hypothyroidism levothyroxine dosing guideline
+Graves disease hyperthyroidism treatment guideline
+adrenal insufficiency glucocorticoid replacement guideline
+osteoporosis bisphosphonate treatment guideline AACE
+community-acquired pneumonia CAP antibiotic guideline IDSA ATS
+hospital-acquired pneumonia ventilator-associated VAP guideline
+COPD exacerbation systemic corticosteroid antibiotic guideline GOLD
+COPD stable management inhaler stepwise guideline GOLD
+asthma stepwise controller treatment adults guideline GINA
+asthma severe biologic therapy omalizumab guideline
+acute respiratory distress syndrome ARDS lung protective ventilation guideline
+sepsis surviving sepsis campaign initial resuscitation guideline
+septic shock vasopressor norepinephrine first-line guideline
+urinary tract infection uncomplicated cystitis antibiotic guideline IDSA
+pyelonephritis complicated UTI inpatient antibiotic guideline
+Clostridioides difficile C diff infection treatment guideline IDSA
+skin soft tissue infection cellulitis abscess guideline IDSA
+bacterial meningitis empiric antibiotic guideline IDSA
+HIV antiretroviral therapy initiation guideline DHHS
+hepatitis C direct-acting antiviral treatment guideline AASLD
+tuberculosis latent TB treatment isoniazid rifampin guideline ATS IDSA
+influenza oseltamivir antiviral treatment guideline
+COVID-19 treatment Paxlovid remdesivir guideline NIH
+malaria prophylaxis treatment guideline CDC
+sexually transmitted infection STI screening treatment guideline CDC
+acute kidney injury AKI management guideline KDIGO
+chronic kidney disease CKD staging management guideline KDIGO
+CKD mineral bone disorder phosphate binder guideline KDIGO
+dialysis initiation hemodialysis peritoneal guideline KDIGO
+kidney transplant immunosuppression guideline KDIGO
+nephrotic syndrome treatment guideline
+acute ischemic stroke thrombolysis alteplase thrombectomy guideline AHA ASA
+intracerebral hemorrhage ICH management blood pressure guideline AHA ASA
+subarachnoid hemorrhage aneurysm management guideline AHA ASA
+transient ischemic attack TIA secondary prevention guideline
+epilepsy seizure first-line antiepileptic guideline AAN
+migraine acute treatment preventive therapy guideline AAN AHS
+Parkinson disease levodopa dopamine agonist guideline AAN
+multiple sclerosis disease-modifying therapy guideline AAN
+Alzheimer disease cholinesterase inhibitor memantine guideline
+status epilepticus benzodiazepine treatment guideline
+non-small cell lung cancer NSCLC treatment guideline NCCN
+small cell lung cancer SCLC treatment guideline NCCN
+breast cancer HER2 positive treatment guideline NCCN ASCO
+breast cancer screening mammography guideline USPSTF
+colorectal cancer screening colonoscopy guideline USPSTF
+colorectal cancer metastatic treatment guideline NCCN
+prostate cancer screening PSA guideline USPSTF AUA
+prostate cancer treatment guideline NCCN AUA
+pancreatic cancer treatment guideline NCCN
+hepatocellular carcinoma HCC treatment guideline AASLD NCCN
+melanoma treatment immunotherapy guideline NCCN
+acute lymphoblastic leukemia ALL treatment guideline NCCN
+chronic myeloid leukemia CML TKI imatinib guideline NCCN
+diffuse large B-cell lymphoma DLBCL treatment guideline NCCN
+multiple myeloma treatment guideline NCCN
+cancer-related pain opioid management guideline NCCN
+febrile neutropenia empiric antibiotic guideline IDSA ASCO
+antiemetic prophylaxis chemotherapy-induced nausea guideline ASCO NCCN
+cervical cancer screening HPV guideline USPSTF ASCCP
+rheumatoid arthritis DMARD biologic treatment guideline ACR
+systemic lupus erythematosus SLE treatment guideline ACR EULAR
+gout acute treatment urate-lowering therapy guideline ACR
+ankylosing spondylitis axial spondyloarthritis treatment guideline
+osteoarthritis knee hip management guideline ACR AAOS
+inflammatory bowel disease Crohn disease treatment guideline AGA ACG
+ulcerative colitis treatment guideline AGA ACG
+irritable bowel syndrome IBS treatment guideline AGA ACG
+gastroesophageal reflux GERD PPI treatment guideline AGA ACG
+peptic ulcer disease H pylori eradication guideline ACG
+acute pancreatitis management guideline AGA ACG
+cirrhosis portal hypertension variceal bleeding guideline AASLD
+nonalcoholic fatty liver disease NAFLD NASH guideline AASLD
+celiac disease diagnosis management guideline AGA ACG
+upper GI bleeding PPI endoscopy guideline
+lower GI bleeding colonoscopy management guideline
+major depressive disorder antidepressant treatment guideline APA
+bipolar disorder lithium mood stabilizer guideline APA
+schizophrenia antipsychotic treatment guideline APA
+generalized anxiety disorder treatment guideline APA
+PTSD post-traumatic stress disorder treatment guideline APA VA
+ADHD attention deficit hyperactivity stimulant treatment guideline AAP
+substance use disorder opioid use naltrexone buprenorphine guideline
+alcohol use disorder pharmacotherapy guideline
+insomnia cognitive behavioral therapy pharmacotherapy guideline
+eating disorder anorexia bulimia treatment guideline
+warfarin INR management bridging guideline
+direct oral anticoagulant DOAC renal dosing guideline
+heparin-induced thrombocytopenia HIT treatment guideline
+perioperative anticoagulation bridging guideline
+iron deficiency anemia treatment oral IV iron guideline
+sickle cell disease hydroxyurea transfusion guideline
+disseminated intravascular coagulation DIC treatment guideline
+perioperative beta-blocker cardiac risk assessment guideline ACC AHA
+preoperative pulmonary assessment guideline
+surgical site infection prevention antibiotic prophylaxis guideline
+postoperative nausea vomiting PONV prevention guideline
+enhanced recovery after surgery ERAS protocol guideline
+pain management multimodal analgesia guideline
+chronic pain opioid prescribing CDC guideline
+neonatal resuscitation NRP guideline AAP AHA
+pediatric asthma treatment guideline
+pediatric obesity management guideline AAP
+childhood immunization schedule guideline CDC ACIP
+prenatal care screening guideline ACOG
+gestational diabetes screening treatment guideline ACOG
+preeclampsia management guideline ACOG
+preterm labor tocolysis corticosteroid guideline ACOG
+postpartum hemorrhage management guideline ACOG
+cervical insufficiency cerclage guideline ACOG
+contraception selection guideline ACOG
+urticaria chronic angioedema guideline
+anaphylaxis epinephrine management guideline
+drug allergy penicillin desensitization guideline
+food allergy management guideline
+glaucoma treatment guideline AAO
+age-related macular degeneration AMD treatment guideline AAO
+diabetic retinopathy screening treatment guideline AAO
+acute otitis media antibiotic guideline AAP
+sinusitis acute bacterial rhinosinusitis guideline IDSA
+obstructive sleep apnea CPAP treatment guideline AASM
+palliative care symptom management guideline
+advance directive goals of care discussion guideline
+falls prevention elderly guideline AGS
+delirium prevention management ICU guideline
+polypharmacy deprescribing older adults guideline AGS
+pressure ulcer prevention treatment guideline
+chronic wound diabetic foot ulcer management guideline
+burn injury initial management guideline
+trauma initial assessment ATLS guideline
+acetaminophen overdose N-acetylcysteine guideline
+acute alcohol withdrawal benzodiazepine guideline
+opioid overdose naloxone guideline
+organophosphate poisoning atropine pralidoxime guideline
+snakebite antivenom management guideline

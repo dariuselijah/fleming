@@ -17,6 +17,7 @@ interface CitationPopupProps {
 
 export interface CitationData {
   index: number
+  sourceId?: string
   title: string
   authors: string[]
   journal: string

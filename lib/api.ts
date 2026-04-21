@@ -101,8 +101,12 @@ export async function updateChatModel(chatId: string, model: string) {
 
 /**
  * Signs in user with Google OAuth via Supabase
+ * @param next - Path to redirect after OAuth (must start with `/`). Passed to `/auth/callback?next=`.
  */
-export async function signInWithGoogle(supabase: SupabaseClient) {
+export async function signInWithGoogle(
+  supabase: SupabaseClient,
+  opts?: { next?: string }
+) {
   try {
     const isDev = process.env.NODE_ENV === "development"
 
@@ -115,12 +119,17 @@ export async function signInWithGoogle(supabase: SupabaseClient) {
           ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
           : APP_DOMAIN
 
-    console.log("Signing in with Google, redirect URL:", `${baseUrl}/auth/callback`)
+    const rawNext = opts?.next?.trim()
+    const nextPath =
+      rawNext?.startsWith("/") && !rawNext.includes("//") ? rawNext : "/"
+    const callbackUrl = `${baseUrl}/auth/callback?next=${encodeURIComponent(nextPath)}`
+
+    console.log("Signing in with Google, redirect URL:", callbackUrl)
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${baseUrl}/auth/callback`,
+        redirectTo: callbackUrl,
         queryParams: {
           access_type: "offline",
           prompt: "consent",

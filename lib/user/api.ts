@@ -1,10 +1,35 @@
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { createClient } from "@/lib/supabase/server"
+import { decryptHealthData, isEncryptionEnabled } from "@/lib/encryption"
 import {
   convertFromApiFormat,
   defaultPreferences,
 } from "@/lib/user-preference-store/utils"
 import type { UserProfile } from "./types"
+
+function decryptHealthFields<T extends Record<string, any> | null | undefined>(row: T): T {
+  if (!row || !isEncryptionEnabled()) return row
+
+  const next = { ...row } as Record<string, any>
+  const fieldMappings: Array<{ key: string; ivKey: string }> = [
+    { key: "health_context", ivKey: "health_context_iv" },
+    { key: "health_conditions", ivKey: "health_conditions_iv" },
+    { key: "medications", ivKey: "medications_iv" },
+    { key: "allergies", ivKey: "allergies_iv" },
+    { key: "family_history", ivKey: "family_history_iv" },
+    { key: "lifestyle_factors", ivKey: "lifestyle_factors_iv" },
+  ]
+
+  for (const { key, ivKey } of fieldMappings) {
+    if (!next[key]) continue
+    const iv = next[ivKey]
+    if (typeof iv === "string" || Array.isArray(iv)) {
+      next[key] = decryptHealthData(next[key], iv)
+    }
+  }
+
+  return next as T
+}
 
 export async function getSupabaseUser() {
   const supabase = await createClient()
@@ -44,7 +69,7 @@ export async function getUserProfile(): Promise<UserProfile | null> {
 
   // Format user preferences if they exist
   const formattedPreferences = userProfileData?.user_preferences
-    ? convertFromApiFormat(userProfileData.user_preferences)
+    ? convertFromApiFormat(decryptHealthFields(userProfileData.user_preferences))
     : undefined
 
   return {

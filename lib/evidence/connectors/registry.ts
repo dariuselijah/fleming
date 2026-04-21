@@ -17,6 +17,8 @@ import type {
 import { searchBiorxivApi } from "./biorxiv-api"
 import { searchScholarApi } from "./scholar-api"
 import { searchCmsCoverageApi } from "./cms-coverage-api"
+import { searchDrugInteractions } from "./rxnorm-api"
+import { searchDrugLabels } from "./openfda-api"
 
 const CONNECTOR_RETRY_COUNT = 1
 const CONNECTOR_CIRCUIT_FAIL_THRESHOLD = 3
@@ -56,6 +58,33 @@ function toIsoDateCandidate(value: string | null | undefined): string | null {
   if (!value) return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function buildGuidelineFallbackQueries(query: string): string[] {
+  const normalized = query.replace(/\s+/g, " ").trim()
+  if (!normalized) return []
+  const variants = new Set<string>([normalized])
+
+  const expanded = normalized
+    .replace(/\bESC\b/gi, "European Society of Cardiology")
+    .replace(/\bNICE\b/gi, "National Institute for Health and Care Excellence")
+    .replace(/\bACC\b/gi, "American College of Cardiology")
+    .replace(/\bAHA\b/gi, "American Heart Association")
+    .replace(/\bHFpEF\b/gi, "heart failure with preserved ejection fraction")
+    .replace(/\bHFrEF\b/gi, "heart failure with reduced ejection fraction")
+    .replace(/\bSGLT2i\b/gi, "SGLT2 inhibitor")
+  if (expanded !== normalized) {
+    variants.add(expanded)
+  }
+  variants.add(`${expanded} guideline`)
+  variants.add(`${expanded} guideline summary`)
+  variants.add(`${expanded} recommendations`)
+  variants.add("European Society of Cardiology guidelines SGLT2i")
+
+  return Array.from(variants)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 8)
 }
 
 function scoreFromResultCount(count: number): number {
@@ -142,6 +171,8 @@ function sourceTypeForConnector(connectorId: ClinicalConnectorId): ProvenanceSou
     cms_coverage: "coverage_policy",
     chembl: "chemical_database",
     benchling: "lab_workflow",
+    rxnorm: "rxnorm",
+    openfda: "openfda",
   }
   return map[connectorId]
 }
@@ -348,21 +379,101 @@ async function pubmedConnector(input: ConnectorSearchInput): Promise<ConnectorSe
 async function guidelineConnector(input: ConnectorSearchInput): Promise<ConnectorSearchPayload> {
   const startedAt = performance.now()
   const maxResults = Math.min(Math.max(input.maxResults ?? 6, 1), 10)
-  const result = await searchGuidelines(input.query, maxResults, "US")
-  const records: ConnectorSearchRecord[] = result.results.map((item, index) => ({
-    id: `guideline_${index + 1}`,
-    title: item.title,
-    snippet: item.summary || "",
-    url: item.url || null,
-    publishedAt: toIsoDateCandidate(item.date),
-    sourceLabel: item.source,
-    metadata: {
-      evidenceLevel: item.evidenceLevel ?? 3,
-      studyType: item.studyType || "Guideline",
-    },
-  }))
-  const warnings =
-    records.length === 0 ? ["Guideline connector returned no matching records."] : []
+  const mergedByKey = new Map<string, ConnectorSearchRecord>()
+  const mergedProvenance = new Map<string, ReturnType<typeof buildProvenance>>()
+  const attemptedQueries: string[] = []
+  const warnings: string[] = []
+
+  const ingestGuidelineResult = (
+    result: Awaited<ReturnType<typeof searchGuidelines>>,
+    queryUsed: string
+  ) => {
+    attemptedQueries.push(queryUsed)
+    result.results.forEach((item, index) => {
+      const record: ConnectorSearchRecord = {
+        id: `guideline_${index + 1}_${queryUsed.slice(0, 24)}`,
+        title: item.title,
+        snippet: item.summary || "",
+        url: item.url || null,
+        publishedAt: toIsoDateCandidate(item.date),
+        sourceLabel: item.source,
+        metadata: {
+          evidenceLevel: item.evidenceLevel ?? 3,
+          studyType: item.studyType || "Guideline",
+        },
+      }
+      const key = `${record.url || ""}|${record.title.toLowerCase()}`
+      if (!mergedByKey.has(key) && mergedByKey.size < maxResults) {
+        mergedByKey.set(key, record)
+      }
+    })
+    result.provenance.forEach((item) => {
+      const key = item.id || `${item.url || ""}|${String(item.title || "").toLowerCase()}`
+      if (!mergedProvenance.has(key)) {
+        mergedProvenance.set(key, item)
+      }
+    })
+  }
+
+  // Tier 1: Exact/primary match.
+  const primary = await searchGuidelines(input.query, maxResults, "US")
+  ingestGuidelineResult(primary, input.query)
+  const directMatches = primary.results.length
+
+  // Tier 2: semantic expansion.
+  if (directMatches === 0) {
+    const expandedQueries = buildGuidelineFallbackQueries(input.query)
+    for (const expandedQuery of expandedQueries) {
+      if (mergedByKey.size >= maxResults) break
+      if (expandedQuery.toLowerCase() === input.query.toLowerCase()) continue
+      const expanded = await searchGuidelines(expandedQuery, maxResults, "GLOBAL")
+      ingestGuidelineResult(expanded, expandedQuery)
+    }
+  }
+
+  // Tier 3: broad scholarly guideline summaries.
+  if (mergedByKey.size === 0) {
+    const scholarQuery = `${input.query} Guideline Summaries`
+    attemptedQueries.push(scholarQuery)
+    try {
+      const scholar = await searchScholarApi(scholarQuery, {
+        maxResults,
+      })
+      scholar.records.forEach((record) => {
+        const key = `${record.url || ""}|${record.title.toLowerCase()}`
+        if (!mergedByKey.has(key) && mergedByKey.size < maxResults) {
+          mergedByKey.set(key, {
+            ...record,
+            sourceLabel: record.sourceLabel || "Scholar Gateway",
+            metadata: {
+              ...(record.metadata || {}),
+              studyType:
+                typeof record.metadata?.studyType === "string"
+                  ? (record.metadata.studyType as string)
+                  : "Guideline summary",
+            },
+          })
+        }
+      })
+      warnings.push(...scholar.warnings)
+    } catch (error) {
+      warnings.push(
+        `Scholar Gateway fallback failed: ${error instanceof Error ? error.message : "unknown error"}`
+      )
+    }
+  }
+
+  const records = Array.from(mergedByKey.values()).slice(0, maxResults)
+  if (records.length === 0) {
+    warnings.push("No direct matches found in Guideline Index. Attempting query expansion...")
+  } else if (directMatches === 0) {
+    warnings.push("No direct matches found in Guideline Index. Attempting query expansion...")
+  }
+  if (attemptedQueries.length > 1) {
+    warnings.push(
+      `Guideline recursive retrieval attempted ${attemptedQueries.length} query variants.`
+    )
+  }
   const payload = normalizeConnectorPayload(
     input,
     "guideline",
@@ -374,7 +485,7 @@ async function guidelineConnector(input: ConnectorSearchInput): Promise<Connecto
     "mixed"
   )
   // Preserve adapter-provided provenance details when available.
-  payload.provenance = result.provenance
+  payload.provenance = Array.from(mergedProvenance.values())
   return payload
 }
 
@@ -392,8 +503,8 @@ async function clinicalTrialsConnector(input: ConnectorSearchInput): Promise<Con
     publishedAt: null,
     sourceLabel: "ClinicalTrials.gov",
     metadata: {
-      evidenceLevel: 3,
-      studyType: trial.phase || "Clinical trial",
+      evidenceLevel: 5,
+      studyType: trial.phase ? `${trial.phase} (registry)` : "Trial registration",
     },
   }))
   const warnings =
@@ -806,6 +917,140 @@ async function cmsCoverageConnector(input: ConnectorSearchInput): Promise<Connec
   }
 }
 
+async function rxnormConnector(
+  input: ConnectorSearchInput
+): Promise<ConnectorSearchPayload> {
+  const t0 = Date.now()
+  try {
+    const result = await searchDrugInteractions(input.query, input.maxResults ?? 10)
+    if (!result || result.interactions.length === 0) {
+      return emptyPayload(input, "rxnorm", "No drug interactions found for this query.")
+    }
+    const records: ConnectorSearchRecord[] = result.interactions.map((ix, i) => ({
+      id: `rxnorm:${result.rxcui}:${i}`,
+      title: `${ix.drug1} ↔ ${ix.drug2} interaction (${ix.severity})`,
+      snippet: ix.description,
+      url: `https://mor.nlm.nih.gov/RxNav/search?searchBy=RXCUI&searchTerm=${result.rxcui.split(",")[0]}`,
+      publishedAt: null,
+      sourceLabel: ix.source,
+      metadata: { severity: ix.severity },
+    }))
+    return {
+      connectorId: "rxnorm",
+      query: input.query,
+      results: records,
+      warnings: [],
+      provenance: records.map((r) =>
+        buildProvenance({
+          id: r.id,
+          sourceType: "rxnorm" as ProvenanceSourceType,
+          sourceName: "RxNorm",
+          url: r.url,
+          title: r.title,
+          publishedAt: null,
+          region: null,
+          journal: null,
+          doi: null,
+          pmid: null,
+          evidenceLevel: null,
+          studyType: "Drug Interaction",
+          snippet: r.snippet.slice(0, 300),
+        })
+      ),
+      confidence: Math.min(0.85, 0.5 + records.length * 0.08),
+      licenseTier: "public",
+      metrics: {
+        elapsedMs: Date.now() - t0,
+        retriesUsed: 0,
+        sourceCount: records.length,
+        fallbackUsed: false,
+        cacheHit: false,
+        circuitOpen: false,
+        degraded: false,
+        qualityScore: computeQualityScore(records, [], false),
+      },
+    }
+  } catch (err) {
+    return emptyPayload(input, "rxnorm", err instanceof Error ? err.message : "RxNorm lookup failed.")
+  }
+}
+
+async function openfdaConnector(
+  input: ConnectorSearchInput
+): Promise<ConnectorSearchPayload> {
+  const t0 = Date.now()
+  try {
+    const labels = await searchDrugLabels(input.query, input.maxResults ?? 5)
+    if (labels.length === 0) {
+      return emptyPayload(input, "openfda", "No FDA drug labels found for this query.")
+    }
+    const records: ConnectorSearchRecord[] = labels.map((lbl) => {
+      const parts = [
+        lbl.indications && `Indications: ${lbl.indications}`,
+        lbl.dosage && `Dosage: ${lbl.dosage}`,
+        lbl.contraindications && `Contraindications: ${lbl.contraindications}`,
+        lbl.warnings && `Warnings: ${lbl.warnings}`,
+        lbl.drugInteractions && `Drug Interactions: ${lbl.drugInteractions}`,
+        lbl.boxedWarning && `⚠ BOXED WARNING: ${lbl.boxedWarning}`,
+      ].filter(Boolean)
+
+      return {
+        id: `openfda:${lbl.setId}`,
+        title: `${lbl.brandName || lbl.genericName} (${lbl.manufacturer || "FDA"})`,
+        snippet: parts.join(" | ").slice(0, 1200),
+        url: lbl.setId
+          ? `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${lbl.setId}`
+          : null,
+        publishedAt: null,
+        sourceLabel: "OpenFDA / DailyMed",
+        metadata: {
+          genericName: lbl.genericName,
+          route: lbl.route,
+          hasBoxedWarning: Boolean(lbl.boxedWarning),
+        },
+      }
+    })
+
+    return {
+      connectorId: "openfda",
+      query: input.query,
+      results: records,
+      warnings: [],
+      provenance: records.map((r) =>
+        buildProvenance({
+          id: r.id,
+          sourceType: "openfda" as ProvenanceSourceType,
+          sourceName: "OpenFDA",
+          url: r.url,
+          title: r.title,
+          publishedAt: null,
+          region: "US",
+          journal: null,
+          doi: null,
+          pmid: null,
+          evidenceLevel: null,
+          studyType: "Drug Label",
+          snippet: r.snippet.slice(0, 300),
+        })
+      ),
+      confidence: Math.min(0.88, 0.55 + records.length * 0.1),
+      licenseTier: "public",
+      metrics: {
+        elapsedMs: Date.now() - t0,
+        retriesUsed: 0,
+        sourceCount: records.length,
+        fallbackUsed: false,
+        cacheHit: false,
+        circuitOpen: false,
+        degraded: false,
+        qualityScore: computeQualityScore(records, [], false),
+      },
+    }
+  } catch (err) {
+    return emptyPayload(input, "openfda", err instanceof Error ? err.message : "OpenFDA lookup failed.")
+  }
+}
+
 function createWebBackedAdapter(
   id: ClinicalConnectorId,
   label: string,
@@ -920,6 +1165,20 @@ const connectorAdapters: Record<ClinicalConnectorId, ConnectorAdapter> = {
         "lab notebook protocol site:benchling.com",
         false
       ),
+  },
+  rxnorm: {
+    id: "rxnorm",
+    label: "RxNorm Drug Interactions",
+    licenseTier: "public",
+    enabled: () => true,
+    search: rxnormConnector,
+  },
+  openfda: {
+    id: "openfda",
+    label: "OpenFDA Drug Labels",
+    licenseTier: "public",
+    enabled: () => true,
+    search: openfdaConnector,
   },
 }
 

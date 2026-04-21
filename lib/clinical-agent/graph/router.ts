@@ -9,6 +9,76 @@ function includesAny(text: string, terms: string[]): boolean {
   return terms.some((term) => text.includes(term))
 }
 
+/**
+ * Determine if the query targets a static guideline that should be
+ * resolved from the pre-indexed local corpus rather than live PubMed.
+ */
+export function isStaticGuidelineQuery(query: string): boolean {
+  const normalized = query.toLowerCase()
+  return includesAny(normalized, [
+    "nccn",
+    "aha guideline",
+    "acc guideline",
+    "aha/acc",
+    "uspstf",
+    "nice guideline",
+    "who guideline",
+    "idsa guideline",
+    "esc guideline",
+    "asco guideline",
+    "kdigo",
+    "gold copd",
+    "ats guideline",
+    "jnc ",
+    "chest guideline",
+    "guideline",
+    "recommendation",
+    "consensus statement",
+    "practice guideline",
+    "position statement",
+    "first-line",
+    "first line",
+    "management of",
+    "treatment of",
+    "workup",
+    "initial management",
+    "stepwise",
+    "empiric",
+    "prophylaxis",
+    "screening",
+    "acp",
+    "ada guideline",
+    "acog",
+    "aap guideline",
+    "acr guideline",
+    "aga guideline",
+    "acg guideline",
+    "aasld",
+    "apa guideline",
+    "cdc guideline",
+    "nih guideline",
+    "gina",
+    "eular",
+    "aan guideline",
+  ])
+}
+
+/**
+ * Score how sufficient local evidence results are.
+ * Returns true if local results are "good enough" to skip live PubMed.
+ */
+export function isLocalEvidenceSufficient(
+  resultCount: number,
+  topScore: number | undefined,
+  thresholds?: { minCount?: number; minScore?: number },
+): boolean {
+  const minCount = thresholds?.minCount ?? 2
+  const minScore = thresholds?.minScore ?? 0.12
+  if (resultCount >= minCount && (topScore ?? 0) >= minScore) return true
+  if (resultCount >= 6) return true
+  return false
+}
+
 export function classifyClinicalIntent(query: string): ClinicalIntentClass {
   const normalized = query.toLowerCase()
 
@@ -32,6 +102,41 @@ export function classifyClinicalIntent(query: string): ClinicalIntentClass {
       "differential",
       "risk",
       "contraindication",
+      "screening",
+      "prevention",
+      "prophylaxis",
+      "dose",
+      "dosing",
+      "first-line",
+      "first line",
+      "second-line",
+      "medication",
+      "drug",
+      "antibiotic",
+      "antihypertensive",
+      "statin",
+      "insulin",
+      "workup",
+      "algorithm",
+      "protocol",
+      "empiric",
+      "sepsis",
+      "pneumonia",
+      "diabetes",
+      "cancer",
+      "heart failure",
+      "stroke",
+      "infection",
+      "surgery",
+      "perioperative",
+      "emergency",
+      "acute",
+      "chronic",
+      "symptom",
+      "side effect",
+      "adverse",
+      "indication",
+      "evidence",
     ])
   ) {
     return "clinical_evidence"
@@ -85,12 +190,95 @@ export function classifyClinicalIntent(query: string): ClinicalIntentClass {
   return "general"
 }
 
-export function selectConnectorPriority(intent: ClinicalIntentClass): ClinicalConnectorId[] {
+function isDrugQuery(query: string): boolean {
+  const n = query.toLowerCase()
+  return includesAny(n, [
+    "interaction",
+    "contraindication",
+    "side effect",
+    "adverse",
+    "drug label",
+    "prescribing",
+    "boxed warning",
+    "black box",
+    "dosing",
+    "dose adjustment",
+    "renal dosing",
+    "hepatic dosing",
+    "drug interaction",
+    "ddi",
+    "warfarin",
+    "heparin",
+    "doac",
+    "anticoagulant",
+    "antibiotic",
+    "nsaid",
+    "opioid",
+    "statin",
+    "ace inhibitor",
+    "arb",
+    "beta blocker",
+    "calcium channel",
+    "ssri",
+    "snri",
+    "benzodiazepine",
+    "insulin",
+    "metformin",
+    "sglt2",
+    "glp-1",
+    "medication safety",
+    "polypharmacy",
+    "deprescribing",
+  ])
+}
+
+export function selectConnectorPriority(
+  intent: ClinicalIntentClass,
+  query?: string,
+): ClinicalConnectorId[] {
+  const drugFocused = query ? isDrugQuery(query) : false
+
   if (intent === "clinical_evidence") {
+    if (drugFocused) {
+      return [
+        "openfda",
+        "rxnorm",
+        "guideline",
+        "pubmed",
+        "clinical_trials",
+        "scholar_gateway",
+        "chembl",
+        "biorxiv",
+        "cms_coverage",
+        "npi_registry",
+        "synapse",
+        "benchling",
+        "biorender",
+      ]
+    }
+    if (query && isStaticGuidelineQuery(query)) {
+      return [
+        "guideline",
+        "clinical_trials",
+        "scholar_gateway",
+        "pubmed",
+        "openfda",
+        "rxnorm",
+        "biorxiv",
+        "chembl",
+        "cms_coverage",
+        "npi_registry",
+        "synapse",
+        "benchling",
+        "biorender",
+      ]
+    }
     return [
       "guideline",
       "pubmed",
       "clinical_trials",
+      "openfda",
+      "rxnorm",
       "scholar_gateway",
       "biorxiv",
       "chembl",
@@ -110,6 +298,8 @@ export function selectConnectorPriority(intent: ClinicalIntentClass): ClinicalCo
       "synapse",
       "clinical_trials",
       "guideline",
+      "rxnorm",
+      "openfda",
       "benchling",
       "cms_coverage",
       "npi_registry",
@@ -122,6 +312,8 @@ export function selectConnectorPriority(intent: ClinicalIntentClass): ClinicalCo
       "npi_registry",
       "guideline",
       "pubmed",
+      "openfda",
+      "rxnorm",
       "clinical_trials",
       "scholar_gateway",
       "biorxiv",
@@ -141,6 +333,8 @@ export function selectConnectorPriority(intent: ClinicalIntentClass): ClinicalCo
       "clinical_trials",
       "chembl",
       "synapse",
+      "rxnorm",
+      "openfda",
       "benchling",
       "cms_coverage",
       "npi_registry",
@@ -156,15 +350,19 @@ export function selectConnectorPriority(intent: ClinicalIntentClass): ClinicalCo
       "biorxiv",
       "clinical_trials",
       "guideline",
+      "rxnorm",
+      "openfda",
       "cms_coverage",
       "npi_registry",
       "biorender",
     ]
   }
   return [
-    "pubmed",
     "guideline",
+    "pubmed",
     "clinical_trials",
+    "openfda",
+    "rxnorm",
     "scholar_gateway",
     "biorxiv",
     "chembl",

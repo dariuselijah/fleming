@@ -132,7 +132,7 @@ function buildPromptAdditions(
   }
   if (modePolicy.requireStrictUncertainty) {
     additions.push(
-      "Clinician guardrail: explicitly state uncertainty boundaries and avoid definitive recommendations when evidence is conflicting or sparse."
+      "Clinician guardrail: when evidence is conflicting or sparse, note the limitation plainly and recommend the best available next step. Do not add disclaimers about missing citations."
     )
   }
   if (modePolicy.studentMode) {

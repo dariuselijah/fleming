@@ -24,12 +24,16 @@ import {
 import { toast } from "@/components/ui/toast"
 import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
+import { usePathname } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { buildClinicalContext, useWorkspaceStore } from "@/lib/clinical-workspace"
 import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
 import { PerformanceMonitor } from "./performance-monitor"
 import { OnboardingDialog } from "../onboarding/onboarding-dialog"
+import { HealthHomeSection } from "../health/health-home-section"
+import { DocumentSelectorModal } from "@/app/components/workspace/document-selector-modal"
 
 const FeedbackWidget = dynamic(
   () => import("./feedback-widget").then((mod) => mod.FeedbackWidget),
@@ -48,6 +52,7 @@ const RateLimitPaywall = dynamic(
 
 export function Chat() {
   const { chatId } = useChatSession()
+  const pathname = usePathname()
   const {
     createNewChat,
     getChatById,
@@ -152,6 +157,7 @@ export function Chat() {
     status,
     stop,
     streamIntroPreview,
+    optimisticTaskBoard,
     hasSentFirstMessageRef,
     isSubmitting,
     enableSearch,
@@ -167,11 +173,13 @@ export function Chat() {
     setArtifactIntent,
     setCitationStyle,
     evidenceCitations,
+    discussionInsights,
     submit,
     handleSuggestion,
     handleWorkflowSuggestion,
     handleReload,
     handleInputChange,
+    addDrilldownInsightToDiscussion,
   } = useChatCore({
     initialMessages,
     draftValue,
@@ -363,6 +371,130 @@ export function Chat() {
     }
   }, [handleSuggestion, setClinicianMode, status, stop])
 
+  const statusRef = useRef(status)
+  statusRef.current = status
+  const handleSuggestionRef = useRef(handleSuggestion)
+  handleSuggestionRef.current = handleSuggestion
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const fn = (e: Event) => {
+      const prompt = (e as CustomEvent<{ prompt?: string }>).detail?.prompt
+      if (!prompt) return
+      if (statusRef.current === "streaming") stop()
+      handleSuggestionRef.current(prompt)
+    }
+    window.addEventListener("fleming:attach-chart-context", fn as EventListener)
+    return () => window.removeEventListener("fleming:attach-chart-context", fn as EventListener)
+  }, [stop])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const EVIDENCE_TAIL =
+      " Where management, diagnosis, or drug choice depends on literature, cite current evidence with numbered in-text markers [1], [2] and ensure the response can include an EVIDENCE SOURCES appendix as instructed in the system prompt."
+
+    const PRESCRIPTION_JSON_TAIL =
+      " After any clinical narrative, output ONLY medications explicitly named in the transcript or chat context (no invented drugs). Append this exact block with valid JSON array (use [] if none):\n=== PRESCRIPTION_ITEMS ===\n[{\"id\":\"1\",\"drug\":\"...\",\"strength\":\"...\",\"route\":\"...\",\"frequency\":\"...\",\"duration\":\"...\",\"instructions\":\"...\"}]\n=== END_PRESCRIPTION_ITEMS ==="
+
+    const TEMPLATE_PROMPTS: Record<string, string> = {
+      soap:
+        "[/soap] Create a SOAP note from this consultation only (no external literature). Format with ## Subjective, ## Objective, ## Assessment, ## Plan. Do not use [T], [E], or [H] tags.",
+      summary:
+        "[/summary] Generate a clinical summary for the current consult: Presenting Complaint, Exam Findings, Assessment, Plan." +
+        EVIDENCE_TAIL,
+      refer:
+        "[/refer] Generate referral letter. Reason, clinical summary, investigations, specialist questions." +
+        EVIDENCE_TAIL,
+      prescribe:
+        "[/prescribe] Help prescribe medication based on this consultation. Drug, strength, route, frequency, duration. Check interactions and cite evidence for safety where relevant." +
+        EVIDENCE_TAIL +
+        PRESCRIPTION_JSON_TAIL,
+      icd:
+        "[/icd] Suggest ICD-10 codes based on the consultation. Code, description, confidence." +
+        EVIDENCE_TAIL,
+      evidence:
+        "[/evidence] Evidence-based synthesis for this consult (OpenEvidence-style): use only numbered in-text markers [1], [2] tied to literature — never [T], [E], or [H]. " +
+        "Append === EVIDENCE SOURCES (N) === with one block per source ([n] title, Journal, Year, URL, Snippet), then === END ===." +
+        EVIDENCE_TAIL,
+    }
+
+    const buildPrompt = (
+      template: string,
+      store: ReturnType<typeof useWorkspaceStore.getState>
+    ) => {
+      const patient = store.openPatients.find(
+        (p) => p.patientId === store.activePatientId
+      )
+      const ctx = buildClinicalContext(
+        store.scribeTranscript,
+        store.scribeEntities,
+        patient,
+        store.scribeEntityStatus
+      )
+      const CTX_BLOCK = ctx ? `\n\n${ctx}` : ""
+      const CONCISE =
+        template === "evidence"
+          ? " Be concise and clinically precise. No preamble. Bullet points preferred."
+          : template === "soap"
+            ? " Be concise and clinically precise. Chart-ready prose. Ground only in the consultation context below; if something was not discussed, write \"not documented\". Do not use [T], [E], or [H] tags."
+            : " Be concise and clinically precise. No preamble. Bullet points preferred. Tag each statement with [T] (from transcript), [E] (from extracted entities), or [H] (from patient history) to indicate its source."
+      const basePrompt =
+        TEMPLATE_PROMPTS[template] ??
+        `[/${template}] Produce an updated clinical document for this consult. Follow standard clinical structure unless context implies otherwise.` +
+          EVIDENCE_TAIL
+      return `${basePrompt}${CONCISE}${CTX_BLOCK}`
+    }
+
+    const handleGenerateNote = (e: Event) => {
+      const event = e as CustomEvent<{ template: string }>
+      const template = event.detail?.template ?? "soap"
+      if (statusRef.current === "streaming") return
+
+      const store = useWorkspaceStore.getState()
+      if (!store.scribeTranscript || store.scribeTranscript.length < 20) return
+
+      const prompt = buildPrompt(template, store)
+
+      store.setScribeCollapsed(true)
+      handleSuggestionRef.current(prompt)
+    }
+
+    const handleReviseDocument = (e: Event) => {
+      const event = e as CustomEvent<{
+        commandTag: string
+        reason: string
+        priorContent: string
+      }>
+      const detail = event.detail
+      if (!detail?.reason?.trim()) return
+      if (statusRef.current === "streaming") return
+
+      const store = useWorkspaceStore.getState()
+      if (!store.scribeTranscript || store.scribeTranscript.length < 20) return
+
+      const tag = detail.commandTag || "soap"
+      const base = buildPrompt(tag, store)
+      const prior = detail.priorContent.slice(0, 12000)
+      const revision = `\n\n--- REVISION ---\nThe clinician rejected the previous output. Address this feedback directly and replace the prior document.\nFeedback: ${detail.reason.trim()}\n\nPrior version:\n---\n${prior}\n---`
+      store.setScribeCollapsed(true)
+      handleSuggestionRef.current(`${base}${revision}`)
+    }
+
+    window.addEventListener("fleming:generate-note", handleGenerateNote)
+    window.addEventListener(
+      "fleming:revise-document",
+      handleReviseDocument as EventListener
+    )
+    return () => {
+      window.removeEventListener("fleming:generate-note", handleGenerateNote)
+      window.removeEventListener(
+        "fleming:revise-document",
+        handleReviseDocument as EventListener
+      )
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Memoize the conversation props to prevent unnecessary rerenders
   const conversationProps = useMemo(
     () => ({
@@ -374,8 +506,11 @@ export function Chat() {
       onReload: handleReload,
       onSuggestion: handleSuggestion,
       onWorkflowSuggestion: handleWorkflowSuggestion,
+      onDrilldownInsightAdd: addDrilldownInsightToDiscussion,
+      discussionInsightCount: discussionInsights.length,
       evidenceCitations,
       streamIntroPreview,
+      optimisticTaskBoard,
     }),
     [
       messages,
@@ -386,8 +521,11 @@ export function Chat() {
       handleReload,
       handleSuggestion,
       handleWorkflowSuggestion,
+      addDrilldownInsightToDiscussion,
+      discussionInsights.length,
       evidenceCitations,
       streamIntroPreview,
+      optimisticTaskBoard,
     ]
   )
 
@@ -546,25 +684,94 @@ export function Chat() {
     }
   }, [chatId, isMounted])
 
+  const isClinicalMode = preferences.userRole === "doctor"
+  const isClinicalCopilotRole =
+    preferences.userRole === "doctor" || preferences.userRole === "medical_student"
+
+  const [documentSelectorOpen, setDocumentSelectorOpen] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const fn = () => setDocumentSelectorOpen(true)
+    window.addEventListener("fleming:open-document-selector", fn)
+    return () => window.removeEventListener("fleming:open-document-selector", fn)
+  }, [])
+
+  const workspaceMode = useWorkspaceStore((s) => s.mode)
+  const activePatientIdWs = useWorkspaceStore((s) => s.activePatientId)
+  const openPatientsWs = useWorkspaceStore((s) => s.openPatients)
+  const activePatientWs = useMemo(
+    () => openPatientsWs.find((p) => p.patientId === activePatientIdWs) ?? null,
+    [openPatientsWs, activePatientIdWs]
+  )
+  const routeChatId =
+    pathname?.startsWith("/c/") ? pathname.split("/c/")[1]?.split("/")[0] ?? null : null
+  const effectiveChatId = chatId ?? routeChatId
+  const awaitingPatientConsultRoute =
+    isClinicalMode &&
+    workspaceMode === "clinical" &&
+    activePatientWs &&
+    (!activePatientWs.chatId || effectiveChatId !== activePatientWs.chatId)
+
   return (
     <>
       <div className={cn(
         "relative flex h-full w-full flex-col",
-        showOnboarding
-          ? "items-center justify-start px-2 pt-[calc(var(--spacing-app-header)+1rem)] sm:justify-center sm:px-0 sm:pt-0"
+        awaitingPatientConsultRoute
+          ? "items-center justify-center"
+          : showOnboarding
+          ? isClinicalMode
+            ? "items-center justify-end px-2 sm:px-0"
+            : "items-center justify-start px-2 pt-[calc(var(--spacing-app-header)+0.75rem)] sm:px-0 sm:pt-4"
           : "justify-end"
       )}>
-        {showOnboarding ? (
-          <>
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-medium tracking-tight">
-                What&apos;s on your mind?
-              </h1>
+        {awaitingPatientConsultRoute ? (
+          <div className="flex flex-col items-center justify-center gap-3 px-4 py-8">
+            <div
+              className="size-9 animate-spin rounded-full border-2 border-indigo-500/30 border-t-indigo-500"
+              aria-hidden
+            />
+            <p className="text-sm text-muted-foreground">Opening patient consult…</p>
+          </div>
+        ) : showOnboarding ? (
+          isClinicalMode ? (
+            <div className="flex h-full w-full max-w-3xl min-h-0 flex-col justify-end pb-3 sm:pb-4">
+              <div className="flex flex-1 flex-col items-center justify-center text-center">
+                <div className="flex size-12 items-center justify-center rounded-2xl bg-indigo-500/10 mb-4">
+                  <svg className="size-6 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                  </svg>
+                </div>
+                <h2 className="text-lg font-semibold tracking-tight text-foreground">Ready for consult</h2>
+                <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
+                  Select a patient from the tab bar or open the calendar to start. Type <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">/</code> for commands.
+                </p>
+              </div>
+              <div>
+                <ChatInput {...chatInputProps} hasSuggestions={false} />
+              </div>
             </div>
-            <div className="w-full max-w-3xl">
-              <ChatInput {...chatInputProps} />
+          ) : (
+            <div className="flex h-full w-full max-w-3xl min-h-0 flex-col pb-3 sm:pb-4">
+              <div className="text-center">
+                <h1 className="text-3xl font-medium tracking-tight">
+                  What&apos;s on your mind?
+                </h1>
+              </div>
+              <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1 sm:mt-5">
+                <HealthHomeSection
+                  onJourneyPrompt={handleSuggestion}
+                  userRole={preferences.userRole}
+                  showWorkspaceLink={false}
+                />
+              </div>
+              <div className="mt-4 sm:mt-5">
+                <ChatInput {...chatInputProps} hasSuggestions={false} />
+              </div>
             </div>
-          </>
+          )
         ) : (
           <>
             <Conversation {...conversationProps} />
@@ -592,6 +799,17 @@ export function Chat() {
       />
 
       <FeedbackWidget />
+
+      {isClinicalCopilotRole ? (
+        <DocumentSelectorModal
+          open={documentSelectorOpen}
+          onClose={() => setDocumentSelectorOpen(false)}
+          onAttach={(prompt) => {
+            if (status === "streaming") stop()
+            handleSuggestion(prompt)
+          }}
+        />
+      ) : null}
       
       {/* Performance Monitor for development */}
       <PerformanceMonitor />

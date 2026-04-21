@@ -16,6 +16,8 @@ import type {
   EvidenceSearchOptions,
   EvidenceContext 
 } from './types';
+import { buildEvidenceSourceId } from "./source-id";
+import { parallelRetrieve } from './parallel-retrieval';
 
 export interface SynthesisOptions extends EvidenceSearchOptions {
   includeContext?: boolean;
@@ -39,7 +41,7 @@ export async function synthesizeEvidence(
   
   const {
     query,
-    maxResults = 12,
+    maxResults = 20,
     minEvidenceLevel = 5,
     includeContext = true,
     minMedicalConfidence,
@@ -66,12 +68,20 @@ export async function synthesizeEvidence(
   }
 
   try {
-    // Search for relevant evidence
-    const results = await searchMedicalEvidence({
+    // Parallel retrieval: run local hybrid search + live PubMed concurrently
+    const parallelResult = await parallelRetrieve({
       ...options,
       maxResults,
       minEvidenceLevel,
+      skipPubMedIfLocalSufficient: true,
     });
+
+    const results = parallelResult.merged;
+    if (parallelResult.sources.pubmed > 0 || parallelResult.sources.connectors > 0) {
+      console.log(
+        `📚 [PARALLEL RETRIEVAL] Merged ${parallelResult.sources.local} local + ${parallelResult.sources.pubmed} PubMed + ${parallelResult.sources.connectors} connector results (${parallelResult.totalMs}ms${parallelResult.connectorsUsed.length > 0 ? `, connectors: ${parallelResult.connectorsUsed.join(",")}` : ""})`,
+      );
+    }
 
     // Convert to citations
     const citations = resultsToCitations(results);
@@ -116,6 +126,18 @@ export function buildEvidenceSystemPrompt(
 
 ${evidenceContext.systemPromptAddition}
 
+### CITATION-CLAIM ALIGNMENT RULES:
+1. Every factual clinical claim MUST be immediately followed by its citation marker [N].
+2. Only cite a source if the cited text DIRECTLY supports the specific claim. Do not cite tangentially related sources.
+3. If a drug name, dosage, or specific recommendation is mentioned, the citation MUST contain that drug/dosage/recommendation.
+4. When sources conflict, explicitly state the conflict: "Source [1] recommends X, while source [2] suggests Y."
+5. Never fabricate citation numbers. Only use [1] through [${evidenceContext.citations.length}].
+6. For guideline recommendations, include the strength and evidence level when available (e.g., "Class I, Level A").
+7. IMPORTANT: Use at LEAST 3 different citations throughout your response. Spread citations across multiple claims. Do NOT rely on a single source for the entire answer.
+8. Prefer citing published PubMed articles and guidelines over trial registrations (ClinicalTrials.gov). Trial registrations are NOT evidence — they only prove a trial exists.
+9. When citing a landmark trial (e.g., PARADIGM-HF, DAPA-HF, ARISTOTLE, AASK), cite the specific source that contains the trial data, not a secondary review.
+10. Never use transcript provenance tags like [T], [E], or [H]. Those are for dictation/workspace notes only. In this evidence-grounded mode use ONLY numbered markers [1]–[${evidenceContext.citations.length}] tied to the evidence list below.
+
 ### EVIDENCE CONTENT:
 ${evidenceContext.formattedContext}`;
 }
@@ -139,6 +161,50 @@ export function parseCitationMarkers(
 
   // Extract all cited indices
   const citedIndices = new Set<number>();
+  const citationBySourceId = new Map<string, EvidenceCitation>();
+  citations.forEach((citation) => {
+    const primaryId = buildEvidenceSourceId(citation).toLowerCase();
+    citationBySourceId.set(primaryId, citation);
+    // Also index UUID segments for fuzzy matching (LLM sometimes abbreviates sourceIds)
+    const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+    const uuids = [primaryId, citation.sourceId || "", citation.url || ""]
+      .join(" ")
+      .match(uuidPattern);
+    if (uuids) {
+      for (const uuid of uuids) {
+        if (!citationBySourceId.has(uuid.toLowerCase())) {
+          citationBySourceId.set(uuid.toLowerCase(), citation);
+        }
+      }
+    }
+  });
+
+  function resolveSourceId(sourceId: string): EvidenceCitation | undefined {
+    const exact = citationBySourceId.get(sourceId);
+    if (exact) return exact;
+    // Substring fallback for abbreviated sourceIds
+    if (sourceId.length >= 8) {
+      for (const [key, citation] of citationBySourceId) {
+        if (key.includes(sourceId) || sourceId.includes(key)) return citation;
+      }
+    }
+    return undefined;
+  }
+
+  // Source-id citations [CITE_<sourceId>] / [CITE_<sourceId1>,<sourceId2>]
+  const sourceIdMatches = response.matchAll(/\[CITE_([A-Za-z0-9:._\/-]+(?:\s*,\s*[A-Za-z0-9:._\/-]+)*)\]/g);
+  for (const match of sourceIdMatches) {
+    const values = match[1]
+      .split(/\s*,\s*/)
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+    values.forEach((sourceId) => {
+      const citation = resolveSourceId(sourceId);
+      if (citation) {
+        citedIndices.add(citation.index);
+      }
+    });
+  }
   
   // Simple numeric citations [1], [1,2]
   const simpleMatches = response.matchAll(/\[(\d+(?:,\s*\d+)*)\]/g);
