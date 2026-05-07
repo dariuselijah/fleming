@@ -1,7 +1,7 @@
 "use client"
 
 import { isSupabaseEnabled } from "@/lib/supabase/config"
-import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import { useAuthContext } from "@/lib/auth/provider"
 import { Buildings } from "@phosphor-icons/react"
 import { PracticeProfileCard } from "./practice-profile-card"
 import { PracticeSetupPreferences } from "./practice-setup-preferences"
@@ -15,9 +15,9 @@ import { usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-cont
  * Dedicated Settings tab: clinic identity, location, hours, FAQs, billing identifiers, and team.
  */
 export function PracticeSettingsTab() {
-  const { preferences } = useUserPreferences()
+  const auth = useAuthContext()
   const { practiceId } = usePracticeCrypto()
-  if (preferences.userRole !== "doctor" || !isSupabaseEnabled) return null
+  if (!auth.hasPermission("settings:practice") || !isSupabaseEnabled) return null
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 pb-8">

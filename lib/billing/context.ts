@@ -1,26 +1,21 @@
-import { createClient } from "@/lib/supabase/server"
+import { getServerAuthPracticeContext } from "@/lib/auth/context"
 
 export async function getAuthenticatedPracticeContext(): Promise<
-  | { supabase: NonNullable<Awaited<ReturnType<typeof createClient>>>; userId: string; practiceId: string }
+  | {
+      supabase: NonNullable<Awaited<ReturnType<typeof getServerAuthPracticeContext>>["supabase"]>
+      userId: string
+      practiceId: string
+      role: string | null
+    }
   | null
 > {
-  const supabase = await createClient()
-  if (!supabase) return null
+  const context = await getServerAuthPracticeContext()
+  if (!context.supabase || !context.userId || !context.activePracticeId) return null
 
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser()
-  if (authErr || !user) return null
-
-  const { data: membership } = await supabase
-    .from("practice_members")
-    .select("practice_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle()
-
-  if (!membership?.practice_id) return null
-
-  return { supabase, userId: user.id, practiceId: membership.practice_id }
+  return {
+    supabase: context.supabase,
+    userId: context.userId,
+    practiceId: context.activePracticeId,
+    role: context.activeRole,
+  }
 }

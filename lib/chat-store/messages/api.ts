@@ -1,4 +1,4 @@
-import { loadAttachmentsWithSignedUrls, refreshEvidenceCitationsWithSignedUrls } from "@/lib/file-handling"
+import { loadAttachmentsWithSignedUrls } from "@/lib/file-handling"
 import type { Message as MessageAISDK } from "ai"
 import { readFromIndexedDB, writeToIndexedDB } from "../persist"
 const MESSAGE_FETCH_TIMEOUT_MS = 12000
@@ -93,13 +93,12 @@ export async function getMessagesFromDb(
             const metadataPart = parts.find((p: any) => p.type === "metadata" && (p as any).metadata)
             if (metadataPart && (metadataPart as any).metadata?.evidenceCitations) {
               evidenceCitations = (metadataPart as any).metadata.evidenceCitations
-              if (evidenceCitations) {
-                evidenceCitations = await refreshEvidenceCitationsWithSignedUrls(evidenceCitations)
-              }
-              const messageId = (message as any).id
-              if (evidenceCitations) {
-                console.log(`📚 [LOAD] Found ${evidenceCitations.length} evidence citations in message ${messageId}`)
-              }
+              // PERF: skip eager refresh of signed URLs here. previewReference /
+              // figureReferences are only needed when the user expands a citation
+              // popover. Refreshing all of them on chat load triggered N+1 HTTP
+              // calls to /api/get-signed-url and was the dominant load-time cost
+              // for chats with many citations. The popover handles lazy refresh
+              // on demand if a URL is stale.
             }
             if (metadataPart && (metadataPart as any).metadata?.topicContext) {
               topicContext = (metadataPart as any).metadata.topicContext

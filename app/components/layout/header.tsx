@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { APP_NAME } from "@/lib/config"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
+import { useAuthContext } from "@/lib/auth/provider"
 import { Info } from "@phosphor-icons/react"
 import Link from "next/link"
 import { SavedClinicianQuestionsDialog } from "../chat-input/saved-clinician-questions-dialog"
@@ -19,11 +20,13 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
   const isMobile = useBreakpoint(768)
   const { user } = useUser()
   const { preferences } = useUserPreferences()
+  const auth = useAuthContext()
 
   const isLoggedIn = !!user
-  const isClinicalMode = preferences.userRole === "doctor"
+  const isPracticeWorkspace =
+    !!auth.activePracticeId || preferences.userRole === "doctor"
 
-  if (isClinicalMode && isLoggedIn) {
+  if (isPracticeWorkspace && isLoggedIn) {
     return null
   }
 
@@ -69,7 +72,7 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
             <div className="pointer-events-auto flex flex-1 items-center justify-end gap-2">
               <ButtonNewChat />
               {!hasSidebar && <HistoryTrigger hasSidebar={hasSidebar} />}
-              {preferences.userRole === "doctor" && (
+              {auth.hasPermission("clinical:access") && (
                 <SavedClinicianQuestionsDialog
                   showLabel={!isMobile}
                   className={

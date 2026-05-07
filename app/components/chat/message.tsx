@@ -41,7 +41,7 @@ type MessageProps = {
   optimisticTaskBoard?: OptimisticTaskBoardState | null
 }
 
-export function Message({
+function MessageImpl({
   variant,
   children,
   id,
@@ -160,3 +160,37 @@ export function Message({
 
   return messageContent
 }
+
+/**
+ * PERF: React.memo with a custom equality check so historical messages don't
+ * re-render on every streaming token of the latest message. The streaming
+ * message itself still re-renders because its `children`, `parts`, or
+ * `annotations` change between renders.
+ */
+function arePropsEqualForMessage(prev: MessageProps, next: MessageProps): boolean {
+  if (prev.id !== next.id) return false
+  if (prev.variant !== next.variant) return false
+  if (prev.children !== next.children) return false
+  if (prev.isLast !== next.isLast) return false
+  if (prev.status !== next.status) return false
+  if (prev.hasScrollAnchor !== next.hasScrollAnchor) return false
+  if (prev.discussionInsightCount !== next.discussionInsightCount) return false
+  if (prev.contextPrompt !== next.contextPrompt) return false
+  if (prev.streamIntroPreview !== next.streamIntroPreview) return false
+  if (prev.className !== next.className) return false
+  if (prev.parts !== next.parts) return false
+  if (prev.annotations !== next.annotations) return false
+  if (prev.attachments !== next.attachments) return false
+  if (prev.evidenceCitations !== next.evidenceCitations) return false
+  if (prev.referencedUploads !== next.referencedUploads) return false
+  if (prev.optimisticTaskBoard !== next.optimisticTaskBoard) return false
+  if (prev.onDelete !== next.onDelete) return false
+  if (prev.onEdit !== next.onEdit) return false
+  if (prev.onReload !== next.onReload) return false
+  if (prev.onSuggestion !== next.onSuggestion) return false
+  if (prev.onWorkflowSuggestion !== next.onWorkflowSuggestion) return false
+  if (prev.onDrilldownInsightAdd !== next.onDrilldownInsightAdd) return false
+  return true
+}
+
+export const Message = React.memo(MessageImpl, arePropsEqualForMessage)

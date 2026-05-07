@@ -1,11 +1,11 @@
 "use client"
 
-import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import { getChatsForPatientInDb } from "@/lib/chat-store/chats/api"
 import { useWorkspaceStore } from "@/lib/clinical-workspace"
 import { isPracticePatientUuid } from "@/lib/clinical-workspace/clinical-uuid"
+import { useAuthContext } from "@/lib/auth/provider"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef } from "react"
 
@@ -14,7 +14,7 @@ import { useEffect, useRef } from "react"
  * Supports multiple chats per patient; prefers the current route when it matches the patient.
  */
 export function PatientChatSync() {
-  const { preferences } = useUserPreferences()
+  const auth = useAuthContext()
   const { user } = useUser()
   const { createNewChat } = useChats()
   const pathname = usePathname()
@@ -25,7 +25,7 @@ export function PatientChatSync() {
   const inFlightRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (preferences.userRole !== "doctor" || mode !== "clinical") return
+    if (!auth.hasPermission("clinical:access") || mode !== "clinical") return
     const userId = user?.id
     if (!userId || !activePatientId) return
 
@@ -109,7 +109,7 @@ export function PatientChatSync() {
     createNewChat,
     mode,
     pathname,
-    preferences.userRole,
+    auth,
     router,
     user?.id,
   ])

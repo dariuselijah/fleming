@@ -123,7 +123,7 @@ export function BentoInventory() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-foreground">Inventory &amp; Consumables</h2>
-          <p className="text-[10px] text-white/30">
+          <p className="text-[10px] text-muted-foreground">
             {inventory.length} items ·{" "}
             <span className={cn(lowStock > 0 ? "text-[#FFC107]" : "text-[#00E676]")}>
               {lowStock} low stock
@@ -134,7 +134,7 @@ export function BentoInventory() {
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-white/[0.08] px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-white/[0.14]"
+            className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14]"
           >
             <Plus className="size-3.5" />
             Add Item
@@ -142,7 +142,7 @@ export function BentoInventory() {
           <button
             type="button"
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-white/[0.08] px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-white/[0.14]"
+            className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14]"
           >
             <FileXls className="size-3.5" />
             Smart Import
@@ -160,8 +160,8 @@ export function BentoInventory() {
             className={cn(
               "rounded-full px-3 py-1 text-[10px] font-medium transition-colors",
               category === cat
-                ? "bg-white/[0.12] text-foreground"
-                : "bg-white/[0.03] text-white/30 hover:bg-white/[0.06] hover:text-white/50",
+                ? "bg-muted text-foreground dark:bg-white/[0.12]"
+                : "bg-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:bg-white/[0.03] dark:text-white/30 dark:hover:bg-white/[0.06] dark:hover:text-white/50",
             )}
           >
             {cat}
@@ -170,11 +170,11 @@ export function BentoInventory() {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-hidden rounded-2xl border border-white/[0.05] bg-white/[0.015]">
+      <div className="flex-1 overflow-hidden rounded-2xl border border-border bg-card/70 dark:border-white/[0.05] dark:bg-white/[0.015]">
         <div className="h-full overflow-x-auto overflow-y-auto" style={{ scrollbarWidth: "none" }}>
           <table className="w-full min-w-[800px] border-collapse text-left">
             <thead>
-              <tr className="border-b border-white/[0.06]">
+              <tr className="border-b border-border dark:border-white/[0.06]">
                 <ColHeader label="Item (NAPPI)" sortKey="name" current={sortKey} dir={sortDir} onSort={toggleSort} className="min-w-[200px]" />
                 <ColHeader label="Category" sortKey="category" current={sortKey} dir={sortDir} onSort={toggleSort} />
                 <ColHeader label="Stock" sortKey="stock" current={sortKey} dir={sortDir} onSort={toggleSort} />
@@ -195,8 +195,8 @@ export function BentoInventory() {
                   <tr
                     key={item.id}
                     className={cn(
-                      "border-b border-white/[0.03] transition-colors hover:bg-white/[0.03] cursor-pointer",
-                      selectedItem?.id === item.id && "bg-white/[0.04]",
+                      "cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 dark:border-white/[0.03] dark:hover:bg-white/[0.03]",
+                      selectedItem?.id === item.id && "bg-muted/60 dark:bg-white/[0.04]",
                     )}
                     onClick={() => setSelectedItem(item)}
                   >
@@ -206,14 +206,14 @@ export function BentoInventory() {
                         <div>
                           <p className="text-[11px] font-medium text-foreground">{item.name}</p>
                           {item.nappiCode && (
-                            <p className="text-[9px] tabular-nums text-white/25">
+                            <p className="text-[9px] tabular-nums text-muted-foreground dark:text-white/25">
                               NAPPI: {item.nappiCode}
                             </p>
                           )}
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-[11px] text-white/40">{item.category}</td>
+                    <td className="px-3 py-2.5 text-[11px] text-muted-foreground">{item.category}</td>
                     <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                       {isEditing ? (
                         <div className="flex items-center gap-1">
@@ -225,12 +225,12 @@ export function BentoInventory() {
                               if (e.key === "Escape") setEditingId(null)
                             }}
                             autoFocus
-                            className="w-14 rounded border border-white/[0.1] bg-white/[0.04] px-1.5 py-0.5 text-[11px] tabular-nums outline-none"
+                            className="w-14 rounded border border-input bg-background px-1.5 py-0.5 text-[11px] tabular-nums outline-none dark:border-white/[0.1] dark:bg-white/[0.04]"
                           />
                           <button type="button" onClick={() => commitEdit(item)} className="text-[#00E676] hover:text-[#00E676]/80">
                             <Check className="size-3" />
                           </button>
-                          <button type="button" onClick={() => setEditingId(null)} className="text-white/20 hover:text-white/40">
+                          <button type="button" onClick={() => setEditingId(null)} className="text-muted-foreground hover:text-foreground dark:text-white/20 dark:hover:text-white/40">
                             <X className="size-3" />
                           </button>
                         </div>
@@ -244,11 +244,11 @@ export function BentoInventory() {
                           )}
                         >
                           {item.currentStock}{" "}
-                          <span className="text-[9px] text-white/20">{item.unit}s</span>
+                          <span className="text-[9px] text-muted-foreground dark:text-white/20">{item.unit}s</span>
                         </button>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-[11px] tabular-nums text-white/40">
+                    <td className="px-3 py-2.5 text-[11px] tabular-nums text-muted-foreground">
                       {item.costPrice ? `R${item.costPrice.toFixed(2)}` : "—"}
                     </td>
                     <td className="px-3 py-2.5 text-[11px] tabular-nums font-medium text-foreground">
@@ -265,10 +265,10 @@ export function BentoInventory() {
                           {margin.toFixed(1)}%
                         </span>
                       ) : (
-                        <span className="text-[10px] text-white/15">—</span>
+                        <span className="text-[10px] text-muted-foreground/70 dark:text-white/15">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-[11px] tabular-nums text-white/30">
+                    <td className="px-3 py-2.5 text-[11px] tabular-nums text-muted-foreground">
                       {item.expiresAt
                         ? new Date(item.expiresAt).toLocaleDateString([], {
                             year: "numeric",
@@ -277,7 +277,7 @@ export function BentoInventory() {
                           })
                         : "—"}
                     </td>
-                    <td className="px-3 py-2.5 text-white/15">
+                    <td className="px-3 py-2.5 text-muted-foreground/50 dark:text-white/15">
                       <CaretRight className="size-3" />
                     </td>
                   </tr>
@@ -285,8 +285,8 @@ export function BentoInventory() {
               })}
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-[11px] text-white/20">
-                    <Package className="mx-auto mb-2 size-6 text-white/10" />
+                  <td colSpan={8} className="py-12 text-center text-[11px] text-muted-foreground">
+                    <Package className="mx-auto mb-2 size-6 text-muted-foreground/40 dark:text-white/10" />
                     No items in this category
                   </td>
                 </tr>
@@ -369,7 +369,9 @@ function ColHeader({
         onClick={() => onSort(sortKey)}
         className={cn(
           "flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider transition-colors",
-          active ? "text-white/60" : "text-white/25 hover:text-white/40",
+          active
+            ? "text-foreground"
+            : "text-muted-foreground hover:text-foreground dark:text-white/25 dark:hover:text-white/40",
         )}
       >
         {label}

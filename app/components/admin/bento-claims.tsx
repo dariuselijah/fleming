@@ -18,13 +18,9 @@ import {
   ArrowsClockwise,
   ArrowsDownUp,
   Bell,
-  CaretRight,
   Check,
-  CheckCircle,
   Copy,
   CreditCard,
-  CurrencyCircleDollar,
-  FileText,
   MagnifyingGlass,
   PaperPlaneTilt,
   PencilSimple,
@@ -37,7 +33,6 @@ import {
   Warning,
   X,
 } from "@phosphor-icons/react"
-import { BentoTile } from "./bento-tile"
 import { RevenueSparkline } from "./revenue-sparkline"
 import { motion, AnimatePresence } from "motion/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -64,7 +59,7 @@ function weeklyBucketsZar(
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  draft: "bg-white/[0.06] text-white/50",
+  draft: "bg-muted text-muted-foreground dark:bg-white/[0.06] dark:text-white/50",
   submitted: "bg-blue-500/15 text-blue-400",
   approved: "bg-[#00E676]/15 text-[#00E676]",
   rejected: "bg-[#EF5350]/15 text-[#EF5350]",
@@ -234,7 +229,7 @@ export function BentoClaims() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Header: Sub-tabs + Create */}
         <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-1 rounded-xl bg-white/[0.04] p-1">
+          <div className="flex items-center gap-1 rounded-xl bg-muted p-1 dark:bg-white/[0.04]">
             {SUB_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -243,8 +238,8 @@ export function BentoClaims() {
                 className={cn(
                   "rounded-lg px-3.5 py-1.5 text-[11px] font-semibold transition-all",
                   activeBillingSubTab === tab.id
-                    ? "bg-white/[0.1] text-white shadow-sm"
-                    : "text-white/35 hover:text-white/55"
+                    ? "bg-background text-foreground shadow-sm dark:bg-white/[0.1] dark:text-white"
+                    : "text-muted-foreground hover:text-foreground dark:text-white/35 dark:hover:text-white/55"
                 )}
               >
                 {tab.label}
@@ -298,14 +293,14 @@ export function BentoClaims() {
                     "flex-1 rounded-xl border px-3 py-2",
                     isOld
                       ? "border-[#EF5350]/20 bg-[#EF5350]/[0.04]"
-                      : "border-white/[0.06] bg-white/[0.02]"
+                      : "border-border bg-card/70 dark:border-white/[0.06] dark:bg-white/[0.02]"
                   )}
                 >
-                  <p className="text-[9px] font-medium uppercase tracking-wider text-white/25">{label}</p>
-                  <p className={cn("text-sm font-bold tabular-nums", isOld ? "text-[#EF5350]" : "text-white/70")}>
+                  <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground dark:text-white/25">{label}</p>
+                  <p className={cn("text-sm font-bold tabular-nums", isOld ? "text-[#EF5350]" : "text-foreground dark:text-white/70")}>
                     R{total.toLocaleString()}
                   </p>
-                  <p className="text-[9px] text-white/20">{items.length} claim{items.length !== 1 ? "s" : ""}</p>
+                  <p className="text-[9px] text-muted-foreground dark:text-white/20">{items.length} claim{items.length !== 1 ? "s" : ""}</p>
                 </div>
               )
             })}
@@ -318,11 +313,11 @@ export function BentoClaims() {
 
         {/* Table (claims, outstanding, payments) */}
         {activeBillingSubTab !== "invoices" && (
-          <div className="flex-1 overflow-hidden rounded-2xl border border-white/[0.05] bg-white/[0.015]">
+          <div className="flex-1 overflow-hidden rounded-2xl border border-border bg-card/70 dark:border-white/[0.05] dark:bg-white/[0.015]">
             <div className="h-full overflow-x-auto overflow-y-auto" style={{ scrollbarWidth: "none" }}>
               <table className="w-full min-w-[700px] border-collapse text-left">
                 <thead>
-                  <tr className="border-b border-white/[0.06]">
+                  <tr className="border-b border-border dark:border-white/[0.06]">
                     <th className="w-8 px-3 py-2.5">
                       <input
                         type="checkbox"
@@ -336,14 +331,14 @@ export function BentoClaims() {
                     </th>
                     <ColHeader label="Date" sortKey="date" current={sortKey} dir={sortDir} onSort={toggleSort} />
                     <ColHeader label="Patient" sortKey="patient" current={sortKey} dir={sortDir} onSort={toggleSort} />
-                    <th className="px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-white/25">ICD-10</th>
+                    <th className="px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground dark:text-white/25">ICD-10</th>
                     <ColHeader label="Amount" sortKey="amount" current={sortKey} dir={sortDir} onSort={toggleSort} />
                     <ColHeader label="Status" sortKey="status" current={sortKey} dir={sortDir} onSort={toggleSort} />
-                    <th className="px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-white/25">Type</th>
+                    <th className="px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground dark:text-white/25">Type</th>
                     {activeBillingSubTab === "payments" && (
                       <>
-                        <th className="px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-white/25">Method</th>
-                        <th className="px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-white/25">Reference</th>
+                        <th className="px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground dark:text-white/25">Method</th>
+                        <th className="px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground dark:text-white/25">Reference</th>
                       </>
                     )}
                     <th className="w-10 px-3 py-2.5" />
@@ -358,7 +353,7 @@ export function BentoClaims() {
                       <tr
                         key={claim.id}
                         onClick={() => setSelectedClaim(claim)}
-                        className="cursor-pointer border-b border-white/[0.03] transition-colors hover:bg-white/[0.03]"
+                        className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 dark:border-white/[0.03] dark:hover:bg-white/[0.03]"
                       >
                         <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -368,14 +363,14 @@ export function BentoClaims() {
                             className="size-3.5 rounded accent-blue-500"
                           />
                         </td>
-                        <td className="px-3 py-2 text-[11px] tabular-nums text-white/40">
+                        <td className="px-3 py-2 text-[11px] tabular-nums text-muted-foreground">
                           {new Date(claim.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
                         </td>
                         <td className="px-3 py-2 text-[11px] font-medium text-foreground">{claim.patientName}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-1">
                             {icdCodes.map((code) => (
-                              <span key={code} className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-white/50">
+                              <span key={code} className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-muted-foreground dark:bg-white/[0.06] dark:text-white/50">
                                 {code}
                               </span>
                             ))}
@@ -399,8 +394,8 @@ export function BentoClaims() {
                         </td>
                         {activeBillingSubTab === "payments" && (
                           <>
-                            <td className="px-3 py-2 text-[10px] text-white/40">{claim.paymentMethod ?? "—"}</td>
-                            <td className="px-3 py-2 text-[10px] font-mono text-white/30">{claim.paymentRef ?? "—"}</td>
+                            <td className="px-3 py-2 text-[10px] text-muted-foreground">{claim.paymentMethod ?? "—"}</td>
+                            <td className="px-3 py-2 text-[10px] font-mono text-muted-foreground">{claim.paymentRef ?? "—"}</td>
                           </>
                         )}
                         <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
@@ -409,7 +404,7 @@ export function BentoClaims() {
                               <button
                                 type="button"
                                 title="Send Reminder"
-                                className="rounded-md p-1 text-white/20 transition-colors hover:bg-amber-500/10 hover:text-amber-400"
+                                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-amber-500/10 hover:text-amber-600 dark:text-white/20 dark:hover:text-amber-400"
                               >
                                 <Bell className="size-3.5" />
                               </button>
@@ -417,7 +412,7 @@ export function BentoClaims() {
                             <button
                               type="button"
                               onClick={() => setSelectedClaim(claim)}
-                              className="rounded-md p-1 text-white/20 transition-colors hover:bg-white/[0.06] hover:text-white/50"
+                              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/20 dark:hover:bg-white/[0.06] dark:hover:text-white/50"
                             >
                               <PencilSimple className="size-3.5" />
                             </button>
@@ -428,7 +423,7 @@ export function BentoClaims() {
                   })}
                   {sorted.length === 0 && (
                     <tr>
-                      <td colSpan={activeBillingSubTab === "payments" ? 10 : 8} className="px-4 py-12 text-center text-[11px] text-white/20">
+                      <td colSpan={activeBillingSubTab === "payments" ? 10 : 8} className="px-4 py-12 text-center text-[11px] text-muted-foreground">
                         No claims found
                       </td>
                     </tr>
@@ -479,7 +474,7 @@ function PulseChip({ label, value, data, color }: { label: string; value: string
   return (
     <div className="flex items-center gap-2.5">
       <div>
-        <p className="text-[9px] font-medium uppercase tracking-wider text-white/25">{label}</p>
+        <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground dark:text-white/25">{label}</p>
         <p className="text-sm font-bold tabular-nums" style={{ color }}>{value}</p>
       </div>
       {data && <RevenueSparkline data={data} color={color} width={64} height={20} />}
@@ -689,6 +684,19 @@ function ClaimBillingSection({
   const [deliverSms, setDeliverSms] = useState(false)
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null)
   const [eftUrl, setEftUrl] = useState<string | null>(null)
+  const [cashDrawerOpen, setCashDrawerOpen] = useState<boolean | null>(null)
+
+  const refreshCashDrawerStatus = useCallback(async () => {
+    if (!practiceId) return
+    try {
+      const res = await fetchClient("/api/billing/cash-drawer/status")
+      if (!res.ok) return
+      const j = (await res.json()) as { open?: { id: string } | null }
+      setCashDrawerOpen(!!j.open)
+    } catch {
+      setCashDrawerOpen(null)
+    }
+  }, [practiceId])
 
   useEffect(() => {
     setCashZar(cashAmount > 0 ? String(cashAmount) : "")
@@ -722,6 +730,10 @@ function ClaimBillingSection({
       cancelled = true
     }
   }, [claimId, practiceId])
+
+  useEffect(() => {
+    void refreshCashDrawerStatus()
+  }, [refreshCashDrawerStatus, invoiceId])
 
   const billingMode: BillingMode = useMemo(() => {
     if (medicalAidAmount > 0 && cashAmount > 0) return "split"
@@ -799,6 +811,7 @@ function ClaimBillingSection({
       if (!res.ok) throw new Error(j.error || "Failed")
       if (j.invoiceStatus) setInvoiceStatus(j.invoiceStatus)
       setMsg("Cash recorded")
+      void refreshCashDrawerStatus()
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Failed")
     } finally {
@@ -976,6 +989,11 @@ function ClaimBillingSection({
       {invoiceId && (
         <div className="space-y-2 border-t border-white/[0.06] pt-2">
           <p className="text-[9px] font-medium uppercase tracking-wider text-white/25">Record cash</p>
+          {cashDrawerOpen === false && (
+            <p className="text-[9px] leading-snug text-amber-400/90">
+              Open a cash drawer shift using the banner above before posting cash.
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
@@ -1021,7 +1039,7 @@ function ClaimBillingSection({
 // ─── Column Header ───────────────────────────────────────────────
 
 function ColHeader({
-  label, sortKey, current, dir, onSort,
+  label, sortKey, current, onSort,
 }: {
   label: string; sortKey: SortKey; current: SortKey; dir: SortDir; onSort: (k: SortKey) => void
 }) {
@@ -1031,7 +1049,12 @@ function ColHeader({
       <button
         type="button"
         onClick={() => onSort(sortKey)}
-        className={cn("flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider transition-colors", active ? "text-white/60" : "text-white/25 hover:text-white/40")}
+        className={cn(
+          "flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider transition-colors",
+          active
+            ? "text-foreground"
+            : "text-muted-foreground hover:text-foreground dark:text-white/25 dark:hover:text-white/40"
+        )}
       >
         {label}
         <ArrowsDownUp className="size-3" weight={active ? "fill" : "regular"} />
@@ -1129,8 +1152,6 @@ function ClaimDetailPanel({
   const { resumeMedikreditClaimDraft, setMode } = useWorkspace()
   const { practiceId } = usePracticeCrypto()
   const [editingLines, setEditingLines] = useState<ClaimLine[]>(claim.lines)
-  const [paymentMethod, setPaymentMethod] = useState("EFT")
-  const [paymentRef, setPaymentRef] = useState("")
   const [isEditing, setIsEditing] = useState(false)
 
   useEffect(() => {
@@ -1192,16 +1213,6 @@ function ClaimDetailPanel({
 
   const removeLine = (lineId: string) => {
     setEditingLines((prev) => prev.filter((l) => l.id !== lineId))
-  }
-
-  const handleMarkPaid = () => {
-    onUpdateClaim(claim.id, {
-      status: "paid",
-      paymentMethod,
-      paymentRef,
-      paidAt: new Date().toISOString(),
-    })
-    onUpdateStatus(claim.id, "paid")
   }
 
   return (
@@ -1447,36 +1458,13 @@ function ClaimDetailPanel({
             </div>
           </div>
 
-          {/* Payment recording */}
-          {claim.status !== "paid" && claim.status !== "draft" && (
-            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 space-y-2.5">
-              <p className="text-[9px] font-medium uppercase tracking-wider text-white/20">Record Payment</p>
-              <div className="flex gap-2">
-                <select
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-blue-500/30"
-                >
-                  <option value="EFT">EFT</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Card">Card</option>
-                </select>
-                <input
-                  type="text"
-                  value={paymentRef}
-                  onChange={(e) => setPaymentRef(e.target.value)}
-                  placeholder="Reference"
-                  className="flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 text-[11px] text-foreground outline-none placeholder:text-white/20 focus:border-blue-500/30"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleMarkPaid}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#00E676]/10 py-2 text-[11px] font-semibold text-[#00E676] transition-colors hover:bg-[#00E676]/20"
-              >
-                <CheckCircle className="size-3.5" weight="fill" />
-                Mark as Paid
-              </button>
+          {/* Payments are now recorded through Revenue → Invoices so the invoice/payment ledger stays canonical. */}
+          {claim.status !== "paid" && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3">
+              <p className="text-[11px] font-medium text-amber-300">Use Revenue → Invoices to record payment</p>
+              <p className="mt-1 text-[10px] text-white/35">
+                Cash, card, EFT, medical-aid remittances and write-offs are posted to `practice_payments`.
+              </p>
             </div>
           )}
         </div>
@@ -1493,16 +1481,6 @@ function ClaimDetailPanel({
                 <ShieldCheck className="size-3.5" weight="fill" />
                 Submit to Scheme
               </button>
-              {claim.cashAmount > 0 && (
-                <button
-                  type="button"
-                  onClick={handleMarkPaid}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#00E676]/10 py-2 text-[11px] font-semibold text-[#00E676] transition-colors hover:bg-[#00E676]/20"
-                >
-                  <Receipt className="size-3.5" weight="fill" />
-                  Record Cash
-                </button>
-              )}
             </div>
           ) : (
             <div className="flex gap-2">

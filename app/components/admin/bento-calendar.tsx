@@ -266,7 +266,7 @@ export function BentoCalendar() {
             <button
               type="button"
               onClick={() => (viewMode === "day" ? navigateDay(-1) : navigateWeek(-1))}
-              className="rounded-lg p-1 text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white/70"
+              className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/70"
             >
               <CaretLeft className="size-4" weight="bold" />
             </button>
@@ -275,9 +275,9 @@ export function BentoCalendar() {
               <button
                 type="button"
                 onClick={() => setShowDatePicker(!showDatePicker)}
-                className="flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors hover:bg-white/[0.06]"
+                className="flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors hover:bg-muted dark:hover:bg-white/[0.06]"
               >
-                <CalendarBlank className="size-3.5 text-white/40" />
+                <CalendarBlank className="size-3.5 text-muted-foreground dark:text-white/40" />
                 <span className="text-sm font-semibold text-foreground">{dateLabel}</span>
               </button>
 
@@ -305,18 +305,20 @@ export function BentoCalendar() {
             <button
               type="button"
               onClick={() => (viewMode === "day" ? navigateDay(1) : navigateWeek(1))}
-              className="rounded-lg p-1 text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white/70"
+              className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/70"
             >
               <CaretRight className="size-4" weight="bold" />
             </button>
 
-            <div className="ml-2 flex rounded-lg border border-white/[0.06] p-0.5">
+            <div className="ml-2 flex rounded-lg border border-border p-0.5 dark:border-white/[0.06]">
               <button
                 type="button"
                 onClick={() => setViewMode("day")}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                  viewMode === "day" ? "bg-white/[0.1] text-foreground" : "text-white/30 hover:text-white/50"
+                  viewMode === "day"
+                    ? "bg-muted text-foreground dark:bg-white/[0.1]"
+                    : "text-muted-foreground hover:text-foreground dark:text-white/30 dark:hover:text-white/50"
                 )}
               >
                 Day
@@ -326,7 +328,9 @@ export function BentoCalendar() {
                 onClick={() => setViewMode("week")}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                  viewMode === "week" ? "bg-white/[0.1] text-foreground" : "text-white/30 hover:text-white/50"
+                  viewMode === "week"
+                    ? "bg-muted text-foreground dark:bg-white/[0.1]"
+                    : "text-muted-foreground hover:text-foreground dark:text-white/30 dark:hover:text-white/50"
                 )}
               >
                 Week
@@ -336,20 +340,20 @@ export function BentoCalendar() {
 
           <div className="flex items-center gap-3">
             <div className="flex gap-3 text-[10px]">
-              <span className="text-white/40">
+              <span className="text-muted-foreground">
                 Booked: <span className="font-bold text-foreground">{booked}</span>
               </span>
-              <span className="text-white/40">
+              <span className="text-muted-foreground">
                 Done: <span className="font-bold text-[#00E676]">{completed}</span>
               </span>
-              <span className="text-white/40">
+              <span className="text-muted-foreground">
                 Waiting: <span className="font-bold text-blue-400">{checkedIn}</span>
               </span>
             </div>
             <button
               type="button"
               onClick={() => setShowCreate(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-white/[0.08] px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-white/[0.14]"
+              className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14]"
             >
               <Plus className="size-3.5" />
               New Appointment
@@ -433,9 +437,9 @@ function DayView({
 }) {
   if (dayClosed || slots.length === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 py-16">
-        <CalendarBlank className="mb-3 size-10 text-white/15" />
-        <p className="max-w-sm text-center text-[13px] leading-relaxed text-white/35">
+      <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-border bg-card/70 px-6 py-16 dark:border-white/[0.05] dark:bg-white/[0.015]">
+        <CalendarBlank className="mb-3 size-10 text-muted-foreground/40 dark:text-white/15" />
+        <p className="max-w-sm text-center text-[13px] leading-relaxed text-muted-foreground">
           {dayClosed
             ? "This practice is closed on this day. Change operating hours in Settings → Practice."
             : "No time slots — check open and close times in Practice settings."}
@@ -446,7 +450,7 @@ function DayView({
 
   return (
     <div
-      className="flex-1 overflow-y-auto rounded-2xl border border-white/[0.05] bg-white/[0.015]"
+      className="flex-1 overflow-y-auto rounded-2xl border border-border bg-card/70 dark:border-white/[0.05] dark:bg-white/[0.015]"
       style={{ scrollbarWidth: "none" }}
     >
       <div className="relative">
@@ -461,11 +465,11 @@ function DayView({
               key={key}
               className={cn(
                 "flex min-h-[44px] items-stretch",
-                isHalfHour ? "border-t border-white/[0.03]" : "border-t border-white/[0.06]"
+                isHalfHour ? "border-t border-border/50 dark:border-white/[0.03]" : "border-t border-border dark:border-white/[0.06]"
               )}
             >
               <div className="flex w-14 shrink-0 items-start justify-end pr-3 pt-1.5">
-                {!isHalfHour && <span className="text-[10px] tabular-nums text-white/25">{ts}</span>}
+                {!isHalfHour && <span className="text-[10px] tabular-nums text-muted-foreground dark:text-white/25">{ts}</span>}
               </div>
               <div className="flex-1 py-0.5 pr-2">
                 {appt && (
@@ -473,14 +477,14 @@ function DayView({
                     type="button"
                     onClick={() => onSelect(appt)}
                     className={cn(
-                      "flex w-full items-center gap-2.5 rounded-lg border-l-2 bg-white/[0.03] px-3 py-2 text-left transition-all hover:bg-white/[0.06]",
+                      "flex w-full items-center gap-2.5 rounded-lg border-l-2 bg-muted/40 px-3 py-2 text-left transition-all hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.06]",
                       STATUS_COLOR[appt.status]
                     )}
                   >
                     <span className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[appt.status])} />
                     <div className="min-w-0 flex-1">
                       <span className="text-[12px] font-medium text-foreground">{appt.patientName}</span>
-                      <span className="ml-2 text-[10px] text-white/30">{appt.reason}</span>
+                      <span className="ml-2 text-[10px] text-muted-foreground dark:text-white/30">{appt.reason}</span>
                     </div>
                     <PaymentBadge paymentType={appt.paymentType} medicalAid={appt.medicalAid} />
                   </button>
@@ -524,7 +528,7 @@ function WeekView({
 
   return (
     <div
-      className="flex-1 overflow-y-auto rounded-2xl border border-white/[0.05] bg-white/[0.015]"
+      className="flex-1 overflow-y-auto rounded-2xl border border-border bg-card/70 dark:border-white/[0.05] dark:bg-white/[0.015]"
       style={{ scrollbarWidth: "none" }}
     >
       <div className="grid h-full grid-cols-7 divide-x divide-white/[0.04]">
@@ -540,11 +544,11 @@ function WeekView({
                 type="button"
                 onClick={() => onDateClick(d)}
                 className={cn(
-                  "border-b border-white/[0.05] px-2 py-2 text-center transition-colors hover:bg-white/[0.04]",
-                  isSelected && "bg-white/[0.04]"
+                  "border-b border-border px-2 py-2 text-center transition-colors hover:bg-muted/50 dark:border-white/[0.05] dark:hover:bg-white/[0.04]",
+                  isSelected && "bg-muted/60 dark:bg-white/[0.04]"
                 )}
               >
-                <div className="text-[9px] font-semibold uppercase tracking-wider text-white/30">
+                <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground dark:text-white/30">
                   {WEEKDAYS[(d.getDay() + 6) % 7]}
                 </div>
                 <div
@@ -564,12 +568,12 @@ function WeekView({
                     type="button"
                     onClick={() => onSelect(a)}
                     className={cn(
-                      "w-full rounded-md border-l-2 bg-white/[0.03] px-1.5 py-1 text-left transition-all hover:bg-white/[0.06]",
+                      "w-full rounded-md border-l-2 bg-muted/40 px-1.5 py-1 text-left transition-all hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.06]",
                       STATUS_COLOR[a.status]
                     )}
                   >
                     <div className="truncate text-[10px] font-medium text-foreground">{a.patientName}</div>
-                    <div className="text-[9px] tabular-nums text-white/30">{a.startTime}</div>
+                    <div className="text-[9px] tabular-nums text-muted-foreground dark:text-white/30">{a.startTime}</div>
                   </button>
                 ))}
               </div>

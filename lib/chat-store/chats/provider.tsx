@@ -86,11 +86,15 @@ export function ChatsProvider({
 
   // Listen for reset chat state events
   useEffect(() => {
-    const handleResetChatState = () => {
-      // Don't reset chats on new chat, just refresh to get latest
-      if (userId) {
-        refresh()
-      }
+    const handleResetChatState = (event: Event) => {
+      const reason = (event as CustomEvent<{ reason?: string }>).detail?.reason
+
+      // New Chat is a purely local composer reset. Refreshing the whole chat
+      // list here made the button feel slow and churned the sidebar for no
+      // useful data: no new database chat exists until the user actually sends.
+      if (reason === "new-chat") return
+
+      if (userId) refresh()
     }
 
     const handleChatCreated = async (event: Event) => {

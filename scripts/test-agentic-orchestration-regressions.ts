@@ -105,7 +105,7 @@ function testLangChainSupervisorSkeleton() {
   )
   assert.match(
     orchestrator,
-    /under 40 characters|under 40/,
+    /under 4[0-8] characters|under 4[0-8]/,
     "Orchestrator generatePlan should enforce strict short task-title policy"
   )
   assert.match(

@@ -477,12 +477,12 @@ export function EvidenceCitationPill({
       let x = rect.right + 12 + scrollX
       let y = rect.top + scrollY - 10
       
-      // Check bounds
-      const popupWidth = 420
+      // Check bounds — keep popup compact and refined
+      const popupWidth = 340
       const popupHeight =
         citation.previewReference || (citation.figureReferences?.length ?? 0) > 0
-          ? 460
-          : 320
+          ? 420
+          : 280
       
       if (x + popupWidth > window.innerWidth + scrollX) {
         x = rect.left - popupWidth - 12 + scrollX
@@ -727,15 +727,19 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
     <AnimatePresence>
       <motion.div
         data-evidence-popup
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 4 }}
-        transition={{ duration: 0.15, ease: "easeOut" }}
-        className="fixed z-50 w-[380px] overflow-hidden rounded-lg border border-border/80 bg-popover text-popover-foreground shadow-lg"
+        initial={{ opacity: 0, y: 2, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 2, scale: 0.985 }}
+        transition={{ duration: 0.14, ease: [0.22, 0.9, 0.32, 1] }}
+        className={cn(
+          "fixed z-50 w-[324px] overflow-hidden rounded-xl",
+          "border border-white/[0.06] bg-zinc-950/85 text-popover-foreground",
+          "shadow-[0_8px_32px_-8px_rgba(0,0,0,0.45)] supports-[backdrop-filter]:bg-zinc-950/65 supports-[backdrop-filter]:backdrop-blur-xl"
+        )}
         style={{ left: position.x, top: position.y }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-3.5 space-y-2.5">
+        <div className="space-y-2 px-3.5 py-3">
           {/* Title row */}
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -743,7 +747,7 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
                 isUploadCitation ? (
                   <Link
                     href={primaryHref}
-                    className="block text-[13px] font-medium leading-snug text-foreground hover:text-primary transition-colors line-clamp-2"
+                    className="block text-[12.5px] font-medium leading-snug tracking-[-0.005em] text-foreground transition-colors hover:text-primary line-clamp-3"
                   >
                     {citation.title}
                   </Link>
@@ -752,37 +756,43 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
                     href={primaryHref}
                     target={primaryTarget}
                     rel={primaryRel}
-                    className="block text-[13px] font-medium leading-snug text-foreground hover:text-primary transition-colors line-clamp-2"
+                    className="block text-[12.5px] font-medium leading-snug tracking-[-0.005em] text-foreground transition-colors hover:text-primary line-clamp-3"
                   >
                     {citation.title}
                   </a>
                 )
               ) : (
-                <h4 className="text-[13px] font-medium leading-snug line-clamp-2">
+                <h4 className="text-[12.5px] font-medium leading-snug tracking-[-0.005em] line-clamp-3">
                   {citation.title}
                 </h4>
               )}
             </div>
             <button
               onClick={onClose}
-              className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground/60 hover:text-foreground transition-colors"
+              aria-label="Close"
+              className="mt-0.5 shrink-0 rounded-full p-0.5 text-muted-foreground/40 transition-colors hover:bg-white/[0.04] hover:text-foreground"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3 w-3" />
             </button>
           </div>
 
-          {/* Meta line with GRADE indicator */}
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span className={cn(
-              "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold text-white",
-              evidenceColor
-            )}>
+          {/* Meta line: tiny grade pill + journal · year */}
+          <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground/70">
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center rounded px-1 py-px text-[9.5px] font-semibold leading-none text-white/95",
+                evidenceColor
+              )}
+              title={evidenceLabel}
+            >
               L{citation.evidenceLevel}
             </span>
-            <span className={cn(
-              "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium",
-              gradeColorForLevel(citation.evidenceLevel, citation.studyType || undefined)
-            )}>
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center rounded px-1 py-px text-[9.5px] font-medium leading-none",
+                gradeColorForLevel(citation.evidenceLevel, citation.studyType || undefined)
+              )}
+            >
               {gradeLabelForLevel(citation.evidenceLevel, citation.studyType || undefined)}
             </span>
             <span className="truncate">{metaLine}</span>
@@ -790,21 +800,21 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
 
           {/* Author */}
           {authorStr && (
-            <p className="text-[11px] text-muted-foreground/80 truncate">
+            <p className="truncate text-[10.5px] text-muted-foreground/55">
               {authorStr}
             </p>
           )}
 
           {/* Snippet */}
           {citation.snippet && (
-            <p className="text-[11px] leading-relaxed text-muted-foreground line-clamp-3">
+            <p className="text-[11px] leading-[1.55] text-muted-foreground/85 line-clamp-3">
               {citation.snippet}
             </p>
           )}
 
           {/* Visuals */}
           {visualReferences.length > 0 && (
-            <div className="flex gap-1.5 overflow-x-auto">
+            <div className="flex gap-1 overflow-x-auto pt-0.5">
               {visualReferences.slice(0, 3).map((visual) => (
                 <a
                   key={visual.assetId}
@@ -813,7 +823,7 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
                   rel={isUploadCitation ? undefined : "noopener noreferrer"}
                   className="shrink-0"
                 >
-                  <div className="h-16 w-20 overflow-hidden rounded border border-border/60">
+                  <div className="h-14 w-[72px] overflow-hidden rounded-md ring-1 ring-white/[0.06]">
                     <img
                       src={visual.signedUrl || ""}
                       alt={visual.label}
@@ -826,36 +836,39 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
           )}
 
           {/* Footer actions */}
-          <div className="flex items-center gap-3 pt-1.5">
-            {citation.url && (
-              isUploadCitation ? (
-                <Link
-                  href={primaryHref}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:text-primary/80 transition-colors"
-                >
-                  Open source
-                  <ArrowSquareOut className="h-3 w-3" />
-                </Link>
-              ) : (
-                <a
-                  href={primaryHref}
-                  target={primaryTarget}
-                  rel={primaryRel}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:text-primary/80 transition-colors"
-                >
-                  {ctaSourceLabel}
-                  <ArrowSquareOut className="h-3 w-3" />
-                </a>
-              )
-            )}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <div className="flex min-w-0 items-center gap-2.5">
+              {citation.url && (
+                isUploadCitation ? (
+                  <Link
+                    href={primaryHref}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-primary/90 transition-colors hover:text-primary"
+                  >
+                    Open source
+                    <ArrowSquareOut className="h-2.5 w-2.5" />
+                  </Link>
+                ) : (
+                  <a
+                    href={primaryHref}
+                    target={primaryTarget}
+                    rel={primaryRel}
+                    className="inline-flex min-w-0 items-center gap-1 text-[11px] font-medium text-primary/90 transition-colors hover:text-primary"
+                  >
+                    <span className="truncate">{ctaSourceLabel}</span>
+                    <ArrowSquareOut className="h-2.5 w-2.5 shrink-0" />
+                  </a>
+                )
+              )}
+            </div>
             {citation.doi && citation.sourceType !== "user_upload" && (
               <a
                 href={`https://doi.org/${citation.doi}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-foreground transition-colors"
+                className="shrink-0 truncate text-[10px] text-muted-foreground/45 transition-colors hover:text-muted-foreground/80"
+                title={citation.doi}
               >
-                {citation.doi}
+                {citation.doi.length > 26 ? `${citation.doi.slice(0, 24)}…` : citation.doi}
               </a>
             )}
           </div>

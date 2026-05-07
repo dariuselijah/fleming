@@ -18,14 +18,18 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function Page() {
-  if (isSupabaseEnabled) {
-    const supabase = await createClient()
-    if (supabase) {
-      const { data: userData, error: userError } = await supabase.auth.getUser()
-      if (userError || !userData?.user) {
-        redirect("/")
-      }
-    }
+  if (!isSupabaseEnabled) {
+    redirect("/auth")
+  }
+
+  const supabase = await createClient()
+  if (!supabase) {
+    redirect("/auth")
+  }
+
+  const { data: userData, error: userError } = await supabase.auth.getUser()
+  if (userError || !userData?.user) {
+    redirect("/auth")
   }
 
   return (

@@ -34,6 +34,8 @@ import { MediKreditAccreditationModal } from "@/app/components/medikredit/medi-k
 import { BentoTile } from "./bento-tile"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import QRCode from "qrcode"
+import type { PatientScanDocument, PatientScanSessionView } from "@/lib/clinical/patient-scan-session"
 import {
   MagnifyingGlass,
   Plus,
@@ -49,7 +51,6 @@ import {
   Heartbeat,
   Eye,
   Camera,
-  Upload,
   Spinner,
   ToggleLeft,
   ToggleRight,
@@ -870,6 +871,17 @@ function FunnelRow({ label, value, total, color }: { label: string; value: numbe
 
 type ModalTab = "manual" | "scan"
 
+type ScanSessionRow = {
+  id: string
+  status: string
+  expires_at: string
+  documents?: PatientScanDocument[]
+  extracted_fields?: Record<string, string>
+  prefill?: PatientRegistrationPrefill
+  missing_fields?: string[]
+  error?: string | null
+}
+
 interface ManualFormState {
   title: string
   firstName: string
@@ -951,6 +963,20 @@ function registrationPrefillToManualForm(p: PatientRegistrationPrefill): Partial
   return out
 }
 
+function normalizeScanSession(row: ScanSessionRow, scanUrl?: string): PatientScanSessionView {
+  return {
+    id: row.id,
+    status: row.status as PatientScanSessionView["status"],
+    expiresAt: row.expires_at,
+    scanUrl,
+    documents: Array.isArray(row.documents) ? row.documents : [],
+    extractedFields: row.extracted_fields ?? {},
+    prefill: row.prefill ?? {},
+    missingFields: Array.isArray(row.missing_fields) ? row.missing_fields : [],
+    error: row.error ?? null,
+  }
+}
+
 function AddPatientModal({
   onClose,
   onCreate,
@@ -964,14 +990,17 @@ function AddPatientModal({
   smartImportPrefillNonce?: number
   registrationError?: string | null
 }) {
+  const { practiceId } = usePracticeCrypto()
+  const { patients } = useWorkspace()
   const [tab, setTab] = useState<ModalTab>("manual")
   const [form, setForm] = useState<ManualFormState>(INITIAL_FORM)
   const [schemeOpen, setSchemeOpen] = useState(false)
   const schemeRef = useRef<HTMLDivElement>(null)
 
-  // Smart Scan state
-  const [scanStage, setScanStage] = useState<"idle" | "scanning" | "confirm">("idle")
-  const [scanData, setScanData] = useState<Partial<ManualFormState> | null>(null)
+  const [scanSession, setScanSession] = useState<PatientScanSessionView | null>(null)
+  const [scanQrUrl, setScanQrUrl] = useState<string | null>(null)
+  const [scanBusy, setScanBusy] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
 
   useEffect(() => {
     if (smartImportPrefillNonce <= 0) return
@@ -1035,6 +1064,74 @@ function AddPatientModal({
     })
   }, [form.scheme, medicalSchemes])
 
+  useEffect(() => {
+    let cancelled = false
+    async function makeQr() {
+      if (!scanSession?.scanUrl) {
+        setScanQrUrl(null)
+        return
+      }
+      try {
+        const dataUrl = await QRCode.toDataURL(scanSession.scanUrl, {
+          margin: 1,
+          width: 256,
+          color: { dark: "#052e2b", light: "#ffffff" },
+        })
+        if (!cancelled) setScanQrUrl(dataUrl)
+      } catch {
+        if (!cancelled) setScanQrUrl(null)
+      }
+    }
+    void makeQr()
+    return () => {
+      cancelled = true
+    }
+  }, [scanSession?.scanUrl])
+
+  useEffect(() => {
+    if (!scanSession?.id) return
+    const supabase = createClient()
+    if (!supabase) return
+    const channel = supabase
+      .channel(`patient_scan_sessions:id=eq.${scanSession.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "patient_scan_sessions",
+          filter: `id=eq.${scanSession.id}`,
+        },
+        (payload) => {
+          setScanSession((current) =>
+            normalizeScanSession(payload.new as ScanSessionRow, current?.scanUrl)
+          )
+        }
+      )
+      .subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [scanSession?.id])
+
+  const scanForm = useMemo(
+    () => (scanSession?.prefill ? registrationPrefillToManualForm(scanSession.prefill) : null),
+    [scanSession?.prefill]
+  )
+  const scanDuplicate = useMemo(
+    () =>
+      scanSession?.prefill
+        ? findDuplicatePatient(patients, { idNumber: scanSession.prefill.idNumber })
+        : undefined,
+    [patients, scanSession?.prefill]
+  )
+  const scanExpiresIn = useMemo(() => {
+    if (!scanSession?.expiresAt) return null
+    const diff = new Date(scanSession.expiresAt).getTime() - Date.now()
+    if (diff <= 0) return "Expired"
+    return `${Math.max(1, Math.ceil(diff / 60000))} min`
+  }, [scanSession?.expiresAt, scanSession?.status])
+
   const canCreate = form.firstName.trim() && form.lastName.trim()
 
   const handleCreate = useCallback(() => {
@@ -1079,31 +1176,50 @@ function AddPatientModal({
     void onCreate(draft)
   }, [form, onCreate])
 
-  const handleScan = useCallback(() => {
-    setScanStage("scanning")
-    setTimeout(() => {
-      setScanData({
-        title: "Mrs",
-        firstName: "Thandi",
-        lastName: "Mokoena",
-        idNumber: "8806150234089",
-        dateOfBirth: "1988-06-15",
-        sex: "F",
-        hasMedicalAid: true,
-        scheme: "Discovery",
-        memberNumber: "DH-88061500",
-        dependentCode: "00",
+  const startScanSession = useCallback(async () => {
+    if (!practiceId) {
+      setScanError("Practice is not ready yet. Unlock the workspace and try again.")
+      return
+    }
+    setScanBusy(true)
+    setScanError(null)
+    try {
+      const res = await fetch("/api/clinical/patient-scan-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ practiceId }),
       })
-      setScanStage("confirm")
-    }, 2200)
-  }, [])
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || "Could not create scan session")
+      setScanSession(json.session as PatientScanSessionView)
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : "Could not create scan session")
+    } finally {
+      setScanBusy(false)
+    }
+  }, [practiceId])
+
+  const cancelScanSession = useCallback(async () => {
+    if (!scanSession?.id) {
+      setScanSession(null)
+      return
+    }
+    const id = scanSession.id
+    setScanBusy(true)
+    try {
+      await fetch(`/api/clinical/patient-scan-sessions/${encodeURIComponent(id)}`, { method: "DELETE" })
+    } finally {
+      setScanSession(null)
+      setScanQrUrl(null)
+      setScanBusy(false)
+    }
+  }, [scanSession?.id])
 
   const handleConfirmScan = useCallback(() => {
-    if (!scanData) return
-    setForm((f) => ({ ...f, ...scanData }))
+    if (!scanForm) return
+    setForm((f) => ({ ...f, ...scanForm }))
     setTab("manual")
-    setScanStage("idle")
-  }, [scanData])
+  }, [scanForm])
 
   return (
     <motion.div
@@ -1313,73 +1429,157 @@ function AddPatientModal({
             </div>
           ) : (
             /* Smart Scan Tab */
-            <div className="flex flex-col items-center gap-6 py-4">
-              {scanStage === "idle" && (
-                <>
-                  <div className="flex size-32 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-white/[0.1] text-white/20">
-                    <Camera className="mb-2 size-10" />
-                    <p className="text-[10px]">ID / MA Card</p>
+            <div className="space-y-5 py-1">
+              <div className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.03] p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-300">
+                    <Camera className="size-5" weight="bold" />
                   </div>
-                  <p className="max-w-xs text-center text-xs text-white/30">
-                    Take a photo or upload an image of the patient&apos;s ID document or medical aid card to auto-fill registration fields.
-                  </p>
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={handleScan}
-                      className="flex items-center gap-2 rounded-lg bg-white/[0.06] px-4 py-2.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.1] hover:text-white"
-                    >
-                      <Camera className="size-4" weight="bold" />
-                      Capture
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleScan}
-                      className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-4 py-2.5 text-xs font-medium text-white/50 transition-colors hover:bg-white/[0.04] hover:text-white"
-                    >
-                      <Upload className="size-4" weight="bold" />
-                      Upload
-                    </button>
+                  <div>
+                    <p className="text-sm font-semibold text-white">Smart Scan QR</p>
+                    <p className="mt-1 text-xs leading-5 text-white/40">
+                      Show this QR code to the patient. Their phone only captures the ID and medical aid card; you
+                      confirm or edit everything here before creating the profile.
+                    </p>
                   </div>
-                </>
-              )}
-
-              {scanStage === "scanning" && (
-                <div className="flex flex-col items-center gap-4 py-8">
-                  <Spinner className="size-8 animate-spin text-white/40" />
-                  <p className="text-xs text-white/40">Extracting information from document...</p>
                 </div>
-              )}
+              </div>
 
-              {scanStage === "confirm" && scanData && (
-                <div className="w-full space-y-4">
-                  <p className="text-center text-xs font-medium text-[#00E676]">Fields extracted successfully</p>
-                  <div className="space-y-2 rounded-xl border border-[#00E676]/20 bg-[#00E676]/[0.03] p-4">
-                    {Object.entries(scanData)
-                      .filter(([, v]) => typeof v === "string" && v)
-                      .map(([key, value]) => (
-                        <div key={key} className="flex items-center justify-between text-xs">
-                          <span className="text-white/40">{key.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase())}</span>
-                          <span className="font-medium text-white/80">{String(value)}</span>
-                        </div>
-                      ))}
+              {!scanSession ? (
+                <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-white/[0.1] p-6 text-center">
+                  <div className="flex size-24 items-center justify-center rounded-3xl bg-white/[0.04] text-white/25">
+                    <Camera className="size-10" />
                   </div>
-                  <div className="flex justify-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => { setScanStage("idle"); setScanData(null) }}
-                      className="rounded-lg px-4 py-2 text-xs text-white/40 hover:text-white"
-                    >
-                      Retry
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleConfirmScan}
-                      className="flex items-center gap-1.5 rounded-lg bg-[#00E676]/10 px-4 py-2 text-xs font-medium text-[#00E676] transition-colors hover:bg-[#00E676]/20"
-                    >
-                      <Check className="size-3.5" weight="bold" />
-                      Confirm & Edit
-                    </button>
+                  <div>
+                    <p className="text-sm font-medium text-white/80">Start a secure scan session</p>
+                    <p className="mt-1 max-w-sm text-xs leading-5 text-white/35">
+                      The link expires quickly and pairs this registration modal with one mobile browser.
+                    </p>
+                  </div>
+                  {scanError ? <p className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">{scanError}</p> : null}
+                  <button
+                    type="button"
+                    disabled={scanBusy}
+                    onClick={() => void startScanSession()}
+                    className="flex items-center gap-2 rounded-xl bg-emerald-400/15 px-4 py-2.5 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-400/25 disabled:opacity-50"
+                  >
+                    {scanBusy ? <Spinner className="size-4 animate-spin" /> : <Camera className="size-4" weight="bold" />}
+                    Generate QR code
+                  </button>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-[180px_1fr]">
+                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 text-center">
+                    <div className="mx-auto flex size-36 items-center justify-center overflow-hidden rounded-2xl bg-white p-2">
+                      {scanQrUrl ? (
+                        <img src={scanQrUrl} alt="Patient scan QR code" className="size-full" />
+                      ) : (
+                        <Spinner className="size-6 animate-spin text-black/50" />
+                      )}
+                    </div>
+                    <p className="mt-3 text-[10px] uppercase tracking-wider text-white/30">Expires in</p>
+                    <p className="text-sm font-semibold text-white/70">{scanExpiresIn ?? "15 min"}</p>
+                    {scanSession.scanUrl ? (
+                      <p className="mt-2 break-all text-[9px] leading-4 text-white/25">{scanSession.scanUrl}</p>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                      <div>
+                        <p className="text-xs font-medium text-white/80">
+                          {scanSession.status === "submitted"
+                            ? "Ready for review"
+                            : scanSession.status === "processing"
+                              ? "Processing photos"
+                              : scanSession.status === "opened"
+                                ? "Phone connected"
+                                : scanSession.status === "error"
+                                  ? "Needs retry"
+                                  : "Waiting for scan"}
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-white/35">
+                          {scanSession.status === "submitted"
+                            ? "Review missing details, then confirm into the form."
+                            : scanSession.status === "processing"
+                              ? "The mobile upload is being read now."
+                              : "Ask the patient to open the QR code and send both captures."}
+                        </p>
+                      </div>
+                      {scanSession.status === "processing" ? (
+                        <Spinner className="size-4 animate-spin text-emerald-300" />
+                      ) : (
+                        <span className="rounded-full bg-white/[0.06] px-2 py-1 text-[10px] capitalize text-white/45">
+                          {scanSession.status}
+                        </span>
+                      )}
+                    </div>
+
+                    {scanSession.error ? (
+                      <p className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">{scanSession.error}</p>
+                    ) : null}
+
+                    {scanDuplicate ? (
+                      <p className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+                        Possible duplicate: {scanDuplicate.name}. Confirm before creating a new profile.
+                      </p>
+                    ) : null}
+
+                    {scanSession.missingFields.length > 0 ? (
+                      <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/80">Missing information</p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {scanSession.missingFields.map((field) => (
+                            <span key={field} className="rounded-full bg-amber-400/10 px-2 py-1 text-[10px] text-amber-200">
+                              {field}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {scanSession.documents.length > 0 ? (
+                      <div className="space-y-2 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+                        {scanSession.documents.map((doc) => (
+                          <div key={doc.kind} className="rounded-lg bg-black/20 p-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium text-white/75">{doc.detectedLabel}</p>
+                              <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] text-white/35">
+                                {doc.kind === "id_document" ? "ID" : "Medical aid"}
+                              </span>
+                            </div>
+                            <div className="mt-2 grid gap-1">
+                              {Object.entries(doc.fields).slice(0, 5).map(([key, value]) => (
+                                <div key={key} className="flex justify-between gap-3 text-[10px]">
+                                  <span className="text-white/35">{key}</span>
+                                  <span className="text-right text-white/70">{value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={scanBusy}
+                        onClick={() => void cancelScanSession()}
+                        className="rounded-lg px-3 py-2 text-xs text-white/40 hover:text-white disabled:opacity-50"
+                      >
+                        Cancel session
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!scanForm || scanSession.status !== "submitted"}
+                        onClick={handleConfirmScan}
+                        className="flex items-center gap-1.5 rounded-lg bg-[#00E676]/10 px-4 py-2 text-xs font-medium text-[#00E676] transition-colors hover:bg-[#00E676]/20 disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <Check className="size-3.5" weight="bold" />
+                        Confirm & Edit
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

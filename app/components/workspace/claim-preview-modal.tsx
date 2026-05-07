@@ -18,6 +18,7 @@ import {
   DISCIPLINE_LABELS,
 } from "@/lib/medikredit/modifier-catalog"
 import { validateClaimModifiers, type ValidationResult } from "@/lib/medikredit/modifier-validator"
+import { MedpraxCodeSearch, type MedpraxPickedCode } from "@/app/components/admin/revenue/medprax-code-search"
 import {
   calculateAnaestheticUnits,
   calculateAnaestheticAmount,
@@ -215,6 +216,17 @@ export function ClaimPreviewModal() {
     )
   }
 
+  const applyMedpraxPick = (id: string, pick: MedpraxPickedCode) => {
+    updateLine(id, {
+      description: pick.description,
+      lineSource: "medprax",
+      ...(pick.amount ? { amount: pick.amount / 100 } : {}),
+      ...(pick.kind === "tariff" ? { tariffCode: pick.code, medikreditTp: 2 as const } : {}),
+      ...(pick.kind === "nappi" ? { nappiCode: pick.code, medikreditTp: 1 as const } : {}),
+      ...(pick.kind === "icd" ? { icdCode: pick.code } : {}),
+    })
+  }
+
   const removeLine = (id: string) => {
     if (!patientId || !lines) return
     const next = lines.filter((l) => l.id !== id)
@@ -402,6 +414,7 @@ export function ClaimPreviewModal() {
                 <thead className="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-2 py-2 font-medium">Type</th>
+                    <th className="px-2 py-2 font-medium">Medprax</th>
                     <th className="px-2 py-2 font-medium">Description</th>
                     <th className="px-2 py-2 font-medium">ICD</th>
                     <th className="px-2 py-2 font-medium">Tariff</th>
@@ -427,6 +440,12 @@ export function ClaimPreviewModal() {
                           <option value={1}>Medication</option>
                           <option value={3}>Modifier</option>
                         </select>
+                      </td>
+                      <td className="px-2 py-1 align-top">
+                        <MedpraxCodeSearch onPick={(pick) => applyMedpraxPick(line.id, pick)} discipline={discipline} />
+                        <span className="mt-1 block text-[9px] text-muted-foreground">
+                          {line.lineSource === "medprax" ? "Verified from Medprax" : "Manual override"}
+                        </span>
                       </td>
                       <td className="px-2 py-1 align-top">
                         <input

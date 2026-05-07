@@ -47,12 +47,14 @@ export interface InvoiceLineSnapshot {
 
 export interface PracticeSnapshot {
   name: string
+  logoStoragePath?: string
   vatNumber?: string
   hpcsaNumber?: string
   bhfNumber?: string
   address?: string
   phone?: string
   email?: string
+  website?: string
 }
 
 export interface PatientSnapshot {

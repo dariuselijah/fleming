@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { cn } from "@/lib/utils"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import { useAuthContext } from "@/lib/auth/provider"
 import { Buildings, GearSixIcon, PaintBrushIcon, XIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 import { InteractionPreferences } from "./appearance/interaction-preferences"
@@ -28,8 +29,10 @@ export function SettingsContent({
 }: SettingsContentProps) {
   const [activeTab, setActiveTab] = useState<TabType>("general")
   const { preferences } = useUserPreferences()
+  const auth = useAuthContext()
   const showHealthContext = preferences.userRole === "general"
-  const showPracticeTab = preferences.userRole === "doctor"
+  const showPracticeTab =
+    auth.hasPermission("settings:practice") || preferences.userRole === "doctor"
 
   return (
     <div

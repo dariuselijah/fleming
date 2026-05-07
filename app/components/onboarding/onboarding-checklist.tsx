@@ -46,10 +46,10 @@ const STEP_ICONS: Record<ChecklistStepId, typeof Stethoscope> = {
 }
 
 const STATUS_RING: Record<StepStatus, string> = {
-  pending: "border-white/15 text-white/25",
+  pending: "border-border text-muted-foreground/45 dark:border-white/15 dark:text-white/25",
   in_progress: "border-primary/60 text-primary",
-  done: "border-emerald-500/60 text-emerald-400",
-  waiting: "border-amber-400/60 text-amber-400",
+  done: "border-emerald-500/60 text-emerald-600 dark:text-emerald-400",
+  waiting: "border-amber-400/60 text-amber-600 dark:text-amber-400",
 }
 
 const springSnappy = { type: "spring" as const, damping: 30, stiffness: 400, mass: 0.85 }
@@ -91,7 +91,7 @@ function ProgressRing({ pct, size = 32 }: { pct: number; size?: number }) {
           strokeWidth={size > 28 ? 2.5 : 2}
           stroke="currentColor"
           fill="none"
-          className="text-white/[0.08]"
+          className="text-muted-foreground/15 dark:text-white/[0.08]"
         />
         <motion.circle
           cx={size / 2}
@@ -107,7 +107,7 @@ function ProgressRing({ pct, size = 32 }: { pct: number; size?: number }) {
           transition={springSoft}
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold tabular-nums text-white/80">
+      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold tabular-nums text-foreground/80 dark:text-white/80">
         {pct}%
       </span>
     </div>
@@ -206,24 +206,24 @@ export function OnboardingChecklist() {
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.98 }}
           onClick={() => setMinimized(false)}
-          className="fixed bottom-5 right-5 z-[180] flex items-center gap-2.5 rounded-full border border-white/[0.12] bg-[#111]/95 px-4 py-2.5 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.65)] backdrop-blur-md transition-colors hover:border-white/20 hover:bg-[#161616]/95"
+          className="fixed bottom-5 right-5 z-[180] flex items-center gap-2.5 rounded-full border border-border/80 bg-card/95 px-4 py-2.5 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors hover:border-border hover:bg-card dark:border-white/[0.12] dark:bg-[#111]/95 dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.65)] dark:hover:border-white/20 dark:hover:bg-[#161616]/95"
         >
           <ProgressRing pct={pct} size={28} />
-          <span className="text-xs font-medium text-white/75">Setup</span>
+          <span className="text-xs font-medium text-foreground/75 dark:text-white/75">Setup</span>
         </motion.button>
       ) : (
         <motion.div
           initial={{ opacity: 0, y: 18, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={springSnappy}
-          className="fixed bottom-5 right-5 z-[180] flex w-[min(100vw-2rem,360px)] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#0c0c0d]/95 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)] backdrop-blur-xl"
+          className="fixed bottom-5 right-5 z-[180] flex w-[min(100vw-2rem,360px)] flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/95 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.2)] backdrop-blur-xl dark:border-white/[0.1] dark:bg-[#0c0c0d]/95 dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)]"
         >
-          <div className="flex items-center justify-between border-b border-white/[0.06] px-3.5 py-3">
+          <div className="flex items-center justify-between border-b border-border/70 px-3.5 py-3 dark:border-white/[0.06]">
             <div className="flex items-center gap-2.5">
               <ProgressRing pct={pct} size={36} />
               <div>
-                <h3 className="text-[13px] font-semibold tracking-tight text-white/90">Practice setup</h3>
-                <p className="text-[10px] text-white/35">
+                <h3 className="text-[13px] font-semibold tracking-tight text-foreground">Practice setup</h3>
+                <p className="text-[10px] text-muted-foreground">
                   {done} of {total} complete
                 </p>
               </div>
@@ -233,7 +233,7 @@ export function OnboardingChecklist() {
                 type="button"
                 whileTap={{ scale: 0.94 }}
                 onClick={() => openPanel(null)}
-                className="rounded-lg p-2 text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white/80"
+                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/80"
                 aria-label="Expand setup"
                 title="Expand"
               >
@@ -243,7 +243,7 @@ export function OnboardingChecklist() {
                 type="button"
                 whileTap={{ scale: 0.94 }}
                 onClick={() => setMinimized(true)}
-                className="rounded-lg p-2 text-white/35 transition-colors hover:bg-white/[0.06] hover:text-white/65"
+                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/35 dark:hover:bg-white/[0.06] dark:hover:text-white/65"
                 aria-label="Minimize"
               >
                 <CaretDown className="size-4" weight="bold" />
@@ -252,7 +252,7 @@ export function OnboardingChecklist() {
                 type="button"
                 whileTap={{ scale: 0.94 }}
                 onClick={() => void dismissSetupGuide()}
-                className="rounded-lg p-2 text-white/35 transition-colors hover:bg-white/[0.06] hover:text-white/65"
+                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/35 dark:hover:bg-white/[0.06] dark:hover:text-white/65"
                 aria-label="Close setup"
                 title="Close setup"
               >
@@ -284,12 +284,12 @@ export function OnboardingChecklist() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2, ...fade }}
-            className="border-t border-white/[0.05] px-3 py-2.5"
+            className="border-t border-border/70 px-3 py-2.5 dark:border-white/[0.05]"
           >
             <button
               type="button"
               onClick={() => openPanel(null)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] py-2 text-[11px] font-medium text-white/60 transition-colors hover:border-white/15 hover:bg-white/[0.07] hover:text-white/85"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-muted/40 py-2 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white/60 dark:hover:border-white/15 dark:hover:bg-white/[0.07] dark:hover:text-white/85"
             >
               <ArrowsOutSimple className="size-3.5" />
               Open full workspace
@@ -313,7 +313,7 @@ function CompactStepRow({ step, onOpen }: { step: ChecklistStep; onOpen: () => v
       <motion.button
         type="button"
         onClick={onOpen}
-        whileHover={{ backgroundColor: "rgba(255,255,255,0.04)" }}
+        whileHover={{ backgroundColor: "hsl(var(--muted) / 0.55)" }}
         whileTap={{ scale: 0.995 }}
         className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left"
       >
@@ -335,14 +335,16 @@ function CompactStepRow({ step, onOpen }: { step: ChecklistStep; onOpen: () => v
           <p
             className={cn(
               "text-[12px] font-medium tracking-tight",
-              step.status === "done" ? "text-white/38 line-through decoration-white/20" : "text-white/[0.88]"
+              step.status === "done"
+                ? "text-muted-foreground/55 line-through decoration-muted-foreground/25 dark:text-white/38 dark:decoration-white/20"
+                : "text-foreground"
             )}
           >
             {step.label}
           </p>
-          <p className="truncate text-[10px] text-white/28">{step.description}</p>
+          <p className="truncate text-[10px] text-muted-foreground dark:text-white/28">{step.description}</p>
         </div>
-        <CaretRight className="size-3.5 shrink-0 text-white/20" weight="bold" />
+        <CaretRight className="size-3.5 shrink-0 text-muted-foreground/60 dark:text-white/20" weight="bold" />
       </motion.button>
     </motion.li>
   )
@@ -382,7 +384,7 @@ function SetupPanelOverlay({
       <button
         type="button"
         aria-label="Close"
-        className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-background/65 backdrop-blur-[2px] dark:bg-black/55"
         onClick={onClose}
       />
       <motion.div
@@ -390,18 +392,18 @@ function SetupPanelOverlay({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 20, scale: 0.96 }}
         transition={springSnappy}
-        className="relative flex max-h-[min(92vh,880px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#0a0a0b]/[0.97] shadow-[0_32px_80px_-20px_rgba(0,0,0,0.85)] backdrop-blur-2xl sm:flex-row"
+        className="relative flex max-h-[min(92vh,880px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card/95 shadow-[0_32px_80px_-20px_rgba(0,0,0,0.24)] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#0a0a0b]/[0.97] dark:shadow-[0_32px_80px_-20px_rgba(0,0,0,0.85)] sm:flex-row"
         onClick={(e) => e.stopPropagation()}
       >
-        <aside className="flex w-full shrink-0 flex-col border-b border-white/[0.06] sm:w-[min(240px,32%)] sm:border-r sm:border-b-0">
-          <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-4 py-3.5">
+        <aside className="flex w-full shrink-0 flex-col border-b border-border/70 sm:w-[min(240px,32%)] sm:border-r sm:border-b-0 dark:border-white/[0.06]">
+          <div className="flex items-center justify-between gap-2 border-b border-border/70 px-4 py-3.5 dark:border-white/[0.06]">
             <div className="flex min-w-0 items-center gap-2.5">
               <ProgressRing pct={pct} size={34} />
               <div className="min-w-0">
-                <h2 id="setup-panel-title" className="truncate text-sm font-semibold text-white/90">
+                <h2 id="setup-panel-title" className="truncate text-sm font-semibold text-foreground">
                   Practice setup
                 </h2>
-                <p className="text-[10px] text-white/35">
+                <p className="text-[10px] text-muted-foreground">
                   {done}/{total} done
                 </p>
               </div>
@@ -410,7 +412,7 @@ function SetupPanelOverlay({
               type="button"
               whileTap={{ scale: 0.92 }}
               onClick={onClose}
-              className="rounded-lg p-2 text-white/40 hover:bg-white/[0.06] hover:text-white/80"
+              className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/80"
               aria-label="Close panel"
             >
               <X className="size-4" weight="bold" />
@@ -430,8 +432,8 @@ function SetupPanelOverlay({
                   className={cn(
                     "flex shrink-0 items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors sm:w-full",
                     isActive
-                      ? "bg-white/[0.08] text-white"
-                      : "text-white/45 hover:bg-white/[0.04] hover:text-white/75"
+                      ? "bg-muted text-foreground dark:bg-white/[0.08] dark:text-white"
+                      : "text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:text-white/45 dark:hover:bg-white/[0.04] dark:hover:text-white/75"
                   )}
                 >
                   <div
@@ -467,12 +469,12 @@ function SetupPanelOverlay({
               transition={fade}
               className="flex min-h-0 flex-1 flex-col"
             >
-              <header className="border-b border-white/[0.06] px-5 py-4 sm:px-8">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/30">Step</p>
-                <h3 className="mt-1 text-lg font-semibold tracking-tight text-white/90 sm:text-xl">
+              <header className="border-b border-border/70 px-5 py-4 sm:px-8 dark:border-white/[0.06]">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Step</p>
+                <h3 className="mt-1 text-lg font-semibold tracking-tight text-foreground sm:text-xl">
                   {activeMeta?.label}
                 </h3>
-                <p className="mt-1 text-sm text-white/40">{activeMeta?.description}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{activeMeta?.description}</p>
               </header>
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-8 sm:py-7" style={{ scrollbarWidth: "thin" }}>
                 <StepContent stepId={active} layout="panel" />
@@ -691,7 +693,7 @@ function ServicesStep({ layout }: { layout: "panel" }) {
         <motion.div layout className="space-y-4">
           <motion.div
             layout
-            className="flex cursor-pointer flex-col items-center gap-3 rounded-2xl border border-dashed border-white/15 bg-white/[0.02] px-6 py-10 text-center transition-colors hover:border-white/25 hover:bg-white/[0.04]"
+            className="flex cursor-pointer flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-background px-6 py-10 text-center transition-colors hover:border-primary/35 hover:bg-muted/50 dark:border-white/15 dark:bg-white/[0.02] dark:hover:border-white/25 dark:hover:bg-white/[0.04]"
             onClick={() => fileRef.current?.click()}
             whileHover={{ scale: 1.005 }}
             whileTap={{ scale: 0.995 }}
@@ -700,12 +702,12 @@ function ServicesStep({ layout }: { layout: "panel" }) {
               animate={{ y: [0, -3, 0] }}
               transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
             >
-              <Upload className="size-8 text-white/25" />
+              <Upload className="size-8 text-muted-foreground/45 dark:text-white/25" />
             </motion.div>
-            <p className="text-sm text-white/50">
+            <p className="text-sm text-muted-foreground">
               {file ? file.name : "Excel, CSV, or PDF — click to choose"}
             </p>
-            <p className="max-w-sm text-xs text-white/25">We detect columns and map service names, codes, and prices.</p>
+            <p className="max-w-sm text-xs text-muted-foreground/75 dark:text-white/25">We detect columns and map service names, codes, and prices.</p>
           </motion.div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" className="hidden" onChange={handleFilePick} />
           <AnimatePresence>
@@ -720,7 +722,7 @@ function ServicesStep({ layout }: { layout: "panel" }) {
                   type="button"
                   disabled={parsing}
                   onClick={() => void handleUpload()}
-                  className="flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white disabled:opacity-50"
+                  className="flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                 >
                   {parsing ? <Spinner className="size-4 animate-spin" /> : <FileXls className="size-4" />}
                   {parsing ? "Parsing…" : "Parse & preview"}
@@ -731,8 +733,8 @@ function ServicesStep({ layout }: { layout: "panel" }) {
         </motion.div>
       ) : (
         <motion.div layout className="space-y-4">
-          <div className="overflow-hidden rounded-xl border border-white/[0.08]">
-            <div className="grid grid-cols-[minmax(0,1fr)_7rem_6rem_2.5rem] gap-0 border-b border-white/[0.06] bg-white/[0.03] px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-white/35 sm:grid-cols-[minmax(0,1fr)_8.5rem_7.5rem_2.75rem] sm:px-4">
+          <div className="overflow-hidden rounded-xl border border-border dark:border-white/[0.08]">
+            <div className="grid grid-cols-[minmax(0,1fr)_7rem_6rem_2.5rem] gap-0 border-b border-border bg-muted/40 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground sm:grid-cols-[minmax(0,1fr)_8.5rem_7.5rem_2.75rem] sm:px-4 dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-white/35">
               <span>Service</span>
               <span className="hidden sm:inline">Code</span>
               <span className="sm:hidden">Cd</span>
@@ -748,33 +750,33 @@ function ServicesStep({ layout }: { layout: "panel" }) {
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={springSoft}
-                    className="grid grid-cols-[minmax(0,1fr)_7rem_6rem_2.5rem] items-center gap-2 border-b border-white/[0.04] px-3 py-2.5 last:border-0 sm:grid-cols-[minmax(0,1fr)_8.5rem_7.5rem_2.75rem] sm:px-4"
+                    className="grid grid-cols-[minmax(0,1fr)_7rem_6rem_2.5rem] items-center gap-2 border-b border-border/70 px-3 py-2.5 last:border-0 sm:grid-cols-[minmax(0,1fr)_8.5rem_7.5rem_2.75rem] sm:px-4 dark:border-white/[0.04]"
                   >
                     <input
                       value={row.name}
                       onChange={(e) => updateRow(i, "name", e.target.value)}
                       placeholder="Service name"
-                      className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-white outline-none placeholder:text-white/20 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 focus:ring-1 focus:ring-primary/20 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20"
                     />
                     <input
                       value={row.code}
                       onChange={(e) => updateRow(i, "code", e.target.value)}
                       placeholder="0190"
-                      className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-sm tabular-nums text-white outline-none placeholder:text-white/20 focus:border-primary/40"
+                      className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20"
                     />
                     <div className="relative">
-                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-white/25">R</span>
+                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/60 dark:text-white/25">R</span>
                       <input
                         value={row.price}
                         onChange={(e) => updateRow(i, "price", e.target.value)}
                         placeholder="0"
-                        className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] py-2 pr-2 pl-7 text-sm tabular-nums text-white outline-none placeholder:text-white/20 focus:border-primary/40"
+                        className="w-full rounded-lg border border-input bg-background py-2 pr-2 pl-7 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={() => services.length > 1 && setServices((p) => p.filter((_, j) => j !== i))}
-                      className="flex size-8 items-center justify-center rounded-lg text-white/25 hover:bg-red-500/15 hover:text-red-300 disabled:opacity-20"
+                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground/60 hover:bg-red-500/15 hover:text-red-600 disabled:opacity-20 dark:text-white/25 dark:hover:text-red-300"
                       disabled={services.length <= 1}
                       aria-label="Remove row"
                     >
@@ -817,7 +819,7 @@ function PatientMessagingStep({ layout }: { layout: "panel" }) {
 
   return (
     <div className={cn("space-y-5", comfy && "max-w-2xl")}>
-      <p className="text-sm leading-relaxed text-white/40">
+      <p className="text-sm leading-relaxed text-muted-foreground">
         Patients text your practice number; messages use SMS everywhere and RCS rich features when the handset and carrier
         support them. The AI agent handles bookings, FAQs, and urgent routing.
       </p>
@@ -832,22 +834,22 @@ function PatientMessagingStep({ layout }: { layout: "panel" }) {
       {mode === "connect" ? (
         <div className="space-y-3">
           <Field label="Practice mobile number" value={waNumber} onChange={setWaNumber} placeholder="+27 82 000 0000" comfortable={comfy} />
-          <p className="text-xs text-white/25">We send a verification code via Twilio.</p>
+          <p className="text-xs text-muted-foreground/75 dark:text-white/25">We send a verification code via Twilio.</p>
         </div>
       ) : (
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={springSoft}
-          className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5"
+          className="rounded-2xl border border-border bg-background p-5 dark:border-white/[0.08] dark:bg-white/[0.02]"
         >
-          <p className="text-sm text-white/55">
+          <p className="text-sm text-muted-foreground">
             We provision a dedicated number through Twilio and wire it to your practice. Typical setup: about two minutes.
           </p>
         </motion.div>
       )}
       <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-white/30">Agent can handle</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Agent can handle</p>
         <div className="flex flex-wrap gap-2">
           {["Bookings", "FAQs & hours", "Urgent routing", "Reminders"].map((cap) => (
             <motion.span
@@ -855,7 +857,7 @@ function PatientMessagingStep({ layout }: { layout: "panel" }) {
               initial={{ opacity: 0, scale: 0.92 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={springSoft}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs text-white/45"
+              className="rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-white/45"
             >
               {cap}
             </motion.span>
@@ -887,7 +889,7 @@ function VoiceAgentStep({ layout }: { layout: "panel" }) {
 
   return (
     <div className={cn("space-y-5", comfy && "max-w-2xl")}>
-      <p className="text-sm leading-relaxed text-white/40">
+      <p className="text-sm leading-relaxed text-muted-foreground">
         Voice AI cuts no-shows and answers after-hours calls. Turn on only what you need.
       </p>
       <div className="space-y-3">
@@ -964,13 +966,13 @@ function LabsStep({ layout }: { layout: "panel" }) {
           <ClockCounterClockwise className="size-7 text-amber-400" />
         </motion.div>
         <div>
-          <p className="text-base font-medium text-white/80">Contacting lab partners</p>
-          <p className="mt-2 max-w-md text-sm text-white/40">
+          <p className="text-base font-medium text-foreground">Contacting lab partners</p>
+          <p className="mt-2 max-w-md text-sm text-muted-foreground">
             We&apos;re reaching out to {selected.length} provider{selected.length > 1 ? "s" : ""}. You&apos;ll be notified when
             results routing is live.
           </p>
         </div>
-        <p className="flex items-center gap-2 text-xs text-white/30">
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <Spinner className="size-3.5 animate-spin" />
           Usually 3–5 business days
         </p>
@@ -980,7 +982,7 @@ function LabsStep({ layout }: { layout: "panel" }) {
 
   return (
     <div className={cn("space-y-5", comfy && "max-w-2xl")}>
-      <p className="text-sm text-white/40">Pick providers for automatic lab results in your inbox.</p>
+      <p className="text-sm text-muted-foreground">Pick providers for automatic lab results in your inbox.</p>
       <div className="grid gap-2 sm:grid-cols-2">
         {labs.map((lab, i) => {
           const on = selected.includes(lab.id)
@@ -996,20 +998,22 @@ function LabsStep({ layout }: { layout: "panel" }) {
               whileTap={{ scale: 0.99 }}
               className={cn(
                 "flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
-                on ? "border-primary/45 bg-primary/[0.07]" : "border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.04]"
+                on
+                  ? "border-primary/45 bg-primary/[0.07]"
+                  : "border-border bg-background hover:bg-muted/50 dark:border-white/[0.08] dark:bg-white/[0.02] dark:hover:bg-white/[0.04]"
               )}
             >
               <div
                 className={cn(
                   "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-                  on ? "border-primary bg-primary text-white" : "border-white/20"
+                  on ? "border-primary bg-primary text-primary-foreground" : "border-border dark:border-white/20"
                 )}
               >
                 {on && <Check className="size-3" weight="bold" />}
               </div>
               <div>
-                <p className="text-sm font-medium text-white/85">{lab.name}</p>
-                <p className="mt-0.5 text-xs text-white/35">{lab.desc}</p>
+                <p className="text-sm font-medium text-foreground">{lab.name}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{lab.desc}</p>
               </div>
             </motion.button>
           )
@@ -1075,7 +1079,7 @@ function AISettingsStep({ layout }: { layout: "panel" }) {
 
   return (
     <div className={cn("space-y-5", comfy && "max-w-2xl")}>
-      <p className="text-sm text-white/40">Tune clinical AI during consults and in chat.</p>
+      <p className="text-sm text-muted-foreground">Tune clinical AI during consults and in chat.</p>
       <div className="space-y-3">
         <ToggleRow label="Auto-generate SOAP" description="Draft notes from scribe transcripts" enabled={autoSoap} onToggle={() => setAutoSoap(!autoSoap)} comfortable={comfy} />
         <ToggleRow label="Evidence search" description="PubMed & guideline citations" enabled={evidenceSearch} onToggle={() => setEvidenceSearch(!evidenceSearch)} comfortable={comfy} />
@@ -1115,7 +1119,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className={cn("font-medium uppercase tracking-wider text-white/30", comfortable ? "text-[10px]" : "text-[9px]")}>
+      <span className={cn("font-medium uppercase tracking-wider text-muted-foreground", comfortable ? "text-[10px]" : "text-[9px]")}>
         {label}
       </span>
       <input
@@ -1123,7 +1127,7 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={cn(
-          "mt-1.5 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] text-white outline-none placeholder:text-white/20 focus:border-primary/35 focus:ring-2 focus:ring-primary/15",
+          "mt-1.5 w-full rounded-xl border border-input bg-background text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/35 focus:ring-2 focus:ring-primary/15 dark:border-white/[0.1] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20",
           comfortable ? "px-3.5 py-2.5 text-sm" : "px-2.5 py-2 text-[11px]"
         )}
       />
@@ -1150,7 +1154,9 @@ function TabButton({
       className={cn(
         "rounded-xl font-medium transition-colors",
         comfortable ? "px-4 py-2 text-sm" : "px-3 py-1.5 text-[10px]",
-        active ? "bg-white/[0.12] text-white shadow-sm" : "text-white/40 hover:bg-white/[0.05] hover:text-white/70"
+        active
+          ? "bg-muted text-foreground shadow-sm dark:bg-white/[0.12] dark:text-white"
+          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.05] dark:hover:text-white/70"
       )}
     >
       {children}
@@ -1175,22 +1181,22 @@ function ToggleRow({
     <motion.button
       type="button"
       onClick={onToggle}
-      whileHover={{ backgroundColor: "rgba(255,255,255,0.04)" }}
+      whileHover={{ backgroundColor: "hsl(var(--muted) / 0.55)" }}
       whileTap={{ scale: 0.995 }}
       className={cn(
-        "flex w-full items-center gap-4 rounded-2xl border border-white/[0.07] bg-white/[0.02] text-left transition-colors",
+        "flex w-full items-center gap-4 rounded-2xl border border-border bg-background text-left transition-colors dark:border-white/[0.07] dark:bg-white/[0.02]",
         comfortable ? "p-4" : "p-2.5"
       )}
     >
       <div className="min-w-0 flex-1">
-        <p className={cn("font-medium text-white/80", comfortable ? "text-sm" : "text-[11px]")}>{label}</p>
-        <p className={cn("text-white/35", comfortable ? "mt-1 text-xs" : "text-[9px]")}>{description}</p>
+        <p className={cn("font-medium text-foreground", comfortable ? "text-sm" : "text-[11px]")}>{label}</p>
+        <p className={cn("text-muted-foreground", comfortable ? "mt-1 text-xs" : "text-[9px]")}>{description}</p>
       </div>
       <div
         className={cn(
           "relative flex shrink-0 items-center rounded-full transition-colors",
           comfortable ? "h-7 w-[3.25rem] p-0.5" : "h-5 w-9 p-px",
-          enabled ? "bg-primary" : "bg-white/10"
+          enabled ? "bg-primary" : "bg-muted dark:bg-white/10"
         )}
       >
         <motion.span
@@ -1225,7 +1231,7 @@ function SaveButton({
       whileHover={{ scale: disabled ? 1 : 1.01 }}
       whileTap={{ scale: disabled ? 1 : 0.98 }}
       className={cn(
-        "flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-white font-semibold text-zinc-950 transition-colors hover:bg-white/95 disabled:opacity-40",
+        "flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40 dark:bg-white dark:text-zinc-950 dark:hover:bg-white/95",
         comfortable ? "py-3 text-sm" : "py-2 text-[11px]"
       )}
     >

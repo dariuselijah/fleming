@@ -99,3 +99,35 @@ export function verifyPolarWebhookSignatureLoose(rawBody: string, signatureHeade
   const got = signatureHeader.replace(/^sha256=/, "").replace(/"/g, "").trim()
   return expected === got || verifyPolarWebhookSignature(rawBody, signatureHeader)
 }
+
+export async function refundPolarPayment(opts: {
+  providerOrderId?: string | null
+  providerCheckoutId?: string | null
+  amountCents: number
+  reason?: string | null
+}): Promise<{ refundId: string }> {
+  const token = process.env.POLAR_SH_ACCESS_TOKEN?.trim()
+  if (process.env.POLAR_SH_DRY_RUN === "1" || !token) {
+    return { refundId: `polar_refund_dry_${Date.now()}` }
+  }
+
+  const paymentId = opts.providerOrderId ?? opts.providerCheckoutId
+  if (!paymentId) throw new Error("Polar payment id missing")
+
+  const res = await fetch(`${BASE}/refunds/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      payment_id: paymentId,
+      amount: opts.amountCents,
+      reason: opts.reason ?? "requested_by_customer",
+    }),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`Polar refund failed (${res.status}): ${text.slice(0, 500)}`)
+  const json = JSON.parse(text || "{}") as { id?: string }
+  return { refundId: json.id ?? paymentId }
+}

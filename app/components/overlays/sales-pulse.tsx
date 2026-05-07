@@ -1,43 +1,31 @@
 "use client"
 
-import { X, CurrencyDollar, TrendUp, Receipt, CheckCircle, XCircle } from "@phosphor-icons/react"
+import { X, TrendUp, Receipt, CheckCircle, XCircle } from "@phosphor-icons/react"
+import { fetchClient } from "@/lib/fetch"
 import { motion } from "motion/react"
+import { useEffect, useMemo, useState } from "react"
 
-interface DayMetrics {
-  totalRevenue: number
-  claimsSubmitted: number
-  claimsApproved: number
-  claimsRejected: number
-  consultations: number
-  avgRevenuePerConsult: number
-}
-
-const MOCK_METRICS: DayMetrics = {
-  totalRevenue: 12450,
-  claimsSubmitted: 18,
-  claimsApproved: 15,
-  claimsRejected: 2,
-  consultations: 16,
-  avgRevenuePerConsult: 778,
-}
-
-const HOURLY_DATA = [
-  { hour: "08:00", revenue: 2400 },
-  { hour: "09:00", revenue: 1800 },
-  { hour: "10:00", revenue: 2200 },
-  { hour: "11:00", revenue: 1600 },
-  { hour: "12:00", revenue: 450 },
-  { hour: "13:00", revenue: 0 },
-  { hour: "14:00", revenue: 2100 },
-  { hour: "15:00", revenue: 1900 },
-]
+type DailyRevenue = { day: string; amountCents: number; count: number }
 
 function formatZAR(amount: number): string {
-  return `R${amount.toLocaleString()}`
+  return `R${(amount / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 export function SalesPulse({ onClose }: { onClose: () => void }) {
-  const maxRevenue = Math.max(...HOURLY_DATA.map((d) => d.revenue), 1)
+  const [rows, setRows] = useState<DailyRevenue[]>([])
+  useEffect(() => {
+    ;(async () => {
+      const res = await fetchClient("/api/billing/reports/daily-revenue")
+      if (!res.ok) return
+      const j = (await res.json()) as { rows?: DailyRevenue[] }
+      setRows(j.rows ?? [])
+    })()
+  }, [])
+  const today = new Date().toISOString().slice(0, 10)
+  const totalToday = rows.find((r) => r.day === today)?.amountCents ?? 0
+  const countToday = rows.find((r) => r.day === today)?.count ?? 0
+  const chartRows = useMemo(() => rows.slice(-8), [rows])
+  const maxRevenue = Math.max(...chartRows.map((d) => d.amountCents), 1)
 
   return (
     <motion.div
@@ -65,24 +53,24 @@ export function SalesPulse({ onClose }: { onClose: () => void }) {
         {/* Main revenue figure */}
         <div className="mb-4 text-center">
           <span className="text-3xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-            {formatZAR(MOCK_METRICS.totalRevenue)}
+            {formatZAR(totalToday)}
           </span>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            {MOCK_METRICS.consultations} consultations · avg {formatZAR(MOCK_METRICS.avgRevenuePerConsult)}/consult
+            {countToday} payments · live billing ledger
           </p>
         </div>
 
         {/* Sparkline bar chart */}
         <div className="mb-4 flex items-end gap-1.5">
-          {HOURLY_DATA.map((d) => (
-            <div key={d.hour} className="flex flex-1 flex-col items-center gap-1">
+          {chartRows.map((d) => (
+            <div key={d.day} className="flex flex-1 flex-col items-center gap-1">
               <div className="relative h-16 w-full rounded-t-sm bg-muted/30">
                 <div
                   className="absolute bottom-0 w-full rounded-t-sm bg-emerald-500/60"
-                  style={{ height: `${(d.revenue / maxRevenue) * 100}%` }}
+                  style={{ height: `${(d.amountCents / maxRevenue) * 100}%` }}
                 />
               </div>
-              <span className="text-[8px] text-muted-foreground">{d.hour.split(":")[0]}</span>
+              <span className="text-[8px] text-muted-foreground">{d.day.slice(5)}</span>
             </div>
           ))}
         </div>
@@ -91,18 +79,18 @@ export function SalesPulse({ onClose }: { onClose: () => void }) {
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-xl border border-border/30 bg-card p-3 text-center">
             <Receipt className="mx-auto size-4 text-blue-500" />
-            <span className="mt-1 block text-lg font-bold tabular-nums">{MOCK_METRICS.claimsSubmitted}</span>
-            <span className="text-[10px] text-muted-foreground">Submitted</span>
+            <span className="mt-1 block text-lg font-bold tabular-nums">{countToday}</span>
+            <span className="text-[10px] text-muted-foreground">Payments</span>
           </div>
           <div className="rounded-xl border border-border/30 bg-card p-3 text-center">
             <CheckCircle className="mx-auto size-4 text-emerald-500" weight="fill" />
-            <span className="mt-1 block text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{MOCK_METRICS.claimsApproved}</span>
-            <span className="text-[10px] text-muted-foreground">Approved</span>
+            <span className="mt-1 block text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{rows.length}</span>
+            <span className="text-[10px] text-muted-foreground">Days</span>
           </div>
           <div className="rounded-xl border border-border/30 bg-card p-3 text-center">
             <XCircle className="mx-auto size-4 text-red-500" weight="fill" />
-            <span className="mt-1 block text-lg font-bold tabular-nums text-red-600 dark:text-red-400">{MOCK_METRICS.claimsRejected}</span>
-            <span className="text-[10px] text-muted-foreground">Rejected</span>
+            <span className="mt-1 block text-lg font-bold tabular-nums text-red-600 dark:text-red-400">0</span>
+            <span className="text-[10px] text-muted-foreground">Mock</span>
           </div>
         </div>
       </div>

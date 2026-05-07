@@ -217,9 +217,87 @@ function chartTaskNameForShape(dataShape: ChartPlanHint["dataShape"]): string {
 const EDUCATIONAL_INTENT_PATTERN =
   /\b(curriculum|course|module|lecture|assignment|syllabus|learning objective|exam|osce|shelf|board|moodle|canvas|study plan|revision)\b/i
 
-function taskNameForFocus(prefix: string, _scenarioFocus: string): string {
-  // Titles should represent action only; prompt context belongs in task details.
-  return sanitizePlannerTaskTitle(prefix)
+/**
+ * Compose query-specific titles for planner tasks. Each phase prefix maps to
+ * a focused, scenario-aware variant ("Auditing acute chest pain evidence")
+ * instead of a generic shell ("Auditing Evidence Sources"). Falls back to
+ * a clean "<prefix> · <focus>" format for unmatched prefixes, and to the
+ * bare prefix when no usable focus is available.
+ */
+function taskNameForFocus(prefix: string, scenarioFocus: string): string {
+  const sanitizedPrefix = sanitizePlannerTaskTitle(prefix)
+  const focus = normalizeFocusForTitle(scenarioFocus)
+  if (!focus) return sanitizedPrefix
+  const decorated = decorateTitleWithFocus(sanitizedPrefix, focus)
+  return clampLabel(decorated.replace(/\s+/g, " ").trim(), 48)
+}
+
+function normalizeFocusForTitle(scenarioFocus: string): string {
+  const cleaned = (scenarioFocus || "").replace(/\s+/g, " ").trim().toLowerCase()
+  if (!cleaned) return ""
+  if (cleaned === "current scenario") return ""
+  // Drop trailing punctuation and any "?" the user typed in their query.
+  const trimmed = cleaned.replace(/[?.!]+$/g, "").trim()
+  if (!trimmed) return ""
+  // Keep titles compact — a long verbatim query would overflow the row.
+  return clampLabel(trimmed, 24)
+}
+
+type TitleVariantBuilder = {
+  match: RegExp
+  build: (focus: string) => string
+}
+
+const TITLE_VARIANTS: TitleVariantBuilder[] = [
+  { match: /^extracting clinical nuances$/i, build: (f) => `Mapping ${f} workflow` },
+  { match: /^auditing evidence sources$/i, build: (f) => `Auditing ${f} evidence` },
+  { match: /^auditing clinical trials$/i, build: (f) => `Auditing trials for ${f}` },
+  { match: /^auditing clinical guidelines$/i, build: (f) => `Auditing guidelines for ${f}` },
+  { match: /^selecting evidence channels$/i, build: (f) => `Targeting ${f} sources` },
+  { match: /^deciding evidence sufficiency$/i, build: (f) => `Validating ${f} coverage` },
+  {
+    match: /^composing evidence-grounded synthesis$/i,
+    build: (f) => `Composing ${f} synthesis`,
+  },
+  { match: /^final synthesis.*$/i, build: (f) => `Composing ${f} answer` },
+  {
+    match: /^framing competing clinical pathways$/i,
+    build: (f) => `Framing ${f} differentials`,
+  },
+  {
+    match: /^gating retrieval loop by confidence$/i,
+    build: (f) => `Confidence-gating ${f} retrieval`,
+  },
+  {
+    match: /^mapping treatment divergence$/i,
+    build: (f) => `Mapping ${f} guideline divergence`,
+  },
+  {
+    match: /^checking curriculum alignment$/i,
+    build: (f) => `Aligning ${f} to curriculum`,
+  },
+  { match: /^rapid clinical response$/i, build: (f) => `Rapid ${f} response` },
+  {
+    match: /^rapid curriculum-aligned synthesis$/i,
+    build: (f) => `Rapid ${f} curriculum answer`,
+  },
+  {
+    match: /^generating (comparison|trend|distribution|decision tree|clinical) chart$/i,
+    build: (f) => `Charting ${f} comparison`,
+  },
+  {
+    match: /^synthesizing efficacy matrix$/i,
+    build: (f) => `Synthesizing ${f} efficacy matrix`,
+  },
+]
+
+function decorateTitleWithFocus(prefix: string, focus: string): string {
+  for (const variant of TITLE_VARIANTS) {
+    if (variant.match.test(prefix)) {
+      return variant.build(focus)
+    }
+  }
+  return `${prefix} · ${focus}`
 }
 
 const FORBIDDEN_TASK_TITLE_REWRITES: Array<[RegExp, string]> = [
@@ -234,7 +312,7 @@ function sanitizePlannerTaskTitle(taskName: string): string {
   for (const [pattern, replacement] of FORBIDDEN_TASK_TITLE_REWRITES) {
     next = next.replace(pattern, replacement)
   }
-  return clampLabel(next.replace(/\s+/g, " ").trim(), 40)
+  return clampLabel(next.replace(/\s+/g, " ").trim(), 48)
 }
 
 function connectorSpecificRetrievalTaskName(input: {

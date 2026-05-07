@@ -50,7 +50,12 @@ async function buildPracticeSnapshot(
   supabase: SupabaseClient<Database>,
   practiceId: string
 ): Promise<PracticeSnapshot> {
-  const { data: p } = await supabase.from("practices").select("name, country_code").eq("id", practiceId).maybeSingle()
+  const db = supabase as unknown as SupabaseClient
+  const { data: p } = await db
+    .from("practices")
+    .select("name, country_code, logo_storage_path, vat_number, hpcsa_number, bhf_number, address, phone, email, website")
+    .eq("id", practiceId)
+    .maybeSingle()
   const { data: bs } = await supabase
     .from("practice_billing_settings")
     .select("provider_name")
@@ -58,7 +63,14 @@ async function buildPracticeSnapshot(
     .maybeSingle()
   return {
     name: (bs?.provider_name as string)?.trim() || p?.name || "Practice",
-    address: p?.country_code ? `Country: ${p.country_code}` : undefined,
+    logoStoragePath: (p as { logo_storage_path?: string | null } | null)?.logo_storage_path ?? undefined,
+    vatNumber: (p as { vat_number?: string | null } | null)?.vat_number ?? undefined,
+    hpcsaNumber: (p as { hpcsa_number?: string | null } | null)?.hpcsa_number ?? undefined,
+    bhfNumber: (p as { bhf_number?: string | null } | null)?.bhf_number ?? undefined,
+    address: (p as { address?: string | null } | null)?.address ?? (p?.country_code ? `Country: ${p.country_code}` : undefined),
+    phone: (p as { phone?: string | null } | null)?.phone ?? undefined,
+    email: (p as { email?: string | null } | null)?.email ?? undefined,
+    website: (p as { website?: string | null } | null)?.website ?? undefined,
   }
 }
 
@@ -190,6 +202,24 @@ export async function issueInvoice(
   const patientSnap = inv.patient_snapshot as unknown as PatientSnapshot
   const lines = (inv.line_items as unknown as InvoiceLineSnapshot[]) ?? []
   const issuedAt = new Date().toISOString()
+  const dueCents = Math.max(0, (inv.total_cents ?? 0) - (inv.amount_paid_cents ?? 0))
+  const shouldAttachPayQr =
+    inv.patient_id &&
+    inv.billing_mode !== "scheme_only" &&
+    dueCents > 0 &&
+    lines.some((line) => line.lineType !== "medical_aid")
+  let payUrl: string | undefined
+  if (shouldAttachPayQr) {
+    const { createPatientAccessToken } = await import("@/lib/portal/tokens")
+    const token = await createPatientAccessToken({
+      practiceId: opts.practiceId,
+      patientId: inv.patient_id as string,
+      purpose: "billing_invoice",
+      invoiceId: opts.invoiceId,
+      expiresInHours: 168,
+    })
+    payUrl = token.portalUrl
+  }
 
   const pdfBytes = await buildInvoicePdfBytes({
     invoiceNumber: inv.invoice_number,
@@ -200,6 +230,8 @@ export async function issueInvoice(
     subtotalCents: inv.subtotal_cents,
     vatCents: inv.vat_cents,
     totalCents: inv.total_cents,
+    amountPaidCents: inv.amount_paid_cents,
+    payUrl,
   })
 
   const path = `${opts.practiceId}/invoices/${issuedAt.slice(0, 7)}/${inv.invoice_number}.pdf`
@@ -244,8 +276,21 @@ export async function voidInvoice(
     invoiceId: string
     actorUserId: string | null
     reason?: string
+    forceRefundPayments?: boolean
   }
 ): Promise<void> {
+  const { data: payments, error: pErr } = await supabase
+    .from("practice_payments")
+    .select("id")
+    .eq("practice_id", opts.practiceId)
+    .eq("invoice_id", opts.invoiceId)
+    .eq("status", "succeeded")
+    .limit(1)
+  if (pErr) throw new Error(pErr.message)
+  if ((payments?.length ?? 0) > 0 && !opts.forceRefundPayments) {
+    throw new Error("Cannot void an invoice with succeeded payments. Refund payments first.")
+  }
+
   const now = new Date().toISOString()
   const { error } = await supabase
     .from("practice_invoices")

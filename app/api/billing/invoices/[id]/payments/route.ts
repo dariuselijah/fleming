@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import {
   recordCashPayment,
+  recordSucceededManualPayment,
   initCardCheckout,
   initStitchEft,
 } from "@/lib/billing/payments"
@@ -29,6 +30,7 @@ export async function POST(req: Request, context: Ctx) {
     provider?: string
     amountCents?: number
     reference?: string
+    reason?: string
     cashDrawerSessionId?: string | null
     deliverEmail?: boolean
     deliverSms?: boolean
@@ -50,13 +52,36 @@ export async function POST(req: Request, context: Ctx) {
       if (amount == null || amount <= 0) {
         return NextResponse.json({ error: "amountCents required" }, { status: 400 })
       }
+
+      const { data: openDrawer } = await ctx.supabase
+        .from("cash_drawer_sessions")
+        .select("id")
+        .eq("practice_id", ctx.practiceId)
+        .is("closed_at", null)
+        .maybeSingle()
+
+      if (!openDrawer?.id) {
+        return NextResponse.json(
+          { error: "Open a cash drawer shift before recording cash payments." },
+          { status: 400 }
+        )
+      }
+
+      const requestedSession = body.cashDrawerSessionId?.trim() || null
+      if (requestedSession && requestedSession !== openDrawer.id) {
+        return NextResponse.json(
+          { error: "Cash drawer session does not match the open shift." },
+          { status: 400 }
+        )
+      }
+
       const result = await recordCashPayment(ctx.supabase, {
         practiceId: ctx.practiceId,
         invoiceId,
         amountCents: amount,
         actorUserId: ctx.userId,
         idempotencyKey,
-        cashDrawerSessionId: body.cashDrawerSessionId ?? null,
+        cashDrawerSessionId: openDrawer.id,
         reference: body.reference ?? null,
       })
 
@@ -140,6 +165,28 @@ export async function POST(req: Request, context: Ctx) {
         redirectUrl,
       })
       return NextResponse.json({ paymentUrl: eft.paymentUrl, paymentId: eft.paymentId })
+    }
+
+    if (provider === "medical_aid" || provider === "eft_manual" || provider === "write_off") {
+      const amount = body.amountCents
+      if (amount == null || amount <= 0) {
+        return NextResponse.json({ error: "amountCents required" }, { status: 400 })
+      }
+      const manual = await recordSucceededManualPayment(ctx.supabase, {
+        practiceId: ctx.practiceId,
+        invoiceId,
+        amountCents: amount,
+        actorUserId: ctx.userId,
+        idempotencyKey,
+        provider,
+        reference: body.reference ?? null,
+        reason: body.reason ?? body.reference ?? null,
+      })
+      return NextResponse.json({
+        paymentId: manual.paymentId,
+        receiptId: manual.receiptId,
+        invoiceStatus: manual.invoiceStatus,
+      })
     }
 
     return NextResponse.json({ error: "Unsupported provider" }, { status: 400 })

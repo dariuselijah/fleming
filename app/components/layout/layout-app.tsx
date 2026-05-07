@@ -3,7 +3,7 @@
 import { Header } from "@/app/components/layout/header"
 import { AppSidebar } from "@/app/components/layout/sidebar/app-sidebar"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
-import { WorkspaceProvider } from "@/lib/clinical-workspace"
+import { useWorkspace, WorkspaceProvider } from "@/lib/clinical-workspace"
 import { PracticeCryptoProvider } from "@/lib/clinical-workspace/practice-crypto-context"
 import { ClinicalWorkspace } from "@/app/components/workspace/clinical-workspace"
 import {
@@ -15,17 +15,49 @@ import { ClinicalPersistence } from "@/app/components/workspace/clinical-persist
 import { ClaimPreviewModal } from "@/app/components/workspace/claim-preview-modal"
 import { OnboardingChecklist } from "@/app/components/onboarding/onboarding-checklist"
 import { AppSettingsDialogHost } from "@/app/components/layout/settings/app-settings-dialog-host"
+import { useAuthContext } from "@/lib/auth/provider"
+import { useEffect } from "react"
+
+function WorkspaceRoleSync({
+  defaultMode,
+  canUseClinical,
+  canUseAdmin,
+}: {
+  defaultMode: "clinical" | "admin"
+  canUseClinical: boolean
+  canUseAdmin: boolean
+}) {
+  const { mode, setMode } = useWorkspace()
+
+  useEffect(() => {
+    if (mode === "chat") return
+    if (mode === "clinical" && canUseClinical) return
+    if (mode === "admin" && canUseAdmin) return
+    setMode(defaultMode === "admin" && canUseAdmin ? "admin" : "clinical")
+  }, [canUseAdmin, canUseClinical, defaultMode, mode, setMode])
+
+  return null
+}
 
 export function LayoutApp({ children }: { children: React.ReactNode }) {
   const { preferences } = useUserPreferences()
+  const auth = useAuthContext()
   const hasSidebar = preferences.layout === "sidebar"
-  const isClinicalMode = preferences.userRole === "doctor"
+  const isPracticeWorkspace =
+    !!auth.activePracticeId || preferences.userRole === "doctor"
 
-  if (isClinicalMode) {
+  if (isPracticeWorkspace) {
     return (
       <PracticeCryptoProvider>
         <WorkspaceProvider>
           <AppSettingsDialogHost />
+          <WorkspaceRoleSync
+            defaultMode={auth.defaultWorkspaceMode}
+            canUseClinical={
+              auth.hasPermission("clinical:access") || !auth.activePracticeId
+            }
+            canUseAdmin={auth.hasPermission("admin:access")}
+          />
           <PracticeIdBootstrap />
           <ClinicalUnlockGate>
             <ClinicalDataBootstrap />

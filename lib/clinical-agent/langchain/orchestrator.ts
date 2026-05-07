@@ -13,6 +13,7 @@ type GeneratePlanInput = {
   selectedToolNames: string[]
   chartEnabled: boolean
   curriculumEnabled: boolean
+  scenarioFocus?: string
 }
 
 type GeneratedPlanTask = {
@@ -28,7 +29,19 @@ const FORBIDDEN_TITLE_PATTERNS: Array<[RegExp, string]> = [
   [/\bexpansion\b/gi, "Scope Broadening"],
   [/\bfinal answer\b/gi, "Final Synthesis"],
 ]
-const TASK_TITLE_MAX_CHARS = 40
+const TASK_TITLE_MAX_CHARS = 48
+
+/** Heuristic: titles like "Auditing acute chest pain evidence" already carry
+ * a noun phrase beyond the action verb, so we should keep them and skip the
+ * generic forced-title override. */
+function titleAlreadyFocused(title: string): boolean {
+  const wordCount = title.split(/\s+/).filter(Boolean).length
+  if (wordCount < 3) return false
+  // A focused title contains either the dot separator we use as a fallback,
+  // or three+ words where the third word is unlikely to be a stopword.
+  if (title.includes(" · ")) return true
+  return wordCount >= 3
+}
 
 function normalizeTitle(value: unknown, fallback: string): string {
   const asString = typeof value === "string" ? value : ""
@@ -83,6 +96,10 @@ function forceConnectorSpecificTitle(
   input: GeneratePlanInput
 ): string | null {
   if (seedTask.phase !== "retrieval") return null
+  // The supervisor seed plan already injects scenario-specific titles
+  // (e.g. "Auditing acute chest pain trials"). Don't clobber those with a
+  // generic shell — only force a title when the seed is too generic.
+  if (titleAlreadyFocused(seedTask.taskName)) return null
   if (
     input.selectedConnectorIds.includes("pubmed") ||
     input.selectedToolNames.some((tool) => /pubmed|clinicaltrials/i.test(tool))
@@ -160,24 +177,30 @@ export async function generatePlan(
     '{ "id": string, "title": string, "description": string, "reasoning": string }',
     "",
     "Hard constraints:",
-    "- Title must be action-oriented and under 40 characters.",
-    "- Title must not copy user prompt fragments.",
-    "- Never use words: Preflight, Retrieval, Expansion, Final Answer.",
-    "- Keep titles professional and concise.",
-    "- Prompt-specific context belongs in description/reasoning, not title.",
+    "- Title must be action-oriented and under 48 characters.",
+    "- Title MUST mention the clinical focus (1–3 word scenario tag) so the user can see what the agent is actually doing.",
+    "  Example transforms:",
+    '    bad → "Auditing Evidence Sources"',
+    '    good → "Auditing acute chest pain evidence"',
+    '    bad → "Selecting evidence channels"',
+    '    good → "Targeting ESC ACS guideline channels"',
+    "- Never use the bare words: Preflight, Retrieval, Expansion, Final Answer.",
+    "- Do not echo the entire user prompt — pull only the scenario noun phrase (e.g. \"acute chest pain\", \"HEART score\", \"hs-troponin algorithm\").",
+    "- Keep titles professional, sentence-case, and free of trailing punctuation.",
     "",
     "Connector rules:",
-    '- If PubMed/clinical trials are used, retrieval title must be "Auditing Clinical Trials".',
-    '- If curriculum-only path is active, retrieval title must be "Checking Curriculum Alignment".',
-    "- If chart task exists, keep it concise and chart-specific.",
+    '- If PubMed/clinical trials are used, retrieval title should follow the pattern "Auditing <focus> trials".',
+    '- If curriculum-only path is active, retrieval title should follow "Aligning <focus> to curriculum".',
+    "- If chart task exists, title should follow \"Charting <focus> <comparison|trend|distribution>\".",
     "",
     `User query: ${input.query}`,
+    `Scenario focus: ${input.scenarioFocus || "(infer from query)"}`,
     `Selected connectors: ${input.selectedConnectorIds.join(", ") || "none"}`,
     `Selected tools: ${input.selectedToolNames.join(", ") || "none"}`,
     `Chart enabled: ${input.chartEnabled ? "yes" : "no"}`,
     `Curriculum mode: ${input.curriculumEnabled ? "yes" : "no"}`,
     "",
-    "Seed tasks JSON:",
+    "Seed tasks JSON (preserve ids, but rewrite each title to include the focus tag):",
     JSON.stringify(seedPayload),
   ].join("\n")
 

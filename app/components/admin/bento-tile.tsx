@@ -31,7 +31,7 @@ export function BentoTile({ children, className, title, subtitle, icon, action, 
       transition={{ type: "spring", stiffness: 400, damping: 35 }}
       className={cn(
         "relative flex flex-col overflow-hidden rounded-2xl",
-        "border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl",
+        "border border-border/80 bg-card/95 shadow-sm backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.03] dark:shadow-none",
         glow && GLOW_RING[glow],
         className
       )}
@@ -42,7 +42,7 @@ export function BentoTile({ children, className, title, subtitle, icon, action, 
             {icon && <span className="text-muted-foreground">{icon}</span>}
             <div>
               {title && <h3 className="text-[13px] font-semibold text-foreground">{title}</h3>}
-              {subtitle && <p className="text-[10px] text-white/40">{subtitle}</p>}
+              {subtitle && <p className="text-[10px] text-muted-foreground dark:text-white/40">{subtitle}</p>}
             </div>
           </div>
           {action}

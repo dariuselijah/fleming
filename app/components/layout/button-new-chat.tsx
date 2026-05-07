@@ -1,30 +1,27 @@
 "use client"
 
 import { useKeyShortcut } from "@/app/hooks/use-key-shortcut"
-import { resetChatClientState } from "@/lib/chat-store/new-chat"
+import { startNewChatClientSide } from "@/lib/chat-store/new-chat"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { NotePencilIcon } from "@phosphor-icons/react/dist/ssr"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 
 export function ButtonNewChat() {
   const pathname = usePathname()
-  const router = useRouter()
 
   useKeyShortcut(
     (e) => (e.key === "u" || e.key === "U") && e.metaKey && e.shiftKey,
     () => {
-      resetChatClientState(pathname)
-      router.push("/")
+      startNewChatClientSide(pathname)
     }
   )
 
   const handleNewChat = () => {
-    resetChatClientState(pathname)
-    router.push("/")
+    startNewChatClientSide(pathname)
   }
 
   if (pathname === "/") return null

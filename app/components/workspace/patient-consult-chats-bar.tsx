@@ -3,7 +3,7 @@
 import { useUser } from "@/lib/user-store/provider"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import { useWorkspace } from "@/lib/clinical-workspace"
-import { useUserPreferences } from "@/lib/user-preference-store/provider"
+import { useAuthContext } from "@/lib/auth/provider"
 import type { Chats } from "@/lib/chat-store/types"
 import {
   AlertDialog,
@@ -42,7 +42,7 @@ function formatConsultThreadLabel(patientName: string, chat: Chats): string {
 export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVariant }) {
   const variant = props?.variant ?? "canvas"
   const { user } = useUser()
-  const { preferences } = useUserPreferences()
+  const auth = useAuthContext()
   const { chats, createNewChat, deleteChat } = useChats()
   const { activePatient, setPatientSessionChatId } = useWorkspace()
   const pathname = usePathname()
@@ -147,7 +147,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
   }, [chatToDelete?.id, deleteChat, patientChats, routeChatId, router])
 
   if (
-    preferences.userRole !== "doctor" ||
+    !auth.hasPermission("clinical:access") ||
     !activePatient ||
     !user?.id
   ) {

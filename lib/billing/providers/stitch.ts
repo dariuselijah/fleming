@@ -129,3 +129,55 @@ export function verifyStitchWebhookSignature(
     return false
   }
 }
+
+export async function refundStitchPayment(opts: {
+  providerOrderId?: string | null
+  providerCheckoutId?: string | null
+  amountCents: number
+  reason?: string | null
+}): Promise<{ refundId: string }> {
+  const clientId = process.env.STITCH_CLIENT_ID?.trim()
+  const clientSecret = process.env.STITCH_CLIENT_SECRET?.trim()
+  if (!clientId || !clientSecret || process.env.STITCH_DRY_RUN === "1") {
+    return { refundId: `stitch_refund_dry_${Date.now()}` }
+  }
+
+  const paymentId = opts.providerOrderId ?? opts.providerCheckoutId
+  if (!paymentId) throw new Error("Stitch payment id missing")
+
+  const token = await getStitchAccessToken(clientId, clientSecret)
+  const mutation = `
+    mutation RefundPayment($input: PaymentInitiationRefundCreateInput!) {
+      clientPaymentInitiationRefundCreate(input: $input) {
+        refund { id }
+        userErrors { field message }
+      }
+    }
+  `
+  const res = await fetch(STITCH_API, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: {
+        input: {
+          paymentInitiationRequestId: paymentId,
+          amount: { quantity: opts.amountCents / 100, currency: "ZAR" },
+          reason: opts.reason ?? "requested_by_customer",
+        },
+      },
+    }),
+  })
+  const json = (await res.json()) as {
+    data?: { clientPaymentInitiationRefundCreate?: { refund?: { id?: string }; userErrors?: { message?: string }[] } }
+    errors?: { message?: string }[]
+  }
+  const err =
+    json.errors?.[0]?.message ?? json.data?.clientPaymentInitiationRefundCreate?.userErrors?.[0]?.message
+  const refundId = json.data?.clientPaymentInitiationRefundCreate?.refund?.id
+  if (!res.ok || !refundId) throw new Error(`Stitch refund failed: ${err ?? res.status}`)
+  return { refundId }
+}

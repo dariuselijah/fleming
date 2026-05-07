@@ -21,7 +21,6 @@ import {
   CaretRight,
   X,
   Flask,
-  Bell,
 } from "@phosphor-icons/react"
 import { BentoTile } from "./bento-tile"
 import {
@@ -35,6 +34,7 @@ import { LiveActivityFeed } from "./live-activity-feed"
 import { LabIntegrationsPanel } from "./lab-integrations-panel"
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { AnimatePresence, motion } from "motion/react"
+import { getVoiceCapabilityState, isMessagingChannelLive } from "@/lib/comms/channel-capability"
 
 // ── Channel styling ──
 
@@ -63,7 +63,7 @@ const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }>
   active: { label: "Auto-reply", color: "text-emerald-400", bg: "bg-emerald-400/10" },
   awaiting_input: { label: "Awaiting Reply", color: "text-blue-400", bg: "bg-blue-400/10" },
   handoff: { label: "Needs Attention", color: "text-amber-400", bg: "bg-amber-400/10" },
-  closed: { label: "Closed", color: "text-white/30", bg: "bg-white/[0.04]" },
+  closed: { label: "Closed", color: "text-muted-foreground dark:text-white/30", bg: "bg-muted dark:bg-white/[0.04]" },
 }
 
 const PRIORITY_BADGE: Record<string, string> = {
@@ -123,8 +123,11 @@ interface VoiceCallItem {
 type PracticeChannelRow = {
   channel_type: string
   status: string
+  provider?: string | null
   phone_number?: string | null
+  phone_number_sid?: string | null
   sender_display_name?: string | null
+  vapi_assistant_id?: string | null
   vapi_phone_number_id?: string | null
 }
 
@@ -166,6 +169,7 @@ export function CommsInbox() {
   const [notifPanelOpen, setNotifPanelOpen] = useState(false)
   const [channels, setChannels] = useState<PracticeChannelRow[]>([])
   const [provisionLoading, setProvisionLoading] = useState(true)
+  const [provisionError, setProvisionError] = useState<string | null>(null)
 
   const lastPanelRequestRef = useRef(0)
   useEffect(() => {
@@ -191,57 +195,70 @@ export function CommsInbox() {
     })
   }, [inboxScrollRequest])
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch("/api/comms/provision/status")
-        if (!res.ok) return
-        const data = await res.json()
-        if (!cancelled) setChannels(data.channels || [])
-      } catch {
-        // silent
-      } finally {
-        if (!cancelled) setProvisionLoading(false)
+  const loadProvisionStatus = useCallback(async () => {
+    setProvisionError(null)
+    setProvisionLoading(true)
+    try {
+      const res = await fetch("/api/comms/provision/status")
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        setProvisionError(j.error || `Could not load channels (${res.status})`)
+        return
       }
-    })()
-    return () => {
-      cancelled = true
+      const data = await res.json()
+      setChannels(data.channels || [])
+    } catch {
+      setProvisionError("Network error loading channel status")
+    } finally {
+      setProvisionLoading(false)
     }
   }, [])
 
-  const hasProvisionedChannel = channels.length > 0
+  useEffect(() => {
+    void loadProvisionStatus()
+  }, [loadProvisionStatus])
+
+  const hasMessagingChannel = useMemo(
+    () => (channels || []).some((c) => c.channel_type === "rcs" && isMessagingChannelLive(c)),
+    [channels]
+  )
 
   const [threads, setThreads] = useState<ThreadItem[]>([])
   const [selectedThread, setSelectedThread] = useState<ThreadItem | null>(null)
   const [messages, setMessages] = useState<MessageItem[]>([])
   const [voiceCalls, setVoiceCalls] = useState<VoiceCallItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [threadsError, setThreadsError] = useState<string | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [filter, setFilter] = useState<"all" | "unread" | "handoff">("all")
   const [channelFilter, setChannelFilter] = useState<string>("all")
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
 
   const fetchThreads = useCallback(async () => {
-    if (!hasProvisionedChannel) {
+    if (!hasMessagingChannel) {
       setThreads([])
+      setThreadsError(null)
       setLoading(false)
       return
     }
     try {
+      setThreadsError(null)
       const params = new URLSearchParams()
       if (channelFilter !== "all") params.set("channel", channelFilter)
       const res = await fetch(`/api/comms/threads?${params}`)
-      if (res.ok) {
-        const data = await res.json()
-        setThreads(data.threads || [])
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        setThreadsError(j.error || `Could not load conversations (${res.status})`)
+        return
       }
+      const data = await res.json()
+      setThreads(data.threads || [])
     } catch {
-      // silent
+      setThreadsError("Network error loading conversations")
     } finally {
       setLoading(false)
     }
-  }, [channelFilter, hasProvisionedChannel])
+  }, [channelFilter, hasMessagingChannel])
 
   useEffect(() => {
     fetchThreads()
@@ -291,7 +308,7 @@ export function CommsInbox() {
           glow={unreadNotifs.length > 0 ? "red" : undefined}
           action={
             <div className="flex flex-wrap items-center justify-end gap-1.5">
-              <div className="flex rounded-lg bg-white/[0.05] p-0.5" role="group" aria-label="Filter notifications">
+              <div className="flex rounded-lg bg-muted p-0.5 dark:bg-white/[0.05]" role="group" aria-label="Filter notifications">
                 {(
                   [
                     { id: "all" as const, label: "All" },
@@ -307,7 +324,7 @@ export function CommsInbox() {
                       "rounded-md px-2 py-1 text-[10px] font-medium transition-colors",
                       inboxNotificationFilter === pill.id
                         ? "bg-foreground text-background"
-                        : "text-white/40 hover:bg-white/[0.06] hover:text-white/70"
+                        : "text-muted-foreground hover:bg-background hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/70"
                     )}
                   >
                     {pill.label}
@@ -317,7 +334,7 @@ export function CommsInbox() {
               <button
                 type="button"
                 onClick={() => setNotifPanelOpen((o) => !o)}
-                className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-white/[0.08]"
+                className="flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-muted dark:border-white/[0.08] dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
               >
                 {notifPanelOpen ? "Close feed" : "Open feed"}
                 <CaretRight className={cn("size-3 transition-transform", notifPanelOpen && "rotate-180")} />
@@ -326,7 +343,7 @@ export function CommsInbox() {
           }
         >
           {stripNotifications.length === 0 ? (
-            <p className="py-2 text-center text-[11px] text-white/25">
+            <p className="py-2 text-center text-[11px] text-muted-foreground">
               {notifications.length === 0 ? "No notifications" : "Nothing in this filter — try All or open the panel"}
             </p>
           ) : (
@@ -351,9 +368,24 @@ export function CommsInbox() {
       >
         {provisionLoading ? (
           <BentoTile className={cn("flex w-full flex-1 items-center justify-center", panelHeightClass)}>
-            <CircleNotch className="size-6 animate-spin text-white/15" />
+            <CircleNotch className="size-6 animate-spin text-muted-foreground/50 dark:text-white/15" />
           </BentoTile>
-        ) : !hasProvisionedChannel ? (
+        ) : provisionError ? (
+          <BentoTile
+            title="Patient messaging"
+            subtitle="Could not load setup"
+            className={cn("flex w-full flex-1 flex-col justify-center", panelHeightClass)}
+          >
+            <p className="text-center text-[11px] text-destructive dark:text-red-300/90">{provisionError}</p>
+            <button
+              type="button"
+              onClick={() => void loadProvisionStatus()}
+              className="mx-auto mt-4 rounded-lg border border-border bg-muted/50 px-3 py-2 text-[10px] font-medium dark:border-white/[0.1] dark:bg-white/[0.06]"
+            >
+              Try again
+            </button>
+          </BentoTile>
+        ) : !hasMessagingChannel ? (
           <div className={cn("flex w-full flex-1 flex-col", panelHeightClass)}>
             <InboxSetupEmptyState onOpenChannels={() => setAdminTab("channels")} />
           </div>
@@ -365,8 +397,13 @@ export function CommsInbox() {
                 "grid min-h-0 flex-1 gap-3 max-lg:grid-cols-1 lg:grid-cols-[minmax(220px,31%)_minmax(0,1fr)]"
               )}
             >
-            <BentoTile className="min-h-0 flex flex-col">
+            <BentoTile title="Threads" subtitle="SMS · RCS · calls" className="min-h-0 flex flex-col">
               <div className="-mt-2 -mx-1 flex min-h-0 flex-1 flex-col">
+                {threadsError && (
+                  <p className="mb-2 rounded-lg border border-destructive/25 bg-destructive/10 px-2 py-1.5 text-[10px] text-destructive dark:text-red-300/90">
+                    {threadsError}
+                  </p>
+                )}
                 <div className="mb-3 flex items-center gap-1.5">
                   {(["all", "unread", "handoff"] as const).map((f) => (
                     <button
@@ -376,8 +413,8 @@ export function CommsInbox() {
                       className={cn(
                         "rounded-lg px-2.5 py-1 text-[10px] font-medium capitalize transition-colors",
                         filter === f
-                          ? "bg-white/[0.08] text-white/80"
-                          : "text-white/30 hover:bg-white/[0.04] hover:text-white/50"
+                          ? "bg-muted text-foreground dark:bg-white/[0.08] dark:text-white/80"
+                          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:text-white/30 dark:hover:bg-white/[0.04] dark:hover:text-white/50"
                       )}
                     >
                       {f === "handoff" ? "Needs Attention" : f}
@@ -395,8 +432,8 @@ export function CommsInbox() {
                         className={cn(
                           "flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] transition-colors",
                           channelFilter === ch
-                            ? "bg-white/[0.08] text-white/70"
-                            : "text-white/25 hover:bg-white/[0.04] hover:text-white/40"
+                            ? "bg-muted text-foreground dark:bg-white/[0.08] dark:text-white/70"
+                            : "text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:text-white/25 dark:hover:bg-white/[0.04] dark:hover:text-white/40"
                         )}
                       >
                         <Icon className="size-3" weight={channelFilter === ch ? "fill" : "regular"} />
@@ -408,15 +445,15 @@ export function CommsInbox() {
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
                   {loading ? (
                     <div className="flex items-center justify-center py-12">
-                      <CircleNotch className="size-5 animate-spin text-white/20" />
+                      <CircleNotch className="size-5 animate-spin text-muted-foreground/50 dark:text-white/20" />
                     </div>
                   ) : filteredThreads.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
-                      <div className="mb-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
-                        <ChatDots className="mx-auto size-9 text-white/12" />
+                      <div className="mb-3 rounded-2xl border border-border bg-muted/40 p-4 dark:border-white/[0.06] dark:bg-white/[0.02]">
+                        <ChatDots className="mx-auto size-9 text-muted-foreground/40 dark:text-white/12" />
                       </div>
-                      <p className="text-[11px] text-white/35">No conversations yet</p>
-                      <p className="mt-1 max-w-[220px] text-[10px] leading-relaxed text-white/18">
+                      <p className="text-[11px] text-muted-foreground">No conversations yet</p>
+                      <p className="mt-1 max-w-[220px] text-[10px] leading-relaxed text-muted-foreground/75 dark:text-white/18">
                         Messages appear when patients text your practice number (SMS/RCS) or call.
                       </p>
                     </div>
@@ -434,7 +471,7 @@ export function CommsInbox() {
               </div>
             </BentoTile>
 
-            <BentoTile className="min-h-0 flex flex-col">
+            <BentoTile title="Messages" subtitle="Selected thread" className="min-h-0 flex flex-col">
               <AnimatePresence mode="wait">
                 {selectedThread ? (
                   <ThreadDetail
@@ -453,11 +490,11 @@ export function CommsInbox() {
                     animate={{ opacity: 1 }}
                     className="flex min-h-[280px] flex-1 flex-col items-center justify-center text-center"
                   >
-                    <div className="mb-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
-                      <ChatDots className="size-8 text-white/10" />
+                    <div className="mb-3 rounded-2xl border border-border bg-muted/40 p-5 dark:border-white/[0.06] dark:bg-white/[0.02]">
+                      <ChatDots className="size-8 text-muted-foreground/35 dark:text-white/10" />
                     </div>
-                    <p className="text-[12px] text-white/35">Select a conversation</p>
-                    <p className="mt-1 max-w-[240px] text-[10px] leading-relaxed text-white/18">
+                    <p className="text-[12px] text-muted-foreground">Select a conversation</p>
+                    <p className="mt-1 max-w-[240px] text-[10px] leading-relaxed text-muted-foreground/75 dark:text-white/18">
                       Patient messages and staff replies appear here.
                     </p>
                   </motion.div>
@@ -482,9 +519,9 @@ export function CommsInbox() {
             <div className="min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
               {labs.length === 0 ? (
                 <div className="py-6 text-center">
-                  <Flask className="mx-auto mb-2 size-7 text-white/10" />
-                  <p className="text-[11px] text-white/25">No lab results in inbox</p>
-                  <p className="mt-1 text-[10px] text-white/15">HL7 or Smart Import can add items here</p>
+                  <Flask className="mx-auto mb-2 size-7 text-muted-foreground/35 dark:text-white/10" />
+                  <p className="text-[11px] text-muted-foreground">No lab results in inbox</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground/70 dark:text-white/15">HL7 or Smart Import can add items here</p>
                 </div>
               ) : (
                 <LabResultsQueue labs={labsSorted} />
@@ -538,26 +575,33 @@ function PracticeNumberBanner({ channels }: { channels: PracticeChannelRow[] }) 
     suspended: { text: "Suspended", color: "text-red-400" },
   }
 
+  const voiceCap = voice ? getVoiceCapabilityState(voice) : null
+
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-border bg-muted/30 px-4 py-2.5 dark:border-white/[0.06] dark:bg-white/[0.02]">
       {messaging && (
         <div className="flex items-center gap-2">
           <ChatText className="size-4 text-emerald-400" weight="fill" />
-          <span className="font-mono text-sm text-white/75">{messaging.phone_number}</span>
+          <span className="font-mono text-sm text-foreground dark:text-white/75">{messaging.phone_number}</span>
           {messaging.sender_display_name && (
-            <span className="text-[10px] text-white/30">({messaging.sender_display_name})</span>
+            <span className="text-[10px] text-muted-foreground dark:text-white/30">({messaging.sender_display_name})</span>
           )}
-          <span className={cn("text-[10px] font-medium", STATUS_LABEL[messaging.status]?.color || "text-white/40")}>
+          <span className={cn("text-[10px] font-medium", STATUS_LABEL[messaging.status]?.color || "text-muted-foreground dark:text-white/40")}>
             {STATUS_LABEL[messaging.status]?.text || messaging.status}
           </span>
         </div>
       )}
-      {voice && (
+      {voice && voiceCap && (
         <div className="flex items-center gap-2">
           <Phone className="size-4 text-violet-400" weight="fill" />
-          <span className="font-mono text-sm text-white/75">{voice.phone_number}</span>
-          <span className={cn("text-[10px] font-medium", STATUS_LABEL[voice.status]?.color || "text-white/40")}>
-            {voice.vapi_phone_number_id ? "Voice ready" : "Voice"}
+          <span className="font-mono text-sm text-foreground dark:text-white/75">{voice.phone_number}</span>
+          <span
+            className={cn(
+              "text-[10px] font-medium",
+              voiceCap.isReady ? "text-emerald-400" : "text-muted-foreground dark:text-white/40"
+            )}
+          >
+            {voiceCap.isReady ? "Voice ready" : "Voice setup"}
           </span>
         </div>
       )}
@@ -566,74 +610,44 @@ function PracticeNumberBanner({ channels }: { channels: PracticeChannelRow[] }) 
 }
 
 function InboxSetupEmptyState({ onOpenChannels }: { onOpenChannels: () => void }) {
-  const steps = [
-    { label: "Database", hint: "Run supabase/migrations/20260407120000_comms_platform.sql (Dashboard SQL or CLI)" },
-    { label: "Environment", hint: "TWILIO_* · TWILIO_WEBHOOK_BASE_URL · SUPABASE_SERVICE_ROLE_KEY" },
-    { label: "Channels", hint: "Open Channels → link Twilio number → SMS/RCS webhooks + Vapi voice" },
-  ]
-
   return (
     <BentoTile
       title="Patient messaging"
-      subtitle="SMS / RCS inbox"
+      subtitle="Not connected"
       className={cn(
         "min-h-[min(520px,calc(100vh-320px))] overflow-hidden",
-        "border border-white/[0.07] bg-gradient-to-b from-white/[0.02] to-transparent shadow-[0_0_0_1px_rgba(255,255,255,0.03)_inset]"
+        "border border-border bg-gradient-to-b from-card to-background shadow-sm dark:border-white/[0.07] dark:from-white/[0.02] dark:to-transparent dark:shadow-[0_0_0_1px_rgba(255,255,255,0.03)_inset]"
       )}
     >
-      <div className="-mx-1 -mt-1 flex flex-col gap-8 px-1 pt-2 lg:flex-row lg:items-stretch lg:gap-10 lg:pt-1">
-        <div className="flex flex-1 flex-col items-center text-center lg:items-start lg:text-left">
-          <div className="relative mb-5">
-            <div
-              className="absolute inset-0 rounded-[1.35rem] blur-2xl"
-              style={{ background: "radial-gradient(circle, rgba(14,165,233,0.2) 0%, transparent 68%)" }}
-              aria-hidden
-            />
-            <div className="relative flex size-[5.25rem] items-center justify-center rounded-[1.35rem] border border-sky-500/25 bg-[#0d1110] shadow-[0_12px_40px_-12px_rgba(14,165,233,0.35)]">
-              <ChatCircle className="size-[2.65rem] text-sky-400" weight="fill" aria-hidden />
-            </div>
-          </div>
-          <h3 className="text-[1.05rem] font-semibold tracking-tight text-white/[0.92]">Ready when you are</h3>
-          <p className="mt-2.5 max-w-[22rem] text-[11px] leading-[1.55] text-white/38">
-            Connect a Twilio line for SMS and RCS. Patient threads, lab imports, and admin notifications land here.
-          </p>
-          <button
-            type="button"
-            onClick={onOpenChannels}
-            className="mt-6 inline-flex items-center gap-2 rounded-xl border border-sky-500/35 bg-sky-500/12 px-5 py-2.5 text-[11px] font-semibold text-sky-200 transition-colors hover:border-sky-400/50 hover:bg-sky-500/18"
-          >
-            <ChatCircle className="size-4 text-sky-400" weight="fill" />
-            Open Channels
-          </button>
-          <p className="mt-4 text-[9px] leading-relaxed text-white/22">
-            See <span className="text-white/35">docs/comms-setup-and-testing.md</span> for env vars and webhooks.
-          </p>
-        </div>
-
-        <div className="w-full shrink-0 lg:max-w-[min(100%,20rem)]">
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] p-4 ring-1 ring-white/[0.04]">
-            <p className="mb-3.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/32">Quick setup</p>
-            <ol className="space-y-3.5">
-              {steps.map((s, i) => (
-                <li key={s.label} className="flex gap-3 text-left">
-                  <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-black/20 text-[10px] font-semibold tabular-nums text-white/45">
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-[12px] font-medium text-white/[0.78]">{s.label}</p>
-                    <p className="mt-0.5 text-[10px] leading-snug text-white/30">{s.hint}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="mt-5 flex gap-2.5 rounded-xl border border-white/[0.05] bg-black/25 px-3 py-2.5">
-              <Bell className="mt-0.5 size-3.5 shrink-0 text-sky-400/75" />
-              <p className="text-[10px] leading-snug text-white/34">
-                Notifications and Lab Results stay in the row above and the narrower column on the right.
-              </p>
-            </div>
+      <div className="flex flex-col items-center px-4 py-10 text-center sm:py-14">
+        <div className="relative mb-5">
+          <div
+            className="absolute inset-0 rounded-[1.35rem] blur-2xl"
+            style={{ background: "radial-gradient(circle, rgba(14,165,233,0.2) 0%, transparent 68%)" }}
+            aria-hidden
+          />
+          <div className="relative flex size-[5.25rem] items-center justify-center rounded-[1.35rem] border border-sky-500/25 bg-sky-50 shadow-[0_12px_40px_-12px_rgba(14,165,233,0.35)] dark:bg-[#0d1110]">
+            <ChatCircle className="size-[2.65rem] text-sky-400" weight="fill" aria-hidden />
           </div>
         </div>
+        <h3 className="text-[1.05rem] font-semibold tracking-tight text-foreground dark:text-white/[0.92]">
+          Connect patient messaging
+        </h3>
+        <p className="mt-2.5 max-w-[24rem] text-[11px] leading-[1.55] text-muted-foreground dark:text-white/38">
+          Link your practice Twilio line in Channels to receive SMS, RCS, and threaded conversations here.
+        </p>
+        <button
+          type="button"
+          onClick={onOpenChannels}
+          className="mt-7 inline-flex items-center gap-2 rounded-xl border border-sky-500/35 bg-sky-500/12 px-5 py-2.5 text-[11px] font-semibold text-sky-700 transition-colors hover:border-sky-400/50 hover:bg-sky-500/18 dark:text-sky-200"
+        >
+          <ChatCircle className="size-4 text-sky-400" weight="fill" />
+          Open Channels
+        </button>
+        <p className="mt-6 text-[9px] text-muted-foreground/80 dark:text-white/22">
+          Full setup steps are in{" "}
+          <span className="text-foreground/70 dark:text-white/35">docs/comms-setup-and-testing.md</span>.
+        </p>
       </div>
     </BentoTile>
   )

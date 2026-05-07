@@ -3,6 +3,7 @@
 import { useUser } from "@/lib/user-store/provider"
 import { fetchClient } from "@/lib/fetch"
 import { createClient } from "@/lib/supabase/client"
+import { useAuthContext } from "@/lib/auth/provider"
 import {
   decryptPatientProfile,
   usePracticeCrypto,
@@ -25,37 +26,34 @@ import { useEffect } from "react"
 /** Resolve practice id: first membership row, else POST bootstrap. */
 export function PracticeIdBootstrap() {
   const { user } = useUser()
+  const auth = useAuthContext()
   const { practiceId, setPracticeId } = usePracticeCrypto()
 
   useEffect(() => {
-    if (!user?.id || practiceId) return
-    const supabase = createClient()
-    if (!supabase) return
+    if (!user?.id) return
+    if (auth.activePracticeId && practiceId !== auth.activePracticeId) {
+      setPracticeId(auth.activePracticeId)
+      return
+    }
+    if (practiceId) return
     let cancelled = false
     ;(async () => {
-      const { data: row } = await supabase
-        .from("practice_members")
-        .select("practice_id")
-        .eq("user_id", user.id)
-        .limit(1)
-        .maybeSingle()
-      if (cancelled) return
-      if (row?.practice_id) {
-        setPracticeId(row.practice_id as string)
-        return
-      }
       const res = await fetchClient("/api/clinical/practice/bootstrap", {
         method: "POST",
         body: JSON.stringify({ name: "My practice" }),
       })
+      if (cancelled) return
       if (!res.ok) return
       const j = (await res.json()) as { practiceId?: string }
-      if (j.practiceId) setPracticeId(j.practiceId)
+      if (j.practiceId) {
+        await auth.setActivePractice(j.practiceId)
+        setPracticeId(j.practiceId)
+      }
     })()
     return () => {
       cancelled = true
     }
-  }, [user?.id, practiceId, setPracticeId])
+  }, [auth, user?.id, practiceId, setPracticeId])
 
   return null
 }

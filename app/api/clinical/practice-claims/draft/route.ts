@@ -48,6 +48,19 @@ export async function POST(req: Request) {
   const clinicalEncounterId = body.clinicalEncounterId?.trim() || null
   const existingId = body.claimId?.trim()
 
+  const { data: patient, error: patientErr } = await supabase
+    .from("practice_patients")
+    .select("id")
+    .eq("id", patientId)
+    .eq("practice_id", practiceId)
+    .maybeSingle()
+  if (patientErr) {
+    return NextResponse.json({ error: patientErr.message }, { status: 500 })
+  }
+  if (!patient) {
+    return NextResponse.json({ error: "Patient profile not found for this practice." }, { status: 400 })
+  }
+
   if (existingId) {
     const { data: existing, error: fetchErr } = await supabase
       .from("practice_claims")

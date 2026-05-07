@@ -851,21 +851,55 @@ export function useChatCore({
       return
     }
 
-    // Moving to a different chat should never carry citations forward.
+    // Moving to a different chat should never carry citations forward —
+    // EXCEPT when we're transitioning from a temp-chat-X placeholder to the
+    // real chat id that was just minted by the server. In that case the
+    // citations in `evidenceCitationsRef` belong to the same conversation
+    // and clearing them causes a visible "citations disappear after
+    // streaming" flash before the DB-backed metadata loads.
+    const previousChatId = restoredChatIdRef.current
+    const isTempToRealMigration = Boolean(
+      chatId &&
+        previousChatId &&
+        previousChatId !== chatId &&
+        previousChatId.startsWith("temp-chat-") &&
+        !chatId.startsWith("temp-chat-")
+    )
+
     if (
       chatId &&
-      restoredChatIdRef.current &&
-      restoredChatIdRef.current !== chatId
+      previousChatId &&
+      previousChatId !== chatId &&
+      !isTempToRealMigration
     ) {
       clearEvidenceCitations()
+    } else if (isTempToRealMigration && evidenceCitationsRef.current.length > 0) {
+      // Migrate the citations into the real chat's sessionStorage key so
+      // a subsequent reload also finds them.
+      try {
+        const payload = JSON.stringify(evidenceCitationsRef.current)
+        sessionStorage.setItem(`evidenceCitations:${chatId}`, payload)
+        sessionStorage.setItem(
+          "evidenceCitations:latest",
+          JSON.stringify({
+            chatId,
+            citations: evidenceCitationsRef.current,
+            timestamp: Date.now(),
+          })
+        )
+        // Clean up the temp-chat key.
+        sessionStorage.removeItem(`evidenceCitations:${previousChatId}`)
+      } catch (e) {
+        console.error("📚 [EVIDENCE] Failed to migrate citations to real chat:", e)
+      }
     }
-    
+
     isRestoringRef.current = true
-    
+
     try {
-      // Skip if we already have citations in ref (they were set from onResponse)
-      if (evidenceCitationsRef.current.length > 0 && chatId && restoredChatIdRef.current === null) {
-        // Citations already exist from onResponse, just mark as restored
+      // Skip if we already have citations in ref (they were set from onResponse
+      // or migrated from a temp chat above).
+      if (evidenceCitationsRef.current.length > 0 && chatId) {
         restoredChatIdRef.current = chatId
         return
       }
@@ -1137,11 +1171,44 @@ export function useChatCore({
   const currentChatIdForSavingRef = useRef<string | null>(null)
   const isStreamingRef = useRef(false)
   const messagesBeforeNavigationRef = useRef<Message[]>([])
+  const messagesBeforeNavigationChatIdRef = useRef<string | null>(null)
   const stableChatIdRef = useRef<string | undefined>(undefined) // Stable ID for useChat to prevent resets
   const submitSourceRef = useRef<"submit" | "suggestion" | "reload" | null>(null)
   const submitStartedAtRef = useRef<number | null>(null)
   const firstByteMeasuredRef = useRef(false)
   const firstTokenMeasuredRef = useRef(false)
+
+  const rememberMessagesBeforeNavigation = (
+    snapshot: Message[],
+    ownerChatId: string | null | undefined = chatId
+  ) => {
+    messagesBeforeNavigationRef.current = snapshot
+    messagesBeforeNavigationChatIdRef.current = ownerChatId ?? null
+  }
+
+  const clearMessagesBeforeNavigation = () => {
+    messagesBeforeNavigationRef.current = []
+    messagesBeforeNavigationChatIdRef.current = null
+  }
+
+  const canRestoreNavigationBackup = (
+    targetChatId: string | null | undefined = chatId
+  ) => {
+    if (messagesBeforeNavigationRef.current.length === 0) return false
+    if (!targetChatId) return false
+
+    const ownerChatId = messagesBeforeNavigationChatIdRef.current
+    if (!ownerChatId) return false
+    if (ownerChatId === targetChatId) return true
+
+    // Allow the one legitimate cross-id restore: a temp chat being
+    // materialized into its real database id during the same send.
+    return (
+      ownerChatId.startsWith("temp-chat-") &&
+      !targetChatId.startsWith("temp-chat-") &&
+      currentChatIdForSavingRef.current === targetChatId
+    )
+  }
 
   const startSubmitTelemetry = useCallback(
     (source: "submit" | "suggestion" | "reload") => {
@@ -1498,7 +1565,7 @@ export function useChatCore({
       const prevCount = messagesBeforeNavigationRef.current.length
       // Only update if message count increased (new messages arrived)
       if (messages.length > prevCount) {
-        messagesBeforeNavigationRef.current = [...messages]
+        rememberMessagesBeforeNavigation([...messages])
         console.log('[🐛 STREAMING TRACK] Stored', messages.length, 'messages before potential navigation')
       }
     }
@@ -1558,7 +1625,7 @@ export function useChatCore({
           }
         }
 
-        messagesBeforeNavigationRef.current = [...messages]
+        rememberMessagesBeforeNavigation([...messages])
         lastStoredMessagesRef.current = messagesKey
         console.log('[🐛 STORE] Stored', messages.length, 'messages to sessionStorage with key:', key)
       }
@@ -1575,8 +1642,11 @@ export function useChatCore({
       if (isCurrentlyStreaming) {
         console.log('[🐛 MESSAGE RESTORE] ⚠️ CRITICAL: Messages cleared during streaming, restoring from backup:', messagesBeforeNavigationRef.current.length)
         // Use setTimeout to ensure this runs after useChat's internal state update
+        const backup = messagesBeforeNavigationRef.current
         setTimeout(() => {
-          setMessages(messagesBeforeNavigationRef.current)
+          if (canRestoreNavigationBackup(chatId)) {
+            setMessages(backup)
+          }
         }, 0)
       }
     }
@@ -1630,7 +1700,7 @@ export function useChatCore({
       })
       // Reset streaming state and clear messages
       isStreamingRef.current = false
-      messagesBeforeNavigationRef.current = []
+      clearMessagesBeforeNavigation()
       currentChatIdForSavingRef.current = null
       lastSavedMessageCountRef.current = 0
       // CRITICAL: Reset status if stuck
@@ -1657,12 +1727,40 @@ export function useChatCore({
   useEffect(() => {
     const handleChatCreated = (event: CustomEvent<{ chatId: string }>) => {
       const newChatId = event.detail.chatId
-      if (newChatId && !newChatId.startsWith('temp-chat-')) {
-        currentChatIdForSavingRef.current = newChatId
-        console.log('[🐛 CHAT CREATED] Updated currentChatIdForSavingRef from event:', newChatId)
+      if (!newChatId || newChatId.startsWith('temp-chat-')) return
+
+      currentChatIdForSavingRef.current = newChatId
+      console.log('[🐛 CHAT CREATED] Updated currentChatIdForSavingRef from event:', newChatId)
+
+      // PERF: Pre-seed the realId caches with the streaming messages so the
+      // post-stream router.replace doesn't cause a "blank flash" while
+      // MessagesProvider waits on the DB. Without this, the temp→real chatId
+      // transition resets useChat with empty initialMessages and the user
+      // perceives the app as "refreshing" at the end of streaming.
+      const live = messagesRef.current
+      if (live.length === 0 || typeof window === "undefined") return
+
+      try {
+        const snapshot = JSON.stringify(live)
+        sessionStorage.setItem(`pendingMessages:${newChatId}`, snapshot)
+        sessionStorage.setItem(
+          "pendingMessages:latest",
+          JSON.stringify({ chatId: newChatId, messages: live, timestamp: Date.now() })
+        )
+      } catch (error) {
+        console.warn('[🐛 CHAT CREATED] Failed to mirror pendingMessages to realId:', error)
       }
+
+      void (async () => {
+        try {
+          const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
+          await writeToIndexedDB("messages", { id: newChatId, messages: live })
+        } catch (error) {
+          console.warn('[🐛 CHAT CREATED] Failed to mirror IndexedDB to realId:', error)
+        }
+      })()
     }
-    
+
     if (typeof window !== 'undefined') {
       window.addEventListener('chatCreated', handleChatCreated as EventListener)
       return () => {
@@ -1730,7 +1828,7 @@ export function useChatCore({
           chatId ?? "home"
         )
         setMessages(restoredMessages as Message[])
-        messagesBeforeNavigationRef.current = restoredMessages as Message[]
+        rememberMessagesBeforeNavigation(restoredMessages as Message[])
         if (pendingKey) {
           sessionStorage.removeItem(pendingKey)
         }
@@ -1784,16 +1882,16 @@ export function useChatCore({
       if (messages.length > 0) {
         // We have messages in state - preserve them
         console.log('[🐛 MESSAGE SYNC] ✅ Preserving messages in state:', messages.length)
-        messagesBeforeNavigationRef.current = [...messages]
+        rememberMessagesBeforeNavigation([...messages])
         // Don't sync - keep current messages
         return
       } else if (currentMessagesLength > 0) {
         // We have messages in ref but not in state - restore them
         console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from ref after navigation:', currentMessagesLength)
         setMessages(currentMessages)
-        messagesBeforeNavigationRef.current = currentMessages
+        rememberMessagesBeforeNavigation(currentMessages)
         return
-      } else if (messagesBeforeNavigationRef.current.length > 0) {
+      } else if (canRestoreNavigationBackup(chatId)) {
         // We have backup messages - restore them
         console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring backup messages after navigation:', messagesBeforeNavigationRef.current.length)
         setMessages(messagesBeforeNavigationRef.current)
@@ -1832,7 +1930,7 @@ export function useChatCore({
       if (messages.length > 0) {
         // We have messages in state - preserve them
         console.log('[🐛 MESSAGE SYNC] ✅ Preserving messages in state during transition:', messages.length)
-        messagesBeforeNavigationRef.current = [...messages]
+        rememberMessagesBeforeNavigation([...messages])
         // Cache to new chat ID
         if (chatId) {
           Promise.resolve().then(async () => {
@@ -1852,7 +1950,7 @@ export function useChatCore({
         // We have messages in ref but not in state - restore them
         console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from ref during transition:', currentMessagesLength)
         setMessages(currentMessages)
-        messagesBeforeNavigationRef.current = currentMessages
+        rememberMessagesBeforeNavigation(currentMessages)
         // Cache to new chat ID
         if (chatId) {
           Promise.resolve().then(async () => {
@@ -1868,7 +1966,7 @@ export function useChatCore({
           })
         }
         return // Don't sync - preserve restored messages
-      } else if (messagesBeforeNavigationRef.current.length > 0) {
+      } else if (canRestoreNavigationBackup(chatId)) {
         // We have backup messages - restore them
         console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring backup messages during transition:', messagesBeforeNavigationRef.current.length)
         setMessages(messagesBeforeNavigationRef.current)
@@ -1897,7 +1995,7 @@ export function useChatCore({
             if (Array.isArray(sessionMessages) && sessionMessages.length > 0) {
               console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from sessionStorage during transition:', sessionMessages.length)
               setMessages(sessionMessages)
-              messagesBeforeNavigationRef.current = sessionMessages
+              rememberMessagesBeforeNavigation(sessionMessages)
               return // Don't sync - preserve restored messages
             }
           } catch (e) {
@@ -1910,7 +2008,7 @@ export function useChatCore({
       if (initialMessages.length > 0 && !isStreamingOrSubmitting) {
         console.log('[🐛 MESSAGE SYNC] Using initialMessages during transition:', initialMessages.length)
         setMessages(initialMessages)
-        messagesBeforeNavigationRef.current = initialMessages
+        rememberMessagesBeforeNavigation(initialMessages)
         return
       }
       
@@ -2009,7 +2107,7 @@ export function useChatCore({
     
     // 6. CRITICAL: If messages are empty but we have backup messages, restore them
     // This handles the case where useChat reset cleared messages during navigation
-    if (messages.length === 0 && messagesBeforeNavigationRef.current.length > 0) {
+    if (messages.length === 0 && canRestoreNavigationBackup(chatId)) {
       const isCurrentlyStreaming = status === 'streaming' || isSubmitting
       if (isCurrentlyStreaming || chatId) {
         console.log('[🐛 MESSAGE SYNC] ⚠️ CRITICAL: Restoring messages from backup ref:', {
@@ -2041,20 +2139,37 @@ export function useChatCore({
     }
   }, [chatId, messages.length, status, isSubmitting])
   
-  // Cache messages to temp chat ID as they come in (for migration)
+  // Cache messages to temp chat ID as they come in (for migration).
+  // PERF: throttle the IndexedDB write so we don't fire it on every streaming
+  // token — that piled up writes during long responses and was a likely
+  // contributor to streaming-time browser freezes / crashes on big chats.
+  const tempChatPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (chatId && chatId.startsWith('temp-chat-') && messages.length > 0) {
-      Promise.resolve().then(async () => {
-        try {
-          const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
-          await writeToIndexedDB("messages", { id: chatId, messages })
-          if (typeof window !== 'undefined') {
-            (window as any).__lastMessagesForMigration = { chatId, messages }
-          }
-        } catch (error) {
-          console.error('[useChatCore] Failed to cache messages:', error)
-        }
-      })
+    if (!chatId || !chatId.startsWith('temp-chat-') || messages.length === 0) {
+      return
+    }
+
+    if (typeof window !== 'undefined') {
+      ;(window as any).__lastMessagesForMigration = { chatId, messages }
+    }
+
+    if (tempChatPersistTimerRef.current) {
+      clearTimeout(tempChatPersistTimerRef.current)
+    }
+    tempChatPersistTimerRef.current = setTimeout(async () => {
+      try {
+        const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
+        await writeToIndexedDB("messages", { id: chatId, messages })
+      } catch (error) {
+        console.error('[useChatCore] Failed to cache messages:', error)
+      }
+    }, 600)
+
+    return () => {
+      if (tempChatPersistTimerRef.current) {
+        clearTimeout(tempChatPersistTimerRef.current)
+        tempChatPersistTimerRef.current = null
+      }
     }
   }, [chatId, messages])
   
@@ -2087,6 +2202,10 @@ export function useChatCore({
   const submit = useCallback(async (overrideInput?: string) => {
     const resolvedInput = typeof overrideInput === "string" ? overrideInput : input
     if (!resolvedInput.trim() && files.length === 0) return
+    if (isSubmitting || status === "submitted" || status === "streaming") {
+      console.warn("[CHAT] Ignored duplicate submit while a response is already in flight")
+      return
+    }
 
     const userRole = userPreferences.preferences.userRole || "general"
     const isSoapCommandRequest = /^\[\/soap\]/i.test(resolvedInput.trim())
@@ -2106,6 +2225,11 @@ export function useChatCore({
       }))
 
       const pendingMessage = {
+        purpose: "auth-resume",
+        id:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `auth-resume-${Date.now()}`,
         content: resolvedInput.trim(),
         files: fileMetadata,
         hasFiles: files.length > 0,
@@ -2551,6 +2675,8 @@ export function useChatCore({
     user,
     input,
     files,
+    isSubmitting,
+    status,
     chatId,
     convertBlobUrlsToDataUrls,
     checkLimitsAndNotify,
@@ -2582,6 +2708,11 @@ export function useChatCore({
   // Handle suggestion - optimized for immediate response
   const handleSuggestion = useCallback(
     async (suggestion: string) => {
+      if (isSubmitting || status === "submitted" || status === "streaming") {
+        console.warn("[CHAT] Ignored duplicate suggestion while a response is already in flight")
+        return
+      }
+
       const isAuthenticatedNow = !!user?.id
       const userRole = userPreferences.preferences.userRole || "general"
       const isSoapSuggestion = /^\[\/soap\]/i.test(suggestion.trim())
@@ -2594,6 +2725,11 @@ export function useChatCore({
 
       if (!isAuthenticatedNow) {
         const pendingMessage = {
+          purpose: "auth-resume",
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `auth-resume-${Date.now()}`,
           content: suggestion,
           files: [],
           hasFiles: false,
@@ -2743,6 +2879,8 @@ export function useChatCore({
       clinicianMode,
       artifactIntent,
       citationStyle,
+      isSubmitting,
+      status,
       clearEvidenceCitations,
       startOptimisticTaskBoard,
       setArtifactIntent,

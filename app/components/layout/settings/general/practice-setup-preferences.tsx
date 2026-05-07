@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useChecklistStore } from "@/lib/onboarding/checklist-store"
+import { useAuthContext } from "@/lib/auth/provider"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { CheckCircle, Stethoscope, XCircle } from "@phosphor-icons/react"
 import { useCallback, useState } from "react"
@@ -14,6 +15,7 @@ import { useCallback, useState } from "react"
  */
 export function PracticeSetupPreferences() {
   const { preferences, updatePreferences } = useUserPreferences()
+  const auth = useAuthContext()
   const [busy, setBusy] = useState(false)
 
   const profileDone = Boolean(preferences.practiceProfileCompleted)
@@ -31,7 +33,7 @@ export function PracticeSetupPreferences() {
     }
   }, [updatePreferences])
 
-  if (preferences.userRole !== "doctor") return null
+  if (!auth.hasPermission("settings:practice")) return null
 
   return (
     <Card>

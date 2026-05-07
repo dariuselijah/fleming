@@ -1519,8 +1519,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         set((s) => ({
           patientAddModalPrefill: prefill,
           patientAddModalOpenNonce: s.patientAddModalOpenNonce + 1,
-          mode: "admin",
-          activeAdminTab: "patients",
         })),
 
       clearPatientAddModalPrefill: () => set({ patientAddModalPrefill: null }),

@@ -34,6 +34,7 @@ import { PerformanceMonitor } from "./performance-monitor"
 import { OnboardingDialog } from "../onboarding/onboarding-dialog"
 import { HealthHomeSection } from "../health/health-home-section"
 import { DocumentSelectorModal } from "@/app/components/workspace/document-selector-modal"
+import { ChatModeWelcome } from "./chat-mode-welcome"
 
 const FeedbackWidget = dynamic(
   () => import("./feedback-widget").then((mod) => mod.FeedbackWidget),
@@ -44,6 +45,8 @@ const DialogAuth = dynamic(
   () => import("./dialog-auth").then((mod) => mod.DialogAuth),
   { ssr: false }
 )
+
+const PENDING_AUTH_MESSAGE_MAX_AGE_MS = 10 * 60 * 1000
 
 const RateLimitPaywall = dynamic(
   () => import("./rate-limit-paywall").then((mod) => mod.RateLimitPaywall),
@@ -119,14 +122,29 @@ export function Chat() {
   const [rateLimitType, setRateLimitType] = useState<"hourly" | "daily">("hourly")
   const [showOnboardingDialog, setShowOnboardingDialog] = useState(false)
   const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
-  
-  // Show onboarding only after login/signup and when not yet completed.
+
+  /** Guest / dev profile when Supabase is off — not a real sign-in; skip blocking onboarding. */
+  const isOnboardingEligibleUser = useMemo(
+    () =>
+      Boolean(
+        user?.id &&
+          user.id !== "guest" &&
+          !(user as { anonymous?: boolean | null }).anonymous
+      ),
+    [user]
+  )
+
+  // Show onboarding only for real accounts after login, when not yet completed.
   useEffect(() => {
-    if (!preferences || !isAuthenticated) {
+    if (!isOnboardingEligibleUser) {
+      setShowOnboardingDialog(false)
+      return
+    }
+    if (!preferences) {
       return
     }
     setShowOnboardingDialog(!preferences.onboardingCompleted)
-  }, [preferences, isAuthenticated])
+  }, [preferences, isOnboardingEligibleUser])
   const systemPrompt = useMemo(
     () => getSystemPromptByRole(preferences?.userRole || "general", user?.system_prompt || undefined),
     [user?.system_prompt, preferences?.userRole]
@@ -212,10 +230,25 @@ export function Chat() {
     
     try {
       const pendingMessage = JSON.parse(pendingMessageStr)
+      const isExplicitAuthResume =
+        pendingMessage?.purpose === "auth-resume" ||
+        pendingMessage?.resumeAfterAuth === true
+      const createdAt =
+        typeof pendingMessage?.timestamp === "number" ? pendingMessage.timestamp : 0
+      const isFresh =
+        createdAt > 0 && Date.now() - createdAt < PENDING_AUTH_MESSAGE_MAX_AGE_MS
+      const content =
+        typeof pendingMessage?.content === "string" ? pendingMessage.content.trim() : ""
+
+      if (!isExplicitAuthResume || !isFresh || !content) {
+        sessionStorage.removeItem("pendingMessage")
+        pendingMessageRef.current = null
+        return
+      }
       
       // Store in ref for immediate access
       pendingMessageRef.current = {
-        content: pendingMessage.content || '',
+        content,
         files: [], // Files can't be serialized, user will need to re-upload if needed
         selectedModel: pendingMessage.selectedModel || selectedModel,
         enableSearch: pendingMessage.enableSearch ?? enableSearch,
@@ -235,7 +268,7 @@ export function Chat() {
       }
       
       // Set input from pending message
-      handleInputChange(pendingMessage.content || '')
+      handleInputChange(content)
       
       // Restore search and evidence settings if they were set
       if (pendingMessage.enableSearch !== undefined) {
@@ -284,7 +317,7 @@ export function Chat() {
       // Use requestAnimationFrame to ensure React has processed state updates
       requestAnimationFrame(() => {
         setTimeout(() => {
-          submit()
+          submit(content)
         }, 50)
       })
     } catch (error) {
@@ -734,7 +767,17 @@ export function Chat() {
             <p className="text-sm text-muted-foreground">Opening patient consult…</p>
           </div>
         ) : showOnboarding ? (
-          isClinicalMode ? (
+          workspaceMode === "chat" ? (
+            <div className="flex h-full w-full max-w-3xl min-h-0 flex-col pb-3 sm:pb-4">
+              <ChatModeWelcome
+                userName={user?.display_name}
+                onSuggestion={handleSuggestion}
+              />
+              <div className="mt-4 sm:mt-5">
+                <ChatInput {...chatInputProps} hasSuggestions={false} />
+              </div>
+            </div>
+          ) : isClinicalMode ? (
             <div className="flex h-full w-full max-w-3xl min-h-0 flex-col justify-end pb-3 sm:pb-4">
               <div className="flex flex-1 flex-col items-center justify-center text-center">
                 <div className="flex size-12 items-center justify-center rounded-2xl bg-indigo-500/10 mb-4">

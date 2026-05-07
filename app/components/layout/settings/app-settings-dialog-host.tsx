@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Drawer, DrawerContent } from "@/components/ui/drawer"
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import { useAppSettingsDialog } from "@/lib/app-settings-dialog-store"
 import { SettingsContent } from "./settings-content"
 
@@ -20,6 +20,9 @@ export function AppSettingsDialogHost() {
     return (
       <Drawer open={open} onOpenChange={setOpen}>
         <DrawerContent className="max-h-[92vh]">
+          <DrawerHeader className="sr-only">
+            <DrawerTitle>Settings</DrawerTitle>
+          </DrawerHeader>
           <SettingsContent isDrawer />
         </DrawerContent>
       </Drawer>

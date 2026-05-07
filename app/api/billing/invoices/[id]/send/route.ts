@@ -39,6 +39,13 @@ export async function POST(req: Request, context: Ctx) {
   const patient = inv.patient_snapshot as { phone?: string; name?: string } | undefined
   const channels = body.channels ?? ["sms"]
 
+  if (!inv.patient_id) {
+    return NextResponse.json(
+      { error: "This invoice has no linked patient. Select a patient before sending a portal link." },
+      { status: 400 }
+    )
+  }
+
   const { portalUrl } = await createPatientAccessToken({
     practiceId: ctx.practiceId,
     patientId: inv.patient_id as string,

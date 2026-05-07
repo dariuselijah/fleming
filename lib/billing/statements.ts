@@ -1,7 +1,10 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib"
+import { PDFDocument, StandardFonts } from "pdf-lib"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/app/types/database.types"
 import { formatZar } from "./money"
+import type { InvoiceLineSnapshot, PatientSnapshot, PracticeSnapshot } from "./types"
+import { drawDocumentHeader, drawFooter, drawLineItems, drawPayQr, embedPracticeLogo, c } from "./pdf/layout"
+import { createPatientAccessToken } from "@/lib/portal/tokens"
 
 export async function buildMonthlyStatementPdf(
   supabase: SupabaseClient<Database>,
@@ -13,7 +16,7 @@ export async function buildMonthlyStatementPdf(
 
   const { data: rows } = await supabase
     .from("practice_invoices")
-    .select("invoice_number, total_cents, amount_paid_cents, status, issued_at, created_at")
+    .select("id, invoice_number, total_cents, amount_paid_cents, status, billing_mode, issued_at, created_at")
     .eq("practice_id", opts.practiceId)
     .eq("patient_id", opts.patientId)
     .in("status", ["issued", "sent", "viewed", "partially_paid", "paid"])
@@ -21,28 +24,69 @@ export async function buildMonthlyStatementPdf(
     .lte("created_at", end)
     .order("created_at", { ascending: true })
 
+  const [{ data: practice }, { data: patient }] = await Promise.all([
+    (supabase as unknown as SupabaseClient)
+      .from("practices")
+      .select("name, logo_storage_path, vat_number, hpcsa_number, bhf_number, address, phone, email, website")
+      .eq("id", opts.practiceId)
+      .maybeSingle(),
+    supabase.from("practice_patients").select("display_name_hint").eq("id", opts.patientId).maybeSingle(),
+  ])
+  const practiceSnap: PracticeSnapshot = {
+    name: practice?.name ?? "Practice",
+    logoStoragePath: (practice as { logo_storage_path?: string | null } | null)?.logo_storage_path ?? undefined,
+    vatNumber: (practice as { vat_number?: string | null } | null)?.vat_number ?? undefined,
+    hpcsaNumber: (practice as { hpcsa_number?: string | null } | null)?.hpcsa_number ?? undefined,
+    bhfNumber: (practice as { bhf_number?: string | null } | null)?.bhf_number ?? undefined,
+    address: (practice as { address?: string | null } | null)?.address ?? undefined,
+    phone: (practice as { phone?: string | null } | null)?.phone ?? undefined,
+    email: (practice as { email?: string | null } | null)?.email ?? undefined,
+    website: (practice as { website?: string | null } | null)?.website ?? undefined,
+  }
+  const patientSnap: PatientSnapshot = { name: patient?.display_name_hint ?? "Patient" }
+  let totalDue = 0
+  const statementLines: InvoiceLineSnapshot[] = []
+  for (const r of rows ?? []) {
+    const due = Math.max(0, (r.total_cents ?? 0) - (r.amount_paid_cents ?? 0))
+    totalDue += due
+    statementLines.push({
+      id: String(r.id),
+      description: `${r.invoice_number} · ${r.status}`,
+      quantity: 1,
+      amountCents: due,
+      lineType: r.billing_mode,
+    })
+  }
+
   const pdf = await PDFDocument.create()
   const page = pdf.addPage([595.28, 841.89])
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold)
-  let y = 800
-  const left = 50
-  const lineH = 14
-  const draw = (text: string, size = 10, bold = false) => {
-    page.drawText(text, { x: left, y, size, font: bold ? fontBold : font, color: rgb(0.1, 0.1, 0.1) })
-    y -= lineH
+  const ctx = { pdf, page, font, bold: fontBold, y: 0, left: 50, right: 545 }
+  const logo = await embedPracticeLogo(pdf, practiceSnap)
+  drawDocumentHeader(ctx, {
+    title: "Account statement",
+    number: `Statement ${opts.yearMonth}`,
+    dateLabel: `${start.slice(0, 10)} to ${end.slice(0, 10)}`,
+    practice: practiceSnap,
+    patient: patientSnap,
+    logo,
+  })
+  drawLineItems(ctx, statementLines)
+  page.drawText("Total outstanding", { x: 360, y: ctx.y - 18, size: 11, font: fontBold, color: c("ink") })
+  page.drawText(formatZar(totalDue), { x: 475, y: ctx.y - 18, size: 12, font: fontBold, color: c("emerald") })
+  const payable = (rows ?? []).find((r) => r.billing_mode !== "scheme_only" && Math.max(0, (r.total_cents ?? 0) - (r.amount_paid_cents ?? 0)) > 0)
+  if (payable && totalDue > 0) {
+    const token = await createPatientAccessToken({
+      practiceId: opts.practiceId,
+      patientId: opts.patientId,
+      purpose: "billing_invoice",
+      invoiceId: String(payable.id),
+      expiresInHours: 168,
+    })
+    await drawPayQr(ctx, token.portalUrl)
   }
-
-  draw(`Account statement — ${opts.yearMonth}`, 14, true)
-  y -= 8
-  let totalDue = 0
-  for (const r of rows ?? []) {
-    const due = (r.total_cents ?? 0) - (r.amount_paid_cents ?? 0)
-    totalDue += due
-    draw(`${r.invoice_number}  ${r.status}  ${formatZar(due)}`, 9)
-  }
-  y -= 8
-  draw(`Total outstanding: ${formatZar(totalDue)}`, 11, true)
+  drawFooter(ctx)
 
   return pdf.save()
 }

@@ -13,6 +13,7 @@ import { WorkspaceHeader } from "./workspace-header"
 import { PaneTimeline } from "./pane-timeline"
 import { PaneCanvas } from "./pane-canvas"
 import { PaneSidecar } from "./pane-sidecar"
+import { AddPatientModalHost } from "@/app/components/admin/add-patient-modal"
 
 import dynamic from "next/dynamic"
 
@@ -159,11 +160,23 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
       <PatientChatSync />
       <ClinicalEncounterHydrate />
       <ConsultChatTitleSync />
+      <AddPatientModalHost />
       <div className="relative flex h-full w-full flex-col overflow-hidden">
         <PatientTabBar />
 
         <AnimatePresence mode="wait">
-          {mode === "admin" ? (
+          {mode === "chat" ? (
+            <motion.div
+              key="chat"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="min-h-0 flex-1 overflow-hidden"
+            >
+              {children}
+            </motion.div>
+          ) : mode === "admin" ? (
             <motion.div
               key="admin"
               initial={{ opacity: 0 }}
@@ -269,30 +282,30 @@ function ClinicalEmptyState() {
   const { setMode, setAdminTab } = useWorkspace()
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4">
-      <div className="flex size-16 items-center justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02]">
-        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" className="text-white/15">
+      <div className="flex size-16 items-center justify-center rounded-2xl border border-border/70 bg-muted/35">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" className="text-muted-foreground/35">
           <path d="M16 4v10M16 18v10M4 16h10M18 16h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           <circle cx="16" cy="16" r="12" stroke="currentColor" strokeWidth="1.5" strokeDasharray="4 4" />
         </svg>
       </div>
       <div className="text-center">
         <h3 className="text-sm font-semibold text-foreground">Select a patient to begin</h3>
-        <p className="mt-1 max-w-xs text-xs text-white/30">
-          Open a patient from the calendar or search with <kbd className="rounded-md border border-white/[0.1] bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-medium">⌘K</kbd>
+        <p className="mt-1 max-w-xs text-xs text-muted-foreground">
+          Open a patient from the calendar or search with <kbd className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground">⌘K</kbd>
         </p>
       </div>
       <div className="flex gap-2">
         <button
           type="button"
           onClick={() => { setMode("admin"); setAdminTab("calendar") }}
-          className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-[11px] text-white/50 transition-colors hover:bg-white/[0.06] hover:text-white"
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           Open Calendar
         </button>
         <button
           type="button"
           onClick={() => { setMode("admin"); setAdminTab("patients") }}
-          className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-[11px] text-white/50 transition-colors hover:bg-white/[0.06] hover:text-white"
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           Patient Directory
         </button>

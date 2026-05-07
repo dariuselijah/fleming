@@ -4,8 +4,11 @@ import { issueReceipt } from "./receipts"
 import { writeBillingAudit } from "./audit"
 import type { PaymentMethod, PaymentProvider, PaymentStatus } from "./types"
 import { allocateBillingNumber } from "./sequences"
-import { createPolarCheckoutForInvoice } from "./providers/polar"
-import { createStitchPaymentLink } from "./providers/stitch"
+import { createPolarCheckoutForInvoice, refundPolarPayment } from "./providers/polar"
+import { createStitchPaymentLink, refundStitchPayment } from "./providers/stitch"
+import { buildCreditNotePdfBytes } from "./pdf/credit-note-pdf"
+import { uploadBillingPdf } from "./storage"
+import type { InvoiceLineSnapshot, PatientSnapshot, PracticeSnapshot } from "./types"
 
 export async function findPaymentByIdempotency(
   supabase: SupabaseClient<Database>,
@@ -117,6 +120,110 @@ export async function recordCashPayment(
     invoiceId: opts.invoiceId,
     paymentId: pay.id,
     methodLabel: "Cash",
+    amountCents: opts.amountCents,
+    reference: opts.reference,
+  })
+
+  return { paymentId: pay.id, receiptId, invoiceStatus: nextStatus }
+}
+
+export async function recordSucceededManualPayment(
+  supabase: SupabaseClient<Database>,
+  opts: {
+    practiceId: string
+    invoiceId: string
+    amountCents: number
+    actorUserId: string | null
+    idempotencyKey: string
+    provider: "medical_aid" | "eft_manual" | "write_off"
+    reference?: string | null
+    reason?: string | null
+  }
+): Promise<{ paymentId: string; receiptId: string; invoiceStatus: string }> {
+  const existing = await findPaymentByIdempotency(supabase, opts.practiceId, opts.idempotencyKey)
+  if (existing?.id) {
+    const { data: inv } = await supabase
+      .from("practice_invoices")
+      .select("status")
+      .eq("id", opts.invoiceId)
+      .maybeSingle()
+    const { data: rec } = await supabase
+      .from("practice_receipts")
+      .select("id")
+      .eq("payment_id", existing.id)
+      .maybeSingle()
+    return { paymentId: existing.id, receiptId: rec?.id ?? existing.id, invoiceStatus: inv?.status ?? "paid" }
+  }
+
+  const { data: inv, error: invErr } = await supabase
+    .from("practice_invoices")
+    .select("total_cents, amount_paid_cents, status, claim_id")
+    .eq("id", opts.invoiceId)
+    .eq("practice_id", opts.practiceId)
+    .maybeSingle()
+  if (invErr || !inv) throw new Error(invErr?.message ?? "Invoice not found")
+  if (inv.status === "void") throw new Error("Cannot pay void invoice")
+
+  const now = new Date().toISOString()
+  const method: PaymentMethod = opts.provider === "eft_manual" ? "eft" : "eft"
+  const { data: pay, error: pErr } = await supabase
+    .from("practice_payments")
+    .insert({
+      practice_id: opts.practiceId,
+      invoice_id: opts.invoiceId,
+      provider: opts.provider as PaymentProvider,
+      method,
+      amount_cents: opts.amountCents,
+      status: "succeeded" as PaymentStatus,
+      idempotency_key: opts.idempotencyKey,
+      received_by_user_id: opts.actorUserId,
+      reference: opts.reference ?? opts.reason ?? null,
+      provider_raw: {
+        claimId: inv.claim_id,
+        reason: opts.reason ?? null,
+      } as unknown as Record<string, unknown>,
+      succeeded_at: now,
+    })
+    .select("id")
+    .single()
+  if (pErr || !pay) throw new Error(pErr?.message ?? "Payment failed")
+
+  const total = inv.total_cents ?? 0
+  const newPaid = opts.provider === "write_off" ? total : (inv.amount_paid_cents ?? 0) + opts.amountCents
+  let nextStatus = inv.status as string
+  if (opts.provider === "write_off") nextStatus = "write_off"
+  else if (newPaid >= total) nextStatus = "paid"
+  else if (newPaid > 0) nextStatus = "partially_paid"
+
+  const { error: uErr } = await supabase
+    .from("practice_invoices")
+    .update({
+      amount_paid_cents: newPaid,
+      status: nextStatus,
+      paid_at: nextStatus === "paid" ? now : null,
+      write_off_reason: opts.provider === "write_off" ? opts.reason ?? null : undefined,
+      updated_at: now,
+    })
+    .eq("id", opts.invoiceId)
+  if (uErr) throw new Error(uErr.message)
+
+  await writeBillingAudit(supabase, {
+    practiceId: opts.practiceId,
+    actorUserId: opts.actorUserId,
+    entityType: "payment",
+    entityId: pay.id,
+    action: `${opts.provider}_succeeded`,
+    diff: { amountCents: opts.amountCents, reference: opts.reference },
+    reason: opts.reason ?? null,
+  })
+
+  const label =
+    opts.provider === "medical_aid" ? "Medical aid" : opts.provider === "eft_manual" ? "Manual EFT" : "Write-off"
+  const { receiptId } = await issueReceipt(supabase, {
+    practiceId: opts.practiceId,
+    invoiceId: opts.invoiceId,
+    paymentId: pay.id,
+    methodLabel: label,
     amountCents: opts.amountCents,
     reference: opts.reference,
   })
@@ -364,12 +471,50 @@ export async function recordRefund(
     throw new Error("Invalid refund amount")
   }
 
+  let providerRefundId: string | null = null
+  if (pay.provider === "polar") {
+    providerRefundId = (
+      await refundPolarPayment({
+        providerOrderId: pay.provider_order_id,
+        providerCheckoutId: pay.provider_checkout_id,
+        amountCents: opts.amountCents,
+        reason: opts.reason,
+      })
+    ).refundId
+  } else if (pay.provider === "stitch") {
+    providerRefundId = (
+      await refundStitchPayment({
+        providerOrderId: pay.provider_order_id,
+        providerCheckoutId: pay.provider_checkout_id,
+        amountCents: opts.amountCents,
+        reason: opts.reason,
+      })
+    ).refundId
+  }
+
   const cn = await allocateBillingNumber(supabase, opts.practiceId, "credit_note")
   const { data: inv } = await supabase
     .from("practice_invoices")
     .select("amount_paid_cents, invoice_number, patient_snapshot, practice_snapshot, line_items")
     .eq("id", pay.invoice_id)
     .maybeSingle()
+
+  const issuedAt = new Date().toISOString()
+  let pdfPath: string | null = null
+  if (inv) {
+    const pdfBytes = await buildCreditNotePdfBytes({
+      creditNoteNumber: cn,
+      issuedAtIso: issuedAt,
+      invoiceNumber: inv.invoice_number,
+      practice: inv.practice_snapshot as unknown as PracticeSnapshot,
+      patient: inv.patient_snapshot as unknown as PatientSnapshot,
+      lines: (inv.line_items as unknown as InvoiceLineSnapshot[]) ?? [],
+      amountCents: opts.amountCents,
+      reason: opts.reason,
+    })
+    pdfPath = `${opts.practiceId}/credit-notes/${issuedAt.slice(0, 7)}/${cn}.pdf`
+    await uploadBillingPdf(pdfPath, pdfBytes)
+  }
 
   const { data: cnRow, error: cnErr } = await supabase
     .from("practice_credit_notes")
@@ -380,9 +525,11 @@ export async function recordRefund(
       credit_note_number: cn,
       amount_cents: opts.amountCents,
       reason: opts.reason ?? null,
+      pdf_storage_path: pdfPath,
       snapshot: {
         invoiceNumber: inv?.invoice_number,
         paymentId: pay.id,
+        providerRefundId,
       } as unknown as Record<string, unknown>,
     })
     .select("id")
@@ -394,7 +541,7 @@ export async function recordRefund(
     .from("practice_invoices")
     .update({
       amount_paid_cents: newPaid,
-      status: newPaid <= 0 ? "issued" : "partially_paid",
+      status: newPaid <= 0 ? "refunded" : "partially_paid",
       updated_at: new Date().toISOString(),
     })
     .eq("id", pay.invoice_id)
@@ -417,7 +564,7 @@ export async function recordRefund(
     entityType: "payment",
     entityId: pay.id,
     action: "refund",
-    diff: { amountCents: opts.amountCents, creditNoteId: cnRow.id },
+    diff: { amountCents: opts.amountCents, creditNoteId: cnRow.id, providerRefundId },
     reason: opts.reason ?? null,
   })
 

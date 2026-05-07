@@ -159,7 +159,7 @@ export type ConsultStatus =
   | "finished"
   | "no_show"
 
-export type WorkspaceMode = "clinical" | "front_desk" | "admin"
+export type WorkspaceMode = "chat" | "clinical" | "front_desk" | "admin"
 
 export type SidecarTab =
   | "intelligence"
@@ -329,6 +329,8 @@ export interface ClaimLine {
   modifierSequences?: number[]
   /** PHISC Table 6 item type indicator */
   itemTypeIndicator?: string
+  /** Audit marker for whether the line originated from Medprax or manual entry */
+  lineSource?: "medprax" | "manual"
 }
 
 export interface PracticeClaim {

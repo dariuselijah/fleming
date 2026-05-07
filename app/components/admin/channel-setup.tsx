@@ -11,8 +11,6 @@ import {
   Question,
   CalendarBlank,
   Phone,
-  PhoneOutgoing,
-  PhoneIncoming,
   ArrowSquareOut,
   UploadSimple,
   Sparkle,
@@ -22,6 +20,11 @@ import {
 import { BentoTile } from "./bento-tile"
 import { ChannelTestLab } from "./channel-test-lab"
 import { useState, useEffect, useCallback, useRef } from "react"
+import {
+  getVoiceCapabilityState,
+  isMessagingChannelLive,
+  VOICE_PROVIDER_RECOMMENDATIONS,
+} from "@/lib/comms/channel-capability"
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
@@ -57,15 +60,6 @@ function truncateId(id: string | undefined | null, head = 10, tail = 6): string 
   return `${id.slice(0, head)}…${id.slice(-tail)}`
 }
 
-/** RCS/SMS is usable once Twilio has linked the number (SID); legacy statuses are treated as live. */
-function isMessagingLive(c: ChannelInfo | undefined): boolean {
-  if (!c || c.channel_type !== "rcs") return false
-  if (c.status === "suspended") return false
-  if (c.status === "provisioning" && !c.phone_number_sid) return false
-  if (c.status === "active") return true
-  return !!(c.phone_number_sid && c.phone_number?.trim())
-}
-
 export function ChannelSetup() {
   const [channels, setChannels] = useState<ChannelInfo[]>([])
   const [hours, setHours] = useState<HoursRow[]>([])
@@ -90,6 +84,7 @@ export function ChannelSetup() {
   const [requestingNumber, setRequestingNumber] = useState(false)
   const [numberRequested, setNumberRequested] = useState(false)
   const [searchedOnce, setSearchedOnce] = useState(false)
+  const [voiceTechnicalOpen, setVoiceTechnicalOpen] = useState(false)
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/comms/provision/status")
@@ -292,8 +287,8 @@ export function ChannelSetup() {
 
   const messagingChannel = channels.find((c) => c.channel_type === "rcs")
   const voiceChannel = channels.find((c) => c.channel_type === "voice")
-  const voiceReady =
-    !!voiceChannel?.vapi_assistant_id && !!voiceChannel?.vapi_phone_number_id
+  const voiceCapability = getVoiceCapabilityState(voiceChannel)
+  const voiceReady = voiceCapability.isReady
 
   if (loading) {
     return (
@@ -313,10 +308,10 @@ export function ChannelSetup() {
         <div className="flex flex-shrink-0 flex-wrap gap-2">
           <StatusChip
             label="Messaging"
-            ok={isMessagingLive(messagingChannel)}
+            ok={isMessagingChannelLive(messagingChannel)}
             pending={
               !!messagingChannel &&
-              !isMessagingLive(messagingChannel) &&
+              !isMessagingChannelLive(messagingChannel) &&
               (messagingChannel.status === "pending_waba" ||
                 messagingChannel.status === "pending_wa_approval" ||
                 messagingChannel.status === "registering_sender" ||
@@ -340,7 +335,7 @@ export function ChannelSetup() {
           title="Patient messaging"
           icon={<ChatCircle className="size-4 text-sky-400" weight="fill" />}
           subtitle="SMS & RCS via Twilio"
-          glow={isMessagingLive(messagingChannel) ? "green" : undefined}
+          glow={isMessagingChannelLive(messagingChannel) ? "green" : undefined}
           className="min-h-[280px]"
         >
           {messagingChannel ? (
@@ -542,79 +537,104 @@ export function ChannelSetup() {
         </BentoTile>
 
         <BentoTile
-          title="Voice"
+          title="Voice AI"
           icon={<Phone className="size-4 text-violet-400" weight="fill" />}
-          subtitle="Inbound calls"
+          subtitle="Calls on your practice line"
           glow={voiceReady ? "blue" : undefined}
           className="min-h-[280px]"
         >
-          <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">
-                  <PhoneIncoming className="size-3.5 text-sky-400" weight="bold" />
-                  Inbound
-                </div>
-                <p className="text-xs leading-relaxed text-white/45">
-                  Patients call your practice number; the assistant answers using your hours and FAQs.
-                </p>
-              </div>
-              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">
-                  <PhoneOutgoing className="size-3.5 text-violet-400" weight="bold" />
-                  Outbound
-                </div>
-                <p className="text-xs leading-relaxed text-white/45">
-                  Automated outbound calls from workflows use the same voice profile once it is ready.
-                </p>
-              </div>
+          <div className="space-y-4">
+            <p className="text-[11px] leading-relaxed text-white/45">
+              One assistant answers inbound calls and can be used for outbound workflows. Setup is tied to your
+              telephony stack; you can migrate providers without changing this screen.
+            </p>
+
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-white/35">Faster paths to evaluate</p>
+              <ul className="mt-2 space-y-2">
+                {VOICE_PROVIDER_RECOMMENDATIONS.map((rec) => (
+                  <li key={rec.id} className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-medium text-white/75">{rec.name}</span>
+                      <a
+                        href={rec.docsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-violet-300/90 hover:text-violet-200"
+                      >
+                        Docs
+                        <ArrowSquareOut className="size-3" />
+                      </a>
+                    </div>
+                    <p className="mt-1 text-[10px] text-white/38">{rec.fit}</p>
+                    <p className="mt-1 text-[10px] leading-snug text-white/30">{rec.summary}</p>
+                  </li>
+                ))}
+              </ul>
             </div>
 
             {voiceChannel ? (
               <div className="space-y-3 rounded-xl border border-violet-500/20 bg-violet-500/[0.04] p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-white/70">Voice channel</span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-white/70">This practice</span>
                   {voiceReady ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
                       <CheckCircle className="size-3" weight="fill" />
-                      Ready
+                      Voice ready
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-400">
                       <Warning className="size-3" weight="fill" />
-                      Finish voice setup
+                      Finish setup
                     </span>
                   )}
                 </div>
                 <p className="font-mono text-sm text-white/75">{voiceChannel.phone_number}</p>
-                <dl className="grid gap-2 text-[11px]">
-                  <div className="flex justify-between gap-2 border-t border-white/[0.06] pt-2">
-                    <dt className="text-white/35">Assistant ID</dt>
-                    <dd className="max-w-[65%] truncate font-mono text-white/55" title={voiceChannel.vapi_assistant_id || ""}>
-                      {truncateId(voiceChannel.vapi_assistant_id)}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-white/35">Phone number ID</dt>
-                    <dd className="max-w-[65%] truncate font-mono text-white/55" title={voiceChannel.vapi_phone_number_id || ""}>
-                      {truncateId(voiceChannel.vapi_phone_number_id)}
-                    </dd>
-                  </div>
-                </dl>
+                <p className="text-[10px] text-white/40">
+                  Connected stack:{" "}
+                  <span className="text-white/60">{voiceCapability.connectedProviderLabel}</span>
+                </p>
                 {!voiceReady && (
                   <p className="text-[10px] leading-relaxed text-amber-200/70">
-                    Finish voice setup in your telephony dashboard so this number is linked to your
-                    assistant.
+                    Complete provider linking so this number routes to your assistant. Use your provider dashboard or
+                    support if technical refs stay empty after messaging is live.
                   </p>
                 )}
-                {voiceReady && voiceChannel.vapi_phone_number_id && (
+                <button
+                  type="button"
+                  onClick={() => setVoiceTechnicalOpen((o) => !o)}
+                  className="text-[10px] font-medium text-violet-300/90 hover:text-violet-200"
+                >
+                  {voiceTechnicalOpen ? "Hide technical details" : "Technical details"}
+                </button>
+                {voiceTechnicalOpen && (
+                  <dl className="grid gap-2 border-t border-white/[0.06] pt-3 text-[11px]">
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-white/35">Assistant ref.</dt>
+                      <dd
+                        className="max-w-[65%] truncate font-mono text-white/55"
+                        title={voiceChannel.vapi_assistant_id || ""}
+                      >
+                        {truncateId(voiceChannel.vapi_assistant_id)}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-white/35">Number ref.</dt>
+                      <dd
+                        className="max-w-[65%] truncate font-mono text-white/55"
+                        title={voiceChannel.vapi_phone_number_id || ""}
+                      >
+                        {truncateId(voiceChannel.vapi_phone_number_id)}
+                      </dd>
+                    </div>
+                  </dl>
+                )}
+                {voiceReady && voiceChannel.provider === "vapi" && (
                   <div className="space-y-2 border-t border-white/[0.06] pt-3">
                     <p className="text-[10px] leading-relaxed text-white/35">
-                      Outbound calls fail with Twilio “Authenticate” if the Auth Token in Vapi is stale (e.g. after
-                      rotating it in Twilio). Update{" "}
+                      If Twilio was rotated, sync credentials to the connected provider after updating{" "}
                       <span className="font-mono text-white/45">TWILIO_ACCOUNT_SID</span> /{" "}
-                      <span className="font-mono text-white/45">TWILIO_AUTH_TOKEN</span> in your deployment, then
-                      refresh Vapi&apos;s copy:
+                      <span className="font-mono text-white/45">TWILIO_AUTH_TOKEN</span> in deployment.
                     </p>
                     <button
                       type="button"
@@ -627,7 +647,7 @@ export function ChannelSetup() {
                       ) : (
                         <ArrowClockwise className="size-3.5" />
                       )}
-                      Sync Twilio credentials to Vapi
+                      Sync Twilio credentials
                     </button>
                     {vapiTwilioSyncMessage && (
                       <p className="text-[10px] text-white/45">{vapiTwilioSyncMessage}</p>
@@ -637,30 +657,32 @@ export function ChannelSetup() {
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-5 text-center">
-                <p className="text-sm text-white/55">Voice for this line</p>
+                <p className="text-sm text-white/55">Voice AI</p>
                 <p className="mt-2 text-xs leading-relaxed text-white/35">
-                  {messagingChannel
-                    ? "Linking your phone line to the voice assistant. Refresh this page in a moment, or contact support if voice status doesn’t appear after your number is connected."
-                    : "Add a patient messaging number first. Inbound calls to that Twilio number can then use your workspace voice assistant."}
+                  {isMessagingChannelLive(messagingChannel)
+                    ? "Provision voice from Channels (API) or add a voice row for this practice. Patient messaging is already live on this line."
+                    : "Connect patient messaging first. Voice uses the same practice line once Twilio is linked."}
                 </p>
               </div>
             )}
 
-            <a
-              href="https://dashboard.vapi.ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-xs font-medium text-violet-300/90 transition-colors hover:text-violet-200"
-            >
-              Voice provider dashboard
-              <ArrowSquareOut className="size-3.5" />
-            </a>
+            {voiceChannel?.provider === "vapi" && (
+              <a
+                href="https://dashboard.vapi.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-xs font-medium text-violet-300/90 transition-colors hover:text-violet-200"
+              >
+                Open current provider (Vapi)
+                <ArrowSquareOut className="size-3.5" />
+              </a>
+            )}
           </div>
         </BentoTile>
       </div>
 
       <ChannelTestLab
-        messagingReady={isMessagingLive(messagingChannel)}
+        messagingReady={isMessagingChannelLive(messagingChannel)}
         voiceReady={voiceReady}
         voiceInboundNumber={voiceChannel?.phone_number?.trim() || null}
       />
@@ -1039,7 +1061,7 @@ function ChannelStatusCard({ channel }: { channel: ChannelInfo }) {
     suspended: { icon: Warning, color: "text-red-400", label: "Suspended" },
   }
 
-  const live = isMessagingLive(channel)
+  const live = isMessagingChannelLive(channel)
   const info = live
     ? statusMap.active
     : statusMap[channel.status] || statusMap.provisioning

@@ -8,7 +8,7 @@ import type { EvidenceCitation } from "@/lib/evidence/types"
 import type { ChartDrilldownPayload } from "@/app/components/charts/chat-chart"
 import { Markdown } from "@/components/prompt-kit/markdown"
 import { buildEvidenceSourceId, normalizeEvidenceSourceId } from "@/lib/evidence/source-id"
-import { useMemo } from "react"
+import { useMemo, useRef } from "react"
 import React from "react"
 import type { Components } from "react-markdown"
 
@@ -1008,110 +1008,93 @@ export function CitationMarkdown({
   )
   
 
-  // Custom components for markdown that handle citation placeholders
-  // We need to process ALL text nodes to catch citation placeholders
+  // PERF: stabilize the `components` map across streaming tokens.
+  //
+  // Previously these closures captured `markerMap` / `evidenceCitationMap` /
+  // `inlineVisualSourceMap` directly, which meant the `components` reference
+  // changed on every streaming token. That defeated `MemoizedMarkdownBlock`'s
+  // shallow-equality check and forced ALL markdown blocks to re-run through
+  // react-markdown on every token (the dominant cause of "blocky" streaming).
+  //
+  // We now read those lookups via refs at call time. The components map ref
+  // is stable for the lifetime of this message, so unchanged blocks short-
+  // circuit and only the actively streaming block re-renders.
+  const lookupsRef = useRef({
+    citations,
+    markerMap,
+    evidenceCitationMap,
+    inlineVisualSourceMap,
+  })
+  lookupsRef.current = {
+    citations,
+    markerMap,
+    evidenceCitationMap,
+    inlineVisualSourceMap,
+  }
+
   const components: Partial<Components> = useMemo(() => {
+    const node = (nodeChildren: React.ReactNode) =>
+      processNode(
+        nodeChildren,
+        lookupsRef.current.citations,
+        lookupsRef.current.markerMap,
+        lookupsRef.current.evidenceCitationMap,
+        lookupsRef.current.inlineVisualSourceMap
+      )
     return {
-      // Process paragraphs - this is where most citations appear
       p: ({ children: nodeChildren, ...props }) => {
-        const processedChildren = processNode(
-          nodeChildren,
-          citations,
-          markerMap,
-          evidenceCitationMap,
-          inlineVisualSourceMap
-        )
+        const processedChildren = node(nodeChildren)
         if (isStandaloneInlineVisualNode(processedChildren)) {
           return <>{processedChildren}</>
         }
         return <p {...props}>{processedChildren}</p>
       },
-      // Process list items
-      li: ({ children: nodeChildren, ...props }) => {
-        return (
-          <li {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </li>
-        )
-      },
-      table: ({ children: nodeChildren, ...props }) => {
-        return (
-          <table {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </table>
-        )
-      },
-      thead: ({ children: nodeChildren, ...props }) => {
-        return (
-          <thead {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </thead>
-        )
-      },
-      tbody: ({ children: nodeChildren, ...props }) => {
-        return (
-          <tbody {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </tbody>
-        )
-      },
-      tr: ({ children: nodeChildren, ...props }) => {
-        return (
-          <tr {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </tr>
-        )
-      },
-      th: ({ children: nodeChildren, ...props }) => {
-        return (
-          <th {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </th>
-        )
-      },
-      td: ({ children: nodeChildren, ...props }) => {
-        return (
-          <td {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </td>
-        )
-      },
-      // Process ALL text nodes - this is critical for inline citations
-      // react-markdown passes text as children to this component
+      li: ({ children: nodeChildren, ...props }) => (
+        <li {...props}>{node(nodeChildren)}</li>
+      ),
+      table: ({ children: nodeChildren, ...props }) => (
+        <table {...props}>{node(nodeChildren)}</table>
+      ),
+      thead: ({ children: nodeChildren, ...props }) => (
+        <thead {...props}>{node(nodeChildren)}</thead>
+      ),
+      tbody: ({ children: nodeChildren, ...props }) => (
+        <tbody {...props}>{node(nodeChildren)}</tbody>
+      ),
+      tr: ({ children: nodeChildren, ...props }) => (
+        <tr {...props}>{node(nodeChildren)}</tr>
+      ),
+      th: ({ children: nodeChildren, ...props }) => (
+        <th {...props}>{node(nodeChildren)}</th>
+      ),
+      td: ({ children: nodeChildren, ...props }) => (
+        <td {...props}>{node(nodeChildren)}</td>
+      ),
       text: ({ children: nodeChildren, ...props }) => {
-        if (typeof nodeChildren === 'string') {
+        if (typeof nodeChildren === "string") {
           const processed = processText(
             nodeChildren,
-            citations,
-            markerMap,
-            evidenceCitationMap,
-            inlineVisualSourceMap
+            lookupsRef.current.citations,
+            lookupsRef.current.markerMap,
+            lookupsRef.current.evidenceCitationMap,
+            lookupsRef.current.inlineVisualSourceMap
           )
-          // If processing returned an array, we need to handle it
-          if (Array.isArray(processed)) {
-            return <>{processed}</>
-          }
+          if (Array.isArray(processed)) return <>{processed}</>
           return <>{processed}</>
         }
         return <>{nodeChildren}</>
       },
-      // Also process other inline elements that might contain citations
-      strong: ({ children: nodeChildren, ...props }) => {
-        return (
-          <strong {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </strong>
-        )
-      },
-      em: ({ children: nodeChildren, ...props }) => {
-        return (
-          <em {...props}>
-            {processNode(nodeChildren, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
-          </em>
-        )
-      },
+      strong: ({ children: nodeChildren, ...props }) => (
+        <strong {...props}>{node(nodeChildren)}</strong>
+      ),
+      em: ({ children: nodeChildren, ...props }) => (
+        <em {...props}>{node(nodeChildren)}</em>
+      ),
     }
-  }, [citations, markerMap, evidenceCitationMap, inlineVisualSourceMap])
+    // Empty deps → reference is stable forever for this CitationMarkdown
+    // instance. Lookups happen via the ref at call time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <Markdown
