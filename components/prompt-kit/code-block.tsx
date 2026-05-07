@@ -32,6 +32,18 @@ export type CodeBlockCodeProps = {
   className?: string
 } & React.HTMLProps<HTMLDivElement>
 
+const SHIKI_LANGUAGE_ALIASES: Record<string, string> = {
+  chart: "json",
+  "chart-spec": "json",
+  chartjson: "json",
+  healthchart: "json",
+}
+
+function normalizeShikiLanguage(language: string): string {
+  const normalized = language.trim().toLowerCase()
+  return SHIKI_LANGUAGE_ALIASES[normalized] || normalized || "plaintext"
+}
+
 function CodeBlockCode({
   code,
   language = "tsx",
@@ -43,15 +55,46 @@ function CodeBlockCode({
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null)
 
   useEffect(() => {
+    let isActive = true
+
     async function highlight() {
-      const html = await codeToHtml(code, {
-        lang: language,
-        theme: appTheme === "dark" ? "github-dark" : "github-light",
-      })
-      setHighlightedHtml(html)
+      const preferredTheme = appTheme === "dark" ? "github-dark" : theme
+      const normalizedLanguage = normalizeShikiLanguage(language)
+      try {
+        const html = await codeToHtml(code, {
+          lang: normalizedLanguage,
+          theme: preferredTheme,
+        })
+        if (isActive) {
+          setHighlightedHtml(html)
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (/Language\s+`[^`]+`\s+is not included in this bundle/i.test(message)) {
+          try {
+            const fallbackHtml = await codeToHtml(code, {
+              lang: "plaintext",
+              theme: preferredTheme,
+            })
+            if (isActive) {
+              setHighlightedHtml(fallbackHtml)
+            }
+            return
+          } catch {
+            // Fall through to plain-code rendering.
+          }
+        }
+        if (isActive) {
+          setHighlightedHtml(null)
+        }
+      }
     }
-    highlight()
-  }, [code, language, appTheme])
+    void highlight()
+
+    return () => {
+      isActive = false
+    }
+  }, [code, language, appTheme, theme])
 
   const classNames = cn(
     "w-full overflow-x-auto text-[13px] [&>pre]:px-4 [&>pre]:py-4 [&>pre]:!bg-background",

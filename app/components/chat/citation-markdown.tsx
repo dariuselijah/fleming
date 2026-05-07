@@ -2,10 +2,13 @@
 
 import { parseCitationMarkers } from "@/lib/citations/parser"
 import { EvidenceCitationPill } from "./evidence-citation-pill"
+import { InlineEvidenceVisual } from "./inline-evidence-visual"
 import type { CitationData } from "./citation-popup"
 import type { EvidenceCitation } from "@/lib/evidence/types"
+import type { ChartDrilldownPayload } from "@/app/components/charts/chat-chart"
 import { Markdown } from "@/components/prompt-kit/markdown"
-import { useMemo } from "react"
+import { buildEvidenceSourceId, normalizeEvidenceSourceId } from "@/lib/evidence/source-id"
+import { useMemo, useRef } from "react"
 import React from "react"
 import type { Components } from "react-markdown"
 
@@ -14,6 +17,48 @@ interface CitationMarkdownProps {
   citations: Map<number, CitationData>
   className?: string
   evidenceCitations?: EvidenceCitation[]
+  onChartDrilldown?: (payload: ChartDrilldownPayload) => void
+}
+
+type TextRange = {
+  start: number
+  end: number
+}
+
+function collectFencedCodeRanges(text: string): TextRange[] {
+  if (!text) return []
+  const ranges: TextRange[] = []
+  const fencedCodePattern = /```[\s\S]*?```/g
+  let match: RegExpExecArray | null
+  while ((match = fencedCodePattern.exec(text)) !== null) {
+    ranges.push({
+      start: match.index,
+      end: match.index + match[0].length,
+    })
+  }
+  return ranges
+}
+
+function maskRangesWithSpaces(text: string, ranges: TextRange[]): string {
+  if (!text || ranges.length === 0) return text
+  let cursor = 0
+  let output = ""
+  ranges.forEach((range) => {
+    if (range.start > cursor) {
+      output += text.slice(cursor, range.start)
+    }
+    output += " ".repeat(Math.max(0, range.end - range.start))
+    cursor = range.end
+  })
+  if (cursor < text.length) {
+    output += text.slice(cursor)
+  }
+  return output
+}
+
+function firstSortedMapKey<T>(map: Map<number, T>): number | null {
+  const keys = Array.from(map.keys()).sort((a, b) => a - b)
+  return keys.length > 0 ? keys[0] : null
 }
 
 function stripInternalCitationTokens(value: string): string {
@@ -30,6 +75,140 @@ function stripInternalRuntimeTokensPreservePlaceholders(value: string): string {
     .replace(/\[tool\s+[^\]]+\]/gi, "")
     .replace(/\[source\s+[^\]]+\]/gi, "")
     .replace(/\[doc\s+[^\]]+\]/gi, "")
+}
+
+function normalizeInlineSourceIdToken(value: string): string {
+  return value
+    .trim()
+    .replace(/^CITE[_:]/i, "")
+    .replace(/^["']|["']$/g, "")
+    .toLowerCase()
+}
+
+function inferSourceLabelFromUrl(url: string | undefined): string | null {
+  if (!url || typeof url !== "string") return null
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "")
+    if (host.includes("pubmed.ncbi.nlm.nih.gov") || host.includes("ncbi.nlm.nih.gov")) {
+      return "PubMed"
+    }
+    if (host.includes("clinicaltrials.gov")) {
+      return "ClinicalTrials.gov"
+    }
+    if (host.includes("nice.org.uk")) {
+      return "NICE"
+    }
+    if (host.includes("who.int")) {
+      return "WHO"
+    }
+    if (host.includes("cdc.gov")) {
+      return "CDC"
+    }
+    if (host.includes("fda.gov")) {
+      return "FDA"
+    }
+    return host
+  } catch {
+    return null
+  }
+}
+
+function normalizeUrlSourceId(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl)
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "")
+    const pathname = parsed.pathname.replace(/\/+$/, "") || "/"
+    return `url:${host}${pathname}`.toLowerCase()
+  } catch {
+    const normalized = rawUrl.trim().toLowerCase()
+    return normalized ? `url:${normalized}` : null
+  }
+}
+
+function extractPmcidToken(value: string | null | undefined): string | null {
+  if (!value) return null
+  const match = value.match(/\b(PMC\d+)\b/i)
+  return match?.[1]?.toUpperCase() || null
+}
+
+function extractUuidSegments(value: string): string[] {
+  const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
+  const matches = value.match(uuidPattern)
+  return matches ? matches.map((m) => m.toLowerCase()) : []
+}
+
+function buildEvidenceSourceAliases(
+  candidate: EvidenceCitation | CitationData
+): Set<string> {
+  const aliases = new Set<string>()
+  aliases.add(buildEvidenceSourceId(candidate).toLowerCase())
+  if (typeof candidate.sourceId === "string" && candidate.sourceId.trim().length > 0) {
+    aliases.add(normalizeEvidenceSourceId(candidate.sourceId))
+    // Also add any UUID segments from sourceId (LLM sometimes drops prefix)
+    for (const uuid of extractUuidSegments(candidate.sourceId)) {
+      aliases.add(uuid)
+    }
+  }
+  if (typeof candidate.pmid === "string" && /^\d{6,10}$/.test(candidate.pmid.trim())) {
+    aliases.add(normalizeEvidenceSourceId(`pmid:${candidate.pmid.trim()}`))
+  }
+  if (typeof candidate.doi === "string" && candidate.doi.trim().length > 0) {
+    aliases.add(
+      normalizeEvidenceSourceId(
+        `doi:${candidate.doi
+          .trim()
+          .toLowerCase()
+          .replace(/^https?:\/\/(dx\.)?doi\.org\//, "")
+          .replace(/^doi:/, "")}`
+      )
+    )
+  }
+
+  if (typeof candidate.url === "string" && candidate.url.trim().length > 0) {
+    const normalizedUrlId = normalizeUrlSourceId(candidate.url)
+    if (normalizedUrlId) aliases.add(normalizedUrlId)
+    // Also add UUID segments extracted from URL paths (LLM often drops the host prefix)
+    for (const uuid of extractUuidSegments(candidate.url)) {
+      aliases.add(uuid)
+    }
+  }
+
+  const pmcid = extractPmcidToken(
+    ("pmcid" in candidate && typeof candidate.pmcid === "string" ? candidate.pmcid : null) ||
+      candidate.url ||
+      null
+  )
+  if (pmcid) {
+    aliases.add(normalizeEvidenceSourceId(`url:pmc.ncbi.nlm.nih.gov/articles/${pmcid}`))
+    aliases.add(normalizeEvidenceSourceId(`url:pmc.ncbi.nlm.nih.gov/articles/${pmcid.toLowerCase()}`))
+    aliases.add(normalizeEvidenceSourceId(`url:ncbi.nlm.nih.gov/pmc/articles/${pmcid}`))
+    aliases.add(normalizeEvidenceSourceId(`url:ncbi.nlm.nih.gov/pmc/articles/${pmcid.toLowerCase()}`))
+  }
+
+  return aliases
+}
+
+function sourceIdsMatchCitation(
+  sourceIds: string[],
+  candidate: EvidenceCitation | CitationData
+): boolean {
+  if (sourceIds.length === 0) return false
+  const aliases = buildEvidenceSourceAliases(candidate)
+  const normalizedIds = sourceIds.map((s) => normalizeEvidenceSourceId(s))
+
+  // Exact alias match (fast path)
+  if (normalizedIds.some((id) => aliases.has(id))) return true
+
+  // Substring fallback: if the marker looks like a UUID or partial sourceId,
+  // check if any alias contains it or vice versa. This handles LLM abbreviation
+  // (e.g., outputting just the UUID portion of a url:host/uuid sourceId).
+  const aliasArr = Array.from(aliases)
+  return normalizedIds.some((id) => {
+    if (id.length < 8) return false
+    return aliasArr.some(
+      (alias) => alias.includes(id) || id.includes(alias)
+    )
+  })
 }
 
 function resolveNamedMarkerIndices(
@@ -198,6 +377,17 @@ function resolveSymbolicEvidenceMarkerIndices(
   )
   if (allCitations.length === 0) return []
 
+  // When the number looks like a PMID (too large to be a positional index),
+  // resolve by matching the PMID directly against citations.
+  if (ordinal > allCitations.length) {
+    const pmidStr = String(ordinal)
+    const byPmid = allCitations.find(
+      (c) => c.pmid === pmidStr || (c.url || "").includes(pmidStr)
+    )
+    if (byPmid) return [byPmid.index]
+    return []
+  }
+
   const filtered = allCitations.filter((citation) => {
     const journal = (citation.journal || "").toLowerCase()
     const title = (citation.title || "").toLowerCase()
@@ -332,6 +522,15 @@ function resolveSymbolicCitationIndices(
   const allCitations = Array.from(citations.values()).sort((left, right) => left.index - right.index)
   if (allCitations.length === 0) return []
 
+  if (ordinal > allCitations.length) {
+    const pmidStr = String(ordinal)
+    const byPmid = allCitations.find(
+      (c) => c.pmid === pmidStr || (c.url || "").includes(pmidStr)
+    )
+    if (byPmid) return [byPmid.index]
+    return []
+  }
+
   const filtered = allCitations.filter((citation) => {
     const title = (citation.title || "").toLowerCase()
     const journal = (citation.journal || "").toLowerCase()
@@ -408,6 +607,54 @@ function collectSymbolicMarkers(
   return symbolicMarkers
 }
 
+function remapNumberedMarkerIndicesToEvidence(
+  indices: number[],
+  evidenceCitationMap: Map<number, EvidenceCitation>,
+  citationByPmid: Map<string, number>
+): number[] {
+  const remapped: number[] = []
+  const seen = new Set<number>()
+
+  indices.forEach((rawIndex) => {
+    if (!Number.isFinite(rawIndex)) return
+    if (evidenceCitationMap.has(rawIndex)) {
+      if (!seen.has(rawIndex)) {
+        seen.add(rawIndex)
+        remapped.push(rawIndex)
+      }
+      return
+    }
+
+    const pmidMatch = citationByPmid.get(String(rawIndex))
+    if (typeof pmidMatch === "number" && !seen.has(pmidMatch)) {
+      seen.add(pmidMatch)
+      remapped.push(pmidMatch)
+    }
+  })
+
+  return remapped
+}
+
+function remapMarkerSourceIds(
+  markers: ReturnType<typeof parseCitationMarkers>,
+  sourceIdToIndex: Map<string, number>
+): ReturnType<typeof parseCitationMarkers> {
+  return markers.map((marker) => {
+    if (!Array.isArray(marker.sourceIds) || marker.sourceIds.length === 0) {
+      return marker
+    }
+    const remapped = marker.sourceIds
+      .map((sourceId) => sourceIdToIndex.get(sourceId.toLowerCase()))
+      .filter((index): index is number => typeof index === "number")
+    if (remapped.length === 0) return marker
+    const uniqueRemapped = Array.from(new Set(remapped))
+    return {
+      ...marker,
+      indices: uniqueRemapped,
+    }
+  })
+}
+
 /**
  * Markdown component that renders citations inline
  * When evidenceCitations are provided, uses EvidenceCitationPill (with favicon + journal name)
@@ -417,13 +664,22 @@ export function CitationMarkdown({
   children, 
   citations, 
   className,
-  evidenceCitations 
+  evidenceCitations,
+  onChartDrilldown,
 }: CitationMarkdownProps) {
   const sanitizedChildren = useMemo(
     () =>
       stripInternalRuntimeTokensPreservePlaceholders(String(children || ""))
         .replace(/\n{3,}/g, "\n\n"),
     [children]
+  )
+  const fencedCodeRanges = useMemo(
+    () => collectFencedCodeRanges(sanitizedChildren),
+    [sanitizedChildren]
+  )
+  const citationSearchText = useMemo(
+    () => maskRangesWithSpaces(sanitizedChildren, fencedCodeRanges),
+    [fencedCodeRanges, sanitizedChildren]
   )
 
   // Build evidence citation map for fast lookup
@@ -447,7 +703,7 @@ export function CitationMarkdown({
     }
     
     // First try the standard parser for [CITATION:X] format
-    let result = parseCitationMarkers(sanitizedChildren)
+    let result = parseCitationMarkers(citationSearchText)
     
     // Also look for simple [1] pattern - this is what evidence mode uses
     // Only do this if we have evidence citations to match them to
@@ -455,7 +711,7 @@ export function CitationMarkdown({
       // Parse simple [1], [2,3], [1-3] patterns manually
       const simplePattern = /\[(\d+(?:[\s,]+\d+)*(?:-\d+)?)\]/g
       let match
-      while ((match = simplePattern.exec(sanitizedChildren)) !== null) {
+      while ((match = simplePattern.exec(citationSearchText)) !== null) {
         const content = match[1]
         const indices: number[] = []
         
@@ -487,12 +743,20 @@ export function CitationMarkdown({
 
     // Resolve PMID markers to evidence citation indices, e.g. [PMID: 37932704]
     if (evidenceCitationMap && evidenceCitationMap.size > 0) {
+      const sourceIdToIndex = new Map<string, number>()
+      evidenceCitationMap.forEach((citation) => {
+        buildEvidenceSourceAliases(citation).forEach((sourceId) => {
+          sourceIdToIndex.set(sourceId, citation.index)
+        })
+      })
+      result = remapMarkerSourceIds(result, sourceIdToIndex)
+
       // Resolve synthesis placeholders (including bare forms), e.g.
       // [CITE_PLACEHOLDER_0] or CITE_PLACEHOLDER_0.
       const placeholderPattern = /\[?\s*CITE_PLACEHOLDER_(\d+)\s*\]?/gi
       let placeholderMatch: RegExpExecArray | null
       const sortedEvidenceIndices = Array.from(evidenceCitationMap.keys()).sort((a, b) => a - b)
-      while ((placeholderMatch = placeholderPattern.exec(sanitizedChildren)) !== null) {
+      while ((placeholderMatch = placeholderPattern.exec(citationSearchText)) !== null) {
         const ordinal = Number.parseInt(placeholderMatch[1] || "", 10)
         if (!Number.isFinite(ordinal) || ordinal < 0) continue
         const resolvedIndex = sortedEvidenceIndices[ordinal]
@@ -522,10 +786,52 @@ export function CitationMarkdown({
         }
       })
 
+      // Also build a URL-fragment lookup for PMIDs embedded in URLs
+      const citationByUrlFragment = new Map<string, number>()
+      evidenceCitationMap.forEach((citation) => {
+        const url = citation.url || ""
+        const urlPmidMatch = url.match(/\/(\d{6,10})\/?$/)
+        if (urlPmidMatch?.[1]) {
+          citationByUrlFragment.set(urlPmidMatch[1], citation.index)
+        }
+      })
+
+      // Resolve [pubmed_XXXXX] and [pubmed_XXXXX, pubmed_YYYYY] patterns.
+      // The LLM sometimes outputs these instead of numeric [1] markers.
+      const pubmedUnderscorePattern = /\[(pubmed[_\s]+\d+(?:\s*,\s*pubmed[_\s]+\d+)*)\]/gi
+      let pubmedUsMatch: RegExpExecArray | null
+      while ((pubmedUsMatch = pubmedUnderscorePattern.exec(citationSearchText)) !== null) {
+        const inner = pubmedUsMatch[1] || ""
+        const pmidNumbers = Array.from(inner.matchAll(/pubmed[_\s]+(\d+)/gi))
+          .map((m) => m[1])
+          .filter(Boolean)
+        const resolvedIndices: number[] = []
+        for (const pmidStr of pmidNumbers) {
+          const idx = citationByPmid.get(pmidStr) ?? citationByUrlFragment.get(pmidStr)
+          if (typeof idx === "number") resolvedIndices.push(idx)
+        }
+        if (resolvedIndices.length === 0) continue
+
+        const startIndex = pubmedUsMatch.index
+        const endIndex = pubmedUsMatch.index + pubmedUsMatch[0].length
+        const overlaps = result.some(
+          (existing) => startIndex < existing.endIndex && endIndex > existing.startIndex
+        )
+        if (overlaps) continue
+
+        result.push({
+          type: "numbered",
+          indices: Array.from(new Set(resolvedIndices)),
+          startIndex,
+          endIndex,
+          fullMatch: pubmedUsMatch[0],
+        })
+      }
+
       // Resolve bare PMID patterns in text, e.g. "PMID: 37932704".
       const barePmidPattern = /\bPMID\s*:\s*(\d{6,10})\b/gi
       let barePmidMatch: RegExpExecArray | null
-      while ((barePmidMatch = barePmidPattern.exec(sanitizedChildren)) !== null) {
+      while ((barePmidMatch = barePmidPattern.exec(citationSearchText)) !== null) {
         const pmid = barePmidMatch[1]?.trim()
         if (!pmid) continue
         const resolvedIndex = citationByPmid.get(pmid)
@@ -549,7 +855,7 @@ export function CitationMarkdown({
 
       const pmidPattern = /\[PMID\s*:\s*(\d+)\]/gi
       let pmidMatch: RegExpExecArray | null
-      while ((pmidMatch = pmidPattern.exec(sanitizedChildren)) !== null) {
+      while ((pmidMatch = pmidPattern.exec(citationSearchText)) !== null) {
         const pmid = pmidMatch[1]?.trim()
         if (!pmid) continue
         const resolvedIndex = citationByPmid.get(pmid)
@@ -571,8 +877,24 @@ export function CitationMarkdown({
         })
       }
 
+      // Remap numeric markers that are actually PMIDs, e.g. [27212091],
+      // to the citation index in the current evidence set.
+      result = result.map((marker) => {
+        if (marker.type !== "numbered") return marker
+        const remappedIndices = remapNumberedMarkerIndicesToEvidence(
+          marker.indices,
+          evidenceCitationMap,
+          citationByPmid
+        )
+        if (remappedIndices.length === 0) return marker
+        return {
+          ...marker,
+          indices: remappedIndices,
+        }
+      })
+
       // Resolve symbolic markers used by synthesis prompts, e.g. [guideline_1], [pubmed_2], [chembl_1].
-      const symbolicMarkers = collectSymbolicMarkers(sanitizedChildren, result, (markerName) =>
+      const symbolicMarkers = collectSymbolicMarkers(citationSearchText, result, (markerName) =>
         resolveSymbolicEvidenceMarkerIndices(markerName, evidenceCitationMap)
       )
       result.push(...symbolicMarkers)
@@ -592,11 +914,12 @@ export function CitationMarkdown({
         })
       })
       const namedMarkers = collectNamedMarkers(
-        sanitizedChildren,
+        citationSearchText,
         result,
         evidenceAsCitationMap,
         true
       )
+      const fallbackEvidenceIndex = firstSortedMapKey(evidenceCitationMap)
       const resolvedNamedMarkers = namedMarkers.map((marker) => {
         if (marker.indices.length > 0) return marker
         const fallbackIndices = resolveNamedEvidenceMarkerIndices(
@@ -605,7 +928,12 @@ export function CitationMarkdown({
         )
         return {
           ...marker,
-          indices: fallbackIndices,
+          indices:
+            fallbackIndices.length > 0
+              ? fallbackIndices
+              : typeof fallbackEvidenceIndex === "number"
+                ? [fallbackEvidenceIndex]
+                : [],
         }
       })
       result.push(...resolvedNamedMarkers)
@@ -614,23 +942,48 @@ export function CitationMarkdown({
     // Resolve named bracket citations for non-evidence mode, e.g.
     // [OpenFDA drug labels for acetaminophen, dapagliflozin, and metformin]
     if (!evidenceCitationMap && citations.size > 0) {
-      const symbolicMarkers = collectSymbolicMarkers(sanitizedChildren, result, (markerName) =>
+      const sourceIdToIndex = new Map<string, number>()
+      citations.forEach((citation, mapIndex) => {
+        const resolvedIndex =
+          typeof citation.index === "number" && Number.isFinite(citation.index)
+            ? citation.index
+            : mapIndex
+        buildEvidenceSourceAliases(citation).forEach((sourceId) => {
+          sourceIdToIndex.set(sourceId, resolvedIndex)
+        })
+      })
+      result = remapMarkerSourceIds(result, sourceIdToIndex)
+
+      const symbolicMarkers = collectSymbolicMarkers(citationSearchText, result, (markerName) =>
         resolveSymbolicCitationIndices(markerName, citations)
       )
       result.push(...symbolicMarkers)
 
-      const namedMarkers = collectNamedMarkers(sanitizedChildren, result, citations)
-      result.push(...namedMarkers)
+      const namedMarkers = collectNamedMarkers(citationSearchText, result, citations)
+      const fallbackCitationIndex = firstSortedMapKey(citations)
+      result.push(
+        ...namedMarkers.map((marker) =>
+          marker.indices.length > 0
+            ? marker
+            : {
+                ...marker,
+                indices:
+                  typeof fallbackCitationIndex === "number"
+                    ? [fallbackCitationIndex]
+                    : [],
+              }
+        )
+      )
     }
 
     result.sort((a, b) => a.startIndex - b.startIndex)
     
     return result
-  }, [sanitizedChildren, citations, evidenceCitationMap, shouldRenderCitations])
+  }, [citationSearchText, citations, evidenceCitationMap, shouldRenderCitations])
   
   // Replace citation markers with unique placeholders BEFORE markdown processing
   // Use a format that react-markdown won't escape or treat specially
-  const { processedText, markerMap } = useMemo(() => {
+  const { processedText: processedTextBase, markerMap } = useMemo(() => {
     let text = sanitizedChildren
     const map = new Map<string, typeof markers[0]>()
     
@@ -648,70 +1001,107 @@ export function CitationMarkdown({
     
     return { processedText: text, markerMap: map }
   }, [sanitizedChildren, markers])
+
+  const { processedText, inlineVisualSourceMap } = useMemo(
+    () => buildInlineVisualSourceIdMap(processedTextBase, markerMap, evidenceCitationMap, markers),
+    [processedTextBase, markerMap, evidenceCitationMap, markers]
+  )
   
 
-  // Custom components for markdown that handle citation placeholders
-  // We need to process ALL text nodes to catch citation placeholders
+  // PERF: stabilize the `components` map across streaming tokens.
+  //
+  // Previously these closures captured `markerMap` / `evidenceCitationMap` /
+  // `inlineVisualSourceMap` directly, which meant the `components` reference
+  // changed on every streaming token. That defeated `MemoizedMarkdownBlock`'s
+  // shallow-equality check and forced ALL markdown blocks to re-run through
+  // react-markdown on every token (the dominant cause of "blocky" streaming).
+  //
+  // We now read those lookups via refs at call time. The components map ref
+  // is stable for the lifetime of this message, so unchanged blocks short-
+  // circuit and only the actively streaming block re-renders.
+  const lookupsRef = useRef({
+    citations,
+    markerMap,
+    evidenceCitationMap,
+    inlineVisualSourceMap,
+  })
+  lookupsRef.current = {
+    citations,
+    markerMap,
+    evidenceCitationMap,
+    inlineVisualSourceMap,
+  }
+
   const components: Partial<Components> = useMemo(() => {
+    const node = (nodeChildren: React.ReactNode) =>
+      processNode(
+        nodeChildren,
+        lookupsRef.current.citations,
+        lookupsRef.current.markerMap,
+        lookupsRef.current.evidenceCitationMap,
+        lookupsRef.current.inlineVisualSourceMap
+      )
     return {
-      // Process paragraphs - this is where most citations appear
       p: ({ children: nodeChildren, ...props }) => {
-        return <p {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</p>
+        const processedChildren = node(nodeChildren)
+        if (isStandaloneInlineVisualNode(processedChildren)) {
+          return <>{processedChildren}</>
+        }
+        return <p {...props}>{processedChildren}</p>
       },
-      // Process list items
-      li: ({ children: nodeChildren, ...props }) => {
-        return <li {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</li>
-      },
-      table: ({ children: nodeChildren, ...props }) => {
-        return <table {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</table>
-      },
-      thead: ({ children: nodeChildren, ...props }) => {
-        return <thead {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</thead>
-      },
-      tbody: ({ children: nodeChildren, ...props }) => {
-        return <tbody {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</tbody>
-      },
-      tr: ({ children: nodeChildren, ...props }) => {
-        return <tr {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</tr>
-      },
-      th: ({ children: nodeChildren, ...props }) => {
-        return <th {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</th>
-      },
-      td: ({ children: nodeChildren, ...props }) => {
-        return <td {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</td>
-      },
-      // Process ALL text nodes - this is critical for inline citations
-      // react-markdown passes text as children to this component
+      li: ({ children: nodeChildren, ...props }) => (
+        <li {...props}>{node(nodeChildren)}</li>
+      ),
+      table: ({ children: nodeChildren, ...props }) => (
+        <table {...props}>{node(nodeChildren)}</table>
+      ),
+      thead: ({ children: nodeChildren, ...props }) => (
+        <thead {...props}>{node(nodeChildren)}</thead>
+      ),
+      tbody: ({ children: nodeChildren, ...props }) => (
+        <tbody {...props}>{node(nodeChildren)}</tbody>
+      ),
+      tr: ({ children: nodeChildren, ...props }) => (
+        <tr {...props}>{node(nodeChildren)}</tr>
+      ),
+      th: ({ children: nodeChildren, ...props }) => (
+        <th {...props}>{node(nodeChildren)}</th>
+      ),
+      td: ({ children: nodeChildren, ...props }) => (
+        <td {...props}>{node(nodeChildren)}</td>
+      ),
       text: ({ children: nodeChildren, ...props }) => {
-        if (typeof nodeChildren === 'string') {
-          const processed = processText(nodeChildren, citations, markerMap, evidenceCitationMap)
-          // If processing returned an array, we need to handle it
-          if (Array.isArray(processed)) {
-            return <>{processed}</>
-          }
+        if (typeof nodeChildren === "string") {
+          const processed = processText(
+            nodeChildren,
+            lookupsRef.current.citations,
+            lookupsRef.current.markerMap,
+            lookupsRef.current.evidenceCitationMap,
+            lookupsRef.current.inlineVisualSourceMap
+          )
+          if (Array.isArray(processed)) return <>{processed}</>
           return <>{processed}</>
         }
         return <>{nodeChildren}</>
       },
-      // Also process other inline elements that might contain citations
-      strong: ({ children: nodeChildren, ...props }) => {
-        return <strong {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</strong>
-      },
-      em: ({ children: nodeChildren, ...props }) => {
-        return <em {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</em>
-      },
-      // Process code blocks and inline code
-      code: ({ children: nodeChildren, ...props }) => {
-        if (typeof nodeChildren === 'string') {
-          return <code {...props}>{processText(nodeChildren, citations, markerMap, evidenceCitationMap)}</code>
-        }
-        return <code {...props}>{processNode(nodeChildren, citations, markerMap, evidenceCitationMap)}</code>
-      },
+      strong: ({ children: nodeChildren, ...props }) => (
+        <strong {...props}>{node(nodeChildren)}</strong>
+      ),
+      em: ({ children: nodeChildren, ...props }) => (
+        <em {...props}>{node(nodeChildren)}</em>
+      ),
     }
-  }, [citations, markerMap, evidenceCitationMap])
+    // Empty deps → reference is stable forever for this CitationMarkdown
+    // instance. Lookups happen via the ref at call time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
-    <Markdown className={className} components={components}>
+    <Markdown
+      className={className}
+      components={components}
+      onChartDrilldown={onChartDrilldown}
+    >
       {processedText}
     </Markdown>
   )
@@ -724,31 +1114,254 @@ function processNode(
   node: React.ReactNode,
   citations: Map<number, CitationData>,
   markerMap: Map<string, ReturnType<typeof parseCitationMarkers>[0]>,
-  evidenceCitationMap: Map<number, EvidenceCitation> | null
+  evidenceCitationMap: Map<number, EvidenceCitation> | null,
+  inlineVisualSourceMap: Map<string, EvidenceCitation>
 ): React.ReactNode {
   if (typeof node === 'string') {
-    return processText(node, citations, markerMap, evidenceCitationMap)
+    return processText(node, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)
   }
   
   if (Array.isArray(node)) {
     return node.map((child, i) => (
       <React.Fragment key={i}>
-        {processNode(child, citations, markerMap, evidenceCitationMap)}
+        {processNode(child, citations, markerMap, evidenceCitationMap, inlineVisualSourceMap)}
       </React.Fragment>
     ))
   }
   
   if (React.isValidElement(node)) {
+    const elementType = typeof node.type === "string" ? node.type : null
+    if (elementType === "code" || elementType === "pre") {
+      return node
+    }
     const props = node.props as { children?: React.ReactNode }
     if (props.children) {
       return React.cloneElement(node, {
         ...props,
-        children: processNode(props.children, citations, markerMap, evidenceCitationMap)
+        children: processNode(
+          props.children,
+          citations,
+          markerMap,
+          evidenceCitationMap,
+          inlineVisualSourceMap
+        )
       } as React.Attributes)
     }
   }
   
   return node
+}
+
+function toEvidenceLikeCitation(
+  citation: CitationData,
+  fallbackIndex: number
+): EvidenceCitation {
+  const parsedYear = Number.parseInt(citation.year, 10)
+  const inferredSourceLabel = inferSourceLabelFromUrl(citation.url)
+  const inferredSourceFromPmid =
+    !inferredSourceLabel && citation.pmid ? "PubMed" : null
+  return {
+    index: citation.index || fallbackIndex,
+    sourceId: buildEvidenceSourceId(citation),
+    pmid: citation.pmid || null,
+    title: citation.title || `Citation ${fallbackIndex}`,
+    journal: citation.journal || inferredSourceLabel || inferredSourceFromPmid || "Source",
+    year: Number.isFinite(parsedYear) ? parsedYear : null,
+    doi: citation.doi || null,
+    authors: Array.isArray(citation.authors) ? citation.authors : [],
+    evidenceLevel: 3,
+    studyType: null,
+    sampleSize: null,
+    meshTerms: [],
+    url: citation.url || null,
+    snippet: "",
+    score: 0,
+    sourceType: "medical_evidence",
+    sourceLabel: inferredSourceLabel || inferredSourceFromPmid || citation.journal || "Source",
+  }
+}
+
+type ResolvedCitationPillProps = {
+  index: number
+  citations: Map<number, CitationData>
+  evidenceCitationMap: Map<number, EvidenceCitation> | null
+}
+
+function resolveIndicesFromSourceIds(
+  sourceIds: string[],
+  citations: Map<number, CitationData>,
+  evidenceCitationMap: Map<number, EvidenceCitation> | null
+): number[] {
+  const wanted = sourceIds.map((sourceId) => normalizeInlineSourceIdToken(sourceId))
+  const resolved = new Set<number>()
+
+  if (evidenceCitationMap) {
+    evidenceCitationMap.forEach((citation, index) => {
+      if (sourceIdsMatchCitation(wanted, citation)) {
+        resolved.add(index)
+      }
+    })
+  }
+
+  citations.forEach((citation, fallbackIndex) => {
+    const resolvedIndex =
+      typeof citation.index === "number" && Number.isFinite(citation.index)
+        ? citation.index
+        : fallbackIndex
+    if (sourceIdsMatchCitation(wanted, citation)) {
+      resolved.add(resolvedIndex)
+    }
+  })
+
+  return Array.from(resolved).sort((a, b) => a - b)
+}
+
+function hasRenderableEvidenceVisual(citation: EvidenceCitation | undefined | null): boolean {
+  if (!citation) return false
+  const references = [
+    ...(citation.previewReference ? [citation.previewReference] : []),
+    ...(citation.figureReferences || []),
+  ]
+  return references.some((reference) => Boolean(reference?.signedUrl))
+}
+
+function buildInlineVisualSourceIdMap(
+  text: string,
+  markerMap: Map<string, ReturnType<typeof parseCitationMarkers>[0]>,
+  evidenceCitationMap: Map<number, EvidenceCitation> | null,
+  markers: ReturnType<typeof parseCitationMarkers>
+): { processedText: string; inlineVisualSourceMap: Map<string, EvidenceCitation> } {
+  const inlineVisualSourceMap = new Map<string, EvidenceCitation>()
+  if (!evidenceCitationMap || evidenceCitationMap.size === 0) {
+    return { processedText: text, inlineVisualSourceMap }
+  }
+
+  const seenIndices = new Set<number>()
+  const exactSourceMatches = new Set<number>()
+
+  markerMap.forEach((marker) => {
+    const markerAny = marker as typeof marker & { sourceIds?: string[] }
+    const sourceIds =
+      Array.isArray(markerAny.sourceIds) && markerAny.sourceIds.length > 0
+        ? markerAny.sourceIds.map((value) => value.toLowerCase())
+        : []
+    if (sourceIds.length === 0) return
+
+    evidenceCitationMap.forEach((citation, index) => {
+      if (sourceIdsMatchCitation(sourceIds, citation) && hasRenderableEvidenceVisual(citation)) {
+        exactSourceMatches.add(index)
+      }
+    })
+  })
+
+  let selectedCitation: EvidenceCitation | null = null
+
+  if (exactSourceMatches.size > 0) {
+    const exactMatch = Array.from(exactSourceMatches)
+      .map((index) => evidenceCitationMap.get(index))
+      .find((citation): citation is EvidenceCitation => Boolean(citation))
+    if (exactMatch) {
+      selectedCitation = exactMatch
+    }
+  }
+
+  if (!selectedCitation) {
+    for (const marker of markers) {
+      for (const index of marker.indices) {
+        if (seenIndices.has(index)) continue
+        seenIndices.add(index)
+        const candidate = evidenceCitationMap.get(index)
+        if (hasRenderableEvidenceVisual(candidate)) {
+          selectedCitation = candidate || null
+          break
+        }
+      }
+      if (selectedCitation) break
+    }
+  }
+
+  if (!selectedCitation) {
+    return { processedText: text, inlineVisualSourceMap }
+  }
+
+  const sourceId = buildEvidenceSourceId(selectedCitation)
+  const visualPlaceholder = `[INLINE_VISUAL_${sourceId}]`
+  inlineVisualSourceMap.set(sourceId.toLowerCase(), selectedCitation)
+
+  if (text.includes(visualPlaceholder)) {
+    return { processedText: text, inlineVisualSourceMap }
+  }
+
+  let insertionIndex = text.length
+  let firstRelevantPlaceholderStart = -1
+  let firstRelevantPlaceholderEnd = -1
+
+  markerMap.forEach((marker, placeholder) => {
+    if (!marker.indices.includes(selectedCitation.index)) return
+    const matchIndex = text.indexOf(placeholder)
+    if (matchIndex === -1) return
+    if (firstRelevantPlaceholderStart === -1 || matchIndex < firstRelevantPlaceholderStart) {
+      firstRelevantPlaceholderStart = matchIndex
+      firstRelevantPlaceholderEnd = matchIndex + placeholder.length
+    }
+  })
+
+  if (firstRelevantPlaceholderEnd >= 0) {
+    const paragraphBoundary = text.indexOf("\n\n", firstRelevantPlaceholderEnd)
+    insertionIndex = paragraphBoundary >= 0 ? paragraphBoundary : text.length
+  }
+
+  const before = text.slice(0, insertionIndex).replace(/\n+$/g, "")
+  const after = text.slice(insertionIndex).replace(/^\n+/g, "")
+  return {
+    processedText: [before, visualPlaceholder, after].filter(Boolean).join("\n\n"),
+    inlineVisualSourceMap,
+  }
+}
+
+function isStandaloneInlineVisualNode(node: React.ReactNode): boolean {
+  if (typeof node === "string") {
+    return node.trim().length === 0
+  }
+
+  if (Array.isArray(node)) {
+    const meaningfulChildren = node.filter((child) => {
+      if (typeof child === "string") return child.trim().length > 0
+      return child !== null && child !== undefined && child !== false
+    })
+    return (
+      meaningfulChildren.length > 0 &&
+      meaningfulChildren.every((child) => isStandaloneInlineVisualNode(child))
+    )
+  }
+
+  if (React.isValidElement(node)) {
+    if (node.type === React.Fragment) {
+      return isStandaloneInlineVisualNode((node.props as { children?: React.ReactNode }).children)
+    }
+    return node.type === InlineEvidenceVisual
+  }
+
+  return false
+}
+
+function ResolvedCitationPill({
+  index,
+  citations,
+  evidenceCitationMap,
+}: ResolvedCitationPillProps) {
+  const evidenceCitation = evidenceCitationMap?.get(index)
+  if (evidenceCitation) {
+    return <EvidenceCitationPill citation={evidenceCitation} size="sm" />
+  }
+  const fallbackCitation = citations.get(index)
+  if (!fallbackCitation) return null
+  return (
+    <EvidenceCitationPill
+      citation={toEvidenceLikeCitation(fallbackCitation, fallbackCitation.index || index)}
+      size="sm"
+    />
+  )
 }
 
 /**
@@ -760,39 +1373,14 @@ function processText(
   text: string,
   citations: Map<number, CitationData>,
   markerMap: Map<string, ReturnType<typeof parseCitationMarkers>[0]>,
-  evidenceCitationMap: Map<number, EvidenceCitation> | null
+  evidenceCitationMap: Map<number, EvidenceCitation> | null,
+  inlineVisualSourceMap: Map<string, EvidenceCitation>
 ): React.ReactNode {
-  const toEvidenceLikeCitation = (
-    citation: CitationData,
-    fallbackIndex: number
-  ): EvidenceCitation => {
-    const parsedYear = Number.parseInt(citation.year, 10)
-    return {
-      index: citation.index || fallbackIndex,
-      pmid: citation.pmid || null,
-      title: citation.title || `Citation ${fallbackIndex}`,
-      journal: citation.journal || "Source",
-      year: Number.isFinite(parsedYear) ? parsedYear : null,
-      doi: citation.doi || null,
-      authors: Array.isArray(citation.authors) ? citation.authors : [],
-      evidenceLevel: 3,
-      studyType: null,
-      sampleSize: null,
-      meshTerms: [],
-      url: citation.url || null,
-      snippet: "",
-      score: 0,
-      sourceType: "medical_evidence",
-      sourceLabel: citation.journal || "Source",
-    }
-  }
-
   const sanitizedText = stripInternalRuntimeTokensPreservePlaceholders(text)
   const parts: React.ReactNode[] = []
   let lastIndex = 0
-  // Match synthesis placeholders in both forms:
-  // [CITE_PLACEHOLDER_0] and CITE_PLACEHOLDER_0
-  const placeholderRegex = /\[?\s*CITE_PLACEHOLDER_(\d+)\s*\]?/g
+  const placeholderRegex =
+    /\[INLINE_VISUAL_([A-Za-z0-9:._\/-]+)\]|\[?\s*CITE_PLACEHOLDER_(\d+)\s*\]?|\[CITE[_:]([^\]]+)\]/gi
   let match: RegExpExecArray | null
   
   while ((match = placeholderRegex.exec(sanitizedText)) !== null) {
@@ -804,33 +1392,95 @@ function processText(
     if (matchIndex > lastIndex) {
       parts.push(sanitizedText.substring(lastIndex, matchIndex))
     }
-    
-    // Add citation component
+
+    const inlineVisualSourceId =
+      typeof match[1] === "string" && match[1].trim().length > 0
+        ? match[1].trim().toLowerCase()
+        : ""
+
+    if (inlineVisualSourceId) {
+      const inlineCitation =
+        inlineVisualSourceMap.get(inlineVisualSourceId) ||
+        resolveIndicesFromSourceIds([inlineVisualSourceId], citations, evidenceCitationMap)
+          .map((index) => evidenceCitationMap?.get(index))
+          .find(
+            (citation): citation is EvidenceCitation =>
+              Boolean(citation && hasRenderableEvidenceVisual(citation))
+          )
+
+      if (inlineCitation) {
+        parts.push(
+          <InlineEvidenceVisual
+            key={`inline-visual-${inlineVisualSourceId}-${matchIndex}`}
+            citation={inlineCitation}
+          />
+        )
+      } else {
+        parts.push(match[0])
+      }
+
+      lastIndex = matchIndex + matchLength
+      continue
+    }
+
     const placeholder = match[0]
-    const canonicalPlaceholder = `[CITE_PLACEHOLDER_${match[1]}]`
-    const marker = markerMap.get(placeholder) || markerMap.get(canonicalPlaceholder)
+    const directSourceIds =
+      typeof match[3] === "string" && match[3].trim().length > 0
+        ? match[3]
+            .split(/\s*,\s*/)
+            .map((sourceId) => normalizeInlineSourceIdToken(sourceId))
+            .filter(Boolean)
+        : []
+    const canonicalPlaceholder = match[2] ? `[CITE_PLACEHOLDER_${match[2]}]` : ""
+    const marker =
+      markerMap.get(placeholder) ||
+      (canonicalPlaceholder ? markerMap.get(canonicalPlaceholder) : undefined) ||
+      (directSourceIds.length > 0
+        ? {
+            type: "named" as const,
+            indices: resolveIndicesFromSourceIds(directSourceIds, citations, evidenceCitationMap),
+            sourceIds: directSourceIds,
+            startIndex: matchIndex,
+            endIndex: matchIndex + matchLength,
+            fullMatch: placeholder,
+          }
+        : undefined)
     if (marker) {
       // If we have evidence citations, render EvidenceCitationPill for each
       if (evidenceCitationMap && evidenceCitationMap.size > 0) {
-        const allIndicesResolvable = marker.indices.every((idx) =>
+        const markerWithResolvedIndices =
+          marker.indices.length === 0 &&
+          Array.isArray(marker.sourceIds) &&
+          marker.sourceIds.length > 0
+            ? {
+                ...marker,
+                indices: resolveIndicesFromSourceIds(
+                  marker.sourceIds,
+                  citations,
+                  evidenceCitationMap
+                ),
+              }
+            : marker
+        const allIndicesResolvable = markerWithResolvedIndices.indices.every((idx) =>
           evidenceCitationMap.has(idx)
         )
         if (!allIndicesResolvable) {
-          // Strict contract: unresolved markers should not leak.
+          // Never swallow marker text if mapping fails.
+          parts.push(markerWithResolvedIndices.fullMatch)
           lastIndex = matchIndex + matchLength
           continue
         }
 
         const evidencePills: React.ReactNode[] = []
         
-        marker.indices.forEach((idx) => {
-          const evidenceCitation = evidenceCitationMap.get(idx)
-          if (evidenceCitation) {
+        markerWithResolvedIndices.indices.forEach((idx) => {
+          if (evidenceCitationMap.get(idx)) {
             evidencePills.push(
-              <EvidenceCitationPill
+              <ResolvedCitationPill
                 key={`evidence-${idx}-${matchIndex}`}
-                citation={evidenceCitation}
-                size="sm"
+                index={idx}
+                citations={citations}
+                evidenceCitationMap={evidenceCitationMap}
               />
             )
           }
@@ -851,6 +1501,9 @@ function processText(
               </span>
             )
           }
+        } else {
+          // Preserve original marker if nothing was resolvable.
+          parts.push(markerWithResolvedIndices.fullMatch)
         }
       } else {
         if (marker.type === "named") {
@@ -860,10 +1513,11 @@ function processText(
 
           if (namedCitations.length > 0) {
             const namedPills = namedCitations.map((citation, i) => (
-              <EvidenceCitationPill
+              <ResolvedCitationPill
                 key={`named-pill-${citation.index}-${matchIndex}-${i}`}
-                citation={toEvidenceLikeCitation(citation, citation.index || i + 1)}
-                size="sm"
+                index={citation.index || i + 1}
+                citations={citations}
+                evidenceCitationMap={evidenceCitationMap}
               />
             ))
 
@@ -876,6 +1530,8 @@ function processText(
             } else {
               parts.push(namedPills[0])
             }
+          } else {
+            parts.push(marker.fullMatch)
           }
 
           lastIndex = matchIndex + matchLength
@@ -889,10 +1545,11 @@ function processText(
         
         if (markerCitations.length > 0) {
           const citationPills = markerCitations.map((citation, i) => (
-            <EvidenceCitationPill
+            <ResolvedCitationPill
               key={`citation-pill-${citation.index}-${matchIndex}-${i}`}
-              citation={toEvidenceLikeCitation(citation, citation.index || i + 1)}
-              size="sm"
+              index={citation.index || i + 1}
+              citations={citations}
+              evidenceCitationMap={evidenceCitationMap}
             />
           ))
           
@@ -906,6 +1563,8 @@ function processText(
           } else if (citationPills.length === 1) {
             parts.push(citationPills[0])
           }
+        } else {
+          parts.push(marker.fullMatch)
         }
       }
     }

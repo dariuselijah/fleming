@@ -68,9 +68,11 @@ export function EvidenceReferencesSection({
       visuals.push(citation.previewReference)
     }
     if (citation.figureReferences?.length) {
-      visuals.push(...citation.figureReferences.filter((item) => item.signedUrl).slice(0, 2))
+      visuals.push(
+        ...citation.figureReferences.filter((item) => item.signedUrl).slice(0, 3)
+      )
     }
-    return visuals
+    return visuals.slice(0, 4)
   }
 
   const handleCitationRating = (citation: EvidenceCitation, rating: 'up' | 'down') => {
@@ -226,7 +228,7 @@ export function EvidenceReferencesSection({
                                     ) : (
                                       <a
                                         key={visual.assetId}
-                                        href={visual.fullUrl || visual.signedUrl || "#"}
+                                        href={citationHref}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="group/visual shrink-0"

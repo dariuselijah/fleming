@@ -10,6 +10,11 @@ import { ModelProvider } from "@/lib/model-store/provider"
 import { TanstackQueryProvider } from "@/lib/tanstack-query/tanstack-query-provider"
 import { UserPreferencesProvider } from "@/lib/user-preference-store/provider"
 import { UserProvider } from "@/lib/user-store/provider"
+import { AuthProvider } from "@/lib/auth/provider"
+import {
+  getServerAuthPracticeContext,
+  toClientAuthContext,
+} from "@/lib/auth/context"
 import { getUserProfile } from "@/lib/user/api"
 import { ThemeProvider } from "next-themes"
 import Script from "next/script"
@@ -136,7 +141,10 @@ export default async function RootLayout({
 }>) {
   const isDev = process.env.NODE_ENV === "development"
   const isOfficialDeployment = process.env.FLEMING_OFFICIAL === "true"
-  const userProfile = await getUserProfile()
+  const [userProfile, authContext] = await Promise.all([
+    getUserProfile(),
+    getServerAuthPracticeContext(),
+  ])
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -205,36 +213,38 @@ export default async function RootLayout({
       >
         <TanstackQueryProvider>
           <LayoutClient />
-          <UserProvider initialUser={userProfile}>
-            <ModelProvider>
-              <ChatsProvider userId={userProfile?.id}>
-                <ChatSessionProvider>
-                  <UserPreferencesProvider
-                    userId={userProfile?.id}
-                    initialPreferences={userProfile?.preferences}
-                  >
-                    <TooltipProvider
-                      delayDuration={200}
-                      skipDelayDuration={500}
+          <AuthProvider initialContext={toClientAuthContext(authContext)}>
+            <UserProvider initialUser={userProfile}>
+              <ModelProvider>
+                <ChatsProvider userId={userProfile?.id}>
+                  <ChatSessionProvider>
+                    <UserPreferencesProvider
+                      userId={userProfile?.id}
+                      initialPreferences={userProfile?.preferences}
                     >
-                      <ThemeProvider
-                        attribute="class"
-                        defaultTheme="light"
-                        enableSystem
-                        disableTransitionOnChange
+                      <TooltipProvider
+                        delayDuration={200}
+                        skipDelayDuration={500}
                       >
-                        <SidebarProvider defaultOpen>
-                          <Toaster position="top-center" />
-                          {children}
-                          {modal}
-                        </SidebarProvider>
-                      </ThemeProvider>
-                    </TooltipProvider>
-                  </UserPreferencesProvider>
-                </ChatSessionProvider>
-              </ChatsProvider>
-            </ModelProvider>
-          </UserProvider>
+                        <ThemeProvider
+                          attribute="class"
+                          defaultTheme="light"
+                          enableSystem
+                          disableTransitionOnChange
+                        >
+                          <SidebarProvider defaultOpen>
+                            <Toaster position="top-center" />
+                            {children}
+                            {modal}
+                          </SidebarProvider>
+                        </ThemeProvider>
+                      </TooltipProvider>
+                    </UserPreferencesProvider>
+                  </ChatSessionProvider>
+                </ChatsProvider>
+              </ModelProvider>
+            </UserProvider>
+          </AuthProvider>
         </TanstackQueryProvider>
       </body>
     </html>

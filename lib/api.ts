@@ -100,31 +100,59 @@ export async function updateChatModel(chatId: string, model: string) {
 }
 
 /**
- * Signs in user with Google OAuth via Supabase
+ * Origin for OAuth `redirectTo` (`/auth/callback`). In the browser we always use
+ * `window.location.origin` so the redirect matches the tab (dev server port,
+ * `npm run start` on localhost, etc.). Supabase must list this origin under
+ * Authentication → URL Configuration → Redirect URLs or it will fall back to the
+ * project Site URL (often production).
  */
-export async function signInWithGoogle(supabase: SupabaseClient) {
+function getOAuthRedirectOrigin(): string {
+  if (typeof window !== "undefined") {
+    return window.location.origin
+  }
+  const explicit = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (explicit) {
+    return explicit.replace(/\/$/, "")
+  }
+  if (process.env.NODE_ENV === "development") {
+    return "http://localhost:3000"
+  }
+  if (process.env.NEXT_PUBLIC_VERCEL_URL) {
+    return `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
+  }
+  return APP_DOMAIN
+}
+
+function buildAuthCallbackUrl(opts?: { next?: string }) {
+  const baseUrl = getOAuthRedirectOrigin()
+  const rawNext = opts?.next?.trim()
+  const nextPath =
+    rawNext?.startsWith("/") && !rawNext.includes("//") ? rawNext : "/"
+  return `${baseUrl}/auth/callback?next=${encodeURIComponent(nextPath)}`
+}
+
+async function signInWithOAuthProvider(
+  supabase: SupabaseClient,
+  provider: "google" | "apple",
+  opts?: { next?: string }
+) {
   try {
-    const isDev = process.env.NODE_ENV === "development"
+    const callbackUrl = buildAuthCallbackUrl(opts)
 
-    // Get base URL dynamically (will work in both browser and server environments)
-    const baseUrl = isDev
-      ? "http://localhost:3000"
-      : typeof window !== "undefined"
-        ? window.location.origin
-        : process.env.NEXT_PUBLIC_VERCEL_URL
-          ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
-          : APP_DOMAIN
-
-    console.log("Signing in with Google, redirect URL:", `${baseUrl}/auth/callback`)
+    console.log(`Signing in with ${provider}, redirect URL:`, callbackUrl)
 
     const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
+      provider,
       options: {
-        redirectTo: `${baseUrl}/auth/callback`,
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent",
-        },
+        redirectTo: callbackUrl,
+        ...(provider === "google"
+          ? {
+              queryParams: {
+                access_type: "offline",
+                prompt: "consent",
+              },
+            }
+          : {}),
       },
     })
 
@@ -134,12 +162,47 @@ export async function signInWithGoogle(supabase: SupabaseClient) {
     }
 
     console.log("OAuth initiated successfully")
-    // Return the provider URL
     return data
   } catch (err) {
-    console.error("Error signing in with Google:", err)
+    console.error(`Error signing in with ${provider}:`, err)
     throw err
   }
+}
+
+/**
+ * Signs in user with Google OAuth via Supabase.
+ * @param next - Path to redirect after OAuth (must start with `/`). Passed to `/auth/callback?next=`.
+ */
+export async function signInWithGoogle(
+  supabase: SupabaseClient,
+  opts?: { next?: string }
+) {
+  return signInWithOAuthProvider(supabase, "google", opts)
+}
+
+export async function signInWithApple(
+  supabase: SupabaseClient,
+  opts?: { next?: string }
+) {
+  return signInWithOAuthProvider(supabase, "apple", opts)
+}
+
+export async function signInWithEmail(
+  supabase: SupabaseClient,
+  email: string,
+  opts?: { next?: string }
+) {
+  const callbackUrl = buildAuthCallbackUrl(opts)
+  const { data, error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: callbackUrl,
+      shouldCreateUser: true,
+    },
+  })
+
+  if (error) throw error
+  return data
 }
 
 export const getOrCreateGuestUserId = async (

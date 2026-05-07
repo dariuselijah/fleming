@@ -1,7 +1,9 @@
 import { ChatContainer } from "@/app/components/chat/chat-container"
 import { LayoutApp } from "@/app/components/layout/layout-app"
 import { MessagesProvider } from "@/lib/chat-store/messages/provider"
+import { getUserProfile } from "@/lib/user/api"
 import type { Metadata } from "next"
+import { redirect } from "next/navigation"
 
 export const dynamic = "force-dynamic"
 
@@ -47,7 +49,13 @@ export const metadata: Metadata = {
   },
 }
 
-export default function Home() {
+export default async function Home() {
+  const userProfile = await getUserProfile()
+
+  if (!userProfile) {
+    redirect("/auth?next=/")
+  }
+
   return (
     <MessagesProvider>
       <LayoutApp>

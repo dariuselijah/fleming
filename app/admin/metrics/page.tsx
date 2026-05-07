@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -200,6 +201,9 @@ export default function AdminMetricsPage() {
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/admin/usage">Usage</Link>
             </Button>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               Logout

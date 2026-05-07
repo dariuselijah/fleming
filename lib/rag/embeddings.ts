@@ -3,10 +3,48 @@
  * Generates embeddings for text using OpenAI's embedding models
  */
 
-const EMBEDDING_MODEL = 'text-embedding-3-large'
-const EMBEDDING_DIMENSION = 1536
+// ── Embedding model configuration ─────────────────────────────────────────
+// The retrieval stage can optionally use a domain-tuned model (PubMedBERT,
+// BioLORD, E5, BGE) while the generation/chat stage continues using OpenAI.
+// Set RETRIEVAL_EMBEDDING_MODEL / RETRIEVAL_EMBEDDING_DIMENSION env vars to
+// switch the retrieval model. When unset, OpenAI text-embedding-3-small is used.
+
+const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small'
+const OPENAI_EMBEDDING_DIMENSION = 1536
+
+const EMBEDDING_MODEL = process.env.RETRIEVAL_EMBEDDING_MODEL || OPENAI_EMBEDDING_MODEL
+const EMBEDDING_DIMENSION = Number.parseInt(
+  process.env.RETRIEVAL_EMBEDDING_DIMENSION || String(OPENAI_EMBEDDING_DIMENSION),
+  10,
+)
+const EMBEDDING_API_BASE = process.env.RETRIEVAL_EMBEDDING_API_BASE || 'https://api.openai.com'
+
 const MAX_EMBEDDING_TOKENS_PER_REQUEST = 240000
 const APPROX_CHARS_PER_TOKEN = 4
+
+// ── In-memory embedding cache (LRU) for single-query hot path ──────────────
+// Avoids re-embedding the same query text within a request window.
+const EMBEDDING_CACHE_MAX = 256
+const EMBEDDING_CACHE_TTL_MS = 5 * 60 * 1000
+const embeddingCache = new Map<string, { embedding: number[]; ts: number }>()
+
+function getEmbeddingFromCache(text: string): number[] | null {
+  const entry = embeddingCache.get(text)
+  if (!entry) return null
+  if (Date.now() - entry.ts > EMBEDDING_CACHE_TTL_MS) {
+    embeddingCache.delete(text)
+    return null
+  }
+  return entry.embedding
+}
+
+function setEmbeddingInCache(text: string, embedding: number[]): void {
+  if (embeddingCache.size >= EMBEDDING_CACHE_MAX) {
+    const oldest = embeddingCache.keys().next().value
+    if (oldest !== undefined) embeddingCache.delete(oldest)
+  }
+  embeddingCache.set(text, { embedding, ts: Date.now() })
+}
 
 function isLikelyOpenAIApiKey(value: string): boolean {
   const token = value.trim()
@@ -44,11 +82,16 @@ export async function generateEmbedding(
   apiKey?: string,
   options?: EmbeddingOptions
 ): Promise<number[]> {
+  // Fast path: return cached embedding if available
+  const cached = getEmbeddingFromCache(text)
+  if (cached) return cached
+
   const model = options?.model || EMBEDDING_MODEL
   const dimension = options?.dimension || EMBEDDING_DIMENSION
   const key = resolveEmbeddingApiKey(apiKey)
+  const apiBase = EMBEDDING_API_BASE.replace(/\/+$/, '')
 
-  const response = await fetch('https://api.openai.com/v1/embeddings', {
+  const response = await fetch(`${apiBase}/v1/embeddings`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -67,7 +110,12 @@ export async function generateEmbedding(
   }
 
   const data = await response.json()
-  return data.data[0].embedding
+  const embedding = data.data[0].embedding
+
+  // Cache the embedding for fast re-use
+  setEmbeddingInCache(text, embedding)
+
+  return embedding
 }
 
 /**
@@ -100,7 +148,8 @@ async function generateEmbeddingsBatch(
   
   while (retries > 0) {
     try {
-      const response = await fetch('https://api.openai.com/v1/embeddings', {
+      const apiBase = EMBEDDING_API_BASE.replace(/\/+$/, '')
+      const response = await fetch(`${apiBase}/v1/embeddings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,7 +157,7 @@ async function generateEmbeddingsBatch(
         },
         body: JSON.stringify({
           model,
-          input: batch, // Send array of texts - OpenAI supports up to 2048 inputs per request
+          input: batch,
           dimensions: dimension,
         }),
       })
@@ -346,17 +395,27 @@ export function cosineSimilarity(a: number[], b: number[]): number {
     throw new Error('Embeddings must have the same dimension')
   }
 
-  let dotProduct = 0
-  let normA = 0
-  let normB = 0
+  // Unrolled loop for better V8 JIT performance on 1536-dim vectors
+  const len = a.length
+  let dot = 0, nA = 0, nB = 0
 
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
+  let i = 0
+  const unrolled = len - (len % 4)
+  for (; i < unrolled; i += 4) {
+    const a0 = a[i], a1 = a[i+1], a2 = a[i+2], a3 = a[i+3]
+    const b0 = b[i], b1 = b[i+1], b2 = b[i+2], b3 = b[i+3]
+    dot += a0*b0 + a1*b1 + a2*b2 + a3*b3
+    nA  += a0*a0 + a1*a1 + a2*a2 + a3*a3
+    nB  += b0*b0 + b1*b1 + b2*b2 + b3*b3
+  }
+  for (; i < len; i++) {
+    dot += a[i] * b[i]
+    nA  += a[i] * a[i]
+    nB  += b[i] * b[i]
   }
 
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
+  const denom = Math.sqrt(nA) * Math.sqrt(nB)
+  return denom > 0 ? dot / denom : 0
 }
 
 

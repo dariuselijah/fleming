@@ -12,6 +12,8 @@ export type ClinicalConnectorId =
   | "cms_coverage"
   | "chembl"
   | "benchling"
+  | "rxnorm"
+  | "openfda"
 
 export type ConnectorLicenseTier = "public" | "licensed" | "mixed"
 

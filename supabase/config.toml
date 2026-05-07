@@ -1,0 +1,5 @@
+# https://supabase.com/docs/guides/cli/config
+# Link your project with: supabase link --project-ref <id>
+
+[functions.docling-parse]
+verify_jwt = true

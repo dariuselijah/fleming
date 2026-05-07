@@ -88,8 +88,10 @@ CREATE INDEX IF NOT EXISTS idx_medical_evidence_fts
 --   WITH (lists = 100);
 --
 -- Option B: HNSW (works on empty tables, slightly slower but more accurate)
+-- Tuned: m=16 links, ef_construction=128 for better recall at build time.
 CREATE INDEX IF NOT EXISTS idx_medical_evidence_embedding 
-  ON medical_evidence USING hnsw (embedding vector_cosine_ops);
+  ON medical_evidence USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 128);
 
 -- B-tree indexes for filtering
 CREATE INDEX IF NOT EXISTS idx_medical_evidence_pmid 
@@ -157,6 +159,9 @@ DECLARE
   current_year INT := EXTRACT(YEAR FROM NOW())::INT;
   rrf_k INT := 60;  -- RRF constant (standard value)
 BEGIN
+  -- Raise HNSW probe depth for better recall (default 40 → 100)
+  PERFORM set_config('hnsw.ef_search', '100', true);
+
   RETURN QUERY
   WITH 
   -- Step 1: Semantic search using vector similarity

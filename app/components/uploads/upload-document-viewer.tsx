@@ -66,6 +66,7 @@ export function UploadDocumentViewer({
   const startParam = toInt(params.get("start"))
   const endParam = toInt(params.get("end"))
   const searchParam = params.get("search")?.trim() || ""
+  const debugExtraction = params.get("debug") === "1"
   const returnToParam = params.get("returnTo")
 
   const closeViewer = useCallback(() => {
@@ -284,7 +285,7 @@ export function UploadDocumentViewer({
               ) : null}
             </div>
           </div>
-        ) : (
+        ) : debugExtraction ? (
           <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[1.25fr_0.9fr]">
             <section className="overflow-hidden rounded-3xl border border-border/60 bg-background shadow-xs">
               <div className="border-b border-border/60 px-4 py-3 text-sm font-medium">PDF page {pdfPage}</div>
@@ -301,7 +302,7 @@ export function UploadDocumentViewer({
               <div className="border-b border-border/60 px-4 py-3">
                 <p className="text-sm font-medium">Referenced context</p>
                 <p className="text-muted-foreground mt-0.5 text-xs">
-                  Click units to navigate. Highlight follows cited offsets.
+                  Debug mode. Click units to inspect extracted text and citation offsets.
                 </p>
               </div>
 
@@ -367,6 +368,44 @@ export function UploadDocumentViewer({
                     <p className="text-muted-foreground text-sm">No source unit available.</p>
                   )}
                 </div>
+              </div>
+            </section>
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 p-4">
+            <section className="h-full overflow-hidden rounded-3xl border border-border/60 bg-background shadow-xs">
+              <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Document viewer</p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    Opens to page {pdfPage}. Add <code>?debug=1</code> for extraction diagnostics.
+                  </p>
+                </div>
+                {upload.originalFileUrl ? (
+                  <a
+                    href={upload.originalFileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex shrink-0 rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent/60"
+                  >
+                    Open in new tab
+                  </a>
+                ) : null}
+              </div>
+              <div className="h-[calc(100%-57px)] min-h-[560px] bg-muted/15">
+                {upload.originalFileUrl ? (
+                  <iframe
+                    title={upload.title || upload.fileName}
+                    src={`${upload.originalFileUrl}#page=${pdfPage}&view=FitH`}
+                    className="h-full w-full"
+                  />
+                ) : (
+                  <PdfTextLayerViewer
+                    fileUrl={upload?.originalFileUrl ?? null}
+                    pageNumber={pdfPage}
+                    highlightText={pdfHighlightText}
+                  />
+                )}
               </div>
             </section>
           </div>

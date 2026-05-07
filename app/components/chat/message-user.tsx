@@ -15,6 +15,7 @@ import {
   MessageContent,
 } from "@/components/prompt-kit/message"
 import { Button } from "@/components/ui/button"
+import { stripClientPromptContextForDisplay } from "@/lib/chat/user-message-display"
 import { stripUploadReferenceTokens } from "@/lib/uploads/reference-tokens"
 import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"
@@ -41,6 +42,58 @@ export type MessageUserProps = {
   className?: string
 }
 
+function parseCommandPrefix(text: string): { commandTag: string | null; rest: string; hasContext: boolean } {
+  let t = text.trimStart()
+  if (t.startsWith("{")) t = t.slice(1).trimStart()
+
+  const match = t.match(/^\[\/(\w+)\]\s*/)
+  if (!match) return { commandTag: null, rest: text, hasContext: false }
+
+  const afterTag = t.slice(match[0].length)
+  const markers = ["\n\n<patient_context", "\n<patient_context", "\n\n<scribe_transcript", "\n<scribe_transcript", "\n\n=== ", "\n=== "]
+  let cut = -1
+  for (const m of markers) {
+    const i = afterTag.indexOf(m)
+    if (i >= 0 && (cut < 0 || i < cut)) cut = i
+  }
+  if (cut >= 0) {
+    return {
+      commandTag: match[1],
+      rest: afterTag.slice(0, cut).trim(),
+      hasContext: true,
+    }
+  }
+  return { commandTag: match[1], rest: afterTag, hasContext: false }
+}
+
+const COMMAND_CHIP_COLORS: Record<string, string> = {
+  summary: "bg-indigo-500/10 text-indigo-600 border-indigo-500/20",
+  interactions: "bg-orange-500/10 text-orange-600 border-orange-500/20",
+  evidence: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+  drug: "bg-sky-500/10 text-sky-600 border-sky-500/20",
+  icd: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+  prescribe: "bg-sky-500/10 text-sky-600 border-sky-500/20",
+  refer: "bg-teal-500/10 text-teal-600 border-teal-500/20",
+  soap: "bg-indigo-500/10 text-indigo-600 border-indigo-500/20",
+  vitals: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+  verify: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+  claim: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+}
+
+const COMMAND_LABELS: Record<string, string> = {
+  soap: "Generate SOAP Note",
+  summary: "Generate Clinical Summary",
+  refer: "Generate Referral Letter",
+  prescribe: "Generate Prescription",
+  icd: "Suggest ICD-10 Codes",
+  interactions: "Check Drug Interactions",
+  evidence: "Search Evidence",
+  drug: "Drug Information",
+  vitals: "Record Vitals",
+  verify: "Verify Eligibility",
+  claim: "Prepare Billing Claim",
+}
+
 export function MessageUser({
   hasScrollAnchor,
   attachments,
@@ -54,6 +107,10 @@ export function MessageUser({
   className,
 }: MessageUserProps) {
   const displayChildren = stripUploadReferenceTokens(children)
+  const { commandTag, rest: messageWithoutCommand, hasContext } = useMemo(
+    () => parseCommandPrefix(displayChildren),
+    [displayChildren]
+  )
   const [editInput, setEditInput] = useState(displayChildren)
   const [isEditing, setIsEditing] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -221,27 +278,67 @@ export function MessageUser({
           </div>
         </div>
       ) : (
-        <MessageContent
-          className="bg-accent relative max-w-[70%] rounded-3xl px-5 py-2.5"
-          markdown={true}
+        <div
+          className={cn(
+            "relative max-w-[70%] rounded-3xl",
+            commandTag && hasContext ? "bg-transparent px-0 py-0" : "bg-accent px-5 py-2.5"
+          )}
           ref={contentRef}
-          components={{
-            code: ({ children }) => <>{children}</>,
-            pre: ({ children }) => <>{children}</>,
-            h1: ({ children }) => <p>{children}</p>,
-            h2: ({ children }) => <p>{children}</p>,
-            h3: ({ children }) => <p>{children}</p>,
-            h4: ({ children }) => <p>{children}</p>,
-            h5: ({ children }) => <p>{children}</p>,
-            h6: ({ children }) => <p>{children}</p>,
-            p: ({ children }) => <p>{children}</p>,
-            li: ({ children }) => <p>- {children}</p>,
-            ul: ({ children }) => <>{children}</>,
-            ol: ({ children }) => <>{children}</>,
-          }}
         >
-          {displayChildren}
-        </MessageContent>
+          {commandTag && hasContext ? (
+            <div className="flex items-center gap-2 rounded-xl border border-border/40 bg-background px-3.5 py-2.5 shadow-sm">
+              <span className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold",
+                COMMAND_CHIP_COLORS[commandTag] ?? "bg-muted text-muted-foreground border-border/50"
+              )}>
+                /{commandTag}
+              </span>
+              <span className="text-sm font-medium text-foreground">
+                {COMMAND_LABELS[commandTag] ?? commandTag}
+              </span>
+              <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+                <span className="size-1.5 rounded-full bg-emerald-500" />
+                Context
+              </span>
+            </div>
+          ) : (
+            <>
+              {commandTag && (
+                <span className={cn(
+                  "mb-1.5 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold",
+                  COMMAND_CHIP_COLORS[commandTag] ?? "bg-muted text-muted-foreground border-border/50"
+                )}>
+                  /{commandTag}
+                </span>
+              )}
+              <MessageContent
+                markdown={true}
+                components={{
+                  code: ({ children }) => <>{children}</>,
+                  pre: ({ children }) => <>{children}</>,
+                  h1: ({ children }) => <p>{children}</p>,
+                  h2: ({ children }) => <p>{children}</p>,
+                  h3: ({ children }) => <p>{children}</p>,
+                  h4: ({ children }) => <p>{children}</p>,
+                  h5: ({ children }) => <p>{children}</p>,
+                  h6: ({ children }) => <p>{children}</p>,
+                  p: ({ children }) => <p>{children}</p>,
+                  li: ({ children }) => <p>- {children}</p>,
+                  ul: ({ children }) => <>{children}</>,
+                  ol: ({ children }) => <>{children}</>,
+                }}
+              >
+                {commandTag ? messageWithoutCommand : displayChildren}
+              </MessageContent>
+              {hasContext && (
+                <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  <span className="size-1 rounded-full bg-emerald-500" />
+                  Clinical context attached
+                </span>
+              )}
+            </>
+          )}
+        </div>
       )}
       <MessageActions className="flex gap-0 opacity-0 transition-opacity duration-0 group-hover:opacity-100">
         <MessageAction tooltip={copied ? "Copied!" : "Copy text"} side="bottom">

@@ -1,0 +1,7 @@
+export { highlightFromExtracted, extractEntitiesByType } from "./entity-highlighter"
+export type { EntityType, HighlightedSegment, HighlightSpan } from "./entity-highlighter"
+export { mapTranscriptToSOAP, generateSOAPGhostText } from "./soap-mapper"
+export { useScribe } from "./use-scribe"
+export { useAudioRecorder } from "./use-audio-recorder"
+export { ScribeProvider, useScribeContext } from "./scribe-context"
+export { requestMicrophoneAccess } from "./request-microphone"

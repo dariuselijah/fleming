@@ -18,14 +18,18 @@ export const metadata: Metadata = {
 }
 
 export default async function UploadsPage() {
-  if (isSupabaseEnabled) {
-    const supabase = await createClient()
-    if (supabase) {
-      const { data: userData, error: userError } = await supabase.auth.getUser()
-      if (userError || !userData?.user) {
-        redirect("/")
-      }
-    }
+  if (!isSupabaseEnabled) {
+    redirect("/auth?next=/uploads")
+  }
+
+  const supabase = await createClient()
+  if (!supabase) {
+    redirect("/auth?next=/uploads")
+  }
+
+  const { data: userData, error: userError } = await supabase.auth.getUser()
+  if (userError || !userData?.user) {
+    redirect("/auth?next=/uploads")
   }
 
   return (

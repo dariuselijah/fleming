@@ -1,0 +1,1 @@
+{"project_id":"uuycidirxveglnpypaly","query":"ALTER TABLE public.medical_schemes DROP CONSTRAINT IF EXISTS medical_schemes_code_key;\nTRUNCATE public.medical_schemes;"}

@@ -14,6 +14,12 @@ import {
 import { AnimatePresence, motion } from "framer-motion"
 import Image from "next/image"
 import { useEffect, useMemo, useState } from "react"
+import {
+  ClinicalSearchCard,
+  EncounterStateCard,
+  PatientSummaryCard,
+  PrescribeMedicationToolCard,
+} from "@/app/components/chat/clinical-tool-cards"
 
 interface ToolInvocationProps {
   toolInvocations: ToolInvocationUIPart[]
@@ -993,6 +999,23 @@ function SingleToolCard({
       )
     }
     if (!parsedResult) return "No result data available"
+
+    if (parsedResult && typeof parsedResult === "object" && !Array.isArray(parsedResult)) {
+      const pr = parsedResult as Record<string, unknown>
+      const tn = String(toolName || "")
+      if (tn === "get_patient_summary") {
+        return <PatientSummaryCard data={pr} />
+      }
+      if (tn === "get_encounter_state") {
+        return <EncounterStateCard data={pr} />
+      }
+      if (tn === "search_patient_clinical_record" || tn === "search_patient_history") {
+        return <ClinicalSearchCard data={pr} />
+      }
+      if (tn === "prescribe_medication") {
+        return <PrescribeMedicationToolCard data={pr} />
+      }
+    }
 
     if (isDocumentArtifactResult(parsedResult)) {
       return <DocumentArtifactCard artifact={parsedResult} />

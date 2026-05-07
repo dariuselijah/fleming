@@ -1,5 +1,5 @@
 export type UploadStatus = "pending" | "processing" | "completed" | "failed"
-export type UploadKind = "pdf" | "pptx" | "docx" | "image" | "text" | "other"
+export type UploadKind = "pdf" | "pptx" | "docx" | "image" | "text" | "video" | "other"
 export type UploadProgressStage =
   | "queued"
   | "uploading"

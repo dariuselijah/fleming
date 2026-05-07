@@ -445,14 +445,13 @@ Copy:
 - `app/components/layout/settings/general/user-role-selection.tsx`
 - `app/components/layout/settings/healthcare/healthcare-settings.tsx`
 - `app/components/layout/settings/healthcare/healthcare-agent-selector.tsx`
-- `app/components/chat/healthcare-agent-integration.tsx`
 
 This preserves:
 
 - Role-based prompt/UX switching
 - Learning mode UX
 - Clinician workflow modes
-- Healthcare settings and agent integration
+- Healthcare settings and agent selection
 
 ## 11) Exact Styling Layer
 

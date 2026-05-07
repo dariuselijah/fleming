@@ -1,14 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUpIcon,
   FileDoc,
   FilePdf,
   FilePpt,
   FileText,
+  FileVideo,
   FolderOpen,
   ImageSquare,
+  Microphone,
   SpinnerGap,
   StopIcon,
   X,
@@ -45,6 +47,21 @@ import { ClinicianWorkflowPanel } from "./clinician-workflow-panel"
 import { ClinicianModeSelector } from "./clinician-mode-selector"
 import { LearningModeSelector } from "./learning-mode-selector"
 import type { FileUploadSummary, FileUploadStatus } from "../chat/use-file-upload"
+import { useCommandBar } from "@/lib/command-bar/use-command-bar"
+import type { SlashCommand } from "@/lib/command-bar/command-registry"
+import { useWorkspaceStore, buildClinicalContext } from "@/lib/clinical-workspace"
+import { useChatDictation } from "@/lib/hooks/use-chat-dictation"
+import { AnimatePresence } from "motion/react"
+import dynamic from "next/dynamic"
+
+const CommandPopover = dynamic(
+  () => import("../workspace/command-popover").then((m) => m.CommandPopover),
+  { ssr: false }
+)
+const CommandChip = dynamic(
+  () => import("../workspace/command-chip").then((m) => m.CommandChip),
+  { ssr: false }
+)
 
 // Fleming 3.5 has been removed - only Fleming 4 is available
 
@@ -113,6 +130,9 @@ export function ChatInput({
 }: ChatInputProps) {
   const { models } = useModel()
   const { preferences } = useUserPreferences()
+  const isDoctor_ = preferences.userRole === "doctor"
+  const isMedicalStudent_ = preferences.userRole === "medical_student"
+  const isClinicalWorkspaceActive_ = isDoctor_
   const [isButtonDisabled, setIsButtonDisabled] = useState(true)
   const [tabsDismissed, setTabsDismissed] = useState(false)
   const [isUploadsPickerOpen, setIsUploadsPickerOpen] = useState(false)
@@ -121,6 +141,129 @@ export function ChatInput({
   const [selectedUploads, setSelectedUploads] = useState<UserUploadListItem[]>([])
   const [selectedUploadIndex, setSelectedUploadIndex] = useState(0)
   const [uploadsLoadedAt, setUploadsLoadedAt] = useState(0)
+  const valueRef = useRef(value)
+  valueRef.current = value
+
+  const dictation = useChatDictation({
+    onAppendText: useCallback(
+      (t: string) => {
+        onValueChange(valueRef.current + t)
+      },
+      [onValueChange]
+    ),
+  })
+
+  useEffect(() => {
+    if (!dictation.error) return
+    toast({ title: dictation.error, status: "error" })
+  }, [dictation.error])
+
+  const activePatientId = useWorkspaceStore((s) => s.activePatientId)
+
+  const handleCommandAction_ = useCallback(
+    (command: SlashCommand, args: string) => {
+      onValueChange("")
+
+      if (command.action === "overlay") {
+        window.dispatchEvent(
+          new CustomEvent("fleming:command", { detail: { command: command.id, args } })
+        )
+        return
+      }
+
+      if (command.id === "upload") {
+        window.dispatchEvent(new CustomEvent("fleming:open-document-selector"))
+        return
+      }
+
+      if (command.id === "sign" || command.id === "submit_claim") {
+        window.dispatchEvent(
+          new CustomEvent("fleming:command", { detail: { command: command.id, args } })
+        )
+        return
+      }
+
+      const store = useWorkspaceStore.getState()
+      const patient = store.openPatients.find(
+        (p) => p.patientId === store.activePatientId
+      )
+      const ctx = buildClinicalContext(
+        store.scribeTranscript,
+        store.scribeEntities,
+        patient,
+        store.scribeEntityStatus
+      )
+      const CTX_BLOCK = ctx ? `\n\n${ctx}` : ""
+      const CONCISE = "Be concise and clinically precise. No preamble. Bullet points preferred. Tag each statement with [T] (from transcript), [E] (from extracted entities), or [H] (from patient history) to indicate its source."
+      const SOAP_FROM_CONSULT =
+        "Be concise and clinically precise. Chart-ready SOAP from the consultation context only. Do not tag lines with [T], [E], or [H]. If something was not discussed, write \"not documented\" rather than guessing."
+      const OPEN_EVIDENCE_STYLE =
+        "OpenEvidence-style: lead with actionable recommendations, then conditional/alternative paths. " +
+        "Cite ONLY with numbered in-text markers [1], [2] matching retrieved evidence — never use [T], [E], or [H]. " +
+        "After the narrative, append a block exactly in this form so the workspace can parse sources:\n" +
+        "=== EVIDENCE SOURCES (N) ===\n[1] Title\nJournal: … | Year: … | URL: …\n…\n=== END ==="
+      const COMMAND_PROMPTS: Record<string, (a: string) => string> = {
+        summary: (a) => a
+          ? `[/summary] Clinical summary focusing on: ${a}. Sections: Presenting Complaint, Exam Findings, Assessment, Plan. ${CONCISE}${CTX_BLOCK}`
+          : `[/summary] Generate a clinical summary for the current consult: Presenting Complaint, Exam Findings, Assessment, Plan. ${CONCISE}${CTX_BLOCK}`,
+        interactions: (a) => a
+          ? `[/interactions] Check drug interactions for: ${a}. List severity, mechanism, recommendation. ${CONCISE}${CTX_BLOCK}`
+          : `[/interactions] Check drug interactions for all current medications. Flag contraindications. ${CONCISE}${CTX_BLOCK}`,
+        evidence: (a) => a
+          ? `[/evidence] Evidence-based answer for: ${a}. ${OPEN_EVIDENCE_STYLE}${CTX_BLOCK}`
+          : `[/evidence] Evidence-based guidelines and literature for this presentation. ${OPEN_EVIDENCE_STYLE}${CTX_BLOCK}`,
+        drug: (a) => a
+          ? `[/drug] Drug info for: ${a}. Include dosing, route, frequency, side effects, interactions. ${CONCISE}${CTX_BLOCK}`
+          : `[/drug] Drug information for current medications: dosing, side effects, interactions. ${CONCISE}${CTX_BLOCK}`,
+        icd: (a) => a
+          ? `[/icd] ICD-10 codes for: ${a}. Code, description, confidence. Primary first. ${CONCISE}${CTX_BLOCK}`
+          : `[/icd] Suggest ICD-10 codes based on the consultation. Code, description, confidence. ${CONCISE}${CTX_BLOCK}`,
+        prescribe: (a) => a
+          ? `[/prescribe] Prescribe: ${a}. Drug, strength, route, frequency, duration, quantity. Check interactions. ${CONCISE}${CTX_BLOCK}`
+          : `[/prescribe] Help prescribe medication. Drug, strength, route, frequency, duration. Check interactions. ${CONCISE}${CTX_BLOCK}`,
+        refer: (a) => a
+          ? `[/refer] Referral letter to: ${a}. Reason, clinical summary, investigations, questions. ${CONCISE}${CTX_BLOCK}`
+          : `[/refer] Generate referral letter. Reason, clinical summary, investigations, specialist questions. ${CONCISE}${CTX_BLOCK}`,
+        soap: (a) => a
+          ? `[/soap] SOAP note focusing on: ${a}. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${SOAP_FROM_CONSULT}${CTX_BLOCK}`
+          : `[/soap] Create a SOAP note from this consultation. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${SOAP_FROM_CONSULT}${CTX_BLOCK}`,
+        vitals: (a) => a
+          ? `[/vitals] Record vitals: ${a}. BP, HR, RR, Temp, SpO2, Weight, Height, BMI. Interpret abnormalities. ${CONCISE}${CTX_BLOCK}`
+          : `[/vitals] Document vital-sign set: BP, HR, RR, Temp, SpO2, Weight, Height, BMI, Pain. Interpret abnormalities. ${CONCISE}${CTX_BLOCK}`,
+        verify: (a) => a
+          ? `[/verify] Verify medical aid eligibility for: ${a}. ${CONCISE}${CTX_BLOCK}`
+          : `[/verify] Verify patient medical aid eligibility. Member status, benefits, pre-auth. ${CONCISE}${CTX_BLOCK}`,
+        claim: (a) => a
+          ? `[/claim] Billing claim: ${a}. ICD-10 codes, tariff codes, line items. ${CONCISE}${CTX_BLOCK}`
+          : `[/claim] Prepare billing claim from consultation. ICD-10, tariffs, line items. ${CONCISE}${CTX_BLOCK}`,
+      }
+
+      const promptFn = COMMAND_PROMPTS[command.id]
+      if (promptFn) {
+        onSuggestion(promptFn(args))
+        return
+      }
+
+      if (command.action === "panel") {
+        window.dispatchEvent(
+          new CustomEvent("fleming:command", { detail: { command: command.id, args } })
+        )
+        return
+      }
+
+      if (command.action === "submit") {
+        const prompt = args ? `[/${command.id}] ${command.label}: ${args}` : `[/${command.id}] ${command.label}`
+        onSuggestion(prompt)
+      }
+    },
+    [onValueChange, onSuggestion]
+  )
+
+  const commandBar = useCommandBar({
+    hasPatient: Boolean(activePatientId),
+    clinicalCopilot: isDoctor_ || isMedicalStudent_,
+    onCommandAction: handleCommandAction_,
+  })
 
   // Migrate old model aliases to the default model id.
   const effectiveModelId = useMemo(() => {
@@ -170,6 +313,7 @@ export function ChatInput({
     if (kind === "docx") return FileDoc
     if (kind === "image") return ImageSquare
     if (kind === "text") return FileText
+    if (kind === "video") return FileVideo
     return FolderOpen
   }, [])
 
@@ -233,6 +377,14 @@ export function ChatInput({
       return
     }
 
+    // Always collapse the scribe when sending so chat flows cleanly below it
+    if (isClinicalWorkspaceActive_) {
+      const ws = useWorkspaceStore.getState()
+      if (!ws.scribeCollapsed) {
+        ws.setScribeCollapsed(true)
+      }
+    }
+
     const hasUploadReferences = selectedUploads.length > 0
     const hasArtifactIntent = artifactIntent !== "none"
     if (hasUploadReferences) {
@@ -282,6 +434,12 @@ export function ChatInput({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Let command bar handle keys first for doctors (popover open OR chip active)
+      if (isDoctor_ && (commandBar.isOpen || commandBar.activeChip)) {
+        const handled = commandBar.handleKeyDown(e, value)
+        if (handled) return
+      }
+
       if (isSlashUploadsMode && isUploadsPickerOpen) {
         if (e.key === "ArrowDown") {
           e.preventDefault()
@@ -415,37 +573,28 @@ export function ChatInput({
     [hasVisionSupport, isUserAuthenticated, onFileUpload]
   )
 
+  // When command is selected from popover, clear the slash text
   useEffect(() => {
-    if (!isSlashUploadsMode) {
+    if (commandBar.activeChip) {
+      onValueChange("")
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commandBar.activeChip])
+
+  // Notify command bar of input changes (for doctors)
+  useEffect(() => {
+    if (isDoctor_) {
+      commandBar.handleInputChange(value)
+    }
+  }, [value, isDoctor_, commandBar.handleInputChange])
+
+  useEffect(() => {
+    if (!isSlashUploadsMode || (isDoctor_ && commandBar.isOpen)) {
       setIsUploadsPickerOpen(false)
       return
     }
     setIsUploadsPickerOpen(true)
-  }, [isSlashUploadsMode])
-
-  useEffect(() => {
-    if (!isUserAuthenticated) return
-    if (uploadResults.length > 0 && Date.now() - uploadsLoadedAt < 60_000) return
-
-    let active = true
-    listUserUploads({
-      allowStale: true,
-      maxAgeMs: 60_000,
-      revalidateInBackground: true,
-    })
-      .then((uploads) => {
-        if (!active) return
-        setUploadResults(uploads)
-        setUploadsLoadedAt(Date.now())
-      })
-      .catch(() => {
-        if (!active) return
-      })
-
-    return () => {
-      active = false
-    }
-  }, [isUserAuthenticated, uploadResults.length, uploadsLoadedAt])
+  }, [isSlashUploadsMode, isDoctor_, commandBar.isOpen])
 
   useEffect(() => {
     if (!isUploadsPickerOpen || !isUserAuthenticated) return
@@ -494,7 +643,9 @@ export function ChatInput({
     // Button should be disabled when:
     // 1. No input and not streaming
     // 2. Submitting (but not streaming)
-    const hasValidInput = value && !isOnlyWhitespace(value);
+    const hasValidInput =
+      (value && !isOnlyWhitespace(value)) ||
+      Boolean(dictation.interimTranscript?.trim());
     const hasAttachedFiles = files.length > 0
     const hasUploadReferences = selectedUploads.length > 0
     const hasArtifactIntent = artifactIntent !== "none"
@@ -503,7 +654,7 @@ export function ChatInput({
     
     const shouldDisable = !isStreaming && ((!hasValidInput && !hasAttachedFiles && !hasUploadReferences && !hasArtifactIntent) || isSubmittingButNotStreaming);
     setIsButtonDisabled(Boolean(shouldDisable));
-  }, [files.length, value, selectedUploads.length, artifactIntent, isSubmitting, status])
+  }, [files.length, value, selectedUploads.length, artifactIntent, isSubmitting, status, dictation.interimTranscript])
 
   // Reset tabs-dismissed when conversation has no messages (e.g. new chat)
   useEffect(() => {
@@ -516,14 +667,16 @@ export function ChatInput({
     guideline: "Ask for a guideline snapshot (e.g., HF GDMT updates)...",
   }
 
-  const isMedicalStudent = preferences.userRole === "medical_student"
-  const isDoctor = preferences.userRole === "doctor"
   const showClinicianWorkflowPanel =
-    isDoctor &&
+    isDoctor_ &&
+    !isClinicalWorkspaceActive_ &&
     !hasMessages &&
     !tabsDismissed &&
     clinicianMode !== "open_search"
   const shouldShowInlineSuggestions = showClinicianWorkflowPanel
+
+  const showDictation =
+    (isDoctor_ || isMedicalStudent_) && dictation.supported && !showClinicianWorkflowPanel
 
   const handleClinicianPanelSubmit = useCallback(
     (prompt: string) => {
@@ -538,13 +691,13 @@ export function ChatInput({
 
   return (
     <div className="relative flex min-w-0 w-full max-w-full flex-col gap-4">
-      {isMedicalStudent && (
+      {isMedicalStudent_ && (
         <LearningModeSelector
           value={learningMode}
           onChange={onLearningModeChange}
         />
       )}
-      {isDoctor && onClinicianModeChange && !hasMessages && !tabsDismissed && (
+      {isDoctor_ && !isClinicalWorkspaceActive_ && onClinicianModeChange && !hasMessages && !tabsDismissed && (
         <div className="-mx-1 bg-background px-1 pt-1 pb-2">
           <ClinicianModeSelector
             value={clinicianMode}
@@ -657,18 +810,48 @@ export function ChatInput({
                 })}
               </div>
             )}
+            {/* Command chip (stays in input when / command selected) */}
+            <AnimatePresence>
+              {isDoctor_ && commandBar.activeChip && (
+                <div className="flex items-center px-3 pt-2">
+                  <CommandChip command={commandBar.activeChip} onRemove={commandBar.clearChip} />
+                </div>
+              )}
+            </AnimatePresence>
+            {dictation.interimTranscript ? (
+              <div className="px-4 pt-1 text-xs italic text-muted-foreground/90">
+                {dictation.interimTranscript}
+              </div>
+            ) : null}
             <PromptInputTextarea
               placeholder={
-                isMedicalStudent
-                  ? placeholderByMode[learningMode]
-                  : isDoctor
-                    ? CLINICIAN_MODE_PLACEHOLDERS[clinicianMode]
-                    : "Ask Fleming anything..."
+                commandBar.activeChip
+                  ? `${commandBar.activeChip.description}...`
+                  : isMedicalStudent_
+                    ? placeholderByMode[learningMode]
+                    : isClinicalWorkspaceActive_
+                      ? "Ask a clinical question or describe the case · Type / for commands"
+                      : isDoctor_
+                        ? CLINICIAN_MODE_PLACEHOLDERS[clinicianMode]
+                        : "Ask Fleming anything..."
               }
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base placeholder:text-muted-foreground placeholder:opacity-80"
+              className={cn(
+                "min-h-[44px] text-base leading-[1.3] sm:text-base md:text-base placeholder:text-muted-foreground placeholder:opacity-80",
+                commandBar.activeChip ? "pt-1.5 pl-4" : "pt-3 pl-4"
+              )}
             />
+            {/* Notion-style command popover for doctors */}
+            <AnimatePresence>
+              {isDoctor_ && commandBar.isOpen && !isUploadsPickerOpen && (
+                <CommandPopover
+                  commands={commandBar.results}
+                  selectedIndex={commandBar.selectedIndex}
+                  onSelect={(cmd) => commandBar.handleSelect(cmd, value)}
+                />
+              )}
+            </AnimatePresence>
             {isUploadsPickerOpen && (
               <div className="absolute right-2 bottom-full left-2 z-30 mb-2 rounded-2xl border border-border/70 bg-background/95 p-2 shadow-lg backdrop-blur-xl">
                 <div className="mb-1 px-2 py-1 text-[11px] font-medium text-muted-foreground">
@@ -746,6 +929,23 @@ export function ChatInput({
                   isUserAuthenticated={isUserAuthenticated}
                   className="h-9 rounded-full"
                 />
+                {showDictation ? (
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant={dictation.isListening ? "default" : "outline"}
+                    className={cn(
+                      "size-9 shrink-0 rounded-full border p-0",
+                      dictation.isListening &&
+                        "border-emerald-500/40 bg-emerald-500/15 text-emerald-400 shadow-[0_0_0_1px_rgba(16,185,129,0.25)]"
+                    )}
+                    onClick={() => dictation.toggle()}
+                    aria-label={dictation.isListening ? "Stop dictation" : "Start dictation"}
+                    aria-pressed={dictation.isListening}
+                  >
+                    <Microphone className={cn("size-4", dictation.isListening && "animate-pulse")} />
+                  </Button>
+                ) : null}
               </div>
               <PromptInputAction tooltip={status === "streaming" ? "Stop" : "Send"}>
                 <Button

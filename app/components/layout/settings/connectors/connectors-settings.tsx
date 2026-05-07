@@ -1,154 +1,108 @@
 "use client"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { CheckIcon, PlusIcon } from "@phosphor-icons/react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { getHealthConnectorCatalog } from "@/lib/health-connectors/catalog"
+import {
+  getConnectorInitials,
+  getConnectorLogoSrc,
+} from "@/lib/health-connectors/branding"
+import type {
+  HealthConnectorAvailability,
+  HealthConnectorCategory,
+  HealthConnectorDefinition,
+} from "@/lib/health-connectors/types"
 import { cn } from "@/lib/utils"
+import { CheckIcon, PlusIcon } from "@phosphor-icons/react"
 import { useMemo, useState } from "react"
 
-type ConnectorItem = {
-  id: string
-  name: string
-  description: string
-  domain: string
-  isFeatured: boolean
-  isAvailable?: boolean
+const CONNECTORS = getHealthConnectorCatalog()
+
+function availabilityBadgeVariant(
+  availability: HealthConnectorAvailability
+): "default" | "secondary" | "outline" {
+  if (availability === "live") return "default"
+  if (availability === "beta") return "secondary"
+  return "outline"
 }
 
-const CONNECTORS: ConnectorItem[] = [
-  {
-    id: "pubmed",
-    name: "PubMed",
-    description: "Search biomedical literature from PubMed",
-    domain: "pubmed.ncbi.nlm.nih.gov",
-    isFeatured: true,
-  },
-  {
-    id: "scholar_gateway",
-    name: "Scholar Gateway",
-    description: "Enhance responses with scholarly research and citations",
-    domain: "scholar.google.com",
-    isFeatured: false,
-  },
-  {
-    id: "clinical_trials",
-    name: "Clinical Trials",
-    description: "Access ClinicalTrials.gov data",
-    domain: "clinicaltrials.gov",
-    isFeatured: false,
-  },
-  {
-    id: "biorxiv",
-    name: "bioRxiv",
-    description: "Access bioRxiv and medRxiv preprint data",
-    domain: "biorxiv.org",
-    isFeatured: false,
-  },
-  {
-    id: "biorender",
-    name: "BioRender",
-    description: "Temporarily unavailable (pending official API support)",
-    domain: "biorender.com",
-    isFeatured: false,
-    isAvailable: false,
-  },
-  {
-    id: "npi_registry",
-    name: "NPI Registry",
-    description: "Access US National Provider Identifier (NPI) Registry",
-    domain: "npiregistry.cms.hhs.gov",
-    isFeatured: false,
-  },
-  {
-    id: "synapse",
-    name: "Synapse.org",
-    description: "Temporarily unavailable (requires Synapse access token)",
-    domain: "synapse.org",
-    isFeatured: false,
-    isAvailable: false,
-  },
-  {
-    id: "cms_coverage",
-    name: "CMS Coverage",
-    description: "Access the CMS Coverage Database",
-    domain: "cms.gov",
-    isFeatured: true,
-  },
-  {
-    id: "chembl",
-    name: "ChEMBL",
-    description: "Access the ChEMBL Database",
-    domain: "ebi.ac.uk",
-    isFeatured: true,
-  },
-  {
-    id: "openfda",
-    name: "OpenFDA",
-    description: "Access FDA datasets for labels, events, and enforcement",
-    domain: "open.fda.gov",
-    isFeatured: true,
-  },
-  {
-    id: "benchling",
-    name: "Benchling",
-    description: "Temporarily unavailable (requires Benchling API credentials)",
-    domain: "benchling.com",
-    isFeatured: false,
-    isAvailable: false,
-  },
-]
+function availabilityLabel(availability: HealthConnectorAvailability): string {
+  if (availability === "live") return "Live"
+  if (availability === "beta") return "Beta"
+  return "Coming soon"
+}
+
+function categoryLabel(category: HealthConnectorCategory): string {
+  if (category === "medical_records") return "Medical records"
+  if (category === "native_mobile") return "Native"
+  if (category === "wearable") return "Wearable"
+  return "Evidence"
+}
 
 type ConnectorCardProps = {
-  connector: ConnectorItem
+  connector: HealthConnectorDefinition
   isEnabled: boolean
   onToggleEnabled: (id: string) => void
 }
 
 function ConnectorCard({ connector, isEnabled, onToggleEnabled }: ConnectorCardProps) {
-  const logoUrl = `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent(
-    `https://${connector.domain}`
-  )}`
-
-  const isAvailable = connector.isAvailable !== false
+  const isComingSoon = connector.availability === "coming_soon"
+  const isEvidenceConnector = connector.category === "evidence"
 
   return (
     <div className="bg-card border-border flex min-h-24 items-center justify-between rounded-xl border px-3 py-2.5">
       <div className="flex min-w-0 items-center gap-3">
         <div className="bg-background border-border flex size-9 shrink-0 items-center justify-center rounded-lg border">
-          <img
-            src={logoUrl}
-            alt={`${connector.name} logo`}
-            className="size-6 rounded-sm object-contain"
-            loading="lazy"
-          />
+          <Avatar className="size-6 rounded-md">
+            <AvatarImage src={getConnectorLogoSrc(connector)} alt={`${connector.name} logo`} />
+            <AvatarFallback className="text-[10px] font-semibold">
+              {getConnectorInitials(connector.name)}
+            </AvatarFallback>
+          </Avatar>
         </div>
         <div className="min-w-0">
           <p className="truncate text-lg font-semibold leading-tight">
             {connector.name}
           </p>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <Badge variant={availabilityBadgeVariant(connector.availability)}>
+              {availabilityLabel(connector.availability)}
+            </Badge>
+            <Badge variant="outline">{categoryLabel(connector.category)}</Badge>
+          </div>
           <p className="text-muted-foreground line-clamp-2 text-sm leading-snug">
             {connector.description}
+            {connector.availability === "coming_soon" && connector.comingSoonReason
+              ? ` ${connector.comingSoonReason}`
+              : ""}
           </p>
         </div>
       </div>
-      <Button
-        type="button"
-        variant={isEnabled ? "secondary" : "outline"}
-        size="icon"
-        className={cn(
-          "h-10 w-10 shrink-0 rounded-lg",
-          isEnabled ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15" : ""
-        )}
-        aria-label={
-          isAvailable
-            ? `${isEnabled ? "Disable" : "Enable"} ${connector.name}`
-            : `${connector.name} unavailable`
-        }
-        onClick={() => onToggleEnabled(connector.id)}
-        disabled={!isAvailable}
-      >
-        {!isAvailable ? "-" : isEnabled ? <CheckIcon className="size-4" /> : <PlusIcon className="size-4" />}
-      </Button>
+      {isComingSoon ? (
+        <Button type="button" variant="outline" size="sm" className="shrink-0" disabled>
+          Soon
+        </Button>
+      ) : isEvidenceConnector ? (
+        <Button
+          type="button"
+          variant={isEnabled ? "secondary" : "outline"}
+          size="icon"
+          className={cn(
+            "h-10 w-10 shrink-0 rounded-lg",
+            isEnabled ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15" : ""
+          )}
+          aria-label={`${isEnabled ? "Disable" : "Enable"} ${connector.name}`}
+          onClick={() => onToggleEnabled(connector.id)}
+        >
+          {isEnabled ? <CheckIcon className="size-4" /> : <PlusIcon className="size-4" />}
+        </Button>
+      ) : (
+        <Button type="button" variant="outline" size="sm" className="shrink-0" disabled>
+          Soon
+        </Button>
+      )}
     </div>
   )
 }
@@ -187,8 +141,8 @@ export function ConnectorsSettings() {
       <div>
         <h3 className="text-3xl font-semibold tracking-tight">Connectors</h3>
         <p className="text-muted-foreground mt-2 max-w-3xl text-base leading-relaxed">
-          Unlock more with AskFleming when you connect with remote and local tools.
-          Choose from AskFleming-reviewed tools.
+          Manage evidence, wearable, and medical-record integrations in one place.
+          Native connectors are marked as coming soon until their mobile bridge is released.
         </p>
       </div>
 

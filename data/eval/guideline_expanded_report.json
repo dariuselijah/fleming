@@ -1,0 +1,1306 @@
+{
+  "createdAt": "2026-04-02T10:13:36.075Z",
+  "queries": [
+    "acute coronary syndrome STEMI management guideline AHA ACC",
+    "NSTEMI risk stratification GRACE score guideline",
+    "hypertension first-line treatment guideline JNC AHA ACC",
+    "resistant hypertension aldosterone antagonist guideline",
+    "hypertensive emergency IV labetalol nicardipine guideline",
+    "heart failure reduced ejection fraction GDMT guideline AHA ACC",
+    "heart failure preserved ejection fraction HFpEF treatment guideline",
+    "atrial fibrillation rate control rhythm control guideline ESC AHA",
+    "atrial fibrillation anticoagulation CHA2DS2-VASc guideline",
+    "venous thromboembolism DVT PE treatment guideline CHEST",
+    "pulmonary embolism risk stratification thrombolysis guideline",
+    "aortic stenosis transcatheter aortic valve replacement TAVR guideline",
+    "stable angina chronic coronary disease management guideline",
+    "peripheral artery disease claudication revascularization guideline",
+    "infective endocarditis prophylaxis treatment guideline AHA",
+    "cardiac arrest ACLS algorithm guideline AHA",
+    "post-cardiac arrest targeted temperature management guideline",
+    "lipid management high-intensity statin guideline ACC AHA",
+    "familial hypercholesterolemia PCSK9 inhibitor guideline",
+    "type 2 diabetes initial treatment metformin guideline ADA",
+    "type 2 diabetes GLP-1 receptor agonist SGLT2 guideline ADA",
+    "diabetic ketoacidosis DKA management insulin guideline",
+    "hypoglycemia management inpatient guideline",
+    "thyroid nodule workup fine-needle aspiration guideline ATA",
+    "hypothyroidism levothyroxine dosing guideline",
+    "Graves disease hyperthyroidism treatment guideline",
+    "adrenal insufficiency glucocorticoid replacement guideline",
+    "osteoporosis bisphosphonate treatment guideline AACE",
+    "community-acquired pneumonia CAP antibiotic guideline IDSA ATS",
+    "hospital-acquired pneumonia ventilator-associated VAP guideline",
+    "COPD exacerbation systemic corticosteroid antibiotic guideline GOLD",
+    "COPD stable management inhaler stepwise guideline GOLD",
+    "asthma stepwise controller treatment adults guideline GINA",
+    "asthma severe biologic therapy omalizumab guideline",
+    "acute respiratory distress syndrome ARDS lung protective ventilation guideline",
+    "sepsis surviving sepsis campaign initial resuscitation guideline",
+    "septic shock vasopressor norepinephrine first-line guideline",
+    "urinary tract infection uncomplicated cystitis antibiotic guideline IDSA",
+    "pyelonephritis complicated UTI inpatient antibiotic guideline",
+    "Clostridioides difficile C diff infection treatment guideline IDSA",
+    "skin soft tissue infection cellulitis abscess guideline IDSA",
+    "bacterial meningitis empiric antibiotic guideline IDSA",
+    "HIV antiretroviral therapy initiation guideline DHHS",
+    "hepatitis C direct-acting antiviral treatment guideline AASLD",
+    "tuberculosis latent TB treatment isoniazid rifampin guideline ATS IDSA",
+    "influenza oseltamivir antiviral treatment guideline",
+    "COVID-19 treatment Paxlovid remdesivir guideline NIH",
+    "malaria prophylaxis treatment guideline CDC",
+    "sexually transmitted infection STI screening treatment guideline CDC",
+    "acute kidney injury AKI management guideline KDIGO",
+    "chronic kidney disease CKD staging management guideline KDIGO",
+    "CKD mineral bone disorder phosphate binder guideline KDIGO",
+    "dialysis initiation hemodialysis peritoneal guideline KDIGO",
+    "kidney transplant immunosuppression guideline KDIGO",
+    "nephrotic syndrome treatment guideline",
+    "acute ischemic stroke thrombolysis alteplase thrombectomy guideline AHA ASA",
+    "intracerebral hemorrhage ICH management blood pressure guideline AHA ASA",
+    "subarachnoid hemorrhage aneurysm management guideline AHA ASA",
+    "transient ischemic attack TIA secondary prevention guideline",
+    "epilepsy seizure first-line antiepileptic guideline AAN",
+    "migraine acute treatment preventive therapy guideline AAN AHS",
+    "Parkinson disease levodopa dopamine agonist guideline AAN",
+    "multiple sclerosis disease-modifying therapy guideline AAN",
+    "Alzheimer disease cholinesterase inhibitor memantine guideline",
+    "status epilepticus benzodiazepine treatment guideline",
+    "non-small cell lung cancer NSCLC treatment guideline NCCN",
+    "small cell lung cancer SCLC treatment guideline NCCN",
+    "breast cancer HER2 positive treatment guideline NCCN ASCO",
+    "breast cancer screening mammography guideline USPSTF",
+    "colorectal cancer screening colonoscopy guideline USPSTF",
+    "colorectal cancer metastatic treatment guideline NCCN",
+    "prostate cancer screening PSA guideline USPSTF AUA",
+    "prostate cancer treatment guideline NCCN AUA",
+    "pancreatic cancer treatment guideline NCCN",
+    "hepatocellular carcinoma HCC treatment guideline AASLD NCCN",
+    "melanoma treatment immunotherapy guideline NCCN",
+    "acute lymphoblastic leukemia ALL treatment guideline NCCN",
+    "chronic myeloid leukemia CML TKI imatinib guideline NCCN",
+    "diffuse large B-cell lymphoma DLBCL treatment guideline NCCN",
+    "multiple myeloma treatment guideline NCCN",
+    "cancer-related pain opioid management guideline NCCN",
+    "febrile neutropenia empiric antibiotic guideline IDSA ASCO",
+    "antiemetic prophylaxis chemotherapy-induced nausea guideline ASCO NCCN",
+    "cervical cancer screening HPV guideline USPSTF ASCCP",
+    "rheumatoid arthritis DMARD biologic treatment guideline ACR",
+    "systemic lupus erythematosus SLE treatment guideline ACR EULAR",
+    "gout acute treatment urate-lowering therapy guideline ACR",
+    "ankylosing spondylitis axial spondyloarthritis treatment guideline",
+    "osteoarthritis knee hip management guideline ACR AAOS",
+    "inflammatory bowel disease Crohn disease treatment guideline AGA ACG",
+    "ulcerative colitis treatment guideline AGA ACG",
+    "irritable bowel syndrome IBS treatment guideline AGA ACG",
+    "gastroesophageal reflux GERD PPI treatment guideline AGA ACG",
+    "peptic ulcer disease H pylori eradication guideline ACG",
+    "acute pancreatitis management guideline AGA ACG",
+    "cirrhosis portal hypertension variceal bleeding guideline AASLD",
+    "nonalcoholic fatty liver disease NAFLD NASH guideline AASLD",
+    "celiac disease diagnosis management guideline AGA ACG",
+    "upper GI bleeding PPI endoscopy guideline",
+    "lower GI bleeding colonoscopy management guideline",
+    "major depressive disorder antidepressant treatment guideline APA",
+    "bipolar disorder lithium mood stabilizer guideline APA",
+    "schizophrenia antipsychotic treatment guideline APA",
+    "generalized anxiety disorder treatment guideline APA",
+    "PTSD post-traumatic stress disorder treatment guideline APA VA",
+    "ADHD attention deficit hyperactivity stimulant treatment guideline AAP",
+    "substance use disorder opioid use naltrexone buprenorphine guideline",
+    "alcohol use disorder pharmacotherapy guideline",
+    "insomnia cognitive behavioral therapy pharmacotherapy guideline",
+    "eating disorder anorexia bulimia treatment guideline",
+    "warfarin INR management bridging guideline",
+    "direct oral anticoagulant DOAC renal dosing guideline",
+    "heparin-induced thrombocytopenia HIT treatment guideline",
+    "perioperative anticoagulation bridging guideline",
+    "iron deficiency anemia treatment oral IV iron guideline",
+    "sickle cell disease hydroxyurea transfusion guideline",
+    "disseminated intravascular coagulation DIC treatment guideline",
+    "perioperative beta-blocker cardiac risk assessment guideline ACC AHA",
+    "preoperative pulmonary assessment guideline",
+    "surgical site infection prevention antibiotic prophylaxis guideline",
+    "postoperative nausea vomiting PONV prevention guideline",
+    "enhanced recovery after surgery ERAS protocol guideline",
+    "pain management multimodal analgesia guideline",
+    "chronic pain opioid prescribing CDC guideline",
+    "neonatal resuscitation NRP guideline AAP AHA",
+    "pediatric asthma treatment guideline",
+    "pediatric obesity management guideline AAP",
+    "childhood immunization schedule guideline CDC ACIP",
+    "prenatal care screening guideline ACOG",
+    "gestational diabetes screening treatment guideline ACOG",
+    "preeclampsia management guideline ACOG",
+    "preterm labor tocolysis corticosteroid guideline ACOG",
+    "postpartum hemorrhage management guideline ACOG",
+    "cervical insufficiency cerclage guideline ACOG",
+    "contraception selection guideline ACOG",
+    "urticaria chronic angioedema guideline",
+    "anaphylaxis epinephrine management guideline",
+    "drug allergy penicillin desensitization guideline",
+    "food allergy management guideline",
+    "glaucoma treatment guideline AAO",
+    "age-related macular degeneration AMD treatment guideline AAO",
+    "diabetic retinopathy screening treatment guideline AAO",
+    "acute otitis media antibiotic guideline AAP",
+    "sinusitis acute bacterial rhinosinusitis guideline IDSA",
+    "obstructive sleep apnea CPAP treatment guideline AASM",
+    "palliative care symptom management guideline",
+    "advance directive goals of care discussion guideline",
+    "falls prevention elderly guideline AGS",
+    "delirium prevention management ICU guideline",
+    "polypharmacy deprescribing older adults guideline AGS",
+    "pressure ulcer prevention treatment guideline",
+    "chronic wound diabetic foot ulcer management guideline",
+    "burn injury initial management guideline",
+    "trauma initial assessment ATLS guideline",
+    "acetaminophen overdose N-acetylcysteine guideline",
+    "acute alcohol withdrawal benzodiazepine guideline",
+    "opioid overdose naloxone guideline",
+    "organophosphate poisoning atropine pralidoxime guideline",
+    "snakebite antivenom management guideline"
+  ],
+  "selectedWaves": [],
+  "region": "US",
+  "totalRecords": 464,
+  "uniqueSources": [
+    "PubMed"
+  ],
+  "qualityGates": {
+    "minResultsPerQuery": 2,
+    "minSourcesPerRun": 2,
+    "failures": [
+      "results_per_query gate failed for 60 query(s): \"NSTEMI risk stratification GRACE score guideline\"(1), \"hypertension first-line treatment guideline JNC AHA ACC\"(0), \"hypertensive emergency IV labetalol nicardipine guideline\"(0), \"atrial fibrillation rate control rhythm control guideline ESC AHA\"(1), \"venous thromboembolism DVT PE treatment guideline CHEST\"(1), \"cardiac arrest ACLS algorithm guideline AHA\"(1), \"familial hypercholesterolemia PCSK9 inhibitor guideline\"(1), \"thyroid nodule workup fine-needle aspiration guideline ATA\"(0), \"COPD stable management inhaler stepwise guideline GOLD\"(0), \"asthma stepwise controller treatment adults guideline GINA\"(1), \"septic shock vasopressor norepinephrine first-line guideline\"(1), \"urinary tract infection uncomplicated cystitis antibiotic guideline IDSA\"(1), \"pyelonephritis complicated UTI inpatient antibiotic guideline\"(0), \"skin soft tissue infection cellulitis abscess guideline IDSA\"(0), \"bacterial meningitis empiric antibiotic guideline IDSA\"(0), \"HIV antiretroviral therapy initiation guideline DHHS\"(1), \"hepatitis C direct-acting antiviral treatment guideline AASLD\"(0), \"tuberculosis latent TB treatment isoniazid rifampin guideline ATS IDSA\"(0), \"COVID-19 treatment Paxlovid remdesivir guideline NIH\"(0), \"malaria prophylaxis treatment guideline CDC\"(0), \"dialysis initiation hemodialysis peritoneal guideline KDIGO\"(0), \"acute ischemic stroke thrombolysis alteplase thrombectomy guideline AHA ASA\"(0), \"intracerebral hemorrhage ICH management blood pressure guideline AHA ASA\"(0), \"subarachnoid hemorrhage aneurysm management guideline AHA ASA\"(1), \"epilepsy seizure first-line antiepileptic guideline AAN\"(1), \"migraine acute treatment preventive therapy guideline AAN AHS\"(0), \"multiple sclerosis disease-modifying therapy guideline AAN\"(1), \"breast cancer HER2 positive treatment guideline NCCN ASCO\"(0), \"prostate cancer screening PSA guideline USPSTF AUA\"(1), \"prostate cancer treatment guideline NCCN AUA\"(1), \"hepatocellular carcinoma HCC treatment guideline AASLD NCCN\"(0), \"chronic myeloid leukemia CML TKI imatinib guideline NCCN\"(0), \"diffuse large B-cell lymphoma DLBCL treatment guideline NCCN\"(1), \"antiemetic prophylaxis chemotherapy-induced nausea guideline ASCO NCCN\"(1), \"systemic lupus erythematosus SLE treatment guideline ACR EULAR\"(0), \"osteoarthritis knee hip management guideline ACR AAOS\"(1), \"inflammatory bowel disease Crohn disease treatment guideline AGA ACG\"(0), \"ulcerative colitis treatment guideline AGA ACG\"(0), \"irritable bowel syndrome IBS treatment guideline AGA ACG\"(0), \"gastroesophageal reflux GERD PPI treatment guideline AGA ACG\"(0), \"peptic ulcer disease H pylori eradication guideline ACG\"(1), \"acute pancreatitis management guideline AGA ACG\"(0), \"cirrhosis portal hypertension variceal bleeding guideline AASLD\"(1), \"celiac disease diagnosis management guideline AGA ACG\"(0), \"bipolar disorder lithium mood stabilizer guideline APA\"(0), \"generalized anxiety disorder treatment guideline APA\"(0), \"PTSD post-traumatic stress disorder treatment guideline APA VA\"(1), \"substance use disorder opioid use naltrexone buprenorphine guideline\"(1), \"perioperative beta-blocker cardiac risk assessment guideline ACC AHA\"(1), \"neonatal resuscitation NRP guideline AAP AHA\"(1), \"childhood immunization schedule guideline CDC ACIP\"(0), \"preterm labor tocolysis corticosteroid guideline ACOG\"(1), \"drug allergy penicillin desensitization guideline\"(1), \"glaucoma treatment guideline AAO\"(1), \"age-related macular degeneration AMD treatment guideline AAO\"(1), \"diabetic retinopathy screening treatment guideline AAO\"(1), \"sinusitis acute bacterial rhinosinusitis guideline IDSA\"(1), \"polypharmacy deprescribing older adults guideline AGS\"(0), \"trauma initial assessment ATLS guideline\"(0), \"organophosphate poisoning atropine pralidoxime guideline\"(0)",
+      "source_diversity gate failed: 1 < 2"
+    ]
+  },
+  "perQueryStats": [
+    {
+      "query": "acute coronary syndrome STEMI management guideline AHA ACC",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "NSTEMI risk stratification GRACE score guideline",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "hypertension first-line treatment guideline JNC AHA ACC",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "resistant hypertension aldosterone antagonist guideline",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "hypertensive emergency IV labetalol nicardipine guideline",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "heart failure reduced ejection fraction GDMT guideline AHA ACC",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "heart failure preserved ejection fraction HFpEF treatment guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "atrial fibrillation rate control rhythm control guideline ESC AHA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "atrial fibrillation anticoagulation CHA2DS2-VASc guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "venous thromboembolism DVT PE treatment guideline CHEST",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "pulmonary embolism risk stratification thrombolysis guideline",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "aortic stenosis transcatheter aortic valve replacement TAVR guideline",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "stable angina chronic coronary disease management guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "peripheral artery disease claudication revascularization guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "infective endocarditis prophylaxis treatment guideline AHA",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "cardiac arrest ACLS algorithm guideline AHA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "post-cardiac arrest targeted temperature management guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "lipid management high-intensity statin guideline ACC AHA",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "familial hypercholesterolemia PCSK9 inhibitor guideline",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "type 2 diabetes initial treatment metformin guideline ADA",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "type 2 diabetes GLP-1 receptor agonist SGLT2 guideline ADA",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "diabetic ketoacidosis DKA management insulin guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "hypoglycemia management inpatient guideline",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "thyroid nodule workup fine-needle aspiration guideline ATA",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "hypothyroidism levothyroxine dosing guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "Graves disease hyperthyroidism treatment guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "adrenal insufficiency glucocorticoid replacement guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "osteoporosis bisphosphonate treatment guideline AACE",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "community-acquired pneumonia CAP antibiotic guideline IDSA ATS",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "hospital-acquired pneumonia ventilator-associated VAP guideline",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "COPD exacerbation systemic corticosteroid antibiotic guideline GOLD",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "COPD stable management inhaler stepwise guideline GOLD",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "asthma stepwise controller treatment adults guideline GINA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "asthma severe biologic therapy omalizumab guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute respiratory distress syndrome ARDS lung protective ventilation guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "sepsis surviving sepsis campaign initial resuscitation guideline",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "septic shock vasopressor norepinephrine first-line guideline",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "urinary tract infection uncomplicated cystitis antibiotic guideline IDSA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "pyelonephritis complicated UTI inpatient antibiotic guideline",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "Clostridioides difficile C diff infection treatment guideline IDSA",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "skin soft tissue infection cellulitis abscess guideline IDSA",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "bacterial meningitis empiric antibiotic guideline IDSA",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "HIV antiretroviral therapy initiation guideline DHHS",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "hepatitis C direct-acting antiviral treatment guideline AASLD",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "tuberculosis latent TB treatment isoniazid rifampin guideline ATS IDSA",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "influenza oseltamivir antiviral treatment guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "COVID-19 treatment Paxlovid remdesivir guideline NIH",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "malaria prophylaxis treatment guideline CDC",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "sexually transmitted infection STI screening treatment guideline CDC",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute kidney injury AKI management guideline KDIGO",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "chronic kidney disease CKD staging management guideline KDIGO",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "CKD mineral bone disorder phosphate binder guideline KDIGO",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "dialysis initiation hemodialysis peritoneal guideline KDIGO",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "kidney transplant immunosuppression guideline KDIGO",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "nephrotic syndrome treatment guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute ischemic stroke thrombolysis alteplase thrombectomy guideline AHA ASA",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "intracerebral hemorrhage ICH management blood pressure guideline AHA ASA",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "subarachnoid hemorrhage aneurysm management guideline AHA ASA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "transient ischemic attack TIA secondary prevention guideline",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "epilepsy seizure first-line antiepileptic guideline AAN",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "migraine acute treatment preventive therapy guideline AAN AHS",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "Parkinson disease levodopa dopamine agonist guideline AAN",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "multiple sclerosis disease-modifying therapy guideline AAN",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "Alzheimer disease cholinesterase inhibitor memantine guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "status epilepticus benzodiazepine treatment guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "non-small cell lung cancer NSCLC treatment guideline NCCN",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "small cell lung cancer SCLC treatment guideline NCCN",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "breast cancer HER2 positive treatment guideline NCCN ASCO",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "breast cancer screening mammography guideline USPSTF",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "colorectal cancer screening colonoscopy guideline USPSTF",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "colorectal cancer metastatic treatment guideline NCCN",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "prostate cancer screening PSA guideline USPSTF AUA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "prostate cancer treatment guideline NCCN AUA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "pancreatic cancer treatment guideline NCCN",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "hepatocellular carcinoma HCC treatment guideline AASLD NCCN",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "melanoma treatment immunotherapy guideline NCCN",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute lymphoblastic leukemia ALL treatment guideline NCCN",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "chronic myeloid leukemia CML TKI imatinib guideline NCCN",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "diffuse large B-cell lymphoma DLBCL treatment guideline NCCN",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "multiple myeloma treatment guideline NCCN",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "cancer-related pain opioid management guideline NCCN",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "febrile neutropenia empiric antibiotic guideline IDSA ASCO",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "antiemetic prophylaxis chemotherapy-induced nausea guideline ASCO NCCN",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "cervical cancer screening HPV guideline USPSTF ASCCP",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "rheumatoid arthritis DMARD biologic treatment guideline ACR",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "systemic lupus erythematosus SLE treatment guideline ACR EULAR",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "gout acute treatment urate-lowering therapy guideline ACR",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "ankylosing spondylitis axial spondyloarthritis treatment guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "osteoarthritis knee hip management guideline ACR AAOS",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "inflammatory bowel disease Crohn disease treatment guideline AGA ACG",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "ulcerative colitis treatment guideline AGA ACG",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "irritable bowel syndrome IBS treatment guideline AGA ACG",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "gastroesophageal reflux GERD PPI treatment guideline AGA ACG",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "peptic ulcer disease H pylori eradication guideline ACG",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute pancreatitis management guideline AGA ACG",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "cirrhosis portal hypertension variceal bleeding guideline AASLD",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "nonalcoholic fatty liver disease NAFLD NASH guideline AASLD",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "celiac disease diagnosis management guideline AGA ACG",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "upper GI bleeding PPI endoscopy guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "lower GI bleeding colonoscopy management guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "major depressive disorder antidepressant treatment guideline APA",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "bipolar disorder lithium mood stabilizer guideline APA",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "schizophrenia antipsychotic treatment guideline APA",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "generalized anxiety disorder treatment guideline APA",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "PTSD post-traumatic stress disorder treatment guideline APA VA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "ADHD attention deficit hyperactivity stimulant treatment guideline AAP",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "substance use disorder opioid use naltrexone buprenorphine guideline",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "alcohol use disorder pharmacotherapy guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "insomnia cognitive behavioral therapy pharmacotherapy guideline",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "eating disorder anorexia bulimia treatment guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "warfarin INR management bridging guideline",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "direct oral anticoagulant DOAC renal dosing guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "heparin-induced thrombocytopenia HIT treatment guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "perioperative anticoagulation bridging guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "iron deficiency anemia treatment oral IV iron guideline",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "sickle cell disease hydroxyurea transfusion guideline",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "disseminated intravascular coagulation DIC treatment guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "perioperative beta-blocker cardiac risk assessment guideline ACC AHA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "preoperative pulmonary assessment guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "surgical site infection prevention antibiotic prophylaxis guideline",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "postoperative nausea vomiting PONV prevention guideline",
+      "count": 7,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "enhanced recovery after surgery ERAS protocol guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "pain management multimodal analgesia guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "chronic pain opioid prescribing CDC guideline",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "neonatal resuscitation NRP guideline AAP AHA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "pediatric asthma treatment guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "pediatric obesity management guideline AAP",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "childhood immunization schedule guideline CDC ACIP",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "prenatal care screening guideline ACOG",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "gestational diabetes screening treatment guideline ACOG",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "preeclampsia management guideline ACOG",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "preterm labor tocolysis corticosteroid guideline ACOG",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "postpartum hemorrhage management guideline ACOG",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "cervical insufficiency cerclage guideline ACOG",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "contraception selection guideline ACOG",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "urticaria chronic angioedema guideline",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "anaphylaxis epinephrine management guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "drug allergy penicillin desensitization guideline",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "food allergy management guideline",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "glaucoma treatment guideline AAO",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "age-related macular degeneration AMD treatment guideline AAO",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "diabetic retinopathy screening treatment guideline AAO",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute otitis media antibiotic guideline AAP",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "sinusitis acute bacterial rhinosinusitis guideline IDSA",
+      "count": 1,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "obstructive sleep apnea CPAP treatment guideline AASM",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "palliative care symptom management guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "advance directive goals of care discussion guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "falls prevention elderly guideline AGS",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "delirium prevention management ICU guideline",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "polypharmacy deprescribing older adults guideline AGS",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "pressure ulcer prevention treatment guideline",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "chronic wound diabetic foot ulcer management guideline",
+      "count": 5,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "burn injury initial management guideline",
+      "count": 8,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "trauma initial assessment ATLS guideline",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "acetaminophen overdose N-acetylcysteine guideline",
+      "count": 4,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "acute alcohol withdrawal benzodiazepine guideline",
+      "count": 2,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "opioid overdose naloxone guideline",
+      "count": 6,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    },
+    {
+      "query": "organophosphate poisoning atropine pralidoxime guideline",
+      "count": 0,
+      "sourcesUsed": []
+    },
+    {
+      "query": "snakebite antivenom management guideline",
+      "count": 3,
+      "sourcesUsed": [
+        "PubMed"
+      ]
+    }
+  ],
+  "bySource": {
+    "PubMed": 464
+  },
+  "sampleRecords": [
+    {
+      "source": "PubMed",
+      "title": "2025 ACC/AHA/ACEP/NAEMSP/SCAI Guideline for the Management of Patients With Acute Coronary Syndromes: A Report of the American College of Cardiology/American Heart Association Joint Committee on Clinical Practice Guidelines.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/40013746/",
+      "date": "2025",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "Contemporary NSTEMI management: the role of the hospitalist.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/31815570/",
+      "date": "2020",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "An update on management of the patient presenting with non-ST-elevation acute coronary syndromes.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/27098650/",
+      "date": "2017",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "2016 ACC/AHA Guideline Focused Update on Duration of Dual Antiplatelet Therapy in Patients With Coronary Artery Disease: A Report of the American College of Cardiology/American Heart Association Task Force on Clinical Practice Guidelines: An Update of the 2011 ACCF/AHA/SCAI Guideline for Percutaneous Coronary Intervention, 2011 ACCF/AHA Guideline for Coronary Artery Bypass Graft Surgery, 2012 ACC/AHA/ACP/AATS/PCNA/SCAI/STS Guideline for the Diagnosis and Management of Patients With Stable Ischemic Heart Disease, 2013 ACCF/AHA Guideline for the Management of ST-Elevation Myocardial Infarction, 2014 AHA/ACC Guideline for the Management of Patients With Non-ST-Elevation Acute Coronary Syndromes, and 2014 ACC/AHA Guideline on Perioperative Cardiovascular Evaluation and Management of Patients Undergoing Noncardiac Surgery.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/27026020/",
+      "date": "2016",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "2014 AHA/ACC Guideline for the Management of Patients with Non-ST-Elevation Acute Coronary Syndromes: a report of the American College of Cardiology/American Heart Association Task Force on Practice Guidelines.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/25260718/",
+      "date": "2015",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "Pharmacoinvasive management of acute coronary syndrome: incorporating the 2007 ACC/AHA guidelines: the CATH (cardiac catheterization and antithrombotic therapy in the hospital) Clinical Consensus Panel Report--III.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/18180524/",
+      "date": "2008",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "Approach to non-ST-segment elevation acute coronary syndrome in the emergency department: risk stratification and treatment strategies.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/20469612/",
+      "date": "2010",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "SFE/SFHTA/AFCE primary aldosteronism consensus: Introduction and handbook.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/27315757/",
+      "date": "2017",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "Resistant hypertension in office practice: a clinical approach.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/21068532/",
+      "date": "2010",
+      "region": "GLOBAL"
+    },
+    {
+      "source": "PubMed",
+      "title": "Guideline-Directed Medical Therapy and Outcomes Among Patients With Heart Failure With Improved Ejection Fraction.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/40738561/",
+      "date": "2025",
+      "region": "GLOBAL"
+    }
+  ]
+}
