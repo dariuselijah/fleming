@@ -7,8 +7,8 @@ import type {
   UploadBatchStatusPayload,
   UploadBatchSummary,
   UploadCollectionSummary,
-} from "@/lib/student-workspace/types"
-import type { UserUploadListItem } from "./types"
+  UserUploadListItem,
+} from "./types"
 import { UserUploadService } from "./server"
 
 const COLLECTION_TABLE = "upload_collections"

@@ -46,7 +46,7 @@ const STEP_ICONS: Record<ChecklistStepId, typeof Stethoscope> = {
 }
 
 const STATUS_RING: Record<StepStatus, string> = {
-  pending: "border-border text-muted-foreground/45 dark:border-white/15 dark:text-white/25",
+  pending: "border-border text-muted-foreground/45 dark:border-border dark:text-muted-foreground/50",
   in_progress: "border-primary/60 text-primary",
   done: "border-emerald-500/60 text-emerald-600 dark:text-emerald-400",
   waiting: "border-amber-400/60 text-amber-600 dark:text-amber-400",
@@ -91,7 +91,7 @@ function ProgressRing({ pct, size = 32 }: { pct: number; size?: number }) {
           strokeWidth={size > 28 ? 2.5 : 2}
           stroke="currentColor"
           fill="none"
-          className="text-muted-foreground/15 dark:text-white/[0.08]"
+          className="text-muted-foreground/15 dark:text-muted-foreground/20"
         />
         <motion.circle
           cx={size / 2}
@@ -107,7 +107,7 @@ function ProgressRing({ pct, size = 32 }: { pct: number; size?: number }) {
           transition={springSoft}
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold tabular-nums text-foreground/80 dark:text-white/80">
+      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold tabular-nums text-foreground/80 dark:text-foreground/80">
         {pct}%
       </span>
     </div>
@@ -130,14 +130,21 @@ export function OnboardingChecklist() {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
-  const done = useMemo(
-    () => steps.filter((s) => s.status === "done" || s.status === "waiting").length,
-    [steps]
+  // Only clinician practice onboarding is relevant here. Steps whose current
+  // UI only simulates persistence stay hidden until their feature is live.
+  const visibleSteps = useMemo(
+    () => (preferences.userRole === "doctor" ? steps.filter((step) => step.id === "profile") : []),
+    [preferences.userRole, steps]
   )
-  const total = steps.length
-  const pct = Math.round((done / total) * 100)
+  const done = useMemo(
+    () => visibleSteps.filter((s) => s.status === "done" || s.status === "waiting").length,
+    [visibleSteps]
+  )
+  const total = visibleSteps.length
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
 
   const hideGuide =
+    preferences.userRole !== "doctor" ||
     Boolean(preferences.practiceProfileCompleted) ||
     Boolean(preferences.practiceSetupGuideDismissed)
 
@@ -183,7 +190,7 @@ export function OnboardingChecklist() {
               {panelOpen ? (
                 <SetupPanelOverlay
                   key="setup-panel"
-                  steps={steps}
+                  steps={visibleSteps}
                   expandedStep={expandedStep}
                   onSelectStep={(id) => setExpandedStep(id)}
                   onClose={() => void dismissSetupGuide()}
@@ -206,19 +213,19 @@ export function OnboardingChecklist() {
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.98 }}
           onClick={() => setMinimized(false)}
-          className="fixed bottom-5 right-5 z-[180] flex items-center gap-2.5 rounded-full border border-border/80 bg-card/95 px-4 py-2.5 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors hover:border-border hover:bg-card dark:border-white/[0.12] dark:bg-[#111]/95 dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.65)] dark:hover:border-white/20 dark:hover:bg-[#161616]/95"
+          className="fixed bottom-5 right-5 z-[180] flex items-center gap-2.5 rounded-full border border-border/80 bg-card/95 px-4 py-2.5 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors hover:border-border hover:bg-card dark:border-border dark:bg-card/95 dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.65)] dark:hover:border-border dark:hover:bg-card/95"
         >
           <ProgressRing pct={pct} size={28} />
-          <span className="text-xs font-medium text-foreground/75 dark:text-white/75">Setup</span>
+          <span className="text-xs font-medium text-foreground/75 dark:text-foreground/75">Setup</span>
         </motion.button>
       ) : (
         <motion.div
           initial={{ opacity: 0, y: 18, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={springSnappy}
-          className="fixed bottom-5 right-5 z-[180] flex w-[min(100vw-2rem,360px)] flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/95 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.2)] backdrop-blur-xl dark:border-white/[0.1] dark:bg-[#0c0c0d]/95 dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)]"
+          className="fixed bottom-5 right-5 z-[180] flex w-[min(100vw-2rem,360px)] flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/95 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.2)] backdrop-blur-xl dark:border-border dark:bg-card/95 dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)]"
         >
-          <div className="flex items-center justify-between border-b border-border/70 px-3.5 py-3 dark:border-white/[0.06]">
+          <div className="flex items-center justify-between border-b border-border/70 px-3.5 py-3 dark:border-border">
             <div className="flex items-center gap-2.5">
               <ProgressRing pct={pct} size={36} />
               <div>
@@ -233,7 +240,7 @@ export function OnboardingChecklist() {
                 type="button"
                 whileTap={{ scale: 0.94 }}
                 onClick={() => openPanel(null)}
-                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/80"
+                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-muted-foreground dark:hover:bg-secondary dark:hover:text-accent-foreground"
                 aria-label="Expand setup"
                 title="Expand"
               >
@@ -243,7 +250,7 @@ export function OnboardingChecklist() {
                 type="button"
                 whileTap={{ scale: 0.94 }}
                 onClick={() => setMinimized(true)}
-                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/35 dark:hover:bg-white/[0.06] dark:hover:text-white/65"
+                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-muted-foreground dark:hover:bg-secondary dark:hover:text-accent-foreground/65"
                 aria-label="Minimize"
               >
                 <CaretDown className="size-4" weight="bold" />
@@ -252,7 +259,7 @@ export function OnboardingChecklist() {
                 type="button"
                 whileTap={{ scale: 0.94 }}
                 onClick={() => void dismissSetupGuide()}
-                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/35 dark:hover:bg-white/[0.06] dark:hover:text-white/65"
+                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-muted-foreground dark:hover:bg-secondary dark:hover:text-accent-foreground/65"
                 aria-label="Close setup"
                 title="Close setup"
               >
@@ -271,7 +278,7 @@ export function OnboardingChecklist() {
               show: { transition: { staggerChildren: 0.04, delayChildren: 0.06 } },
             }}
           >
-            {steps.map((step) => (
+            {visibleSteps.map((step) => (
               <CompactStepRow
                 key={step.id}
                 step={step}
@@ -284,12 +291,12 @@ export function OnboardingChecklist() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2, ...fade }}
-            className="border-t border-border/70 px-3 py-2.5 dark:border-white/[0.05]"
+            className="border-t border-border/70 px-3 py-2.5 dark:border-border"
           >
             <button
               type="button"
               onClick={() => openPanel(null)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-muted/40 py-2 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white/60 dark:hover:border-white/15 dark:hover:bg-white/[0.07] dark:hover:text-white/85"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-muted/40 py-2 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground dark:border-border dark:bg-muted dark:text-muted-foreground/80 dark:hover:border-border dark:hover:bg-accent dark:hover:text-accent-foreground"
             >
               <ArrowsOutSimple className="size-3.5" />
               Open full workspace
@@ -336,15 +343,15 @@ function CompactStepRow({ step, onOpen }: { step: ChecklistStep; onOpen: () => v
             className={cn(
               "text-[12px] font-medium tracking-tight",
               step.status === "done"
-                ? "text-muted-foreground/55 line-through decoration-muted-foreground/25 dark:text-white/38 dark:decoration-white/20"
+                ? "text-muted-foreground/55 line-through decoration-muted-foreground/25 dark:text-muted-foreground dark:decoration-white/20"
                 : "text-foreground"
             )}
           >
             {step.label}
           </p>
-          <p className="truncate text-[10px] text-muted-foreground dark:text-white/28">{step.description}</p>
+          <p className="truncate text-[10px] text-muted-foreground dark:text-muted-foreground/70">{step.description}</p>
         </div>
-        <CaretRight className="size-3.5 shrink-0 text-muted-foreground/60 dark:text-white/20" weight="bold" />
+        <CaretRight className="size-3.5 shrink-0 text-muted-foreground/60 dark:text-muted-foreground/50" weight="bold" />
       </motion.button>
     </motion.li>
   )
@@ -392,11 +399,11 @@ function SetupPanelOverlay({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 20, scale: 0.96 }}
         transition={springSnappy}
-        className="relative flex max-h-[min(92vh,880px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card/95 shadow-[0_32px_80px_-20px_rgba(0,0,0,0.24)] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#0a0a0b]/[0.97] dark:shadow-[0_32px_80px_-20px_rgba(0,0,0,0.85)] sm:flex-row"
+        className="relative flex max-h-[min(92vh,880px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card/95 shadow-[0_32px_80px_-20px_rgba(0,0,0,0.24)] backdrop-blur-2xl dark:border-border dark:bg-card/95 dark:shadow-[0_32px_80px_-20px_rgba(0,0,0,0.85)] sm:flex-row"
         onClick={(e) => e.stopPropagation()}
       >
-        <aside className="flex w-full shrink-0 flex-col border-b border-border/70 sm:w-[min(240px,32%)] sm:border-r sm:border-b-0 dark:border-white/[0.06]">
-          <div className="flex items-center justify-between gap-2 border-b border-border/70 px-4 py-3.5 dark:border-white/[0.06]">
+        <aside className="flex w-full shrink-0 flex-col border-b border-border/70 sm:w-[min(240px,32%)] sm:border-r sm:border-b-0 dark:border-border">
+          <div className="flex items-center justify-between gap-2 border-b border-border/70 px-4 py-3.5 dark:border-border">
             <div className="flex min-w-0 items-center gap-2.5">
               <ProgressRing pct={pct} size={34} />
               <div className="min-w-0">
@@ -412,7 +419,7 @@ function SetupPanelOverlay({
               type="button"
               whileTap={{ scale: 0.92 }}
               onClick={onClose}
-              className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/80"
+              className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground dark:text-muted-foreground dark:hover:bg-secondary dark:hover:text-accent-foreground"
               aria-label="Close panel"
             >
               <X className="size-4" weight="bold" />
@@ -432,8 +439,8 @@ function SetupPanelOverlay({
                   className={cn(
                     "flex shrink-0 items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors sm:w-full",
                     isActive
-                      ? "bg-muted text-foreground dark:bg-white/[0.08] dark:text-white"
-                      : "text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:text-white/45 dark:hover:bg-white/[0.04] dark:hover:text-white/75"
+                      ? "bg-muted text-foreground dark:bg-secondary dark:text-foreground"
+                      : "text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-accent-foreground/75"
                   )}
                 >
                   <div
@@ -469,7 +476,7 @@ function SetupPanelOverlay({
               transition={fade}
               className="flex min-h-0 flex-1 flex-col"
             >
-              <header className="border-b border-border/70 px-5 py-4 sm:px-8 dark:border-white/[0.06]">
+              <header className="border-b border-border/70 px-5 py-4 sm:px-8 dark:border-border">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Step</p>
                 <h3 className="mt-1 text-lg font-semibold tracking-tight text-foreground sm:text-xl">
                   {activeMeta?.label}
@@ -693,7 +700,7 @@ function ServicesStep({ layout }: { layout: "panel" }) {
         <motion.div layout className="space-y-4">
           <motion.div
             layout
-            className="flex cursor-pointer flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-background px-6 py-10 text-center transition-colors hover:border-primary/35 hover:bg-muted/50 dark:border-white/15 dark:bg-white/[0.02] dark:hover:border-white/25 dark:hover:bg-white/[0.04]"
+            className="flex cursor-pointer flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-background px-6 py-10 text-center transition-colors hover:border-primary/35 hover:bg-muted/50 dark:border-border dark:bg-muted/40 dark:hover:border-white/25 dark:hover:bg-muted"
             onClick={() => fileRef.current?.click()}
             whileHover={{ scale: 1.005 }}
             whileTap={{ scale: 0.995 }}
@@ -702,12 +709,12 @@ function ServicesStep({ layout }: { layout: "panel" }) {
               animate={{ y: [0, -3, 0] }}
               transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
             >
-              <Upload className="size-8 text-muted-foreground/45 dark:text-white/25" />
+              <Upload className="size-8 text-muted-foreground/45 dark:text-muted-foreground/50" />
             </motion.div>
             <p className="text-sm text-muted-foreground">
               {file ? file.name : "Excel, CSV, or PDF — click to choose"}
             </p>
-            <p className="max-w-sm text-xs text-muted-foreground/75 dark:text-white/25">We detect columns and map service names, codes, and prices.</p>
+            <p className="max-w-sm text-xs text-muted-foreground/75 dark:text-muted-foreground/50">We detect columns and map service names, codes, and prices.</p>
           </motion.div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" className="hidden" onChange={handleFilePick} />
           <AnimatePresence>
@@ -733,8 +740,8 @@ function ServicesStep({ layout }: { layout: "panel" }) {
         </motion.div>
       ) : (
         <motion.div layout className="space-y-4">
-          <div className="overflow-hidden rounded-xl border border-border dark:border-white/[0.08]">
-            <div className="grid grid-cols-[minmax(0,1fr)_7rem_6rem_2.5rem] gap-0 border-b border-border bg-muted/40 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground sm:grid-cols-[minmax(0,1fr)_8.5rem_7.5rem_2.75rem] sm:px-4 dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-white/35">
+          <div className="overflow-hidden rounded-xl border border-border dark:border-border">
+            <div className="grid grid-cols-[minmax(0,1fr)_7rem_6rem_2.5rem] gap-0 border-b border-border bg-muted/40 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground sm:grid-cols-[minmax(0,1fr)_8.5rem_7.5rem_2.75rem] sm:px-4 dark:border-border dark:bg-muted/50 dark:text-muted-foreground">
               <span>Service</span>
               <span className="hidden sm:inline">Code</span>
               <span className="sm:hidden">Cd</span>
@@ -750,33 +757,33 @@ function ServicesStep({ layout }: { layout: "panel" }) {
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={springSoft}
-                    className="grid grid-cols-[minmax(0,1fr)_7rem_6rem_2.5rem] items-center gap-2 border-b border-border/70 px-3 py-2.5 last:border-0 sm:grid-cols-[minmax(0,1fr)_8.5rem_7.5rem_2.75rem] sm:px-4 dark:border-white/[0.04]"
+                    className="grid grid-cols-[minmax(0,1fr)_7rem_6rem_2.5rem] items-center gap-2 border-b border-border/70 px-3 py-2.5 last:border-0 sm:grid-cols-[minmax(0,1fr)_8.5rem_7.5rem_2.75rem] sm:px-4 dark:border-border"
                   >
                     <input
                       value={row.name}
                       onChange={(e) => updateRow(i, "name", e.target.value)}
                       placeholder="Service name"
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 focus:ring-1 focus:ring-primary/20 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 focus:ring-1 focus:ring-primary/20 dark:border-border dark:bg-muted dark:text-foreground dark:placeholder:text-muted-foreground/50"
                     />
                     <input
                       value={row.code}
                       onChange={(e) => updateRow(i, "code", e.target.value)}
                       placeholder="0190"
-                      className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20"
+                      className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 dark:border-border dark:bg-muted dark:text-foreground dark:placeholder:text-muted-foreground/50"
                     />
                     <div className="relative">
-                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/60 dark:text-white/25">R</span>
+                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/60 dark:text-muted-foreground/50">R</span>
                       <input
                         value={row.price}
                         onChange={(e) => updateRow(i, "price", e.target.value)}
                         placeholder="0"
-                        className="w-full rounded-lg border border-input bg-background py-2 pr-2 pl-7 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20"
+                        className="w-full rounded-lg border border-input bg-background py-2 pr-2 pl-7 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/40 dark:border-border dark:bg-muted dark:text-foreground dark:placeholder:text-muted-foreground/50"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={() => services.length > 1 && setServices((p) => p.filter((_, j) => j !== i))}
-                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground/60 hover:bg-red-500/15 hover:text-red-600 disabled:opacity-20 dark:text-white/25 dark:hover:text-red-300"
+                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground/60 hover:bg-red-500/15 hover:text-red-600 disabled:opacity-20 dark:text-muted-foreground/50 dark:hover:text-red-300"
                       disabled={services.length <= 1}
                       aria-label="Remove row"
                     >
@@ -834,14 +841,14 @@ function PatientMessagingStep({ layout }: { layout: "panel" }) {
       {mode === "connect" ? (
         <div className="space-y-3">
           <Field label="Practice mobile number" value={waNumber} onChange={setWaNumber} placeholder="+27 82 000 0000" comfortable={comfy} />
-          <p className="text-xs text-muted-foreground/75 dark:text-white/25">We send a verification code via Twilio.</p>
+          <p className="text-xs text-muted-foreground/75 dark:text-muted-foreground/50">We send a verification code via Twilio.</p>
         </div>
       ) : (
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={springSoft}
-          className="rounded-2xl border border-border bg-background p-5 dark:border-white/[0.08] dark:bg-white/[0.02]"
+          className="rounded-2xl border border-border bg-background p-5 dark:border-border dark:bg-muted/40"
         >
           <p className="text-sm text-muted-foreground">
             We provision a dedicated number through Twilio and wire it to your practice. Typical setup: about two minutes.
@@ -857,7 +864,7 @@ function PatientMessagingStep({ layout }: { layout: "panel" }) {
               initial={{ opacity: 0, scale: 0.92 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={springSoft}
-              className="rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-white/45"
+              className="rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground dark:border-border dark:bg-muted/50 dark:text-muted-foreground"
             >
               {cap}
             </motion.span>
@@ -1000,7 +1007,7 @@ function LabsStep({ layout }: { layout: "panel" }) {
                 "flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
                 on
                   ? "border-primary/45 bg-primary/[0.07]"
-                  : "border-border bg-background hover:bg-muted/50 dark:border-white/[0.08] dark:bg-white/[0.02] dark:hover:bg-white/[0.04]"
+                  : "border-border bg-background hover:bg-muted/50 dark:border-border dark:bg-muted/40 dark:hover:bg-muted"
               )}
             >
               <div
@@ -1127,7 +1134,7 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={cn(
-          "mt-1.5 w-full rounded-xl border border-input bg-background text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/35 focus:ring-2 focus:ring-primary/15 dark:border-white/[0.1] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20",
+          "mt-1.5 w-full rounded-xl border border-input bg-background text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/35 focus:ring-2 focus:ring-primary/15 dark:border-border dark:bg-muted dark:text-foreground dark:placeholder:text-muted-foreground/50",
           comfortable ? "px-3.5 py-2.5 text-sm" : "px-2.5 py-2 text-[11px]"
         )}
       />
@@ -1155,8 +1162,8 @@ function TabButton({
         "rounded-xl font-medium transition-colors",
         comfortable ? "px-4 py-2 text-sm" : "px-3 py-1.5 text-[10px]",
         active
-          ? "bg-muted text-foreground shadow-sm dark:bg-white/[0.12] dark:text-white"
-          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.05] dark:hover:text-white/70"
+          ? "bg-muted text-foreground shadow-sm dark:bg-secondary dark:text-foreground"
+          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-accent-foreground/70"
       )}
     >
       {children}
@@ -1184,7 +1191,7 @@ function ToggleRow({
       whileHover={{ backgroundColor: "hsl(var(--muted) / 0.55)" }}
       whileTap={{ scale: 0.995 }}
       className={cn(
-        "flex w-full items-center gap-4 rounded-2xl border border-border bg-background text-left transition-colors dark:border-white/[0.07] dark:bg-white/[0.02]",
+        "flex w-full items-center gap-4 rounded-2xl border border-border bg-background text-left transition-colors dark:border-border dark:bg-muted/40",
         comfortable ? "p-4" : "p-2.5"
       )}
     >
@@ -1196,11 +1203,11 @@ function ToggleRow({
         className={cn(
           "relative flex shrink-0 items-center rounded-full transition-colors",
           comfortable ? "h-7 w-[3.25rem] p-0.5" : "h-5 w-9 p-px",
-          enabled ? "bg-primary" : "bg-muted dark:bg-white/10"
+          enabled ? "bg-primary" : "bg-muted dark:bg-secondary"
         )}
       >
         <motion.span
-          className={cn("block rounded-full bg-white shadow-md", comfortable ? "size-6" : "size-4")}
+          className={cn("block rounded-full bg-primary shadow-md", comfortable ? "size-6" : "size-4")}
           initial={false}
           animate={{ x: enabled ? (comfortable ? 24 : 18) : 0 }}
           transition={springSnappy}
@@ -1231,7 +1238,7 @@ function SaveButton({
       whileHover={{ scale: disabled ? 1 : 1.01 }}
       whileTap={{ scale: disabled ? 1 : 0.98 }}
       className={cn(
-        "flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40 dark:bg-white dark:text-zinc-950 dark:hover:bg-white/95",
+        "flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90",
         comfortable ? "py-3 text-sm" : "py-2 text-[11px]"
       )}
     >

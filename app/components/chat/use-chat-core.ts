@@ -1557,6 +1557,69 @@ export function useChatCore({
     }
   }, [messages, chatId, status, hasRenderableAssistantPayload])
   
+  const lastStoredMessagesRef = useRef<string>('')
+
+  const resetTransientChatCoreState = useCallback(
+    (reason: "home" | "new-chat") => {
+      if (status === "submitted" || status === "streaming" || isStreamingRef.current) {
+        stop()
+      }
+
+      setMessages([])
+      setInput("")
+      setFiles([])
+      clearDraft()
+      setIsSubmitting(false)
+      setStreamIntroPreview(null)
+      clearOptimisticTaskBoard()
+      clearEvidenceCitations()
+      setTopicContext(null)
+      pendingHeaderTimelineAnnotationsRef.current = []
+      headerTimelineSequenceRef.current = 0
+      hasSentFirstMessageRef.current = false
+      messagesRef.current = []
+      clearMessagesBeforeNavigation()
+      currentChatIdForSavingRef.current = null
+      lastUsedTempChatIdRef.current = null
+      stableChatIdRef.current = undefined
+      submitSourceRef.current = null
+      submitStartedAtRef.current = null
+      firstByteMeasuredRef.current = false
+      firstTokenMeasuredRef.current = false
+      lastSavedMessageCountRef.current = 0
+      lastStoredMessagesRef.current = ""
+      isStreamingRef.current = false
+
+      if (reason === "new-chat") {
+        prevChatIdRef.current = null
+      }
+    },
+    [
+      clearDraft,
+      clearEvidenceCitations,
+      clearOptimisticTaskBoard,
+      setFiles,
+      setInput,
+      setMessages,
+      setTopicContext,
+      status,
+      stop,
+    ]
+  )
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleResetChatState = () => {
+      resetTransientChatCoreState("new-chat")
+    }
+
+    window.addEventListener("resetChatState", handleResetChatState)
+    return () => {
+      window.removeEventListener("resetChatState", handleResetChatState)
+    }
+  }, [resetTransientChatCoreState])
+
   // CRITICAL: Track if we're streaming and preserve messages during navigation
   useEffect(() => {
     isStreamingRef.current = status === 'streaming' || isSubmitting
@@ -1574,7 +1637,6 @@ export function useChatCore({
   // CRITICAL: Store messages in sessionStorage before navigation to prevent loss
   // This must be AFTER useChat hook so messages is defined
   // DEBOUNCED: Only store when messages actually change, not on every render
-  const lastStoredMessagesRef = useRef<string>('')
   useEffect(() => {
     if (messages.length > 0 && typeof window !== 'undefined') {
       // Serialize messages to check if they actually changed
@@ -1698,11 +1760,7 @@ export function useChatCore({
           sessionStorage.removeItem(key)
         }
       })
-      // Reset streaming state and clear messages
-      isStreamingRef.current = false
-      clearMessagesBeforeNavigation()
-      currentChatIdForSavingRef.current = null
-      lastSavedMessageCountRef.current = 0
+      resetTransientChatCoreState("home")
       // CRITICAL: Reset status if stuck
       if (status !== 'ready' && status !== 'error') {
         // Force reset by clearing messages if status is stuck
@@ -1711,7 +1769,7 @@ export function useChatCore({
         }
       }
     }
-  }, [chatId, status, messages.length, isSubmitting])
+  }, [chatId, status, messages.length, isSubmitting, resetTransientChatCoreState])
 
   // CRITICAL: Update currentChatIdForSavingRef when chatId changes from temp to real
   useEffect(() => {
@@ -1857,9 +1915,9 @@ export function useChatCore({
     }
     
     // 1. NAVIGATING TO HOME: Clear messages only when going to home page
-    if (isNavigatingToHome && currentMessagesLength > 0) {
+    if (isNavigatingToHome) {
       console.log('[🐛 MESSAGE SYNC] Navigating to home, clearing messages')
-      setMessages([])
+      resetTransientChatCoreState("home")
       return
     }
     
@@ -2128,7 +2186,7 @@ export function useChatCore({
       return
     }
     
-  }, [chatId, initialMessages, status, isSubmitting, setMessages, messages, stableChatId]) // Include messages to detect when they're cleared
+  }, [chatId, initialMessages, status, isSubmitting, setMessages, messages, stableChatId, resetTransientChatCoreState]) // Include messages to detect when they're cleared
 
   // Update previous chat ID AFTER synchronization logic runs.
   useEffect(() => {
@@ -2716,12 +2774,17 @@ export function useChatCore({
       const isAuthenticatedNow = !!user?.id
       const userRole = userPreferences.preferences.userRole || "general"
       const isSoapSuggestion = /^\[\/soap\]/i.test(suggestion.trim())
+      const isClinicalArtifactSuggestion = /^\[\/(soap|icd|claim|summary|prescribe|refer|evidence)\]/i.test(
+        suggestion.trim()
+      )
       const effectiveSuggestionEvidence =
-        isSoapSuggestion
+        isClinicalArtifactSuggestion
           ? false
-          : userRole === "doctor" && messageImpliesClinicalEvidence(suggestion)
-            ? true
-            : enableEvidence
+          : isSoapSuggestion
+            ? false
+            : userRole === "doctor" && messageImpliesClinicalEvidence(suggestion)
+              ? true
+              : enableEvidence
 
       if (!isAuthenticatedNow) {
         const pendingMessage = {

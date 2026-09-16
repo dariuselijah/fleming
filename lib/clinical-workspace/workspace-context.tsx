@@ -24,7 +24,6 @@ import type {
   InboxMessage,
   InventoryItem,
   MedicalBlock,
-  OverlayType,
   PatientSession,
   PracticeAppointment,
   PracticeClaim,
@@ -39,6 +38,7 @@ import type {
   SOAPNote,
   VitalReading,
   WorkspaceMode,
+  EncounterAttestation,
 } from "./types"
 import type { PatientRegistrationPrefill } from "@/lib/clinical/smart-import-patient"
 
@@ -50,6 +50,7 @@ interface WorkspaceContextValue {
 
   activeAdminTab: AdminTab
   activeBillingSubTab: BillingSubTab
+  activeBillingQueueFilter: import("./types").BillingQueueFilter
   activeDoctorId: string | null
   practiceProviders: PracticeProvider[]
   practiceHours: PracticeBusinessHour[]
@@ -73,7 +74,6 @@ interface WorkspaceContextValue {
 
   paneVisibility: { timeline: boolean; sidecar: boolean }
   sidecarContent: SidecarPayload | null
-  overlays: Record<OverlayType, boolean>
 
   scribeActive: boolean
   scribeCollapsed: boolean
@@ -86,7 +86,13 @@ interface WorkspaceContextValue {
   documentSheet: DocumentSheetState
   openDocumentSheet: (blockId: string) => void
   openDocumentContent: (doc: ClinicalDocument) => void
-  updateDocumentContent: (content: string, isStreaming: boolean) => void
+  updateDocumentContent: (
+    content: string,
+    isStreaming: boolean,
+    patch?: Pick<ClinicalDocument, "sources" | "prescriptionItems" | "icdItems" | "claimItems"> & {
+      docId?: string
+    }
+  ) => void
   closeDocumentSheet: () => void
   toggleDocumentEditMode: () => void
 
@@ -119,6 +125,7 @@ interface WorkspaceContextValue {
   closePatient: (patientId: string) => void
   setActivePatient: (patientId: string) => void
   setPatientSessionChatId: (patientId: string, chatId: string) => void
+  switchPatientConsultChat: (patientId: string, chatId: string) => void
   setPatientClinicalEncounterId: (patientId: string, encounterId: string) => void
   updatePatientStatus: (patientId: string, status: ConsultStatus) => void
   addPatientChronicCondition: (patientId: string, condition: string) => void
@@ -162,7 +169,7 @@ interface WorkspaceContextValue {
   addVitalReading: (patientId: string, vital: VitalReading) => void
   commitVital: (patientId: string, vitalId: string) => void
   addBlock: (patientId: string, block: MedicalBlock) => void
-  signConsult: (patientId: string) => void
+  signConsult: (patientId: string, attestation: EncounterAttestation) => void
   submitClaim: (patientId: string) => void
   setClaimDraftLines: (patientId: string, lines: ClaimLine[] | null) => void
   dismissClaimPreview: (patientId: string) => void
@@ -176,26 +183,26 @@ interface WorkspaceContextValue {
     clinicalEncounterId?: string
   }) => void
   beginNewVisitForPatient: (patientId: string) => void
+  beginAmendmentForPatient: (patientId: string, reason: string) => void
 
   togglePane: (pane: "timeline" | "sidecar") => void
   setSidecarContent: (content: SidecarPayload | null) => void
   pinToSidecar: (blockId: string) => void
 
-  toggleOverlay: (overlay: OverlayType) => void
-  closeAllOverlays: () => void
   setMode: (mode: WorkspaceMode) => void
 
   setAdminTab: (tab: AdminTab) => void
   setActiveDoctor: (doctorId: string | null) => void
   setBillingSubTab: (tab: BillingSubTab) => void
+  setBillingQueueFilter: (filter: import("./types").BillingQueueFilter) => void
   addClaim: (claim: PracticeClaim) => void
   setClaims: (claims: PracticeClaim[]) => void
   updateClaim: (claimId: string, update: Partial<PracticeClaim>) => void
   updateClaimStatus: (claimId: string, status: PracticeClaim["status"]) => void
-  upsertInventoryItem: (item: InventoryItem) => void
-  deleteInventoryItem: (itemId: string) => void
+  upsertInventoryItem: (item: InventoryItem) => Promise<void>
+  deleteInventoryItem: (itemId: string) => Promise<void>
   decrementInventory: (nappiCode: string, qty?: number) => void
-  bulkImportInventory: (items: InventoryItem[]) => void
+  bulkImportInventory: (items: InventoryItem[]) => Promise<void>
   setCommandBarOpen: (open: boolean) => void
   setSelectedDate: (date: string) => void
   addAppointment: (appointment: PracticeAppointment) => void
@@ -268,6 +275,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       activeAdminTab: store.activeAdminTab,
       activeBillingSubTab: store.activeBillingSubTab,
+      activeBillingQueueFilter: store.activeBillingQueueFilter,
       activeDoctorId: store.activeDoctorId,
       practiceProviders: store.practiceProviders,
       practiceHours: store.practiceHours,
@@ -291,7 +299,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       paneVisibility: store.paneVisibility,
       sidecarContent: store.sidecarContent,
-      overlays: store.overlays,
 
       scribeActive: store.scribeActive,
       scribeCollapsed: store.scribeCollapsed,
@@ -322,6 +329,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       closePatient: store.closePatient,
       setActivePatient: store.setActivePatient,
       setPatientSessionChatId: store.setPatientSessionChatId,
+      switchPatientConsultChat: store.switchPatientConsultChat,
       setPatientClinicalEncounterId: store.setPatientClinicalEncounterId,
       updatePatientStatus: store.updatePatientStatus,
       addPatientChronicCondition: store.addPatientChronicCondition,
@@ -353,18 +361,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setPatientRemoteDraftClaimId: store.setPatientRemoteDraftClaimId,
       resumeMedikreditClaimDraft: store.resumeMedikreditClaimDraft,
       beginNewVisitForPatient: store.beginNewVisitForPatient,
+      beginAmendmentForPatient: store.beginAmendmentForPatient,
 
       togglePane: store.togglePane,
       setSidecarContent: store.setSidecarContent,
       pinToSidecar: store.pinToSidecar,
 
-      toggleOverlay: store.toggleOverlay,
-      closeAllOverlays: store.closeAllOverlays,
       setMode: store.setMode,
 
       setAdminTab: store.setAdminTab,
       setActiveDoctor: store.setActiveDoctor,
       setBillingSubTab: store.setBillingSubTab,
+      setBillingQueueFilter: store.setBillingQueueFilter,
       addClaim: store.addClaim,
       setClaims: store.setClaims,
       updateClaim: store.updateClaim,

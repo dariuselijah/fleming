@@ -41,14 +41,20 @@ export function UserMenu() {
     // fix shadcn/ui / radix bug when dialog into dropdown menu
     <DropdownMenu open={isMenuOpen} onOpenChange={setMenuOpen} modal={false}>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <DropdownMenuTrigger>
-            <Avatar className="bg-background hover:bg-muted">
-              <AvatarImage src={user?.profile_image ?? undefined} />
-              <AvatarFallback>{user?.display_name?.charAt(0)}</AvatarFallback>
-            </Avatar>
-          </DropdownMenuTrigger>
-        </TooltipTrigger>
+        <DropdownMenuTrigger asChild>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Open profile menu"
+              className="rounded-full outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <Avatar className="bg-background hover:bg-muted">
+                <AvatarImage src={user.profile_image ?? undefined} />
+                <AvatarFallback>{user.display_name?.charAt(0)}</AvatarFallback>
+              </Avatar>
+            </button>
+          </TooltipTrigger>
+        </DropdownMenuTrigger>
         <TooltipContent>Profile</TooltipContent>
       </Tooltip>
       <DropdownMenuContent

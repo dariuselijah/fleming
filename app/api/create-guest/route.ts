@@ -1,6 +1,10 @@
 import { createGuestServerClient } from "@/lib/supabase/server-guest"
+import { authorizeDevelopmentRoute } from "@/lib/auth/internal-route"
 
 export async function POST(request: Request) {
+  const denied = authorizeDevelopmentRoute(request)
+  if (denied) return denied
+
   try {
     const { userId } = await request.json()
 

@@ -119,7 +119,7 @@ export function ReferencesSection({
                     )}
                   </div>
                   {citation.isNew && (
-                    <span className="bg-purple-500 text-white rounded px-2 py-0.5 text-xs font-medium ml-auto flex-shrink-0">
+                    <span className="bg-purple-500 text-foreground rounded px-2 py-0.5 text-xs font-medium ml-auto flex-shrink-0">
                       New
                     </span>
                   )}

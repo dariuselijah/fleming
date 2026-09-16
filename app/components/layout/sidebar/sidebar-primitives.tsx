@@ -1,5 +1,6 @@
 "use client"
 
+import { ListRow } from "@/components/ui/list-row"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
 
@@ -25,8 +26,8 @@ export function SidebarSectionLabel({
 }) {
   return (
     <div className={cn("flex items-center justify-between px-2", className)}>
-      <p className="text-[9px] font-medium uppercase tracking-[0.22em] text-white/30">{title}</p>
-      {trailing ? <div className="text-[10px] text-white/40">{trailing}</div> : null}
+      <p className="text-micro font-medium uppercase tracking-[0.18em] text-sidebar-foreground/45">{title}</p>
+      {trailing ? <div className="text-micro text-sidebar-foreground/55">{trailing}</div> : null}
     </div>
   )
 }
@@ -65,14 +66,14 @@ export function SidebarStatRow({
 }) {
   const toneClass =
     tone === "good"
-      ? "text-emerald-400"
+      ? "text-status-success-foreground dark:text-status-success"
       : tone === "warn"
-        ? "text-amber-400"
+        ? "text-status-warning-foreground dark:text-status-warning"
         : tone === "bad"
-          ? "text-rose-400"
+          ? "text-status-danger-foreground dark:text-status-danger"
           : tone === "muted"
-            ? "text-white/40"
-            : "text-white/85"
+            ? "text-sidebar-foreground/45"
+            : "text-sidebar-foreground/85"
   const Component = onClick ? "button" : "div"
   return (
     <Component
@@ -80,14 +81,14 @@ export function SidebarStatRow({
       onClick={onClick}
       className={cn(
         "flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition-colors",
-        onClick && "hover:bg-white/[0.035]"
+        onClick && "hover:bg-sidebar-accent"
       )}
     >
-      <span className="min-w-0 flex-1 truncate text-[11px] text-white/45">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-sidebar-foreground/55">{label}</span>
       <span className={cn("shrink-0 text-[12px] font-semibold tabular-nums", toneClass)}>
         {value}
       </span>
-      {hint ? <span className="shrink-0 text-[9px] text-white/25">{hint}</span> : null}
+      {hint ? <span className="text-micro shrink-0 text-sidebar-foreground/45">{hint}</span> : null}
     </Component>
   )
 }
@@ -114,10 +115,10 @@ export function SidebarLinkRow({
   const className = cn(
     "group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
     active
-      ? "bg-white/[0.05] text-white"
+      ? "bg-sidebar-accent text-sidebar-accent-foreground"
       : tone === "muted"
-        ? "text-white/40 hover:bg-white/[0.03] hover:text-white/70"
-        : "text-white/65 hover:bg-white/[0.03] hover:text-white/95"
+        ? "text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/75"
+        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
   )
   const inner = (
     <>
@@ -129,7 +130,7 @@ export function SidebarLinkRow({
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[12px] font-medium tracking-tight">{label}</span>
         {description ? (
-          <span className="block truncate text-[9px] text-white/30">{description}</span>
+          <span className="text-micro block truncate text-sidebar-foreground/45">{description}</span>
         ) : null}
       </span>
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
@@ -137,15 +138,17 @@ export function SidebarLinkRow({
   )
   if (href) {
     return (
-      <a href={href} className={className}>
-        {inner}
-      </a>
+      <ListRow asChild density="compact" interactive selected={active} className={className}>
+        <a href={href}>{inner}</a>
+      </ListRow>
     )
   }
   return (
-    <button type="button" onClick={onClick} className={className}>
-      {inner}
-    </button>
+    <ListRow asChild density="compact" interactive selected={active} className={className}>
+      <button type="button" onClick={onClick}>
+        {inner}
+      </button>
+    </ListRow>
   )
 }
 
@@ -158,18 +161,18 @@ export function SidebarBadge({
 }) {
   const toneClass =
     tone === "good"
-      ? "bg-emerald-500/15 text-emerald-300"
+      ? "bg-status-success/15 text-status-success-foreground dark:text-status-success"
       : tone === "warn"
-        ? "bg-amber-500/15 text-amber-300"
+        ? "bg-status-warning/15 text-status-warning-foreground dark:text-status-warning"
         : tone === "bad"
-          ? "bg-rose-500/15 text-rose-300"
+          ? "bg-status-danger/15 text-status-danger-foreground dark:text-status-danger"
           : tone === "info"
-            ? "bg-blue-500/15 text-blue-300"
-            : "bg-white/[0.06] text-white/55"
+            ? "bg-status-info/15 text-status-info-foreground dark:text-status-info"
+            : "bg-sidebar-accent text-sidebar-foreground/70"
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[9px] font-bold tabular-nums",
+        "text-micro inline-flex items-center justify-center rounded-full px-1.5 py-0.5 font-bold tabular-nums",
         toneClass
       )}
     >
@@ -194,27 +197,27 @@ export function SidebarHeadline({
 }) {
   const toneClass =
     tone === "good"
-      ? "text-emerald-400"
+      ? "text-status-success-foreground dark:text-status-success"
       : tone === "warn"
-        ? "text-amber-400"
+        ? "text-status-warning-foreground dark:text-status-warning"
         : tone === "bad"
-          ? "text-rose-400"
-          : "text-white"
+          ? "text-status-danger-foreground dark:text-status-danger"
+          : "text-sidebar-foreground"
   return (
     <div className="px-2">
-      <p className="text-[9px] font-medium uppercase tracking-[0.22em] text-white/30">{label}</p>
+      <p className="text-micro font-medium uppercase tracking-[0.18em] text-sidebar-foreground/45">{label}</p>
       <p className={cn("mt-1 text-[20px] font-semibold tracking-tight tabular-nums", toneClass)}>
         {value}
       </p>
-      {delta ? <p className="mt-0.5 text-[10px] text-white/35">{delta}</p> : null}
+      {delta ? <p className="text-micro mt-0.5 text-sidebar-foreground/45">{delta}</p> : null}
     </div>
   )
 }
 
 export function SidebarDivider({ className }: { className?: string }) {
-  return <div className={cn("mx-2 h-px bg-white/[0.05]", className)} />
+  return <div className={cn("mx-2 h-px bg-sidebar-border", className)} />
 }
 
 export function SidebarEmpty({ children }: { children: ReactNode }) {
-  return <p className="px-2 py-2 text-[10.5px] italic text-white/25">{children}</p>
+  return <p className="text-micro px-2 py-2 italic text-sidebar-foreground/45">{children}</p>
 }

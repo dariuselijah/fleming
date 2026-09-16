@@ -18,5 +18,8 @@ export function analyzeAndSplit(lines: ClaimLineInput[]): SplitClaimBatch[] {
       { key: "M", lines: medicines, transactionIdSuffix: "M" },
     ]
   }
-  return [{ key: "P", lines, transactionIdSuffix: "" }]
+  if (medicines.length > 0) {
+    return [{ key: "M", lines: medicines, transactionIdSuffix: "" }]
+  }
+  return [{ key: "P", lines: procedures.length > 0 ? procedures : lines, transactionIdSuffix: "" }]
 }

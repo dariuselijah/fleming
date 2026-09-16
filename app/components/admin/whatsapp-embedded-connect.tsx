@@ -207,7 +207,7 @@ export function WhatsAppEmbeddedConnect({
   return (
     <div className="space-y-3 rounded-xl border border-[#1877F2]/30 bg-[#1877F2]/[0.06] p-3.5">
       <p className="text-[11px] font-semibold text-[#8cb4ff]">Connect WhatsApp Business (Meta)</p>
-      <p className="text-[10px] leading-relaxed text-white/40">
+      <p className="text-[10px] leading-relaxed text-muted-foreground">
         Opens Meta&apos;s Embedded Signup so this practice can create or select a Business Portfolio and
         WhatsApp Business Account (WABA). Fleming then registers the Twilio number against that WABA.
       </p>
@@ -215,10 +215,10 @@ export function WhatsAppEmbeddedConnect({
         type="button"
         onClick={() => launch()}
         disabled={busy || !fbReady}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#1877F2]/40 bg-[#1877F2]/20 px-3 py-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#1877F2]/28 disabled:opacity-45"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#1877F2]/40 bg-[#1877F2]/20 px-3 py-2.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-[#1877F2]/28 disabled:opacity-45"
       >
         {busy || !fbReady ? (
-          <CircleNotch className="size-4 animate-spin text-white/80" />
+          <CircleNotch className="size-4 animate-spin text-foreground/80" />
         ) : null}
         {!fbReady ? "Loading Meta SDK…" : busy ? "Finishing…" : "Continue with Meta"}
       </button>

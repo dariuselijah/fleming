@@ -591,7 +591,7 @@ export function ClinicalDocumentCard({
                 type="button"
                 disabled={!rejectReason.trim()}
                 onClick={handleRejectSubmit}
-                className="rounded-md bg-amber-600/90 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+                className="rounded-md bg-amber-600/90 px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-amber-600 disabled:opacity-40"
               >
                 Reject &amp; revise
               </button>

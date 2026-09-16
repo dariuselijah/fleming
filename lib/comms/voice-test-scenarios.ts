@@ -33,6 +33,9 @@ export type VoiceTestScenario = {
 
 export const DEFAULT_VOICE_TEST_SCENARIO_ID = "voice_channel_smoke"
 
+/** Billing: outbound balance reminder (first line overridden server-side with amount). */
+export const BILLING_VOICE_FOLLOW_UP_SCENARIO_ID = "voice_billing_follow_up"
+
 export const VOICE_TEST_SCENARIOS: VoiceTestScenario[] = [
   {
     id: DEFAULT_VOICE_TEST_SCENARIO_ID,
@@ -141,6 +144,19 @@ export const VOICE_TEST_SCENARIOS: VoiceTestScenario[] = [
       "Hang up after one exchange.",
     ],
     verifyHint: "Short transcript; end-of-call report still stored.",
+  },
+  {
+    id: BILLING_VOICE_FOLLOW_UP_SCENARIO_ID,
+    title: "Billing — balance reminder",
+    shortLabel: "Billing",
+    description: "Outbound call to a patient about an outstanding invoice; opening line is set from invoice amount.",
+    purpose: "billing_follow_up",
+    outboundFirstMessageMode: "assistant-speaks-first",
+    roleplayLines: [
+      "Confirm you received the call about your balance.",
+      "Agree to receive the SMS payment link or ask for clarification.",
+    ],
+    verifyHint: "practice_billing_follow_ups row; voice_calls + Comms thread.",
   },
 ]
 

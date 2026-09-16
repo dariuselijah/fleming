@@ -9,6 +9,9 @@ import { createStitchPaymentLink, refundStitchPayment } from "./providers/stitch
 import { buildCreditNotePdfBytes } from "./pdf/credit-note-pdf"
 import { uploadBillingPdf } from "./storage"
 import type { InvoiceLineSnapshot, PatientSnapshot, PracticeSnapshot } from "./types"
+import { createYocoCheckoutForInvoice } from "./providers/yoco"
+import { createPayfastPaymentForInvoice } from "./providers/payfast"
+import { createPayflexCheckoutForInvoice } from "./providers/payflex"
 
 export async function findPaymentByIdempotency(
   supabase: SupabaseClient<Database>,
@@ -362,6 +365,190 @@ export async function initStitchEft(
   return { paymentUrl: stitch.paymentUrl, paymentId: pay.id }
 }
 
+export async function initYocoCheckout(
+  supabase: SupabaseClient<Database>,
+  opts: {
+    practiceId: string
+    invoiceId: string
+    actorUserId: string | null
+    idempotencyKey: string
+    successUrl: string
+    cancelUrl?: string
+  }
+): Promise<{ checkoutUrl: string; paymentId: string }> {
+  const { data: inv, error } = await supabase
+    .from("practice_invoices")
+    .select("total_cents, amount_paid_cents, currency, invoice_number")
+    .eq("id", opts.invoiceId)
+    .eq("practice_id", opts.practiceId)
+    .maybeSingle()
+  if (error || !inv) throw new Error(error?.message ?? "Invoice not found")
+  const due = (inv.total_cents ?? 0) - (inv.amount_paid_cents ?? 0)
+  if (due <= 0) throw new Error("Nothing to pay")
+
+  const yoco = await createYocoCheckoutForInvoice({
+    amountCents: due,
+    currency: inv.currency ?? "ZAR",
+    invoiceId: opts.invoiceId,
+    practiceId: opts.practiceId,
+    successUrl: opts.successUrl,
+    cancelUrl: opts.cancelUrl,
+  })
+
+  const { data: pay, error: pErr } = await supabase
+    .from("practice_payments")
+    .insert({
+      practice_id: opts.practiceId,
+      invoice_id: opts.invoiceId,
+      provider: "yoco",
+      method: "card",
+      amount_cents: due,
+      currency: inv.currency ?? "ZAR",
+      status: "pending",
+      provider_checkout_id: yoco.checkoutId,
+      idempotency_key: opts.idempotencyKey,
+      received_by_user_id: opts.actorUserId,
+      provider_raw: { checkoutUrl: yoco.checkoutUrl } as unknown as Record<string, unknown>,
+    })
+    .select("id")
+    .single()
+  if (pErr || !pay) throw new Error(pErr?.message ?? "Payment row failed")
+
+  await writeBillingAudit(supabase, {
+    practiceId: opts.practiceId,
+    actorUserId: opts.actorUserId,
+    entityType: "payment",
+    entityId: pay.id,
+    action: "yoco_checkout_created",
+    diff: { checkoutId: yoco.checkoutId },
+  })
+
+  return { checkoutUrl: yoco.checkoutUrl, paymentId: pay.id }
+}
+
+export async function initPayfastCheckout(
+  supabase: SupabaseClient<Database>,
+  opts: {
+    practiceId: string
+    invoiceId: string
+    actorUserId: string | null
+    idempotencyKey: string
+    successUrl: string
+    cancelUrl?: string
+  }
+): Promise<{ checkoutUrl: string; paymentId: string }> {
+  const { data: inv, error } = await supabase
+    .from("practice_invoices")
+    .select("total_cents, amount_paid_cents, currency, invoice_number")
+    .eq("id", opts.invoiceId)
+    .eq("practice_id", opts.practiceId)
+    .maybeSingle()
+  if (error || !inv) throw new Error(error?.message ?? "Invoice not found")
+  const due = (inv.total_cents ?? 0) - (inv.amount_paid_cents ?? 0)
+  if (due <= 0) throw new Error("Nothing to pay")
+
+  const pf = await createPayfastPaymentForInvoice({
+    amountCents: due,
+    currency: inv.currency ?? "ZAR",
+    invoiceId: opts.invoiceId,
+    practiceId: opts.practiceId,
+    successUrl: opts.successUrl,
+    cancelUrl: opts.cancelUrl,
+    itemName: inv.invoice_number,
+  })
+
+  const { data: pay, error: pErr } = await supabase
+    .from("practice_payments")
+    .insert({
+      practice_id: opts.practiceId,
+      invoice_id: opts.invoiceId,
+      provider: "payfast",
+      method: "card",
+      amount_cents: due,
+      currency: inv.currency ?? "ZAR",
+      status: "pending",
+      provider_checkout_id: pf.checkoutId,
+      idempotency_key: opts.idempotencyKey,
+      received_by_user_id: opts.actorUserId,
+      provider_raw: { checkoutUrl: pf.checkoutUrl } as unknown as Record<string, unknown>,
+    })
+    .select("id")
+    .single()
+  if (pErr || !pay) throw new Error(pErr?.message ?? "Payment row failed")
+
+  await writeBillingAudit(supabase, {
+    practiceId: opts.practiceId,
+    actorUserId: opts.actorUserId,
+    entityType: "payment",
+    entityId: pay.id,
+    action: "payfast_checkout_created",
+    diff: { checkoutId: pf.checkoutId },
+  })
+
+  return { checkoutUrl: pf.checkoutUrl, paymentId: pay.id }
+}
+
+export async function initPayflexCheckout(
+  supabase: SupabaseClient<Database>,
+  opts: {
+    practiceId: string
+    invoiceId: string
+    actorUserId: string | null
+    idempotencyKey: string
+    successUrl: string
+    cancelUrl?: string
+  }
+): Promise<{ checkoutUrl: string; paymentId: string }> {
+  const { data: inv, error } = await supabase
+    .from("practice_invoices")
+    .select("total_cents, amount_paid_cents, currency, invoice_number")
+    .eq("id", opts.invoiceId)
+    .eq("practice_id", opts.practiceId)
+    .maybeSingle()
+  if (error || !inv) throw new Error(error?.message ?? "Invoice not found")
+  const due = (inv.total_cents ?? 0) - (inv.amount_paid_cents ?? 0)
+  if (due <= 0) throw new Error("Nothing to pay")
+
+  const px = await createPayflexCheckoutForInvoice({
+    amountCents: due,
+    currency: inv.currency ?? "ZAR",
+    invoiceId: opts.invoiceId,
+    practiceId: opts.practiceId,
+    successUrl: opts.successUrl,
+    cancelUrl: opts.cancelUrl,
+  })
+
+  const { data: pay, error: pErr } = await supabase
+    .from("practice_payments")
+    .insert({
+      practice_id: opts.practiceId,
+      invoice_id: opts.invoiceId,
+      provider: "payflex",
+      method: "card",
+      amount_cents: due,
+      currency: inv.currency ?? "ZAR",
+      status: "pending",
+      provider_checkout_id: px.checkoutId,
+      idempotency_key: opts.idempotencyKey,
+      received_by_user_id: opts.actorUserId,
+      provider_raw: { checkoutUrl: px.checkoutUrl } as unknown as Record<string, unknown>,
+    })
+    .select("id")
+    .single()
+  if (pErr || !pay) throw new Error(pErr?.message ?? "Payment row failed")
+
+  await writeBillingAudit(supabase, {
+    practiceId: opts.practiceId,
+    actorUserId: opts.actorUserId,
+    entityType: "payment",
+    entityId: pay.id,
+    action: "payflex_checkout_created",
+    diff: { checkoutId: px.checkoutId },
+  })
+
+  return { checkoutUrl: px.checkoutUrl, paymentId: pay.id }
+}
+
 /**
  * Mark a pending Polar/Stitch payment succeeded and issue receipt (webhook or redirect confirm).
  */
@@ -391,42 +578,20 @@ export async function finalizePendingPaymentSuccess(
     return { receiptId: existing?.id ?? pay.id }
   }
 
-  const now = new Date().toISOString()
-  const { error: upErr } = await supabase
-    .from("practice_payments")
-    .update({
-      status: "succeeded" as PaymentStatus,
-      provider_order_id: opts.providerOrderId ?? pay.provider_order_id,
-      method: opts.paymentMethod ?? pay.method,
-      succeeded_at: now,
-      updated_at: now,
-    })
-    .eq("id", pay.id)
-  if (upErr) throw new Error(upErr.message)
-
-  const { data: inv, error: iErr } = await supabase
-    .from("practice_invoices")
-    .select("total_cents, amount_paid_cents, status")
-    .eq("id", pay.invoice_id)
-    .maybeSingle()
-  if (iErr || !inv) throw new Error(iErr?.message ?? "Invoice not found")
-
-  const newPaid = (inv.amount_paid_cents ?? 0) + (pay.amount_cents ?? 0)
-  const total = inv.total_cents ?? 0
-  let nextStatus = inv.status as string
-  if (newPaid >= total) nextStatus = "paid"
-  else if (newPaid > 0) nextStatus = "partially_paid"
-
-  const { error: invErr } = await supabase
-    .from("practice_invoices")
-    .update({
-      amount_paid_cents: newPaid,
-      status: nextStatus,
-      paid_at: nextStatus === "paid" ? now : null,
-      updated_at: now,
-    })
-    .eq("id", pay.invoice_id)
-  if (invErr) throw new Error(invErr.message)
+  const db = supabase as unknown as SupabaseClient
+  const { data: finalized, error: finalizeError } = await db.rpc(
+    "finalize_billing_payment_success",
+    {
+      p_practice_id: opts.practiceId,
+      p_payment_id: pay.id,
+      p_provider_order_id: opts.providerOrderId ?? null,
+      p_method: opts.paymentMethod ?? pay.method ?? null,
+    }
+  )
+  if (finalizeError) throw new Error(finalizeError.message)
+  if (!Array.isArray(finalized) || finalized.length === 0) {
+    throw new Error("Payment finalization returned no result")
+  }
 
   await writeBillingAudit(supabase, {
     practiceId: opts.practiceId,

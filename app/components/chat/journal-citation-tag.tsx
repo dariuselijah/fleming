@@ -59,6 +59,8 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
   const [isHovering, setIsHovering] = useState(false)
   const [faviconFailed, setFaviconFailed] = useState(false)
   const anchorRef = useRef<HTMLElement>(null)
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
   if (citations.length === 0) return null
   
@@ -77,9 +79,6 @@ export function JournalCitationTag({ citations, className }: JournalCitationTagP
   const handleClose = () => {
     setIsPopupOpen(false)
   }
-
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const handleMouseEnter = () => {
     setIsHovering(true)

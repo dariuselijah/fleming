@@ -21,9 +21,9 @@ export const DOC_TAB_LABELS: Record<string, string> = {
 
 function statusClasses(status: string, variant: "sidebar" | "sidecar") {
   if (variant === "sidebar") {
-    if (status === "accepted") return "text-[#00E676]"
-    if (status === "rejected") return "text-[#EF5350]"
-    return "text-[#FFC107]"
+    if (status === "accepted") return "text-status-success"
+    if (status === "rejected") return "text-status-danger"
+    return "text-status-warning"
   }
   if (status === "accepted") return "text-emerald-600 dark:text-emerald-400"
   if (status === "rejected") return "text-amber-700 dark:text-amber-400"
@@ -61,7 +61,7 @@ export function SessionDocumentRow({
       className={cn(
         "group flex w-full gap-2.5 rounded-xl border text-left transition-all",
         variant === "sidebar"
-          ? "border-white/[0.08] bg-white/[0.02] px-2 py-1.5 hover:border-indigo-500/30 hover:bg-white/[0.06]"
+          ? "border-border bg-muted/40 px-2 py-1.5 hover:border-indigo-500/30 hover:bg-secondary"
           : "border-border/45 bg-gradient-to-br from-card/90 to-card/40 p-3 shadow-sm hover:border-indigo-500/35 hover:from-card hover:to-card/80"
       )}
     >
@@ -69,7 +69,7 @@ export function SessionDocumentRow({
         className={cn(
           "mt-0.5 flex shrink-0 items-center justify-center rounded-lg border",
           variant === "sidebar"
-            ? "size-6 border-white/[0.08] bg-white/[0.04] text-white/45"
+            ? "size-6 border-border bg-muted text-muted-foreground/65"
             : "size-8 border-border/40 bg-muted/30 text-muted-foreground"
         )}
       >
@@ -98,7 +98,7 @@ export function SessionDocumentRow({
           <p
             className={cn(
               "mt-0.5 text-[10px]",
-              variant === "sidebar" ? "text-white/25" : "text-muted-foreground/70"
+              variant === "sidebar" ? "text-muted-foreground" : "text-muted-foreground/70"
             )}
           >
             {updated}
@@ -108,7 +108,7 @@ export function SessionDocumentRow({
           <p
             className={cn(
               "mt-1 line-clamp-2 text-[10px] leading-relaxed",
-              variant === "sidebar" ? "text-white/35" : "text-muted-foreground"
+              variant === "sidebar" ? "text-muted-foreground" : "text-muted-foreground"
             )}
           >
             {preview}

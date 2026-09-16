@@ -349,7 +349,7 @@ function testUnifiedSourcesWiring() {
   )
   assert.match(
     messageAssistant,
-    /<ReferencesSection citations={sourcesCitations} title="Sources"/,
+    /<ReferencesSection citations={meaningfulSourcesCitations} title="Sources"/,
     "Assistant renderer should show one unified Sources section"
   )
   assert.doesNotMatch(

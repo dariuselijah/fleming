@@ -172,7 +172,7 @@ export function CitationPopup({
                   <span className="font-medium">{citation.journal}</span>
                   {citation.year && `. ${citation.year}`}
                   {citation.isNew && (
-                    <span className="bg-purple-500 text-white rounded px-1.5 py-0.5 text-xs font-medium ml-2">
+                    <span className="bg-purple-500 text-foreground rounded px-1.5 py-0.5 text-xs font-medium ml-2">
                       New
                     </span>
                   )}

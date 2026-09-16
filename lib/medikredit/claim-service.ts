@@ -1,13 +1,27 @@
 import { buildClaimDocument, buildReversalDocument } from "./build-document"
 import { sendMedikreditSoapMaybeDryRun } from "./client"
 import { mergeClaimResponses } from "./claim-response-merger"
-import { analyzeAndSplit } from "./claim-splitter"
-import { resolveOption, resolveOptionByPlanName, resolveSchemeOptionCode } from "./doctor-option-catalog"
+import { analyzeAndSplit, type SplitClaimBatch } from "./claim-splitter"
+import {
+  resolveOption,
+  resolveOptionByOptionCode,
+  resolveOptionByPlanName,
+  resolveSchemeOptionCode,
+} from "./doctor-option-catalog"
 import type { DoctorClaimType, DoctorOption } from "./doctor-option-catalog"
 import { parseClaimXml } from "./parse-response"
 import type { ClaimLineInput, ClaimResponse, ClaimSubmitInput, MedikreditPatientPayload, MedikreditProviderSettings } from "./types"
 
 const CHRONIC_OPTION = "631364"
+
+/** Renumber `lin_num` across split batches so merged ITEM outcomes map to one global sequence (1..N). */
+function assignGlobalLineNumbers(batches: SplitClaimBatch[]): SplitClaimBatch[] {
+  let n = 1
+  return batches.map((batch) => ({
+    ...batch,
+    lines: batch.lines.map((line) => ({ ...line, lineNumber: n++ })),
+  }))
+}
 
 /**
  * Resolve the medical scheme option code for the MEM@scheme_opt attribute.
@@ -31,8 +45,16 @@ function resolveOptionCode(input: ClaimSubmitInput, batchClaimType?: DoctorClaim
  */
 export function resolveClaimDoctorOption(input: ClaimSubmitInput, batchClaimType?: DoctorClaimType): DoctorOption | null {
   const ct = batchClaimType ?? (input.lines.some((l) => l.tp === 1) ? "DD" : "P&C")
+  const explicitOption = resolveOptionByOptionCode(
+    input.medicalSchemeOptionCode ?? input.patient.medicalAidSchemeCode,
+    ct
+  )
+  if (explicitOption) return explicitOption
   if (input.schemeCode?.trim()) {
-    return resolveOption(input.schemeCode.trim(), ct, input.acuteChronic)
+    const byScheme = resolveOption(input.schemeCode.trim(), ct, input.acuteChronic)
+    if (byScheme) return byScheme
+    const byOption = resolveOptionByOptionCode(input.schemeCode.trim(), ct)
+    if (byOption) return byOption
   }
   return resolveOptionByPlanName(input.patient.medicalAidScheme, ct, input.acuteChronic)
 }
@@ -42,7 +64,7 @@ export function resolveClaimDoctorOption(input: ClaimSubmitInput, batchClaimType
  * Multiple batches are separated by XML comments for preview UIs.
  */
 export function buildPreviewClaimXml(input: ClaimSubmitInput): string {
-  const batches = analyzeAndSplit(input.lines)
+  const batches = assignGlobalLineNumbers(analyzeAndSplit(input.lines))
   const parts: string[] = []
   for (const batch of batches) {
     const batchCt: DoctorClaimType = batch.key === "M" ? "DD" : "P&C"
@@ -57,7 +79,7 @@ export function buildPreviewClaimXml(input: ClaimSubmitInput): string {
 }
 
 export async function submitClaim(input: ClaimSubmitInput): Promise<ClaimResponse> {
-  const batches = analyzeAndSplit(input.lines)
+  const batches = assignGlobalLineNumbers(analyzeAndSplit(input.lines))
   const results: ClaimResponse[] = []
 
   for (const batch of batches) {

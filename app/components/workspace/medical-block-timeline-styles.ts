@@ -28,10 +28,10 @@ export const BLOCK_ICONS: Record<MedicalBlockType, ComponentType<Record<string, 
 }
 
 export const BLOCK_COLORS: Record<MedicalBlockType, string> = {
-  LAB: "text-purple-500 bg-purple-500/10",
+  LAB: "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400",
   VITAL: "text-emerald-500 bg-emerald-500/10",
   NOTE: "text-blue-500 bg-blue-500/10",
-  SOAP: "text-indigo-500 bg-indigo-500/10",
+  SOAP: "text-sky-600 bg-sky-500/10 dark:text-sky-400",
   CLAIM: "text-amber-500 bg-amber-500/10",
   BILLING: "text-amber-500 bg-amber-500/10",
   PRESCRIPTION: "text-sky-500 bg-sky-500/10",

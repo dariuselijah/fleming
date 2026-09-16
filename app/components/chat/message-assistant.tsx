@@ -36,6 +36,7 @@ import { detectClinicalCommand } from "@/app/components/clinical-blocks/clinical
 import { ClinicalDocumentCard } from "@/app/components/clinical-blocks/clinical-document-card"
 import { PrescriptionCard } from "@/app/components/clinical-blocks/prescription-card"
 import { detectCommandFromUserMessage, buildClinicalDocument } from "@/lib/clinical-workspace"
+import { findSessionDocumentByType } from "@/lib/clinical-workspace/pending-session-document"
 import { useWorkspaceStore } from "@/lib/clinical-workspace"
 import type { DocumentArtifact, QuizArtifact } from "@/lib/uploads/artifacts"
 import { splitTrailingSourceAppendix } from "./source-appendix"
@@ -587,9 +588,18 @@ export function MessageAssistant({
 
   const documentSheetOpen = useWorkspaceStore((s) => s.documentSheet.isOpen)
   const documentSheetDoc = useWorkspaceStore((s) => s.documentSheet.contentDocument)
+  const workspaceMode = useWorkspaceStore((s) => s.mode)
+  const hideInlineDocumentCard = workspaceMode === "clinical"
 
   const stableClinicalDocumentId = useMemo(() => {
-    if (!documentSheetOpen || !documentSheetDoc || !clinicalDocType) return null
+    if (!clinicalDocType) return null
+    const pid = useWorkspaceStore.getState().activePatientId
+    if (pid) {
+      const patient = useWorkspaceStore.getState().openPatients.find((p) => p.patientId === pid)
+      const pending = findSessionDocumentByType(patient?.sessionDocuments, clinicalDocType)
+      if (pending?.document.isStreaming || pending?.messageId === "pending") return pending.id
+    }
+    if (!documentSheetOpen || !documentSheetDoc) return null
     if (clinicalDocType !== documentSheetDoc.type) return null
     return documentSheetDoc.id
   }, [documentSheetOpen, documentSheetDoc, clinicalDocType])
@@ -612,12 +622,25 @@ export function MessageAssistant({
       },
     )
     const rx = doc.prescriptionItems?.length ?? 0
+    const icd = doc.icdItems?.length ?? 0
+    const claim = doc.claimItems?.length ?? 0
+    const structured = rx + icd + claim
     const bodyLen = doc.content.trim().length
+    const isStructuredDoc =
+      clinicalDocType === "icd" ||
+      clinicalDocType === "claim" ||
+      clinicalDocType === "prescribe"
+
     if (isLastStreaming) {
-      if (bodyLen < 12 && rx === 0) return null
+      if (!isStructuredDoc && bodyLen < 12 && structured === 0) return null
+      if (isStructuredDoc && bodyLen === 0 && structured === 0) return null
       return doc
     }
-    if (bodyLen <= 50 && rx === 0) return null
+    if (isStructuredDoc) {
+      if (structured > 0 || bodyLen > 0) return doc
+      return null
+    }
+    if (bodyLen <= 50 && structured === 0) return null
     return doc
   }, [
     clinicalDocType,
@@ -649,22 +672,30 @@ export function MessageAssistant({
 
   const sessionDocRegisteredRef = useRef<string | null>(null)
   const evidenceDeepDiveSyncedRef = useRef<string | null>(null)
+
+  // Keep session document tab in sync while streaming and after completion.
   useEffect(() => {
-    if (!clinicalDocument || isLastStreaming || !isLast) return
-    const registrationKey = `${messageId}:${clinicalDocument.id}`
-    if (sessionDocRegisteredRef.current === registrationKey) return
-    sessionDocRegisteredRef.current = registrationKey
+    if (!clinicalDocument || !isLast) return
     const pid = useWorkspaceStore.getState().activePatientId
     if (!pid) return
+
+    const docId = stableClinicalDocumentId ?? clinicalDocument.id
+    const registrationKey = `${messageId}:${docId}:${isLastStreaming ? "stream" : "done"}`
+    if (!isLastStreaming && sessionDocRegisteredRef.current === `${messageId}:${docId}:done`) return
+
     upsertSessionDocument(pid, {
-      id: clinicalDocument.id,
+      id: docId,
       messageId,
       status: "draft",
-      document: { ...clinicalDocument, isStreaming: false },
+      document: { ...clinicalDocument, id: docId, isStreaming: !!isLastStreaming },
       updatedAt: new Date().toISOString(),
     })
-    if (clinicalDocument.content?.trim()) {
-      ingestClinicalNoteText(pid, clinicalDocument.content, "Assistant note")
+
+    if (!isLastStreaming) {
+      sessionDocRegisteredRef.current = `${messageId}:${docId}:done`
+      if (clinicalDocument.content?.trim()) {
+        ingestClinicalNoteText(pid, clinicalDocument.content, "Assistant note")
+      }
     }
   }, [
     clinicalDocument,
@@ -672,6 +703,64 @@ export function MessageAssistant({
     isLast,
     isLastStreaming,
     messageId,
+    stableClinicalDocumentId,
+    upsertSessionDocument,
+  ])
+
+  // Finalize session doc when stream ends even if narrative body stayed short (ICD/claim JSON-only).
+  useEffect(() => {
+    if (!clinicalDocType || !isLast) return
+    if (status === "streaming" || status === "submitted") return
+    if (clinicalDocument) return
+
+    const pid = useWorkspaceStore.getState().activePatientId
+    if (!pid || !stableClinicalDocumentId) return
+    const patient = useWorkspaceStore.getState().openPatients.find((p) => p.patientId === pid)
+    const pending = patient?.sessionDocuments?.find((s) => s.id === stableClinicalDocumentId)
+    if (!pending?.document.isStreaming) return
+
+    const raw = contentToRender ?? sanitizedContent ?? ""
+    if (!raw.trim()) {
+      upsertSessionDocument(pid, {
+        ...pending,
+        messageId,
+        document: { ...pending.document, isStreaming: false },
+        updatedAt: new Date().toISOString(),
+      })
+      return
+    }
+
+    const doc = buildClinicalDocument(
+      messageId,
+      clinicalDocType,
+      raw,
+      false,
+      undefined,
+      stableClinicalDocumentId,
+      {
+        sourcesParseInput: sanitizedContent,
+        trailingPmidSources:
+          trailingSourceEntries.length > 0 ? trailingSourceEntries : undefined,
+      }
+    )
+    upsertSessionDocument(pid, {
+      id: stableClinicalDocumentId,
+      messageId,
+      status: "draft",
+      document: { ...doc, id: stableClinicalDocumentId, isStreaming: false },
+      updatedAt: new Date().toISOString(),
+    })
+    sessionDocRegisteredRef.current = `${messageId}:${stableClinicalDocumentId}:done`
+  }, [
+    clinicalDocType,
+    clinicalDocument,
+    contentToRender,
+    isLast,
+    messageId,
+    sanitizedContent,
+    stableClinicalDocumentId,
+    status,
+    trailingSourceEntries,
     upsertSessionDocument,
   ])
 
@@ -1804,6 +1893,7 @@ export function MessageAssistant({
         {learningCard && <LearningCard card={learningCard} />}
 
         {clinicalDocument &&
+        !hideInlineDocumentCard &&
         (clinicalDocument.content.trim().length > 50 ||
           clinicalDocument.isStreaming ||
           (clinicalDocument.type === "prescribe" &&
@@ -1828,6 +1918,12 @@ export function MessageAssistant({
               />
             )}
           </>
+        ) : hideInlineDocumentCard && clinicalDocType && isLast ? (
+          isLastStreaming ? (
+            <p className="px-1 py-1 text-[11px] text-muted-foreground/65">
+              Generating {clinicalDocType === "soap" ? "SOAP note" : clinicalDocType === "summary" ? "summary" : clinicalDocType} — see document tab above
+            </p>
+          ) : null
         ) : contentNullOrEmpty && !hasRenderableActivityTimeline ? (
           isLastStreaming ? (
             <div className="group min-h-scroll-anchor flex w-full max-w-3xl flex-col items-start gap-2 px-6 pb-2">

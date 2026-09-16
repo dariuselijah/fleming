@@ -7,6 +7,7 @@ import { buildInvoicePdfBytes } from "./pdf/invoice-pdf"
 import { uploadBillingPdf } from "./storage"
 import { zarToCents } from "./money"
 import type { BillingMode, InvoiceLineSnapshot, InvoiceStatus, PatientSnapshot, PracticeSnapshot } from "./types"
+import type { ClaimResponse } from "@/lib/medikredit/types"
 import { applyDispenseOnIssue } from "./dispense"
 
 type ClaimLineLike = {
@@ -39,6 +40,18 @@ function linesFromClaimJson(lines: unknown): InvoiceLineSnapshot[] {
     })
   }
   return out
+}
+
+function looksAdjudicated(med: ClaimResponse | null | undefined): boolean {
+  if (!med || typeof med !== "object") return false
+  if (med.txNbr) return true
+  if (Array.isArray(med.itemStatuses) && med.itemStatuses.length > 0) return true
+  return (
+    med.outcome === "approved" ||
+    med.outcome === "partially_approved" ||
+    med.outcome === "rejected" ||
+    med.outcome === "duplicate"
+  )
 }
 
 function sumInvoiceLines(lines: InvoiceLineSnapshot[]): { subtotal: number; vat: number } {
@@ -81,11 +94,12 @@ async function buildPatientSnapshot(
   if (!patientId) return { name: "Patient" }
   const { data } = await supabase
     .from("practice_patients")
-    .select("display_name_hint")
+    .select("display_name_hint, phone_e164")
     .eq("id", patientId)
     .maybeSingle()
   return {
     name: (data?.display_name_hint as string)?.trim() || "Patient",
+    phone: (data?.phone_e164 as string)?.trim() || undefined,
   }
 }
 
@@ -98,19 +112,43 @@ export async function createInvoiceFromClaim(
     actorUserId: string | null
     /** Shortfall-only invoice: single line, this amount in cents */
     shortfallCents?: number
+    /** When set, overrides claim.appointment_id (e.g. API caller knows the visit) */
+    appointmentId?: string | null
+    /**
+     * When true with `billingMode: "scheme_only"`, invoices only explicit cash /
+     * patient-liability rows from the stored claim JSON (dangerous exceptional path).
+     */
+    forceFullClaimInvoice?: boolean
   }
 ): Promise<{ invoiceId: string }> {
+  // Do not select practice_claims.appointment_id here: DBs without migration
+  // `20260425120000_billing_automation_claim_appointment_providers.sql` will error.
   const { data: claim, error: cErr } = await supabase
     .from("practice_claims")
-    .select("id, patient_id, clinical_encounter_id, lines")
+    .select("id, patient_id, clinical_encounter_id, lines, medikredit_response")
     .eq("id", opts.claimId)
     .eq("practice_id", opts.practiceId)
     .maybeSingle()
   if (cErr || !claim) throw new Error(cErr?.message ?? "Claim not found")
 
+  const { data: existingInvoices, error: existingInvoiceError } = await supabase
+    .from("practice_invoices")
+    .select("id, status")
+    .eq("practice_id", opts.practiceId)
+    .eq("claim_id", opts.claimId)
+    .neq("status", "void")
+    .order("created_at", { ascending: true })
+    .limit(1)
+  if (existingInvoiceError) throw new Error(existingInvoiceError.message)
+  if (existingInvoices?.[0]?.id) {
+    return { invoiceId: existingInvoices[0].id }
+  }
+
   let lineItems: InvoiceLineSnapshot[]
   let subtotalCents: number
   let vatCents = 0
+
+  const med = claim.medikredit_response as ClaimResponse | null | undefined
 
   if (opts.shortfallCents != null && opts.shortfallCents > 0) {
     lineItems = [
@@ -121,6 +159,32 @@ export async function createInvoiceFromClaim(
       },
     ]
     subtotalCents = opts.shortfallCents
+  } else if (opts.billingMode === "scheme_only") {
+    if (opts.forceFullClaimInvoice) {
+      const allParsed = linesFromClaimJson(claim.lines)
+      lineItems = allParsed.filter(
+        (l) => l.lineType === "cash" || l.lineType === "patient_liability" || !l.lineType
+      )
+      if (lineItems.length === 0) {
+        throw new Error("No explicit cash/patient-liability lines on claim for override invoice.")
+      }
+      const sums = sumInvoiceLines(lineItems)
+      subtotalCents = sums.subtotal
+      vatCents = sums.vat
+    } else if (!looksAdjudicated(med ?? null)) {
+      throw new Error("Medical-aid claims must be adjudicated before creating an invoice.")
+    } else if (typeof med?.patientResponsibility === "number" && med.patientResponsibility > 0) {
+      subtotalCents = zarToCents(med.patientResponsibility)
+      lineItems = [
+        {
+          id: `sf-${opts.claimId}`,
+          description: "Patient responsibility (scheme shortfall)",
+          amountCents: subtotalCents,
+        },
+      ]
+    } else {
+      throw new Error("No patient invoice required — scheme response shows no liability.")
+    }
   } else {
     lineItems = linesFromClaimJson(claim.lines)
     const onlyCash = lineItems.filter(
@@ -140,29 +204,44 @@ export async function createInvoiceFromClaim(
   const practiceSnap = await buildPracticeSnapshot(supabase, opts.practiceId)
   const patientSnap = await buildPatientSnapshot(supabase, claim.patient_id)
 
+  const appointmentId = opts.appointmentId?.trim() || null
+
   const invoiceNumber = await allocateBillingNumber(supabase, opts.practiceId, "invoice")
 
-  const { data: ins, error: insErr } = await supabase
-    .from("practice_invoices")
-    .insert({
-      practice_id: opts.practiceId,
-      patient_id: claim.patient_id,
-      claim_id: opts.claimId,
-      clinical_encounter_id: claim.clinical_encounter_id,
-      invoice_number: invoiceNumber,
-      subtotal_cents: subtotalCents,
-      vat_cents: vatCents,
-      total_cents: subtotalCents + vatCents,
-      amount_paid_cents: 0,
-      billing_mode: opts.billingMode,
-      status: "draft" as InvoiceStatus,
-      practice_snapshot: practiceSnap as unknown as Record<string, unknown>,
-      patient_snapshot: patientSnap as unknown as Record<string, unknown>,
-      line_items: lineItems as unknown as Record<string, unknown>[],
-    })
-    .select("id")
-    .single()
+  const baseInsert = {
+    practice_id: opts.practiceId,
+    patient_id: claim.patient_id,
+    claim_id: opts.claimId,
+    clinical_encounter_id: claim.clinical_encounter_id,
+    invoice_number: invoiceNumber,
+    subtotal_cents: subtotalCents,
+    vat_cents: vatCents,
+    total_cents: subtotalCents + vatCents,
+    amount_paid_cents: 0,
+    billing_mode: opts.billingMode,
+    status: "draft" as InvoiceStatus,
+    practice_snapshot: practiceSnap as unknown as Record<string, unknown>,
+    patient_snapshot: patientSnap as unknown as Record<string, unknown>,
+    line_items: lineItems as unknown as Record<string, unknown>[],
+  }
 
+  const tryInsert = async (row: typeof baseInsert & { appointment_id?: string | null }) => {
+    return supabase.from("practice_invoices").insert(row).select("id").single()
+  }
+
+  let first = appointmentId
+    ? await tryInsert({ ...baseInsert, appointment_id: appointmentId })
+    : await tryInsert(baseInsert)
+
+  if (first.error && /appointment_id/i.test(first.error.message ?? "")) {
+    console.warn(
+      "[billing] Invoice insert failed on appointment_id; apply migration 20260425120000_billing_automation_claim_appointment_providers.sql. Retrying without appointment_id."
+    )
+    first = await tryInsert(baseInsert)
+  }
+
+  const ins = first.data
+  const insErr = first.error
   if (insErr || !ins) throw new Error(insErr?.message ?? "Insert invoice failed")
 
   await writeBillingAudit(supabase, {

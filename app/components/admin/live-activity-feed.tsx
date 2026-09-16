@@ -40,7 +40,7 @@ function relTime(ts: number): string {
 function notifIcon(n: AdminNotification): { icon: PhosphorIcon; color: string } {
   switch (n.type) {
     case "lab_result":
-      return { icon: Flask, color: "text-[#FFC107]" }
+      return { icon: Flask, color: "text-status-warning" }
     case "claim_status":
     case "payment_received":
     case "payment_overdue":
@@ -51,9 +51,9 @@ function notifIcon(n: AdminNotification): { icon: PhosphorIcon; color: string } 
     case "patient_message":
       return { icon: ChatText, color: "text-green-400" }
     case "stock_low":
-      return { icon: Package, color: "text-[#FFC107]" }
+      return { icon: Package, color: "text-status-warning" }
     default:
-      return { icon: Bell, color: "text-white/40" }
+      return { icon: Bell, color: "text-muted-foreground" }
   }
 }
 
@@ -92,7 +92,7 @@ export function LiveActivityFeed() {
             if (n.actionRoute.tab === "billing" && n.actionRoute.entityId) {
               requestBillingFocusClaim(n.actionRoute.entityId)
             }
-            if (n.actionRoute.tab === "inbox") {
+            if (n.actionRoute.tab === "front_desk") {
               requestInboxScrollTo("messages")
             }
           } else {
@@ -110,7 +110,7 @@ export function LiveActivityFeed() {
           at,
           description: `Lab queue: ${m.from} — ${m.preview.slice(0, 80)}${m.preview.length > 80 ? "…" : ""}`,
           icon: Flask,
-          iconColor: "text-[#FFC107]",
+          iconColor: "text-status-warning",
           onClick: () => requestInboxScrollTo("labs"),
         })
       } else if (m.channel === "rcs" || m.channel === "sms" || m.channel === "voice" || m.channel === "portal") {
@@ -132,7 +132,7 @@ export function LiveActivityFeed() {
         at,
         description: `Patient registered: ${p.name}`,
         icon: UserPlus,
-        iconColor: "text-[#00E676]",
+        iconColor: "text-status-success",
         onClick: () => {
           setMode("admin")
           setAdminTab("patients")
@@ -184,7 +184,7 @@ export function LiveActivityFeed() {
         at,
         description: `Flow · ${f.patientName}: ${f.status.replace(/_/g, " ")}`,
         icon: Warning,
-        iconColor: "text-[#FFC107]",
+        iconColor: "text-status-warning",
         onClick: () => {
           setMode("admin")
           setAdminTab("patients")
@@ -212,30 +212,30 @@ export function LiveActivityFeed() {
     <BentoTile
       title="Recent activity"
       subtitle="Live from notifications, inbox, patients, schedule & billing"
-      icon={<Clock className="size-4 text-white/30" />}
+      icon={<Clock className="size-4 text-muted-foreground" />}
     >
       {rows.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-6">
-          <Bell className="size-8 text-white/10" />
-          <p className="text-[11px] text-white/25">No activity yet</p>
-          <p className="max-w-xs text-center text-[10px] text-white/15">
+          <Bell className="size-8 text-muted-foreground" />
+          <p className="text-[11px] text-muted-foreground">No activity yet</p>
+          <p className="max-w-xs text-center text-[10px] text-muted-foreground">
             Smart Import, scheduling, claims, and WhatsApp will populate this timeline. Rows are clickable.
           </p>
         </div>
       ) : (
         <div className="relative space-y-0">
-          <div className="absolute bottom-2 left-[11px] top-2 w-px bg-white/[0.06]" />
+          <div className="absolute bottom-2 left-[11px] top-2 w-px bg-secondary" />
           {rows.map((event) => {
             const EIcon = event.icon
             const clickable = Boolean(event.onClick)
             const Inner = (
               <>
-                <div className="relative z-10 flex size-[22px] shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-[#0c0c0e]">
+                <div className="relative z-10 flex size-[22px] shrink-0 items-center justify-center rounded-full border border-panel-border bg-panel">
                   <EIcon className={cn("size-3", event.iconColor)} weight="fill" />
                 </div>
                 <div className="flex min-w-0 flex-1 items-baseline justify-between gap-3 pt-0.5">
-                  <p className="text-[11px] leading-snug text-white/60">{event.description}</p>
-                  <span className="shrink-0 text-[9px] text-white/20">{relTime(event.at)}</span>
+                  <p className="text-[11px] leading-snug text-muted-foreground/80">{event.description}</p>
+                  <span className="shrink-0 text-[9px] text-muted-foreground">{relTime(event.at)}</span>
                 </div>
               </>
             )
@@ -244,7 +244,7 @@ export function LiveActivityFeed() {
                 key={event.id}
                 type="button"
                 onClick={event.onClick}
-                className="relative flex w-full items-start gap-3 rounded-lg py-1.5 text-left transition-colors hover:bg-white/[0.03]"
+                className="relative flex w-full items-start gap-3 rounded-lg py-1.5 text-left transition-colors hover:bg-panel-muted"
               >
                 {Inner}
               </button>

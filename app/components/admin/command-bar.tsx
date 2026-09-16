@@ -30,8 +30,6 @@ export function CommandBar() {
     setMode,
     setAdminTab,
     openPatient,
-    toggleOverlay,
-    openPatients,
     practiceProviders,
     patients,
     setActiveDoctor,
@@ -61,7 +59,7 @@ export function CommandBar() {
         icon: Scan,
         action: () => {
           setMode("admin")
-          setAdminTab("inbox")
+          setAdminTab("front_desk")
           requestInboxScrollTo("smart-import")
           close()
         },
@@ -206,18 +204,18 @@ export function CommandBar() {
         transition={{ type: "spring", stiffness: 500, damping: 35 }}
         className="fixed inset-x-0 top-[15%] z-[101] mx-auto w-full max-w-xl"
       >
-        <div className="overflow-hidden rounded-2xl border border-white/[0.1] bg-[#0a0a0a] shadow-2xl">
-          <div className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3">
-            <MagnifyingGlass className="size-4 shrink-0 text-white/30" />
+        <div className="overflow-hidden rounded-2xl border border-panel-border bg-panel shadow-2xl">
+          <div className="flex items-center gap-3 border-b border-panel-border px-4 py-3">
+            <MagnifyingGlass className="size-4 shrink-0 text-muted-foreground" />
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Search patients, bill @MichaelChen, or type /cmd..."
-              className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/25"
+              className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/50"
             />
-            <kbd className="flex items-center gap-0.5 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-white/30">
+            <kbd className="flex items-center gap-0.5 rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
               <Command className="size-2.5" />K
             </kbd>
           </div>
@@ -225,18 +223,18 @@ export function CommandBar() {
           <div ref={listRef} className="max-h-[320px] overflow-y-auto py-1" style={{ scrollbarWidth: "none" }}>
             {filtered.length === 0 ? (
               <div className="py-3">
-                <p className="px-4 py-2 text-center text-[12px] text-white/25">No results for &ldquo;{query}&rdquo;</p>
-                <div className="mt-1 border-t border-white/[0.04] pt-2">
-                  <p className="px-4 pb-1 text-[10px] font-medium uppercase tracking-wider text-white/20">Quick Actions</p>
+                <p className="px-4 py-2 text-center text-[12px] text-muted-foreground">No results for &ldquo;{query}&rdquo;</p>
+                <div className="mt-1 border-t border-panel-border pt-2">
+                  <p className="px-4 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Quick Actions</p>
                   <button
                     type="button"
                     onClick={() => { setMode("admin"); setAdminTab("patients"); close() }}
-                    className="flex w-full items-center gap-3 px-4 py-2 text-left text-white/60 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    className="flex w-full items-center gap-3 px-4 py-2 text-left text-muted-foreground/80 transition-colors hover:bg-secondary hover:text-accent-foreground"
                   >
-                    <UserPlus className="size-4 shrink-0 text-[#00E676]" />
+                    <UserPlus className="size-4 shrink-0 text-status-success" />
                     <div className="min-w-0 flex-1">
                       <span className="text-[12px] font-medium">Register &ldquo;{query}&rdquo; as New Patient</span>
-                      <span className="ml-2 text-[11px] text-white/30">Open patient directory</span>
+                      <span className="ml-2 text-[11px] text-muted-foreground">Open patient directory</span>
                     </div>
                   </button>
                 </div>
@@ -244,7 +242,7 @@ export function CommandBar() {
             ) : (
               sections.map(([section, items]) => (
                 <div key={section}>
-                  <p className="px-4 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-white/20">
+                  <p className="px-4 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                     {section}
                   </p>
                   {items.map((item) => {
@@ -258,15 +256,15 @@ export function CommandBar() {
                         className={cn(
                           "flex w-full items-center gap-3 px-4 py-2 text-left transition-colors",
                           idx === selectedIdx
-                            ? "bg-white/[0.06] text-white"
-                            : "text-white/60 hover:bg-white/[0.03]"
+                            ? "bg-secondary text-foreground"
+                            : "text-muted-foreground/80 hover:bg-panel-muted"
                         )}
                       >
                         <item.icon className="size-4 shrink-0" weight={idx === selectedIdx ? "fill" : "regular"} />
                         <div className="min-w-0 flex-1">
                           <span className="text-[12px] font-medium">{item.label}</span>
                           {item.description && (
-                            <span className="ml-2 text-[11px] text-white/30">{item.description}</span>
+                            <span className="ml-2 text-[11px] text-muted-foreground">{item.description}</span>
                           )}
                         </div>
                       </button>

@@ -65,6 +65,11 @@ function PatientProfileCard() {
     paneVisibility,
     togglePane,
   } = useWorkspace()
+  const openAiExtraction = useCallback(() => {
+    if (!paneVisibility.sidecar) togglePane("sidecar")
+    setSidecarContent({ tab: "intelligence" })
+  }, [paneVisibility.sidecar, setSidecarContent, togglePane])
+
   if (!activePatient) return null
 
   /** EHR allergies/chronic live in the main sidebar only; scribe-only here. */
@@ -87,11 +92,6 @@ function PatientProfileCard() {
     transcriptAllergies.length +
     transcriptDiagnoses.length
 
-  const openAiExtraction = useCallback(() => {
-    if (!paneVisibility.sidecar) togglePane("sidecar")
-    setSidecarContent({ tab: "intelligence" })
-  }, [paneVisibility.sidecar, setSidecarContent, togglePane])
-
   const hasProfileData =
     hasTranscriptBlock || lifestyle || chiefComplaint
 
@@ -100,8 +100,8 @@ function PatientProfileCard() {
   return (
     <div className="mx-3 mb-3 space-y-2">
       {chiefComplaint && (
-        <div className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 px-3 py-2">
-          <div className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+          <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
             Chief complaint
           </div>
           <p className="mt-1 text-[11px] leading-snug text-foreground/90">{chiefComplaint}</p>
@@ -124,7 +124,7 @@ function PatientProfileCard() {
             <button
               type="button"
               onClick={openAiExtraction}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-indigo-500/10 px-2 py-1 text-[10px] font-medium text-indigo-700 transition-colors hover:bg-indigo-500/15 dark:text-indigo-300"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-300"
             >
               <Brain className="size-3" weight="bold" />
               AI tab

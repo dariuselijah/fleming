@@ -52,12 +52,17 @@ export type ChartDrilldownPayload = {
   value?: string | number | null
 }
 
+type RechartsClickEvent = {
+  activeLabel?: string | number
+  activePayload?: unknown[]
+}
+
 const DEFAULT_SERIES_COLORS = [
-  "#0E7C86",
-  "#0FA3B1",
-  "#9FCFD8",
-  "#67D5C4",
-  "#73BFD2",
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
 ]
 
 function normalizedSeries(spec: ChatChartSpec): ChatChartSeries[] {
@@ -110,7 +115,7 @@ function renderChartContent(
 ) {
   const series = normalizedSeries(spec)
   const dualAxis = hasSecondAxis(series)
-  const handleChartClick = (event: any) => {
+  const handleChartClick = (event: RechartsClickEvent | null | undefined) => {
     if (!onDrilldown || !event) return
     const activePayload = Array.isArray(event.activePayload) ? event.activePayload : []
     const primaryPayload = activePayload.find((item: unknown) => Boolean(item)) as
@@ -178,7 +183,7 @@ function renderChartContent(
             </linearGradient>
           ))}
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.35} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.35} />
         <XAxis dataKey={spec.xKey} tick={{ fontSize: 11 }} />
         <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
         {dualAxis ? <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} /> : null}
@@ -204,7 +209,7 @@ function renderChartContent(
   if (spec.type === "bar" || spec.type === "stacked-bar") {
     return (
       <BarChart data={spec.data} onClick={handleChartClick}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.35} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.35} />
         <XAxis dataKey={spec.xKey} tick={{ fontSize: 11 }} />
         <YAxis tick={{ fontSize: 11 }} />
         <Tooltip content={<ChartTooltip />} />
@@ -241,7 +246,7 @@ function renderChartContent(
             </linearGradient>
           ))}
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.35} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.35} />
         <XAxis dataKey={spec.xKey} tick={{ fontSize: 11 }} />
         <YAxis tick={{ fontSize: 11 }} />
         <Tooltip content={<ChartTooltip />} />
@@ -278,7 +283,7 @@ function renderChartContent(
           </linearGradient>
         ))}
       </defs>
-      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.35} />
+      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.35} />
       <XAxis dataKey={spec.xKey} tick={{ fontSize: 11 }} />
       <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
       {dualAxis ? <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} /> : null}

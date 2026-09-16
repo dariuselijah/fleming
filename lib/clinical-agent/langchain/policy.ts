@@ -57,7 +57,7 @@ const TOOL_FAMILY_PATTERNS: Array<{ family: string; pattern: RegExp }> = [
   { family: "pubmed", pattern: /pubmed/i },
   { family: "clinical-trials", pattern: /clinicaltrials/i },
   { family: "scholar", pattern: /scholar|biorxiv/i },
-  { family: "upload", pattern: /upload|artifact|quiz|lecture|timetable|review/i },
+  { family: "upload", pattern: /upload|artifact|quiz/i },
   { family: "web", pattern: /websearch/i },
   { family: "video", pattern: /youtube/i },
   { family: "connector", pattern: /registry|coverage|chembl|synapse|benchling|biorender/i },
@@ -66,18 +66,6 @@ const TOOL_FAMILY_PATTERNS: Array<{ family: string; pattern: RegExp }> = [
 
 const UPLOAD_INTENT_PATTERN =
   /\b(upload|slides?|deck|notes?|lecture|transcript|document|pdf|pptx|docx)\b/i
-
-const STUDY_TIMETABLE_PATTERN =
-  /\b(timetable|study plan|schedule|planner|revision plan|reschedule|rebalance)\b/i
-
-const REVIEW_QUEUE_PATTERN =
-  /\b(spaced repetition|flashcard|recall|review queue|viva|quiz drill)\b/i
-
-const LECTURE_SUMMARY_PATTERN =
-  /\b(lecture|video|recording|transcript|summary|action items?)\b/i
-
-const STUDY_GRAPH_PATTERN =
-  /\b(study graph|topic graph|objective graph|knowledge graph)\b/i
 
 const DRILLDOWN_PATTERN = /\b(chart drilldown|drill[-\s]?down|clicked datapoint)\b/i
 
@@ -362,38 +350,6 @@ function toolGateDecision(input: {
     }
   }
 
-  if (STUDY_TIMETABLE_PATTERN.test(input.query) && /generatetimetable|rebalancetimetable/.test(lowerTool)) {
-    return {
-      decision: "allow",
-      reasonCode: "study_schedule_tool",
-      reason: "Study timetable intent detected; planner tool enabled.",
-    }
-  }
-
-  if (REVIEW_QUEUE_PATTERN.test(input.query) && /createreviewqueue/.test(lowerTool)) {
-    return {
-      decision: "allow",
-      reasonCode: "review_queue_tool",
-      reason: "Review queue intent detected; review-generation tool enabled.",
-    }
-  }
-
-  if (LECTURE_SUMMARY_PATTERN.test(input.query) && /summarizelectureupload/.test(lowerTool)) {
-    return {
-      decision: "allow",
-      reasonCode: "lecture_summary_tool",
-      reason: "Lecture/video summarization intent detected.",
-    }
-  }
-
-  if (STUDY_GRAPH_PATTERN.test(input.query) && /rebuildstudygraph/.test(lowerTool)) {
-    return {
-      decision: "allow",
-      reasonCode: "study_graph_tool",
-      reason: "Study graph rebuild intent detected.",
-    }
-  }
-
   if (workflow === "operational" && /(pubmed|guideline|clinicaltrials|biorxiv|scholargateway)/.test(lowerTool)) {
     return {
       decision: "skip",
@@ -607,13 +563,8 @@ export function evaluateAdaptiveFanoutCoverage(
   const connectorCount = input.selectedConnectorIds.length
   const sourceDiversity = countDistinctToolFamilies(input.selectedToolNames)
   const hasUploadSignal = input.selectedToolNames.some((name) =>
-    /upload|lecture|timetable|review/i.test(name)
+    /upload|artifact|quiz/i.test(name)
   )
-  const pluginLikeCount = input.selectedToolNames.filter((name) =>
-    /(generateTimetableFromUploads|rebalanceTimetablePlan|summarizeLectureUpload|createReviewQueueFromUploads|rebuildStudyGraphFromUpload)/.test(
-      name
-    )
-  ).length
   const skippedCount = (input.gatekeeperDecisions || []).filter(
     (decision) => decision.decision === "skip"
   ).length
@@ -622,7 +573,6 @@ export function evaluateAdaptiveFanoutCoverage(
     0.26 +
     Math.min(0.42, connectorCount * 0.12) +
     Math.min(0.24, sourceDiversity * 0.06) +
-    Math.min(0.08, pluginLikeCount * 0.04) +
     (hasUploadSignal ? 0.05 : 0)
 
   if (input.requireEvidence && connectorCount === 0) {

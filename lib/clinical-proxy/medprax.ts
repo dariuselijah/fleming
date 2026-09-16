@@ -1,23 +1,48 @@
-import { getClinicalProxyBase } from "./url"
+import { getCatalogueProxyBase } from "./url"
 
-function requireProxyBase(): string {
-  const b = getClinicalProxyBase()
+function requireCatalogueBase(): string {
+  const b = getCatalogueProxyBase()
   if (!b) {
-    throw new Error("CLINICAL_PROXY_URL is not set")
+    throw new Error(
+      "Set SA_REFERENCE_DATA_URL (preferred) or CLINICAL_PROXY_URL for catalogue / Medprax-compatible APIs"
+    )
   }
   return b
 }
 
+function authHeaders(): Record<string, string> {
+  const key = process.env.SA_REFERENCE_DATA_API_KEY?.trim()
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  }
+  if (key) headers.Authorization = `Bearer ${key}`
+  return headers
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const base = requireProxyBase()
+  const base = requireCatalogueBase()
   const res = await fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(body),
   })
   const text = await res.text()
   if (!res.ok) {
-    throw new Error(`Medprax proxy ${path} HTTP ${res.status}: ${text.slice(0, 400)}`)
+    throw new Error(`Catalogue proxy ${path} HTTP ${res.status}: ${text.slice(0, 400)}`)
+  }
+  return JSON.parse(text) as T
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  const base = requireCatalogueBase()
+  const res = await fetch(`${base}${path}`, {
+    method: "GET",
+    headers: authHeaders(),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    throw new Error(`Catalogue proxy ${path} HTTP ${res.status}: ${text.slice(0, 400)}`)
   }
   return JSON.parse(text) as T
 }
@@ -81,15 +106,15 @@ export async function postMedpraxPlanoptionsSearch(body: {
 
 /** GET /api/medprax/schemes/:code/planoptions */
 export async function getMedpraxSchemePlanoptions(schemeCode: string): Promise<unknown> {
-  const base = requireProxyBase()
-  const path = `/api/medprax/schemes/${encodeURIComponent(schemeCode)}/planoptions`
-  const res = await fetch(`${base}${path}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  })
-  const text = await res.text()
-  if (!res.ok) {
-    throw new Error(`Medprax proxy ${path} HTTP ${res.status}: ${text.slice(0, 400)}`)
-  }
-  return JSON.parse(text) as unknown
+  return getJson(`/api/medprax/schemes/${encodeURIComponent(schemeCode)}/planoptions`)
+}
+
+/** GET /api/icd10/search — SA Health Codes first-class ICD API */
+export async function searchIcd10(query: string, limit = 12): Promise<unknown> {
+  return getJson(`/api/icd10/search?q=${encodeURIComponent(query)}&limit=${limit}`)
+}
+
+/** GET /api/icd10/validate */
+export async function validateIcd10(code: string): Promise<unknown> {
+  return getJson(`/api/icd10/validate?code=${encodeURIComponent(code)}`)
 }

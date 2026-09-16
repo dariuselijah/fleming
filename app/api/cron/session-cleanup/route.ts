@@ -11,18 +11,14 @@
 
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { requireCronAuthorization } from "@/lib/auth/cron"
 
 export const maxDuration = 30
 export const dynamic = "force-dynamic"
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization")
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-  }
+  const denied = requireCronAuthorization(request)
+  if (denied) return denied
 
   try {
     const db = createAdminClient()

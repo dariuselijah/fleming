@@ -113,8 +113,8 @@ export function InlineEvidenceVisual({
                 className="object-cover transition-transform duration-300 hover:scale-[1.01]"
               />
               <div className="pointer-events-none absolute inset-0 z-10 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.14),transparent_38%),linear-gradient(180deg,rgba(15,23,42,0.04),rgba(15,23,42,0.36))]" />
-              <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-4 py-3 text-white">
-                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.16em] text-white/80">
+              <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-4 py-3 text-foreground">
+                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.16em] text-foreground/80">
                   <ImageSquare className="size-3.5" />
                   <span>Inline Evidence Visual</span>
                   <span>[{citation.index}]</span>
@@ -156,7 +156,7 @@ export function InlineEvidenceVisual({
         </figcaption>
 
         <MorphingDialogContainer>
-          <MorphingDialogContent className="relative w-[min(92vw,960px)] overflow-hidden rounded-3xl border border-white/10 bg-background shadow-2xl">
+          <MorphingDialogContent className="relative w-[min(92vw,960px)] overflow-hidden rounded-3xl border border-border bg-background shadow-2xl">
             <div className="grid min-h-[min(78vh,720px)] grid-cols-1 md:grid-cols-[minmax(0,1.35fr)_360px]">
               <div className="relative flex items-center justify-center overflow-hidden bg-black/95 p-4 md:p-6">
                 <LinkedVisualShader
@@ -228,7 +228,7 @@ export function InlineEvidenceVisual({
               </div>
             </div>
           </MorphingDialogContent>
-          <MorphingDialogClose className="text-white" />
+          <MorphingDialogClose className="text-foreground" />
         </MorphingDialogContainer>
       </MorphingDialog>
     </figure>

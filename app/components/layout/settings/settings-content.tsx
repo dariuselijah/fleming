@@ -5,7 +5,6 @@ import { DrawerClose } from "@/components/ui/drawer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { cn } from "@/lib/utils"
-import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useAuthContext } from "@/lib/auth/provider"
 import { Buildings, GearSixIcon, PaintBrushIcon, XIcon } from "@phosphor-icons/react"
 import { useState } from "react"
@@ -14,8 +13,7 @@ import { LayoutSettings } from "./appearance/layout-settings"
 import { ThemeSelection } from "./appearance/theme-selection"
 import { AccountManagement } from "./general/account-management"
 import { UserProfile } from "./general/user-profile"
-import { HealthContext } from "./general/health-context"
-import { UserRoleSelection } from "./general/user-role-selection"
+import { ProductContext } from "./general/product-context"
 import { PracticeSettingsTab } from "./general/practice-settings-tab"
 
 type SettingsContentProps = {
@@ -28,11 +26,8 @@ export function SettingsContent({
   isDrawer = false,
 }: SettingsContentProps) {
   const [activeTab, setActiveTab] = useState<TabType>("general")
-  const { preferences } = useUserPreferences()
   const auth = useAuthContext()
-  const showHealthContext = preferences.userRole === "general"
-  const showPracticeTab =
-    auth.hasPermission("settings:practice") || preferences.userRole === "doctor"
+  const showPracticeTab = auth.hasPermission("settings:practice")
 
   return (
     <div
@@ -89,8 +84,7 @@ export function SettingsContent({
 
             <TabsContent value="general" className="space-y-6 px-6">
               <UserProfile />
-              <UserRoleSelection />
-              {showHealthContext && <HealthContext />}
+              <ProductContext />
               {isSupabaseEnabled && <AccountManagement />}
             </TabsContent>
 
@@ -144,8 +138,7 @@ export function SettingsContent({
             <div className="flex-1 overflow-auto px-6 pt-4">
               <TabsContent value="general" className="mt-0 space-y-6">
                 <UserProfile />
-                <UserRoleSelection />
-                {showHealthContext && <HealthContext />}
+                <ProductContext />
                 {isSupabaseEnabled && <AccountManagement />}
               </TabsContent>
 

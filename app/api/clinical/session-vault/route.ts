@@ -1,61 +1,69 @@
-import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { requirePracticePermission } from "@/lib/auth/guard"
 import { vaultOpenDek, vaultSealDek } from "@/lib/server/clinical-vault"
+import {
+  persistPracticeDekForUser,
+  resolvePracticeDekForUser,
+  sessionVaultExpiresAt,
+  upsertPracticeDekStore,
+} from "@/lib/clinical/practice-dek-vault"
 
-const TTL_MIN = 15
-
-/** Restore sealed DEK for the current session (same user + practice, not expired). */
+/** Restore sealed DEK for the current session (auto-bootstrap if missing). */
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  if (!supabase) {
-    return NextResponse.json({ error: "Database unavailable" }, { status: 500 })
-  }
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
   const practiceId = req.nextUrl.searchParams.get("practiceId")?.trim()
   if (!practiceId) {
     return NextResponse.json({ error: "practiceId required" }, { status: 400 })
   }
+  const guard = await requirePracticePermission("clinical:access", {
+    requestedPracticeId: practiceId,
+  })
+  if (!guard.ok) return guard.response
+  const { supabase, userId } = guard.context
 
   const { data, error } = await supabase
     .from("clinical_session_keys")
     .select("enc_dek, dek_iv, expires_at")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("practice_id", practiceId)
     .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle()
 
-  if (error || !data?.enc_dek || !data?.dek_iv) {
-    return NextResponse.json({ dekBase64: null })
+  if (!error && data?.enc_dek && data?.dek_iv) {
+    const dekPlain = vaultOpenDek(data.enc_dek, data.dek_iv)
+    if (dekPlain) {
+      try {
+        const admin = createAdminClient()
+        await upsertPracticeDekStore(admin, practiceId, dekPlain)
+      } catch {
+        /* non-fatal backup */
+      }
+      return NextResponse.json({ dekBase64: dekPlain })
+    }
   }
 
-  const dekPlain = vaultOpenDek(data.enc_dek, data.dek_iv)
-  if (!dekPlain) {
+  try {
+    const admin = createAdminClient()
+    const dekBase64 = await resolvePracticeDekForUser(
+      supabase,
+      userId,
+      practiceId,
+      admin
+    )
+    if (!dekBase64) {
+      return NextResponse.json({ dekBase64: null })
+    }
+    await persistPracticeDekForUser(admin, userId, practiceId, dekBase64)
+    return NextResponse.json({ dekBase64 })
+  } catch (e) {
+    console.warn("[session-vault] auto-bootstrap failed", e)
     return NextResponse.json({ dekBase64: null })
   }
-  return NextResponse.json({ dekBase64: dekPlain })
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient()
-  if (!supabase) {
-    return NextResponse.json({ error: "Database unavailable" }, { status: 500 })
-  }
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
   let body: { practiceId?: string; dekBase64?: string }
   try {
     body = await req.json()
@@ -67,6 +75,11 @@ export async function POST(req: NextRequest) {
   if (!practiceId || !dekBase64) {
     return NextResponse.json({ error: "practiceId and dekBase64 required" }, { status: 400 })
   }
+  const guard = await requirePracticePermission("clinical:access", {
+    requestedPracticeId: practiceId,
+  })
+  if (!guard.ok) return guard.response
+  const { supabase, userId } = guard.context
 
   const sealed = vaultSealDek(dekBase64)
   if (!sealed) {
@@ -76,10 +89,13 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const expiresAt = new Date(Date.now() + TTL_MIN * 60_000).toISOString()
+  const admin = (await import("@/lib/supabase/admin")).createAdminClient()
+  await upsertPracticeDekStore(admin, practiceId, dekBase64)
+
+  const expiresAt = sessionVaultExpiresAt()
 
   const { error: insErr } = await supabase.from("clinical_session_keys").insert({
-    user_id: user.id,
+    user_id: userId,
     practice_id: practiceId,
     enc_dek: sealed.enc,
     dek_iv: sealed.iv,
@@ -94,17 +110,13 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE() {
-  const supabase = await createClient()
-  if (!supabase) {
-    return NextResponse.json({ error: "Database unavailable" }, { status: 500 })
-  }
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-  await supabase.from("clinical_session_keys").delete().eq("user_id", user.id)
+  const guard = await requirePracticePermission("clinical:access")
+  if (!guard.ok) return guard.response
+  const { supabase, userId, activePracticeId } = guard.context
+  await supabase
+    .from("clinical_session_keys")
+    .delete()
+    .eq("user_id", userId)
+    .eq("practice_id", activePracticeId)
   return NextResponse.json({ ok: true })
 }

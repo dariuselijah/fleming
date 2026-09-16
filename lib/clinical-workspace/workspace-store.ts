@@ -13,7 +13,6 @@ import type {
   EvidenceDeepDiveState,
   InboxMessage,
   InventoryItem,
-  OverlayType,
   PatientSession,
   PracticeAppointment,
   PracticeClaim,
@@ -29,8 +28,11 @@ import type {
   MedicalBlock,
   PatientMedication,
   BillingSubTab,
+  BillingQueueFilter,
   InboxNotificationFilter,
   InboxScrollTarget,
+  ScribeSnapshot,
+  EncounterAttestation,
 } from "./types"
 import type { ExtractedEntities, HighlightSpan } from "@/lib/scribe/entity-highlighter"
 import {
@@ -49,6 +51,7 @@ import {
   isLikelyLabOrderText,
 } from "./lab-order-catalog"
 import { requestEncounterPersistenceFlush } from "./encounter-persist-bridge"
+import { buildDraftClaimForSubmit } from "./generate-draft-claim"
 import { suppressEncounterHydrationForMs } from "./encounter-hydrate-suppress"
 import type { PatientRegistrationPrefill } from "@/lib/clinical/smart-import-patient"
 import { shouldPromoteDiagnosisToChronic } from "./diagnosis-accept-routing"
@@ -88,6 +91,104 @@ const EMPTY_SOAP: SOAPNote = {
   objective: "",
   assessment: "",
   plan: "",
+}
+
+const EMPTY_SCRIBE: ScribeSnapshot = {
+  transcript: "",
+  segments: [],
+  entities: EMPTY_ENTITIES,
+  highlights: [],
+  entityStatus: {},
+}
+
+function captureScribeSnapshot(state: {
+  scribeTranscript: string
+  scribeSegments: ScribeSegment[]
+  scribeEntities: ExtractedEntities
+  scribeHighlights: HighlightSpan[]
+  scribeEntityStatus: Record<string, "pending" | "accepted" | "rejected">
+}): ScribeSnapshot {
+  return {
+    transcript: state.scribeTranscript,
+    segments: state.scribeSegments,
+    entities: state.scribeEntities,
+    highlights: state.scribeHighlights,
+    entityStatus: state.scribeEntityStatus,
+  }
+}
+
+function scribeFieldsFromSnapshot(snap: ScribeSnapshot | undefined) {
+  const s = snap ?? EMPTY_SCRIBE
+  return {
+    scribeTranscript: s.transcript,
+    scribeSegments: s.segments,
+    scribeEntities: s.entities,
+    scribeHighlights: s.highlights,
+    scribeEntityStatus: s.entityStatus,
+  }
+}
+
+function scribeSnapshotPatch(
+  state: {
+    activePatientId: string | null
+    openPatients: PatientSession[]
+    scribeTranscript: string
+    scribeSegments: ScribeSegment[]
+    scribeEntities: ExtractedEntities
+    scribeHighlights: HighlightSpan[]
+    scribeEntityStatus: Record<string, "pending" | "accepted" | "rejected">
+  },
+  overrides: Partial<{
+    scribeTranscript: string
+    scribeSegments: ScribeSegment[]
+    scribeEntities: ExtractedEntities
+    scribeHighlights: HighlightSpan[]
+    scribeEntityStatus: Record<string, "pending" | "accepted" | "rejected">
+  }>
+) {
+  if (!state.activePatientId) return {}
+  const snap = captureScribeSnapshot({ ...state, ...overrides })
+  return {
+    openPatients: state.openPatients.map((p) =>
+      p.patientId === state.activePatientId ? { ...p, scribeSnapshot: snap } : p
+    ),
+  }
+}
+
+function swapActivePatientScribe(
+  state: {
+    activePatientId: string | null
+    openPatients: PatientSession[]
+    scribeTranscript: string
+    scribeSegments: ScribeSegment[]
+    scribeEntities: ExtractedEntities
+    scribeHighlights: HighlightSpan[]
+    scribeEntityStatus: Record<string, "pending" | "accepted" | "rejected">
+    consultSessionEpoch: number
+  },
+  targetPatientId: string,
+  openPatientsOverride?: PatientSession[]
+) {
+  const fromId = state.activePatientId
+  let openPatients = openPatientsOverride ?? state.openPatients
+
+  if (fromId && fromId !== targetPatientId) {
+    const snap = captureScribeSnapshot(state)
+    openPatients = openPatients.map((p) =>
+      p.patientId === fromId ? { ...p, scribeSnapshot: snap } : p
+    )
+  }
+
+  const target = openPatients.find((p) => p.patientId === targetPatientId)
+  const switched = fromId !== targetPatientId
+
+  return {
+    openPatients,
+    activePatientId: targetPatientId,
+    ...scribeFieldsFromSnapshot(target?.scribeSnapshot),
+    scribeActive: false,
+    consultSessionEpoch: switched ? state.consultSessionEpoch + 1 : state.consultSessionEpoch,
+  }
 }
 
 const MAX_ACCEPT_HISTORY = 200
@@ -148,11 +249,13 @@ interface WorkspaceState {
   // Admin
   activeAdminTab: AdminTab
   activeBillingSubTab: BillingSubTab
+  activeBillingQueueFilter: BillingQueueFilter
   activeDoctorId: string | null
   practiceProviders: PracticeProvider[]
   practiceHours: PracticeBusinessHour[]
   claims: PracticeClaim[]
   inventory: InventoryItem[]
+  inventoryMutationError: string | null
   appointments: PracticeAppointment[]
   inboxMessages: InboxMessage[]
   notifications: AdminNotification[]
@@ -177,7 +280,6 @@ interface WorkspaceState {
     sidecar: boolean
   }
   sidecarContent: SidecarPayload | null
-  overlays: Record<OverlayType, boolean>
 
   scribeActive: boolean
   scribeCollapsed: boolean
@@ -194,6 +296,8 @@ interface WorkspaceState {
   closePatient: (patientId: string) => void
   setActivePatient: (patientId: string) => void
   setPatientSessionChatId: (patientId: string, chatId: string) => void
+  /** Clears in-memory encounter + scribe and binds to a different consult chat (serialized session). */
+  switchPatientConsultChat: (patientId: string, chatId: string) => void
   setPatientClinicalEncounterId: (patientId: string, encounterId: string) => void
   updatePatientStatus: (patientId: string, status: ConsultStatus) => void
   addPatientChronicCondition: (patientId: string, condition: string) => void
@@ -233,7 +337,7 @@ interface WorkspaceState {
   addVitalReading: (patientId: string, vital: VitalReading) => void
   commitVital: (patientId: string, vitalId: string) => void
   addBlock: (patientId: string, block: MedicalBlock) => void
-  signConsult: (patientId: string) => void
+  signConsult: (patientId: string, attestation: EncounterAttestation) => void
   /** Reopen MediKredit claim preview (after dismiss or from header). */
   submitClaim: (patientId: string) => void
   setClaimDraftLines: (patientId: string, lines: ClaimLine[] | null) => void
@@ -250,15 +354,14 @@ interface WorkspaceState {
     clinicalEncounterId?: string
   }) => void
   beginNewVisitForPatient: (patientId: string) => void
+  beginAmendmentForPatient: (patientId: string, reason: string) => void
+  /** Bumped when switching consult chats so encounter hydration reapplies for the new thread. */
+  consultSessionEpoch: number
 
   // Pane control
   togglePane: (pane: "timeline" | "sidecar") => void
   setSidecarContent: (content: SidecarPayload | null) => void
   pinToSidecar: (blockId: string) => void
-
-  // Overlays
-  toggleOverlay: (overlay: OverlayType) => void
-  closeAllOverlays: () => void
 
   // Mode
   setMode: (mode: WorkspaceMode) => void
@@ -293,7 +396,9 @@ interface WorkspaceState {
   updateDocumentContent: (
     content: string,
     isStreaming: boolean,
-    patch?: Pick<ClinicalDocument, "sources" | "prescriptionItems">
+    patch?: Pick<ClinicalDocument, "sources" | "prescriptionItems" | "icdItems" | "claimItems"> & {
+      docId?: string
+    }
   ) => void
   closeDocumentSheet: () => void
   toggleDocumentEditMode: () => void
@@ -320,17 +425,21 @@ interface WorkspaceState {
   // Admin
   setAdminTab: (tab: AdminTab) => void
   setBillingSubTab: (tab: BillingSubTab) => void
+  setBillingQueueFilter: (filter: BillingQueueFilter) => void
   setActiveDoctor: (doctorId: string | null) => void
   setSelectedDate: (date: string) => void
+  /** Provider IDs hidden from calendar swimlanes (sidebar toggles). Empty = show all. */
+  calendarHiddenProviderIds: string[]
+  toggleCalendarProviderHidden: (providerId: string) => void
   addClaim: (claim: PracticeClaim) => void
   /** Replace claims list from server (e.g. practice_claims hydrate). */
   setClaims: (claims: PracticeClaim[]) => void
   updateClaim: (claimId: string, update: Partial<PracticeClaim>) => void
   updateClaimStatus: (claimId: string, status: PracticeClaim["status"]) => void
-  upsertInventoryItem: (item: InventoryItem) => void
-  deleteInventoryItem: (itemId: string) => void
+  upsertInventoryItem: (item: InventoryItem) => Promise<void>
+  deleteInventoryItem: (itemId: string) => Promise<void>
   decrementInventory: (nappiCode: string, qty?: number) => void
-  bulkImportInventory: (items: InventoryItem[]) => void
+  bulkImportInventory: (items: InventoryItem[]) => Promise<void>
   setCommandBarOpen: (open: boolean) => void
 
   // Patients
@@ -368,6 +477,15 @@ interface WorkspaceState {
   updateFlowEntry: (patientId: string, update: Partial<PracticeFlowEntry>) => void
 }
 
+function activeEncounterIsSigned(
+  state: Pick<WorkspaceState, "activePatientId" | "openPatients">
+): boolean {
+  return Boolean(
+    state.activePatientId &&
+      state.openPatients.find((patient) => patient.patientId === state.activePatientId)?.consultSigned
+  )
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()(
   subscribeWithSelector(
   persist(
@@ -379,17 +497,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       activeAdminTab: "calendar",
       activeBillingSubTab: "claims",
+      activeBillingQueueFilter: "needs_action",
       activeDoctorId: null,
       selectedDate: new Date().toISOString().slice(0, 10),
+      calendarHiddenProviderIds: [],
       practiceProviders: [],
       practiceHours: [],
       claims: [],
       inventory: [],
+      inventoryMutationError: null,
       appointments: [],
       inboxMessages: [],
       notifications: [],
       patients: [],
       commandBarOpen: false,
+      consultSessionEpoch: 0,
 
       patientAddModalPrefill: null,
       patientAddModalOpenNonce: 0,
@@ -405,12 +527,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       paneVisibility: { timeline: true, sidecar: true },
       sidecarContent: null,
-      overlays: {
-        calendar: false,
-        inventory: false,
-        resource_library: false,
-        sales: false,
-      },
       scribeActive: false,
       scribeCollapsed: false,
       scribeTranscript: "",
@@ -421,29 +537,61 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       documentSheet: { isOpen: false, blockId: null, editMode: false, contentDocument: null },
 
       openPatient: (patient) => {
-        const { openPatients } = get()
-        const exists = openPatients.find((p) => p.patientId === patient.patientId)
+        const state = get()
+        const exists = state.openPatients.find((p) => p.patientId === patient.patientId)
         if (exists) {
-          set({ activePatientId: patient.patientId })
+          set(swapActivePatientScribe(state, patient.patientId))
           return
         }
+
+        let openPatients = state.openPatients
+        const fromId = state.activePatientId
+        if (fromId) {
+          const snap = captureScribeSnapshot(state)
+          openPatients = openPatients.map((p) =>
+            p.patientId === fromId ? { ...p, scribeSnapshot: snap } : p
+          )
+        }
+
+        const nextPatients = [...openPatients, patient]
         set({
-          openPatients: [...openPatients, patient],
-          activePatientId: patient.patientId,
+          ...swapActivePatientScribe(
+            { ...state, openPatients: nextPatients },
+            patient.patientId,
+            nextPatients
+          ),
         })
       },
 
       closePatient: (patientId) => {
-        const { openPatients, activePatientId } = get()
+        const state = get()
+        let openPatients = state.openPatients
+
+        if (state.activePatientId === patientId) {
+          const snap = captureScribeSnapshot(state)
+          openPatients = openPatients.map((p) =>
+            p.patientId === patientId ? { ...p, scribeSnapshot: snap } : p
+          )
+        }
+
         const filtered = openPatients.filter((p) => p.patientId !== patientId)
         const newActive =
-          activePatientId === patientId
+          state.activePatientId === patientId
             ? filtered[filtered.length - 1]?.patientId ?? null
-            : activePatientId
-        set({ openPatients: filtered, activePatientId: newActive })
+            : state.activePatientId
+
+        if (newActive && state.activePatientId === patientId) {
+          set(swapActivePatientScribe({ ...state, openPatients: filtered }, newActive, filtered))
+        } else {
+          set({ openPatients: filtered, activePatientId: newActive })
+        }
       },
 
-      setActivePatient: (patientId) => set({ activePatientId: patientId }),
+      setActivePatient: (patientId) => {
+        const state = get()
+        if (state.activePatientId === patientId) return
+        set(swapActivePatientScribe(state, patientId))
+      },
 
       setPatientSessionChatId: (patientId, chatId) => {
         set((state) => ({
@@ -451,6 +599,51 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             p.patientId === patientId ? { ...p, chatId } : p
           ),
         }))
+      },
+
+      switchPatientConsultChat: (patientId, chatId) => {
+        const state = get()
+        const patient = state.openPatients.find((p) => p.patientId === patientId)
+        if (!patient) return
+        const next = createPatientSession({
+          patientId: patient.patientId,
+          name: patient.name,
+          age: patient.age,
+          sex: patient.sex,
+          medicalAidStatus: patient.medicalAidStatus,
+          medicalAidScheme: patient.medicalAidScheme,
+          memberNumber: patient.memberNumber,
+          criticalAllergies: patient.criticalAllergies,
+          chronicConditions: patient.chronicConditions,
+          encounterProblems: [],
+          activeMedications: patient.activeMedications,
+          lifestyle: patient.lifestyle,
+          chatId,
+          appointmentId: undefined,
+          appointmentReason: undefined,
+          roomNumber: patient.roomNumber,
+          status: "checked_in",
+          consultSigned: false,
+          consultSignedAt: undefined,
+          claimSubmitted: false,
+          claimId: undefined,
+          clinicalEncounterId: undefined,
+          claimDraftLines: null,
+          claimPreviewDismissed: false,
+          remoteDraftClaimId: undefined,
+          acceptHistory: [],
+          evidenceDeepDive: null,
+        })
+        set({
+          openPatients: state.openPatients.map((p) => (p.patientId === patientId ? next : p)),
+          scribeTranscript: "",
+          scribeSegments: [],
+          scribeEntities: EMPTY_ENTITIES,
+          scribeHighlights: [],
+          scribeEntityStatus: {},
+          scribeCollapsed: false,
+          consultSessionEpoch: state.consultSessionEpoch + 1,
+        })
       },
 
       setPatientClinicalEncounterId: (patientId, encounterId) => {
@@ -537,7 +730,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if (!row.name) return
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
-            p.patientId !== patientId
+            p.patientId !== patientId || p.consultSigned
               ? p
               : {
                   ...p,
@@ -550,7 +743,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       removeSessionMedication: (patientId, medicationId) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
-            p.patientId !== patientId
+            p.patientId !== patientId || p.consultSigned
               ? p
               : {
                   ...p,
@@ -569,12 +762,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         }
         set((state) => ({
           openPatients: state.openPatients.map((p) => {
-            if (p.patientId !== patientId) return p
+            if (p.patientId !== patientId || p.consultSigned) return p
             return {
               ...p,
               activeMedications: (p.activeMedications ?? []).map((m) => {
                 if (m.id !== medicationId) return m
-                let next = { ...m }
+                const next = { ...m }
                 if ("name" in patch && patch.name !== undefined) {
                   next.name = patch.name.trim()
                 }
@@ -608,7 +801,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       updateSOAPNote: (patientId, section, value) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
-            p.patientId === patientId
+            p.patientId === patientId && !p.consultSigned
               ? {
                   ...p,
                   soapNote: {
@@ -628,7 +821,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       setSOAPGhostText: (patientId, section, text) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
-            p.patientId === patientId
+            p.patientId === patientId && !p.consultSigned
               ? {
                   ...p,
                   soapNote: {
@@ -643,11 +836,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       acceptGhostText: (patientId, section) => {
         const patient = get().openPatients.find((p) => p.patientId === patientId)
-        if (!patient?.soapNote.ghostText?.[section]) return
+        if (!patient?.soapNote.ghostText?.[section] || patient.consultSigned) return
         const ghostValue = patient.soapNote.ghostText[section] || ""
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
-            p.patientId === patientId
+            p.patientId === patientId && !p.consultSigned
               ? {
                   ...p,
                   soapNote: {
@@ -664,7 +857,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       addVitalReading: (patientId, vital) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
-            p.patientId === patientId
+            p.patientId === patientId && !p.consultSigned
               ? { ...p, vitals: [...p.vitals, vital] }
               : p
           ),
@@ -674,7 +867,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       commitVital: (patientId, vitalId) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
-            p.patientId === patientId
+            p.patientId === patientId && !p.consultSigned
               ? {
                   ...p,
                   vitals: p.vitals.map((v) =>
@@ -689,34 +882,40 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       addBlock: (patientId, block) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) =>
-            p.patientId === patientId
+            p.patientId === patientId && !p.consultSigned
               ? { ...p, blocks: [...p.blocks, block] }
               : p
           ),
         }))
       },
 
-      signConsult: (patientId) => {
+      signConsult: (patientId, attestation) => {
         const state = get()
         const patient = state.openPatients.find((p) => p.patientId === patientId)
-        if (!patient) return
+        if (!patient || patient.consultSigned) return
+
+        const signedPatient: PatientSession = {
+          ...patient,
+          consultSigned: true,
+          consultSignedAt: new Date(attestation.signedAt),
+          signatureAttestation: attestation,
+          encounterVersion: patient.encounterVersion ?? 1,
+          status: "reviewing" as const,
+          claimDraftLines: null,
+          claimPreviewDismissed: false,
+          remoteDraftClaimId: undefined,
+        }
+        const draft = buildDraftClaimForSubmit(signedPatient, state.activeDoctorId)
 
         set({
           openPatients: state.openPatients.map((p) =>
             p.patientId === patientId
               ? {
-                  ...p,
-                  consultSigned: true,
-                  consultSignedAt: new Date(),
-                  status: "reviewing" as const,
-                  claimDraftLines: null,
-                  claimPreviewDismissed: false,
-                  remoteDraftClaimId: undefined,
+                  ...signedPatient,
+                  claimDraftLines: draft.lines,
                 }
               : p
           ),
-          mode: "admin" as const,
-          activeAdminTab: "billing" as const,
         })
         requestEncounterPersistenceFlush()
       },
@@ -802,6 +1001,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           name: pp?.name?.trim() ? pp.name : patientName,
           consultSigned: true,
           clinicalEncounterId: clinicalEncounterId ?? base.clinicalEncounterId,
+          appointmentId: undefined,
           claimDraftLines: lines,
           claimPreviewDismissed: false,
           claimSubmitted: false,
@@ -838,11 +1038,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           activeMedications: patient.activeMedications,
           lifestyle: patient.lifestyle,
           chatId: patient.chatId,
+          appointmentId: undefined,
           appointmentReason: patient.appointmentReason,
           roomNumber: patient.roomNumber,
           status: "checked_in",
           consultSigned: false,
           consultSignedAt: undefined,
+          signatureAttestation: undefined,
+          encounterVersion: 1,
+          amendmentOfEncounterId: undefined,
+          amendmentReason: undefined,
           claimSubmitted: false,
           claimId: undefined,
           clinicalEncounterId: undefined,
@@ -854,6 +1059,38 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         })
         set({
           openPatients: state.openPatients.map((p) => (p.patientId === patientId ? next : p)),
+          consultSessionEpoch: state.consultSessionEpoch + 1,
+        })
+        requestEncounterPersistenceFlush()
+      },
+
+      beginAmendmentForPatient: (patientId, reason) => {
+        const trimmedReason = reason.trim()
+        if (!trimmedReason) return
+        suppressEncounterHydrationForMs(15_000)
+        const state = get()
+        const patient = state.openPatients.find((p) => p.patientId === patientId)
+        if (!patient?.consultSigned || !patient.clinicalEncounterId) return
+        const next = createPatientSession({
+          ...patient,
+          clinicalEncounterId: undefined,
+          consultSigned: false,
+          consultSignedAt: undefined,
+          signatureAttestation: undefined,
+          encounterVersion: (patient.encounterVersion ?? 1) + 1,
+          amendmentOfEncounterId: patient.clinicalEncounterId,
+          amendmentReason: trimmedReason,
+          claimSubmitted: false,
+          claimId: undefined,
+          claimDraftLines: null,
+          claimPreviewDismissed: false,
+          remoteDraftClaimId: undefined,
+          openedAt: new Date(),
+          status: "reviewing",
+        })
+        set({
+          openPatients: state.openPatients.map((p) => (p.patientId === patientId ? next : p)),
+          consultSessionEpoch: state.consultSessionEpoch + 1,
         })
         requestEncounterPersistenceFlush()
       },
@@ -876,53 +1113,71 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         })
       },
 
-      toggleOverlay: (overlay) => {
-        set((state) => ({
-          overlays: { ...state.overlays, [overlay]: !state.overlays[overlay] },
-        }))
-      },
-
-      closeAllOverlays: () => {
-        set({
-          overlays: {
-            calendar: false,
-            inventory: false,
-            resource_library: false,
-            sales: false,
-          },
-        })
-      },
-
       setMode: (mode) => set({ mode }),
 
       setScribeActive: (active) => set({ scribeActive: active }),
       setScribeCollapsed: (collapsed) => set({ scribeCollapsed: collapsed }),
       appendScribeTranscript: (text) =>
-        set((state) => ({
-          scribeTranscript: state.scribeTranscript + text,
-        })),
-      setScribeTranscript: (text) => set({ scribeTranscript: text }),
+        set((state) => {
+          if (activeEncounterIsSigned(state)) return state
+          const scribeTranscript = state.scribeTranscript + text
+          return {
+            scribeTranscript,
+            ...scribeSnapshotPatch(state, { scribeTranscript }),
+          }
+        }),
+      setScribeTranscript: (text) =>
+        set((state) =>
+          activeEncounterIsSigned(state)
+            ? state
+            : {
+                scribeTranscript: text,
+                ...scribeSnapshotPatch(state, { scribeTranscript: text }),
+              }
+        ),
       appendScribeSegments: (segments) =>
-        set((state) => ({
-          scribeSegments: [...state.scribeSegments, ...segments],
-        })),
+        set((state) => {
+          if (activeEncounterIsSigned(state)) return state
+          const scribeSegments = [...state.scribeSegments, ...segments]
+          return {
+            scribeSegments,
+            ...scribeSnapshotPatch(state, { scribeSegments }),
+          }
+        }),
       setScribeEntities: (entities) => {
-        set({ scribeEntities: entities })
+        if (activeEncounterIsSigned(get())) return
+        set((state) => ({
+          scribeEntities: entities,
+          ...scribeSnapshotPatch(state, { scribeEntities: entities }),
+        }))
         const pid = get().activePatientId
         if (pid) {
           get().ingestScribeExtractionForPatient(pid)
         }
       },
-      setScribeHighlights: (highlights) => set({ scribeHighlights: highlights }),
+      setScribeHighlights: (highlights) =>
+        set((state) =>
+          activeEncounterIsSigned(state)
+            ? state
+            : {
+                scribeHighlights: highlights,
+                ...scribeSnapshotPatch(state, { scribeHighlights: highlights }),
+              }
+        ),
       setEntityStatus: (key, status) =>
-        set((state) => ({
-          scribeEntityStatus: { ...state.scribeEntityStatus, [key]: status },
-        })),
+        set((state) => {
+          if (activeEncounterIsSigned(state)) return state
+          const scribeEntityStatus = { ...state.scribeEntityStatus, [key]: status }
+          return {
+            scribeEntityStatus,
+            ...scribeSnapshotPatch(state, { scribeEntityStatus }),
+          }
+        }),
 
       unacceptScribeEntity: (patientId, entityKey, item) => {
         set((state) => {
           const openPatients = state.openPatients.map((p) => {
-            if (p.patientId !== patientId) return p
+            if (p.patientId !== patientId || p.consultSigned) return p
             let next = { ...p }
             if (entityKey === "diagnoses") {
               next.chronicConditions = (p.chronicConditions ?? []).filter((x) => x !== item)
@@ -979,7 +1234,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             )
           }
           const openPatients = state.openPatients.map((p) => {
-            if (p.patientId !== patientId) return p
+            if (p.patientId !== patientId || p.consultSigned) return p
             let next: PatientSession = {
               ...p,
               blocks: [...p.blocks, block, ...extraLabBlocks],
@@ -1164,10 +1419,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if (!newText.trim()) return
         set((state) => {
           const entities = { ...state.scribeEntities }
-          const arr = [...((entities as any)[category] ?? [])]
+          const entityMap = entities as unknown as Record<string, string[]>
+          const arr = [...(entityMap[category] ?? [])]
           const idx = arr.indexOf(oldText)
           if (idx >= 0) arr[idx] = newText.trim()
-          ;(entities as any)[category] = arr
+          entityMap[category] = arr
           const statusUpdate = { ...state.scribeEntityStatus }
           const oldKey = `${category}:${oldText}`
           const newKey = `${category}:${newText.trim()}`
@@ -1175,11 +1431,32 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             statusUpdate[newKey] = statusUpdate[oldKey]
             delete statusUpdate[oldKey]
           }
-          return { scribeEntities: entities, scribeEntityStatus: statusUpdate }
+          return {
+            scribeEntities: entities,
+            scribeEntityStatus: statusUpdate,
+            ...scribeSnapshotPatch(
+              { ...state, scribeEntities: entities, scribeEntityStatus: statusUpdate },
+              { scribeEntities: entities, scribeEntityStatus: statusUpdate }
+            ),
+          }
         })
       },
       clearScribeTranscript: () =>
-        set({ scribeTranscript: "", scribeSegments: [], scribeEntities: EMPTY_ENTITIES, scribeHighlights: [], scribeEntityStatus: {}, scribeCollapsed: false }),
+        set((state) => ({
+          scribeTranscript: "",
+          scribeSegments: [],
+          scribeEntities: EMPTY_ENTITIES,
+          scribeHighlights: [],
+          scribeEntityStatus: {},
+          scribeCollapsed: false,
+          ...scribeSnapshotPatch(state, {
+            scribeTranscript: "",
+            scribeSegments: [],
+            scribeEntities: EMPTY_ENTITIES,
+            scribeHighlights: [],
+            scribeEntityStatus: {},
+          }),
+        })),
 
       openDocumentSheet: (blockId) => {
         const prev = get().paneVisibility
@@ -1199,8 +1476,20 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       updateDocumentContent: (content, isStreaming, patch) => {
         set((state) => {
-          if (!state.documentSheet.contentDocument) return state
-          const prevDoc = state.documentSheet.contentDocument
+          const pid = state.activePatientId
+          if (!pid) return state
+
+          const docId = patch?.docId ?? state.documentSheet.contentDocument?.id
+          if (!docId) return state
+
+          const patient = state.openPatients.find((p) => p.patientId === pid)
+          if (patient?.consultSigned) return state
+          const sessionEntry = patient?.sessionDocuments?.find(
+            (s) => s.id === docId || s.document.id === docId
+          )
+          if (!sessionEntry) return state
+
+          const prevDoc = sessionEntry.document
           const nextDoc = {
             ...prevDoc,
             content,
@@ -1209,29 +1498,38 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             ...(patch?.prescriptionItems !== undefined
               ? { prescriptionItems: patch.prescriptionItems }
               : {}),
+            ...(patch?.icdItems !== undefined ? { icdItems: patch.icdItems } : {}),
+            ...(patch?.claimItems !== undefined ? { claimItems: patch.claimItems } : {}),
           }
-          const pid = state.activePatientId
-          let openPatients = state.openPatients
-          if (pid) {
-            openPatients = state.openPatients.map((p) => {
-              if (p.patientId !== pid) return p
-              const docs = [...(p.sessionDocuments ?? [])]
-              const idx = docs.findIndex((s) => s.id === prevDoc.id)
-              if (idx < 0) return p
-              docs[idx] = {
-                ...docs[idx],
-                document: nextDoc,
-                updatedAt: new Date().toISOString(),
-              }
-              return { ...p, sessionDocuments: docs }
-            })
-          }
+
+          const openPatients = state.openPatients.map((p) => {
+            if (p.patientId !== pid) return p
+            const docs = [...(p.sessionDocuments ?? [])]
+            const idx = docs.findIndex((s) => s.id === docId || s.document.id === docId)
+            if (idx < 0) return p
+            docs[idx] = {
+              ...docs[idx],
+              document: nextDoc,
+              updatedAt: new Date().toISOString(),
+            }
+            return { ...p, sessionDocuments: docs }
+          })
+
+          const sheetDocId = state.documentSheet.contentDocument?.id
+          const touchSheet =
+            sheetDocId != null &&
+            (sheetDocId === docId || sheetDocId === prevDoc.id)
+
           return {
             openPatients,
-            documentSheet: {
-              ...state.documentSheet,
-              contentDocument: nextDoc,
-            },
+            ...(touchSheet
+              ? {
+                  documentSheet: {
+                    ...state.documentSheet,
+                    contentDocument: nextDoc,
+                  },
+                }
+              : {}),
           }
         })
       },
@@ -1239,11 +1537,24 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       upsertSessionDocument: (patientId, entry) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) => {
-            if (p.patientId !== patientId) return p
+            if (p.patientId !== patientId || p.consultSigned) return p
             const list = [...(p.sessionDocuments ?? [])]
-            const idx = list.findIndex((s) => s.id === entry.id)
-            if (idx >= 0) list[idx] = entry
-            else list.push(entry)
+            const idxById = list.findIndex((s) => s.id === entry.id)
+            if (idxById >= 0) {
+              list[idxById] = entry
+            } else {
+              // Remove any older entry of the same doc type so we never
+              // accumulate duplicate tabs (e.g. two "Summary" entries).
+              // Keep it if it's accepted — accepted docs are historical records.
+              const dupIdx = list.findIndex(
+                (s) =>
+                  s.id !== entry.id &&
+                  s.document.type === entry.document.type &&
+                  s.status !== "accepted"
+              )
+              if (dupIdx >= 0) list.splice(dupIdx, 1)
+              list.push(entry)
+            }
             return { ...p, sessionDocuments: list }
           }),
         }))
@@ -1251,6 +1562,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       acceptSessionDocument: (patientId, docId, options) => {
         const state = get()
+        if (state.openPatients.find((p) => p.patientId === patientId)?.consultSigned) return
         let resolvedDocForSideEffects: ClinicalDocument | null = null
 
         const openPatients = state.openPatients.map((p) => {
@@ -1339,7 +1651,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       rejectSessionDocument: (patientId, docId, reason, options) => {
         set((state) => ({
           openPatients: state.openPatients.map((p) => {
-            if (p.patientId !== patientId) return p
+            if (p.patientId !== patientId || p.consultSigned) return p
 
             const docs = [...(p.sessionDocuments ?? [])]
             const idx = docs.findIndex((s) => s.id === docId)
@@ -1449,8 +1761,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       setAdminTab: (tab) => set({ activeAdminTab: tab }),
       setBillingSubTab: (tab) => set({ activeBillingSubTab: tab }),
+      setBillingQueueFilter: (filter) => set({ activeBillingQueueFilter: filter }),
       setActiveDoctor: (doctorId) => set({ activeDoctorId: doctorId }),
       setSelectedDate: (date) => set({ selectedDate: date }),
+      toggleCalendarProviderHidden: (providerId) =>
+        set((state) => ({
+          calendarHiddenProviderIds: state.calendarHiddenProviderIds.includes(providerId)
+            ? state.calendarHiddenProviderIds.filter((id) => id !== providerId)
+            : [...state.calendarHiddenProviderIds, providerId],
+        })),
 
       addClaim: (claim) =>
         set((state) => ({ claims: [...state.claims, claim] })),
@@ -1478,37 +1797,108 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           ),
         })),
 
-      upsertInventoryItem: (item) =>
+      upsertInventoryItem: async (item) => {
+        const before = get().inventory
+        const persistedId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.id)
         set((state) => {
           const idx = state.inventory.findIndex((i) => i.id === item.id)
-          if (idx >= 0) {
-            const next = [...state.inventory]
-            next[idx] = item
-            return { inventory: next }
+          const inventory = [...state.inventory]
+          if (idx >= 0) inventory[idx] = item
+          else inventory.push(item)
+          return { inventory, inventoryMutationError: null }
+        })
+        try {
+          const response = await fetch(
+            persistedId ? `/api/practice/inventory/${encodeURIComponent(item.id)}` : "/api/practice/inventory",
+            {
+              method: persistedId ? "PATCH" : "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(item),
+            }
+          )
+          const payload = (await response.json().catch(() => ({}))) as {
+            item?: InventoryItem
+            error?: string
           }
-          return { inventory: [...state.inventory, item] }
-        }),
+          if (!response.ok || !payload.item) throw new Error(payload.error || "Could not save inventory item")
+          set((state) => ({
+            inventory: [
+              ...state.inventory.filter((candidate) => candidate.id !== item.id && candidate.id !== payload.item!.id),
+              payload.item!,
+            ],
+            inventoryMutationError: null,
+          }))
+        } catch (error) {
+          set({
+            inventory: before,
+            inventoryMutationError: error instanceof Error ? error.message : "Could not save inventory item",
+          })
+        }
+      },
 
-      deleteInventoryItem: (itemId) =>
+      deleteInventoryItem: async (itemId) => {
+        const before = get().inventory
         set((state) => ({
           inventory: state.inventory.filter((i) => i.id !== itemId),
-        })),
+          inventoryMutationError: null,
+        }))
+        try {
+          const response = await fetch(`/api/practice/inventory/${encodeURIComponent(itemId)}`, {
+            method: "DELETE",
+          })
+          const payload = (await response.json().catch(() => ({}))) as { error?: string }
+          if (!response.ok) throw new Error(payload.error || "Could not delete inventory item")
+        } catch (error) {
+          set({
+            inventory: before,
+            inventoryMutationError: error instanceof Error ? error.message : "Could not delete inventory item",
+          })
+        }
+      },
 
-      decrementInventory: (nappiCode, qty = 1) =>
-        set((state) => ({
-          inventory: state.inventory.map((i) =>
-            i.nappiCode === nappiCode
-              ? { ...i, currentStock: Math.max(0, i.currentStock - qty) }
-              : i
-          ),
-        })),
+      decrementInventory: (nappiCode, qty = 1) => {
+        const match = get().inventory.find((item) => item.nappiCode === nappiCode)
+        if (!match) return
+        void get().upsertInventoryItem({
+          ...match,
+          currentStock: Math.max(0, match.currentStock - qty),
+        })
+      },
 
-      bulkImportInventory: (items) =>
+      bulkImportInventory: async (items) => {
+        if (items.length === 0) return
+        const before = get().inventory
         set((state) => {
           const map = new Map(state.inventory.map((i) => [i.id, i]))
           for (const item of items) map.set(item.id, item)
-          return { inventory: Array.from(map.values()) }
-        }),
+          return { inventory: Array.from(map.values()), inventoryMutationError: null }
+        })
+        try {
+          const response = await fetch("/api/practice/inventory", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items }),
+          })
+          const payload = (await response.json().catch(() => ({}))) as {
+            items?: InventoryItem[]
+            error?: string
+          }
+          if (!response.ok || !payload.items) throw new Error(payload.error || "Could not import inventory")
+          const temporaryIds = new Set(items.map((item) => item.id))
+          set((state) => ({
+            inventory: [
+              ...state.inventory.filter((item) => !temporaryIds.has(item.id)),
+              ...payload.items!,
+            ],
+            inventoryMutationError: null,
+          }))
+        } catch (error) {
+          set({
+            inventory: before,
+            inventoryMutationError: error instanceof Error ? error.message : "Could not import inventory",
+          })
+        }
+      },
 
       setCommandBarOpen: (open) => set({ commandBarOpen: open }),
 
@@ -1574,14 +1964,14 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       requestInboxNotificationsPanelOpen: () =>
         set((s) => ({
           mode: "admin",
-          activeAdminTab: "inbox",
+          activeAdminTab: "front_desk",
           inboxNotificationsPanelRequest: s.inboxNotificationsPanelRequest + 1,
         })),
 
       requestInboxScrollTo: (target) =>
         set((s) => ({
           mode: "admin",
-          activeAdminTab: "inbox",
+          activeAdminTab: "front_desk",
           inboxScrollRequest: { target, nonce: s.inboxScrollRequest.nonce + 1 },
         })),
 
@@ -1645,6 +2035,19 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if ((merged.activeAdminTab as string) === "settings") {
           merged.activeAdminTab = "calendar"
         }
+        if ((merged.activeAdminTab as string) === "inbox") {
+          merged.activeAdminTab = "front_desk"
+        }
+        if ((merged.mode as string) === "front_desk") {
+          merged.mode = "admin"
+          merged.activeAdminTab = "front_desk"
+        }
+        if (merged.activePatientId) {
+          const patient = merged.openPatients.find(
+            (op) => op.patientId === merged.activePatientId
+          )
+          Object.assign(merged, scribeFieldsFromSnapshot(patient?.scribeSnapshot))
+        }
         return merged
       },
       partialize: (state) => ({
@@ -1674,12 +2077,18 @@ export function getActivePatient(): PatientSession | null {
   return openPatients.find((p) => p.patientId === activePatientId) ?? null
 }
 
+/** Persist live scribe fields onto the active patient's session snapshot (e.g. after direct setState). */
+export function syncActivePatientScribeSnapshot() {
+  useWorkspaceStore.setState((state) => scribeSnapshotPatch(state, {}))
+}
+
 export function createPatientSession(
   overrides: Partial<PatientSession> & Pick<PatientSession, "patientId" | "name">
 ): PatientSession {
   return {
     status: "waiting",
     openedAt: new Date(),
+    encounterVersion: 1,
     soapNote: { ...EMPTY_SOAP },
     vitals: [],
     blocks: [],

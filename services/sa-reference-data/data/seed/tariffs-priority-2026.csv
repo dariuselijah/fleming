@@ -1,0 +1,10 @@
+year,schemeCode,schemeName,planOptionCode,disciplineCode,tariffCode,description,networkFlag,amountCents,sourceFileId
+2026,GEMS,Government Employees Medical Scheme,PRIVATE,014,0190,Consultation - New/existing new complaint,contracted,48500,gems-2026-mp-sample
+2026,GEMS,Government Employees Medical Scheme,PRIVATE,014,0191,Consultation - Follow-up,contracted,34200,gems-2026-mp-sample
+2026,GEMS,Government Employees Medical Scheme,PRIVATE,014,0192,Consultation - Prolonged,non_contracted,52000,gems-2026-mp-sample
+2026,DISCOVERY,Discovery Health Medical Scheme,614117,014,0190,Consultation,network,51200,discovery-2026-sample
+2026,DISCOVERY,Discovery Health Medical Scheme,614117,014,0191,Follow-up consultation,network,36800,discovery-2026-sample
+2026,BONITAS,Bonitas Medical Fund,664823,014,0190,GP consultation,network,47000,medscheme-bonitas-2026-sample
+2026,FEDHEALTH,Fedhealth Medical Scheme,664874,014,0190,GP consultation,network,46800,medscheme-fedhealth-2026-sample
+2026,MOMENTUM,Momentum Medical Scheme,639802,014,0190,Consultation,network,45500,momentum-2026-sample
+2026,MOMENTUM,Momentum Medical Scheme,639802,014,0191,Follow-up consultation,network,33000,momentum-2026-sample

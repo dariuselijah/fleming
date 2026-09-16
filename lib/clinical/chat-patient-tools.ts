@@ -1,9 +1,10 @@
 import { tool, type ToolSet } from "ai"
 import { z } from "zod"
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { decryptPracticeAesGcm, vaultOpenDek } from "@/lib/server/clinical-vault"
-import { generateEmbedding } from "@/lib/rag/embeddings"
+import { decryptPracticeAesGcm } from "@/lib/server/clinical-vault"
+import { loadVaultDek } from "@/lib/clinical/vault-dek"
 import { buildPrescriptionDraft } from "@/lib/clinical/prescribe-tool-logic"
+import { generateEmbedding } from "@/lib/rag/embeddings"
 
 function asStringList(v: unknown): string[] {
   if (!Array.isArray(v)) return []
@@ -14,25 +15,6 @@ function asStringList(v: unknown): string[] {
       return String(x)
     })
     .filter(Boolean)
-}
-
-async function loadVaultDek(
-  supabase: SupabaseClient,
-  userId: string,
-  practiceId: string
-): Promise<string | null> {
-  const { data, error } = await supabase
-    .from("clinical_session_keys")
-    .select("enc_dek, dek_iv, expires_at")
-    .eq("user_id", userId)
-    .eq("practice_id", practiceId)
-    .gt("expires_at", new Date().toISOString())
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (error || !data?.enc_dek || !data?.dek_iv) return null
-  return vaultOpenDek(data.enc_dek, data.dek_iv)
 }
 
 type HybridHit = {

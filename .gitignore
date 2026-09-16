@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
 
 # next.js
 /.next/
@@ -19,6 +21,10 @@
 
 # production
 /build
+
+# native build outputs
+/android/
+/ios/
 
 # misc
 .DS_Store

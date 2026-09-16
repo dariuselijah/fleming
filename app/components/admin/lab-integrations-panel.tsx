@@ -31,6 +31,7 @@ const STATUS_OPTIONS: LabConnectionStatus[] = [
   "live",
   "paused",
 ]
+const LAB_INBOUND_ENABLED = false
 
 export function LabIntegrationsPanel() {
   const [loading, setLoading] = useState(true)
@@ -56,8 +57,29 @@ export function LabIntegrationsPanel() {
   }, [])
 
   useEffect(() => {
+    if (!LAB_INBOUND_ENABLED) {
+      setLoading(false)
+      return
+    }
     void load()
   }, [load])
+
+  if (!LAB_INBOUND_ENABLED) {
+    return (
+      <div className="mt-auto border-t border-panel-border pt-3">
+        <div className="rounded-xl border border-dashed border-panel-border bg-panel-muted/40 px-3 py-3">
+          <div className="flex items-center gap-2">
+            <Plugs className="size-4 text-muted-foreground" />
+            <p className="text-[11px] font-medium text-foreground/75">Lab inbound unavailable</p>
+          </div>
+          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+            Partner routing stays hidden until authenticated parsing, patient matching, audit logging, and inbox
+            creation are released together.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const copyText = async (key: string, text: string) => {
     try {
@@ -110,25 +132,25 @@ export function LabIntegrationsPanel() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center border-t border-white/[0.06] py-6">
-        <CircleNotch className="size-5 animate-spin text-white/20" />
+      <div className="flex items-center justify-center border-t border-panel-border py-6">
+        <CircleNotch className="size-5 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   return (
-    <div className="mt-auto border-t border-white/[0.06] pt-3">
+    <div className="mt-auto border-t border-panel-border pt-3">
       <div className="mb-2 flex items-center gap-1.5">
-        <Plugs className="size-3 text-white/30" />
-        <span className="text-[10px] font-medium text-white/40">Lab partners (ZA)</span>
+        <Plugs className="size-3 text-muted-foreground" />
+        <span className="text-[10px] font-medium text-muted-foreground">Lab partners (ZA)</span>
       </div>
-      <p className="mb-2.5 text-[9px] leading-snug text-white/22">
+      <p className="mb-2.5 text-[9px] leading-snug text-muted-foreground">
         Request formal routing for Lancet, Ampath, and PathCare. We email the lab from Fleming with your
         clinicians and a secure inbound URL. Track status here; when the lab confirms, mark{" "}
-        <span className="text-white/35">Live</span>.
+        <span className="text-muted-foreground">Live</span>.
       </p>
       {baseUrl && (
-        <p className="mb-2 font-mono text-[8px] text-white/18">
+        <p className="mb-2 font-mono text-[8px] text-muted-foreground">
           App base: {baseUrl}
         </p>
       )}
@@ -145,12 +167,12 @@ export function LabIntegrationsPanel() {
           return (
             <div
               key={p.id}
-              className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-2.5 py-2"
+              className="rounded-xl border border-panel-border bg-panel-muted/50 px-2.5 py-2"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-medium text-white/70">{p.label}</p>
-                  <p className="text-[9px] text-white/25">
+                  <p className="text-[11px] font-medium text-foreground/70">{p.label}</p>
+                  <p className="text-[9px] text-muted-foreground">
                     {row?.lastOutreachAt
                       ? `Last outreach ${new Date(row.lastOutreachAt).toLocaleString()}${row.lastOutreachTo ? ` → ${row.lastOutreachTo}` : ""}`
                       : "No outreach logged yet"}
@@ -164,8 +186,8 @@ export function LabIntegrationsPanel() {
                   disabled={disabled}
                   onChange={(e) => void setStatus(p.id, e.target.value as LabConnectionStatus)}
                   className={cn(
-                    "max-w-[118px] shrink-0 cursor-pointer rounded-lg border border-white/[0.08] bg-white/[0.04] px-1.5 py-1 text-[9px] font-medium outline-none focus:border-white/[0.14]",
-                    "text-white/70"
+                    "max-w-[118px] shrink-0 cursor-pointer rounded-lg border border-panel-border bg-panel-muted px-1.5 py-1 text-[9px] font-medium outline-none focus:border-ring",
+                    "text-foreground/70"
                   )}
                 >
                   {STATUS_OPTIONS.map((s) => (
@@ -177,16 +199,16 @@ export function LabIntegrationsPanel() {
               </div>
 
               {row?.inboundUrl && row.bearerToken && (
-                <div className="mt-2 space-y-1.5 rounded-lg bg-black/20 p-2">
+                <div className="mt-2 space-y-1.5 rounded-lg bg-panel-muted p-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-[8px] font-medium uppercase tracking-wide text-white/30">Inbound URL</p>
-                      <p className="break-all font-mono text-[9px] text-white/50">{row.inboundUrl}</p>
+                      <p className="text-[8px] font-medium uppercase tracking-wide text-muted-foreground">Inbound URL</p>
+                      <p className="break-all font-mono text-[9px] text-muted-foreground/70">{row.inboundUrl}</p>
                     </div>
                     <button
                       type="button"
                       onClick={() => void copyText(`${p.id}-url`, row.inboundUrl!)}
-                      className="shrink-0 rounded-md p-1 text-white/35 hover:bg-white/[0.06] hover:text-white/70"
+                      className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-accent-foreground/70"
                       title="Copy URL"
                     >
                       <Copy className="size-3.5" />
@@ -194,15 +216,15 @@ export function LabIntegrationsPanel() {
                   </div>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-[8px] font-medium uppercase tracking-wide text-white/30">
+                      <p className="text-[8px] font-medium uppercase tracking-wide text-muted-foreground">
                         Bearer token
                       </p>
-                      <p className="break-all font-mono text-[9px] text-white/45">{row.bearerToken}</p>
+                      <p className="break-all font-mono text-[9px] text-muted-foreground/65">{row.bearerToken}</p>
                     </div>
                     <button
                       type="button"
                       onClick={() => void copyText(`${p.id}-tok`, row.bearerToken!)}
-                      className="shrink-0 rounded-md p-1 text-white/35 hover:bg-white/[0.06] hover:text-white/70"
+                      className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-accent-foreground/70"
                       title="Copy token"
                     >
                       <Copy className="size-3.5" />
@@ -220,7 +242,7 @@ export function LabIntegrationsPanel() {
                 type="button"
                 disabled={disabled}
                 onClick={() => void requestOutreach(p.id)}
-                className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.05] py-1.5 text-[10px] font-medium text-white/70 transition-colors hover:border-white/18 hover:bg-white/[0.08] disabled:opacity-50"
+                className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-panel-border bg-panel-muted py-1.5 text-[10px] font-medium text-foreground/70 transition-colors hover:border-white/18 hover:bg-secondary disabled:opacity-50"
               >
                 {disabled ? (
                   <CircleNotch className="size-3.5 animate-spin" />

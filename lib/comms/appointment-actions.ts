@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { findPatientByPracticePhone } from "./patient-phone"
+import { rescheduleAppointmentForPractice } from "@/lib/practice/reschedule-appointment-server"
 
 /**
  * Resolve patient id from thread link or phone match (WhatsApp external_party).
@@ -262,25 +263,22 @@ export async function rescheduleAppointment(opts: {
 
   const providerId = opts.providerStaffId ?? row.provider_staff_id
 
-  const { data: conflicts } = await db
-    .from("practice_appointments")
-    .select("id")
-    .eq("practice_id", opts.practiceId)
-    .eq("appt_date", opts.newDate)
-    .eq("start_time", opts.newStartTime)
-    .in("status", ["booked", "confirmed", "checked_in", "in_progress"])
-    .neq("id", row.id)
-    .limit(1)
-
-  if (conflicts && conflicts.length > 0) {
+  const result = await rescheduleAppointmentForPractice(db, opts.practiceId, {
+    appointmentId: row.id,
+    apptDate: opts.newDate,
+    startTime: opts.newStartTime,
+    endTime,
+    providerStaffId: providerId ?? null,
+  })
+  if (!result.ok) {
     return {
       ok: false,
-      message: "That time slot is no longer available. Please choose another.",
+      message: result.error.startsWith("slot_invalid:")
+        ? "That time slot is no longer available. Please choose another."
+        : `Could not reschedule: ${result.error}`,
     }
   }
 
-  const hourVal = parseInt(opts.newStartTime.split(":")[0], 10)
-  const minuteVal = parseInt(opts.newStartTime.split(":")[1], 10)
   const now = new Date().toISOString()
   const meta = {
     ...(row.metadata || {}),
@@ -292,12 +290,6 @@ export async function rescheduleAppointment(opts: {
   const { error } = await db
     .from("practice_appointments")
     .update({
-      appt_date: opts.newDate,
-      start_time: opts.newStartTime,
-      end_time: endTime,
-      hour_val: hourVal,
-      minute_val: minuteVal,
-      provider_staff_id: providerId ?? null,
       metadata: meta,
       updated_at: now,
     })

@@ -4,6 +4,7 @@ import {
   buildDraftClaimForSubmit,
   fetchPracticeClaimsForWorkspace,
   patientSessionToMedikreditPayload,
+  practicePatientToMedikreditPayload,
   practiceClaimLinesToMedikredit,
   useWorkspace,
   useWorkspaceStore,
@@ -14,9 +15,9 @@ import { fetchClient } from "@/lib/fetch"
 import {
   getModifiersForDiscipline,
   type Discipline,
-  type ModifierDef,
   DISCIPLINE_LABELS,
 } from "@/lib/medikredit/modifier-catalog"
+import { ClaimModifierPicker, MAX_MODIFIERS_PER_LINE } from "@/app/components/medikredit/claim-modifier-picker"
 import { validateClaimModifiers, type ValidationResult } from "@/lib/medikredit/modifier-validator"
 import { MedpraxCodeSearch, type MedpraxPickedCode } from "@/app/components/admin/revenue/medprax-code-search"
 import {
@@ -31,7 +32,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import {
   SpinnerGap,
@@ -41,23 +41,13 @@ import {
   XCircle,
   Stethoscope,
   CaretDown,
-  X,
   ArrowsClockwise,
   FloppyDisk,
 } from "@phosphor-icons/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
-const MAX_MODIFIERS_PER_LINE = 5
-
 const ANAESTHETIC_DISCIPLINES: Discipline[] = ["medical"]
-
-// ── Modifier badge colors by type ──
-const MOD_TYPE_COLORS: Record<string, string> = {
-  informational: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
-  reduction: "bg-red-500/15 text-red-600 dark:text-red-400",
-  add: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  compound: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-}
+const CLAIM_SUBMISSION_TIMEOUT_MS = 150_000
 
 export function ClaimPreviewModal() {
   const { practiceId } = usePracticeCrypto()
@@ -78,6 +68,9 @@ export function ClaimPreviewModal() {
   )
 
   const patientId = activePatient?.patientId
+  const billingPatientProfile = useWorkspaceStore(
+    (s) => (patientId ? s.patients.find((x) => x.id === patientId) : undefined)
+  )
 
   // ── Discipline state ──
   const [discipline, setDiscipline] = useState<Discipline>("medical")
@@ -147,6 +140,7 @@ export function ClaimPreviewModal() {
             practiceId,
             patientId,
             clinicalEncounterId: p.clinicalEncounterId,
+            appointmentId: p.appointmentId ?? null,
             claimId: null,
             lines: latestLines,
           }),
@@ -195,6 +189,11 @@ export function ClaimPreviewModal() {
 
   const hasErrors = validationResults.some((r) => r.severity === "error")
 
+  const medicalAidMissingPrimaryIcd = useMemo(
+    () => (lines ?? []).some((l) => l.lineType === "medical_aid" && !l.icdCode?.trim()),
+    [lines]
+  )
+
   // ── Totals ──
   const totalAmount = useMemo(
     () => (lines ?? []).reduce((s, l) => s + (l.amount ?? 0), 0),
@@ -205,7 +204,7 @@ export function ClaimPreviewModal() {
   const [sendError, setSendError] = useState<string | null>(null)
   const [saveLoading, setSaveLoading] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const treatmentDate = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const [treatmentDate, setTreatmentDate] = useState(() => new Date().toISOString().slice(0, 10))
 
   // ── Line helpers ──
   const updateLine = (id: string, patch: Partial<ClaimLine>) => {
@@ -243,6 +242,7 @@ export function ClaimPreviewModal() {
       lineType,
       status: "draft",
       medikreditTp: 2,
+      treatmentDate,
     }
     setClaimDraftLines(patientId, [...(lines ?? []), row])
   }
@@ -277,23 +277,57 @@ export function ClaimPreviewModal() {
     setSendLoading(true)
     setSendError(null)
     try {
-      const mkLines = practiceClaimLinesToMedikredit(lines, treatmentDate)
+      const maUiLines = lines.filter((l) => l.lineType === "medical_aid")
+      if (maUiLines.length === 0) {
+        setSendError("Mark at least one line as Medical aid (scheme) before sending to MediKredit.")
+        return
+      }
+      if (maUiLines.some((l) => !l.icdCode?.trim())) {
+        setSendError(
+          "Every medical-aid line needs a primary ICD-10 code. MediKredit returns RJ 762 if none is submitted."
+        )
+        return
+      }
+      const mkLines = practiceClaimLinesToMedikredit(maUiLines, treatmentDate)
+      const persistedClaimId = activePatient.remoteDraftClaimId?.trim()
       const res = await fetchClient("/api/clinical/medikredit/claim", {
         method: "POST",
+        timeoutMs: CLAIM_SUBMISSION_TIMEOUT_MS,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           practiceId,
-          patient: patientSessionToMedikreditPayload(activePatient),
+          patient: billingPatientProfile
+            ? practicePatientToMedikreditPayload(billingPatientProfile)
+            : patientSessionToMedikreditPayload(activePatient),
           lines: mkLines,
           clinicalEncounterId: activePatient.clinicalEncounterId,
+          appointmentId: activePatient.appointmentId ?? undefined,
+          claimId: persistedClaimId || undefined,
+          schemeCode: billingPatientProfile?.medicalAidSchemeCode?.trim() || undefined,
+          isSpecialist,
+          anaestheticDurationMinutes: anDuration > 0 ? anDuration : undefined,
+          isOptometry: discipline === "optometry",
         }),
       })
       const text = await res.text()
+      let j: { claimId?: string; error?: string; hint?: string; code?: string } = {}
+      try {
+        j = JSON.parse(text) as typeof j
+      } catch {
+        j = {}
+      }
       if (!res.ok) {
-        setSendError(text || `Claim failed (${res.status})`)
+        const codePart = j.code ? ` [${j.code}]` : ""
+        const extra = j.hint ? `\n${j.hint}` : ""
+        const base =
+          typeof j.error === "string" && j.error.trim()
+            ? j.error.trim()
+            : text.trim()
+              ? text.trim()
+              : `Claim failed (${res.status})`
+        setSendError(`${base}${codePart}${extra}`.trim())
         return
       }
-      const j = JSON.parse(text) as { claimId?: string }
       if (activePatient.remoteDraftClaimId) {
         await fetchClient(
           `/api/clinical/practice-claims/draft?id=${encodeURIComponent(activePatient.remoteDraftClaimId)}&practiceId=${encodeURIComponent(practiceId)}`,
@@ -332,6 +366,7 @@ export function ClaimPreviewModal() {
           practiceId,
           patientId,
           clinicalEncounterId: activePatient.clinicalEncounterId ?? null,
+          appointmentId: activePatient.appointmentId ?? null,
           claimId: activePatient.remoteDraftClaimId ?? null,
           lines,
         }),
@@ -390,6 +425,15 @@ export function ClaimPreviewModal() {
                 className="rounded"
               />
               <span className="text-muted-foreground">Specialist</span>
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-muted-foreground">Treatment date</span>
+              <input
+                type="date"
+                value={treatmentDate}
+                onChange={(event) => setTreatmentDate(event.target.value)}
+                className="rounded border border-border/60 bg-background px-1.5 py-1 text-[11px]"
+              />
             </label>
           </div>
         </div>
@@ -456,7 +500,12 @@ export function ClaimPreviewModal() {
                       </td>
                       <td className="px-2 py-1 align-top">
                         <input
-                          className="w-20 rounded border border-border/60 bg-background px-1.5 py-1 font-mono"
+                          className={cn(
+                            "w-20 rounded border bg-background px-1.5 py-1 font-mono",
+                            line.lineType === "medical_aid" && !line.icdCode?.trim()
+                              ? "border-amber-500/55 ring-1 ring-amber-500/25"
+                              : "border-border/60"
+                          )}
                           value={line.icdCode ?? ""}
                           placeholder="—"
                           onChange={(e) => updateLine(line.id, { icdCode: e.target.value || undefined })}
@@ -479,7 +528,7 @@ export function ClaimPreviewModal() {
                         />
                       </td>
                       <td className="px-2 py-1 align-top">
-                        <ModifierCell
+                        <ClaimModifierPicker
                           lineId={line.id}
                           codes={line.modifierCodes ?? []}
                           available={availableModifiers}
@@ -605,6 +654,16 @@ export function ClaimPreviewModal() {
             )}
 
             {/* ── Validation warnings ── */}
+            {medicalAidMissingPrimaryIcd && (
+              <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/35 bg-amber-500/[0.06] p-3 text-[11px] text-amber-800 dark:text-amber-200/90">
+                <WarningCircle className="mt-0.5 size-3.5 shrink-0" weight="fill" />
+                <span>
+                  Medical-aid lines need a primary ICD-10 code on each row. MediKredit rejects submissions without one
+                  (RJ 762).
+                </span>
+              </div>
+            )}
+
             {validationResults.length > 0 && (
               <div className="rounded-lg border border-border/60 p-3">
                 <p className="mb-2 text-[11px] font-medium text-muted-foreground">Validation</p>
@@ -656,9 +715,9 @@ export function ClaimPreviewModal() {
           </button>
           <button
             type="button"
-            disabled={sendLoading || !lines?.length || hasErrors}
+            disabled={sendLoading || !lines?.length || hasErrors || medicalAidMissingPrimaryIcd}
             onClick={() => void handleSend()}
-            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-xs font-semibold text-foreground hover:bg-emerald-700 disabled:opacity-50"
           >
             {sendLoading && <SpinnerGap className="size-4 animate-spin" />}
             Send to MediKredit
@@ -666,138 +725,5 @@ export function ClaimPreviewModal() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-// ── Modifier cell component ──
-
-function ModifierCell({
-  lineId,
-  codes,
-  available,
-  onAdd,
-  onRemove,
-}: {
-  lineId: string
-  codes: string[]
-  available: ModifierDef[]
-  onAdd: (code: string) => void
-  onRemove: (code: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return available.slice(0, 30)
-    const q = search.toLowerCase()
-    return available.filter(
-      (m) =>
-        m.code.includes(q) ||
-        m.description.toLowerCase().includes(q)
-    ).slice(0, 30)
-  }, [available, search])
-
-  return (
-    <div className="min-w-[100px]">
-      <Popover
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next)
-          if (!next) setSearch("")
-        }}
-        modal={false}
-      >
-        <div className="flex flex-wrap items-center gap-0.5">
-          {codes.map((c) => {
-            const def = available.find((m) => m.code === c)
-            const color = def ? MOD_TYPE_COLORS[def.modifierType] ?? "" : "bg-muted"
-            return (
-              <span
-                key={c}
-                className={cn("inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-semibold", color)}
-                title={def?.description}
-              >
-                {c}
-                <button type="button" onClick={() => onRemove(c)} className="hover:opacity-70">
-                  <X className="size-2.5" />
-                </button>
-              </span>
-            )
-          })}
-          {codes.length < MAX_MODIFIERS_PER_LINE && (
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="inline-flex size-5 items-center justify-center rounded border border-dashed border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground"
-                title="Add modifier"
-              >
-                <Plus className="size-3" weight="bold" />
-              </button>
-            </PopoverTrigger>
-          )}
-        </div>
-
-        <PopoverContent
-          align="start"
-          side="bottom"
-          sideOffset={6}
-          collisionPadding={12}
-          className={cn(
-            "z-[100] w-[min(18rem,calc(100vw-2rem))] max-h-[min(22rem,calc(100vh-6rem))] flex flex-col overflow-hidden p-0 shadow-lg",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out"
-          )}
-          onCloseAutoFocus={(e) => e.preventDefault()}
-        >
-          <div className="shrink-0 border-b border-border/60 p-1.5">
-            <input
-              type="text"
-              placeholder="Search modifiers..."
-              className="w-full rounded border border-border/60 bg-background px-2 py-1 text-[11px] placeholder:text-muted-foreground/50 focus:outline-none"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1 [scrollbar-width:thin]"
-            style={{ maxHeight: "min(14rem, 40vh)" }}
-          >
-            {filtered.length === 0 && (
-              <p className="p-2 text-center text-[10px] text-muted-foreground">No modifiers found</p>
-            )}
-            {filtered.map((m) => {
-              const alreadyAdded = codes.includes(m.code)
-              return (
-                <button
-                  key={`${lineId}:${m.discipline}:${m.code}`}
-                  type="button"
-                  disabled={alreadyAdded}
-                  className={cn(
-                    "flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-[10px] transition-colors hover:bg-muted",
-                    alreadyAdded && "opacity-40"
-                  )}
-                  onClick={() => {
-                    onAdd(m.code)
-                    setOpen(false)
-                    setSearch("")
-                  }}
-                >
-                  <span className="shrink-0 font-mono font-bold">{m.code}</span>
-                  <span className="min-w-0 flex-1 text-muted-foreground">{m.description}</span>
-                  <span
-                    className={cn(
-                      "shrink-0 rounded px-1 py-0.5 text-[8px] font-semibold uppercase",
-                      MOD_TYPE_COLORS[m.modifierType] ?? "bg-muted"
-                    )}
-                  >
-                    {m.modifierType.slice(0, 3)}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        </PopoverContent>
-      </Popover>
-    </div>
   )
 }

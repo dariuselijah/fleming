@@ -131,15 +131,15 @@ export function AddPatientModal({
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 8 }}
-        className="w-full max-w-lg rounded-2xl border border-white/[0.08] bg-[#0b0b0b] p-5 shadow-2xl"
+        className="w-full max-w-lg rounded-2xl border border-panel-border bg-popover p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold">Add patient profile</h2>
-            <p className="mt-1 text-[11px] text-white/40">Create the profile first so checkout, claims, PDFs and portal links stay connected.</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Create the profile first so checkout, claims, PDFs and portal links stay connected.</p>
           </div>
-          <button type="button" onClick={close} className="rounded-lg p-1 text-white/40 hover:bg-white/[0.06] hover:text-white">
+          <button type="button" onClick={close} className="rounded-lg p-1 text-muted-foreground hover:bg-secondary hover:text-accent-foreground">
             <X className="size-4" />
           </button>
         </div>
@@ -154,7 +154,7 @@ export function AddPatientModal({
           </div>
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={close} className="rounded-xl bg-white/[0.06] px-4 py-2 text-[11px] font-semibold text-white/60">
+          <button type="button" onClick={close} className="rounded-xl bg-secondary px-4 py-2 text-[11px] font-semibold text-muted-foreground/80">
             Cancel
           </button>
           <button type="button" disabled={busy} onClick={() => void create()} className="rounded-xl bg-emerald-500/20 px-4 py-2 text-[11px] font-semibold text-emerald-300 disabled:opacity-50">
@@ -169,11 +169,11 @@ export function AddPatientModal({
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="block">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">{label}</span>
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm outline-none focus:border-emerald-400/40"
+        className="mt-1 w-full rounded-xl border border-panel-border bg-panel-muted px-3 py-2 text-sm outline-none focus:border-emerald-400/40"
       />
     </label>
   )

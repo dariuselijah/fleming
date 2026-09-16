@@ -4,7 +4,7 @@ import type { EncounterStatePlain } from "@/lib/clinical-workspace/encounter-sta
 
 /**
  * Loads the most relevant saved encounter for this consult thread.
- * Prefer row linked to the active chat; otherwise latest for this patient.
+ * Prefer row linked to the active chat; otherwise latest for this patient (unless `strictChatId`).
  */
 export async function fetchLatestEncounterPlain(args: {
   supabase: SupabaseClient
@@ -12,8 +12,10 @@ export async function fetchLatestEncounterPlain(args: {
   patientId: string
   chatId: string | null | undefined
   dekKey: CryptoKey
+  /** When true with a non-null `chatId`, only return an encounter for that chat (no patient-wide fallback). */
+  strictChatId?: boolean
 }): Promise<{ encounterId: string; plain: EncounterStatePlain } | null> {
-  const { supabase, practiceId, patientId, chatId, dekKey } = args
+  const { supabase, practiceId, patientId, chatId, dekKey, strictChatId = false } = args
 
   if (chatId) {
     const { data: byChat, error: e1 } = await supabase
@@ -29,6 +31,9 @@ export async function fetchLatestEncounterPlain(args: {
       const plain = await tryDecrypt(dekKey, byChat.state_ciphertext, byChat.state_iv)
       if (plain) return { encounterId: byChat.id as string, plain }
     }
+    if (strictChatId) return null
+  } else if (strictChatId) {
+    return null
   }
 
   const { data: latest, error: e2 } = await supabase

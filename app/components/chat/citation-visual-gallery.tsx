@@ -144,15 +144,15 @@ function VisualTile({
               className="object-cover transition-transform duration-300 group-hover/figure:scale-[1.02]"
             />
             <div className="pointer-events-none absolute inset-0 z-10 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.06),rgba(15,23,42,0.28))]" />
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent px-3 py-3 text-white">
-              <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-white/85">
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent px-3 py-3 text-foreground">
+              <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-foreground/85">
                 <span>[{card.citationIndex}]</span>
                 <span>{card.visual.label || "Figure"}</span>
               </div>
               <MorphingDialogTitle className="mt-1 line-clamp-2 text-sm font-semibold leading-tight">
                 {card.sourceTitle}
               </MorphingDialogTitle>
-              <p className="mt-1 line-clamp-2 text-xs text-white/85">
+              <p className="mt-1 line-clamp-2 text-xs text-foreground/85">
                 {card.caption || card.sourceLabel}
               </p>
             </div>
@@ -170,7 +170,7 @@ function VisualTile({
       </MorphingDialogTrigger>
 
       <MorphingDialogContainer>
-        <MorphingDialogContent className="relative w-[min(92vw,960px)] overflow-hidden rounded-3xl border border-white/10 bg-background shadow-2xl">
+        <MorphingDialogContent className="relative w-[min(92vw,960px)] overflow-hidden rounded-3xl border border-border bg-background shadow-2xl">
           <div className="grid min-h-[min(78vh,720px)] grid-cols-1 md:grid-cols-[minmax(0,1.35fr)_360px]">
             <div className="relative flex items-center justify-center overflow-hidden bg-black/95 p-4 md:p-6">
               <LinkedVisualShader
@@ -240,7 +240,7 @@ function VisualTile({
             </div>
           </div>
         </MorphingDialogContent>
-        <MorphingDialogClose className="text-white" />
+        <MorphingDialogClose className="text-foreground" />
       </MorphingDialogContainer>
     </MorphingDialog>
   )

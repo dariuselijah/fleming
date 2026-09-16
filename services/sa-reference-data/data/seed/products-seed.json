@@ -1,0 +1,90 @@
+[
+  {
+    "nappiCode": "700217001",
+    "name": "Paracetamol 500mg tablets",
+    "fullDescription": "Paracetamol 500 mg tablets, 20s",
+    "strength": "500mg",
+    "packSize": "20",
+    "manufacturer": "Seed Pharma",
+    "productClass": "pharma",
+    "atcCode": "N02BE01",
+    "sepCents": 2499
+  },
+  {
+    "nappiCode": "714512001",
+    "name": "Metformin 500mg tablets",
+    "fullDescription": "Metformin hydrochloride 500 mg tablets, 56s",
+    "strength": "500mg",
+    "packSize": "56",
+    "manufacturer": "Seed Pharma",
+    "productClass": "pharma",
+    "atcCode": "A10BA02",
+    "sepCents": 4599
+  },
+  {
+    "nappiCode": "721001001",
+    "name": "Amoxicillin 500mg capsules",
+    "fullDescription": "Amoxicillin 500 mg capsules, 21s",
+    "strength": "500mg",
+    "packSize": "21",
+    "manufacturer": "Seed Pharma",
+    "productClass": "pharma",
+    "atcCode": "J01CA04",
+    "sepCents": 8999
+  },
+  {
+    "nappiCode": "733210001",
+    "name": "Atorvastatin 20mg tablets",
+    "fullDescription": "Atorvastatin 20 mg tablets, 30s",
+    "strength": "20mg",
+    "packSize": "30",
+    "manufacturer": "Seed Pharma",
+    "productClass": "pharma",
+    "atcCode": "C10AA05",
+    "sepCents": 12999
+  },
+  {
+    "nappiCode": "745100001",
+    "name": "Salbutamol inhaler 100mcg",
+    "fullDescription": "Salbutamol CFC-free inhaler 100 mcg/dose, 200 doses",
+    "strength": "100mcg",
+    "packSize": "200 doses",
+    "manufacturer": "Seed Pharma",
+    "productClass": "pharma",
+    "atcCode": "R03AC02",
+    "sepCents": 15999
+  },
+  {
+    "nappiCode": "802010001",
+    "name": "Sterile gauze swab 10x10cm",
+    "fullDescription": "Sterile gauze swab 10 cm x 10 cm, pack of 5",
+    "strength": null,
+    "packSize": "5",
+    "manufacturer": "Seed Surgical",
+    "productClass": "consumable",
+    "gmdnCode": "46821",
+    "listCents": 3500
+  },
+  {
+    "nappiCode": "802020001",
+    "name": "Surgical gloves latex powder-free M",
+    "fullDescription": "Powder-free latex surgical gloves, size M, box of 50 pairs",
+    "strength": null,
+    "packSize": "50 pairs",
+    "manufacturer": "Seed Surgical",
+    "productClass": "consumable",
+    "gmdnCode": "47182",
+    "listCents": 18900
+  },
+  {
+    "nappiCode": "810001001",
+    "name": "Disposable syringe 5ml Luer",
+    "fullDescription": "Disposable syringe 5 ml Luer slip, box of 100",
+    "strength": null,
+    "packSize": "100",
+    "manufacturer": "Seed Surgical",
+    "productClass": "surgical",
+    "gmdnCode": "47017",
+    "listCents": 12500
+  }
+]

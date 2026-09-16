@@ -13,7 +13,16 @@ export type InvoiceStatus =
   | "write_off"
   | "void"
 
-export type PaymentProvider = "cash" | "polar" | "stitch" | "eft_manual" | "medical_aid" | "write_off"
+export type PaymentProvider =
+  | "cash"
+  | "polar"
+  | "stitch"
+  | "yoco"
+  | "payfast"
+  | "payflex"
+  | "eft_manual"
+  | "medical_aid"
+  | "write_off"
 
 export type PaymentMethod =
   | "apple_pay"

@@ -47,6 +47,7 @@ const MODEL_PROVIDER_MAP: Record<string, Provider> = {
   "o4-mini-2025-04-16": "openai",
   "gpt-5": "openai",
   "gpt-5.2": "openai",
+  "gpt-5.5": "openai",
   "gpt-5.4": "openai",
 
   // Mistral

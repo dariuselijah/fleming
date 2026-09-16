@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client"
 import { usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-context"
+import { getEncounterStorageKey } from "@/lib/clinical-workspace/encounter-storage-key"
 import { fetchLatestEncounterPlain } from "@/lib/clinical-workspace/fetch-latest-encounter"
 import {
   encounterPlainToSessionPartial,
@@ -10,27 +11,27 @@ import {
 import { isEncounterHydrationSuppressed } from "@/lib/clinical-workspace/encounter-hydrate-suppress"
 import { isPracticePatientUuid } from "@/lib/clinical-workspace/clinical-uuid"
 import { useWorkspaceStore } from "@/lib/clinical-workspace"
+import type { ScribeSnapshot } from "@/lib/clinical-workspace/types"
 import { usePathname } from "next/navigation"
 import { useEffect, useRef } from "react"
 
 /**
- * After navigating to a consult chat, load saved transcript + extraction when the
- * client session is still empty (paths like check-in don't run the directory loader).
+ * After navigating to a consult chat, load saved transcript + encounter state for that thread.
  */
 export function ClinicalEncounterHydrate() {
   const pathname = usePathname()
-  const { practiceId, dekKey, unlocked } = usePracticeCrypto()
+  const { practiceId, dekKey } = usePracticeCrypto()
   const activePatientId = useWorkspaceStore((s) => s.activePatientId)
+  const consultSessionEpoch = useWorkspaceStore((s) => s.consultSessionEpoch)
   const chatIdOnPatient = useWorkspaceStore((s) => {
     const p = s.openPatients.find((x) => x.patientId === s.activePatientId)
     return p?.chatId ?? null
   })
-  const transcriptEmpty = useWorkspaceStore((s) => s.scribeTranscript.trim().length === 0)
 
   const appliedRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!practiceId || !dekKey || !unlocked || !activePatientId || !transcriptEmpty) return
+    if (!practiceId || !activePatientId) return
     if (isEncounterHydrationSuppressed()) return
 
     const routeChatId =
@@ -41,38 +42,48 @@ export function ClinicalEncounterHydrate() {
     const patient = st.openPatients.find((p) => p.patientId === activePatientId)
     if (!patient || !isPracticePatientUuid(patient.patientId)) return
 
-    const syncKey = `${patient.patientId}:${routeChatId}`
+    const syncKey = `${patient.patientId}:${routeChatId}:${consultSessionEpoch}`
     if (appliedRef.current === syncKey) return
 
     let cancelled = false
     ;(async () => {
       const supabase = createClient()
       if (!supabase) return
-      const row = await fetchLatestEncounterPlain({
+      const key = dekKey ?? await getEncounterStorageKey(practiceId)
+      let row = await fetchLatestEncounterPlain({
         supabase,
         practiceId,
         patientId: patient.patientId,
         chatId: routeChatId,
-        dekKey,
+        dekKey: key,
+        strictChatId: true,
       })
-      if (cancelled || !row) return
-      if (isEncounterHydrationSuppressed()) return
+      if (!row && routeChatId) {
+        row = await fetchLatestEncounterPlain({
+          supabase,
+          practiceId,
+          patientId: patient.patientId,
+          chatId: routeChatId,
+          dekKey: key,
+          strictChatId: false,
+        })
+      }
+      if (cancelled || isEncounterHydrationSuppressed()) return
 
-      const hasRemote =
-        row.plain.scribeTranscript?.trim().length ||
-        Object.values(row.plain.scribeEntities ?? {}).some(
-          (a) => Array.isArray(a) && a.length > 0
-        ) ||
-        (row.plain.blocks?.length ?? 0) > 0
-
-      if (!hasRemote) {
-        useWorkspaceStore.getState().setPatientClinicalEncounterId(patient.patientId, row.encounterId)
+      if (!row) {
         appliedRef.current = syncKey
         return
       }
 
       const fromEncounter = encounterPlainToSessionPartial(row.plain)
       const s = scribePartialFromPlain(row.plain)
+      const scribeSnap: ScribeSnapshot = {
+        transcript: s.transcript,
+        segments: s.segments,
+        entities: s.entities,
+        highlights: s.highlights,
+        entityStatus: s.entityStatus,
+      }
 
       useWorkspaceStore.setState({
         scribeTranscript: s.transcript,
@@ -87,6 +98,7 @@ export function ClinicalEncounterHydrate() {
                 ...fromEncounter,
                 clinicalEncounterId: row.encounterId,
                 chatId: routeChatId,
+                scribeSnapshot: scribeSnap,
               }
             : op
         ),
@@ -101,10 +113,9 @@ export function ClinicalEncounterHydrate() {
     pathname,
     practiceId,
     dekKey,
-    unlocked,
     activePatientId,
     chatIdOnPatient,
-    transcriptEmpty,
+    consultSessionEpoch,
   ])
 
   return null

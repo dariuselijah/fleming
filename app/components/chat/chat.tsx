@@ -22,18 +22,23 @@ import {
   type RunSavedQuestionEventDetail,
 } from "@/lib/saved-clinician-questions"
 import { toast } from "@/components/ui/toast"
-import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
 import { usePathname } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { buildClinicalContext, useWorkspaceStore } from "@/lib/clinical-workspace"
+import { buildArtifactGenerationContext, useWorkspaceStore } from "@/lib/clinical-workspace"
+import { flushEncounterPersistenceNow } from "@/lib/clinical-workspace/encounter-persist-bridge"
+import {
+  prepareSessionDocumentForGeneration,
+  findSessionDocumentByType,
+} from "@/lib/clinical-workspace/pending-session-document"
+import type { ClinicalDocType } from "@/lib/clinical-workspace/types"
 import { useChatCore } from "./use-chat-core"
 import { useChatOperations } from "./use-chat-operations"
 import { useFileUpload } from "./use-file-upload"
 import { PerformanceMonitor } from "./performance-monitor"
 import { OnboardingDialog } from "../onboarding/onboarding-dialog"
-import { HealthHomeSection } from "../health/health-home-section"
 import { DocumentSelectorModal } from "@/app/components/workspace/document-selector-modal"
+import { useDocumentCanvas } from "@/app/components/workspace/document-canvas-context"
 import { ChatModeWelcome } from "./chat-mode-welcome"
 
 const FeedbackWidget = dynamic(
@@ -61,7 +66,6 @@ export function Chat() {
     getChatById,
     updateChatModel,
     bumpChat,
-    isLoading: isChatsLoading,
   } = useChats()
 
   const currentChat = useMemo(
@@ -71,7 +75,6 @@ export function Chat() {
 
   const {
     messages: initialMessages,
-    isLoading: isMessagesLoading,
     cacheAndAddMessage,
   } = useMessages()
   const { user } = useUser()
@@ -176,7 +179,6 @@ export function Chat() {
     stop,
     streamIntroPreview,
     optimisticTaskBoard,
-    hasSentFirstMessageRef,
     isSubmitting,
     enableSearch,
     setEnableSearch,
@@ -433,6 +435,12 @@ export function Chat() {
     const TEMPLATE_PROMPTS: Record<string, string> = {
       soap:
         "[/soap] Create a SOAP note from this consultation only (no external literature). Format with ## Subjective, ## Objective, ## Assessment, ## Plan. Do not use [T], [E], or [H] tags.",
+      "soap:paediatric":
+        "[/soap] Create a paediatric SOAP note from this consultation. Include developmental context, weight-based dosing where applicable. Format: ## Subjective, ## Objective, ## Assessment, ## Plan. Do not use [T], [E], or [H] tags.",
+      "soap:emergency":
+        "[/soap] Create an emergency medicine SOAP note. Lead with chief complaint, vital signs, and time-critical findings. Format: ## Subjective, ## Objective, ## Assessment, ## Plan. Do not use [T], [E], or [H] tags.",
+      "soap:mental_health":
+        "[/soap] Create a mental health SOAP note. Include MSE (Mental State Examination) in Objective section, risk assessment in Assessment. Format: ## Subjective, ## Objective, ## Assessment, ## Plan. Do not use [T], [E], or [H] tags.",
       summary:
         "[/summary] Generate a clinical summary for the current consult: Presenting Complaint, Exam Findings, Assessment, Plan." +
         EVIDENCE_TAIL,
@@ -444,8 +452,19 @@ export function Chat() {
         EVIDENCE_TAIL +
         PRESCRIPTION_JSON_TAIL,
       icd:
-        "[/icd] Suggest ICD-10 codes based on the consultation. Code, description, confidence." +
+        "[/icd] Suggest ICD-10 codes based on the consultation. For each code output: Code, description, confidence (High/Medium/Low), source tag [T]/[E]/[H], and a brief sourceExcerpt quoting the transcript/note fragment that justifies the code.\n" +
+        "After the narrative, append this exact block with a valid JSON array:\n" +
+        "=== ICD_ITEMS ===\n" +
+        '[{"id":"1","code":"...","description":"...","confidence":"High","sourceTag":"T","sourceExcerpt":"..."}]\n' +
+        "=== END_ICD_ITEMS ===" +
         EVIDENCE_TAIL,
+      claim:
+        "[/claim] Generate a MediKredit-ready medical billing claim for THIS consultation visit only (today). Bill consult tariff + procedures/medications explicitly documented or ordered today. Do NOT bill chronic home medications, past diagnoses, or historical problems unless actively managed this visit.\n" +
+        "Each line must include tariffCode OR nappiCode, primary icdCode, quantity, grossAmount (ZAR), and tp (1=NAPPI, 2=tariff).\n" +
+        "After the narrative, append this exact block with a valid JSON array:\n" +
+        "=== CLAIM_ITEMS ===\n" +
+        '[{"id":"1","description":"Consultation","icdCode":"I10","tariffCode":"0190","nappiCode":"","quantity":1,"amount":450,"tp":2}]\n' +
+        "=== END_CLAIM_ITEMS ===",
       evidence:
         "[/evidence] Evidence-based synthesis for this consult (OpenEvidence-style): use only numbered in-text markers [1], [2] tied to literature — never [T], [E], or [H]. " +
         "Append === EVIDENCE SOURCES (N) === with one block per source ([n] title, Journal, Year, URL, Snippet), then === END ===." +
@@ -459,38 +478,73 @@ export function Chat() {
       const patient = store.openPatients.find(
         (p) => p.patientId === store.activePatientId
       )
-      const ctx = buildClinicalContext(
+      const ctx = buildArtifactGenerationContext(
         store.scribeTranscript,
         store.scribeEntities,
         patient,
         store.scribeEntityStatus
       )
-      const CTX_BLOCK = ctx ? `\n\n${ctx}` : ""
       const CONCISE =
         template === "evidence"
           ? " Be concise and clinically precise. No preamble. Bullet points preferred."
           : template === "soap"
-            ? " Be concise and clinically precise. Chart-ready prose. Ground only in the consultation context below; if something was not discussed, write \"not documented\". Do not use [T], [E], or [H] tags."
-            : " Be concise and clinically precise. No preamble. Bullet points preferred. Tag each statement with [T] (from transcript), [E] (from extracted entities), or [H] (from patient history) to indicate its source."
+            ? " Be concise and clinically precise. Chart-ready prose. Use the CONSULTATION CONTEXT below — it contains the live transcript and extracted findings. Only write \"not documented\" when a section truly has no supporting data in that context. Do not use [T], [E], or [H] tags."
+            : template === "claim" || template === "icd"
+              ? " Be concise. Use ONLY this visit's consultation context — not longitudinal chart history unless explicitly in context for today's visit."
+              : " Be concise and clinically precise. No preamble. Bullet points preferred. Tag each statement with [T] (from transcript), [E] (from extracted entities), or [H] (from patient history) to indicate its source."
       const basePrompt =
         TEMPLATE_PROMPTS[template] ??
         `[/${template}] Produce an updated clinical document for this consult. Follow standard clinical structure unless context implies otherwise.` +
           EVIDENCE_TAIL
-      return `${basePrompt}${CONCISE}${CTX_BLOCK}`
+      return `${basePrompt}${CONCISE}${ctx}`
     }
 
     const handleGenerateNote = (e: Event) => {
-      const event = e as CustomEvent<{ template: string }>
-      const template = event.detail?.template ?? "soap"
+      const event = e as CustomEvent<{ template: string; subTemplate?: string }>
+      const template = (event.detail?.template ?? "soap") as ClinicalDocType
+      const subTemplate = event.detail?.subTemplate
+      const promptKey = subTemplate ? `${template}:${subTemplate}` : template
       if (statusRef.current === "streaming") return
 
-      const store = useWorkspaceStore.getState()
-      if (!store.scribeTranscript || store.scribeTranscript.length < 20) return
+      void (async () => {
+        await flushEncounterPersistenceNow()
 
-      const prompt = buildPrompt(template, store)
+        const store = useWorkspaceStore.getState()
+        if (!store.scribeTranscript || store.scribeTranscript.length < 20) {
+          toast({
+            title: "Add a consult transcript before generating documents.",
+            status: "error",
+          })
+          return
+        }
 
-      store.setScribeCollapsed(true)
-      handleSuggestionRef.current(prompt)
+        const pid = store.activePatientId
+        if (pid) {
+          const patient = store.openPatients.find((p) => p.patientId === pid)
+          for (const sd of patient?.sessionDocuments ?? []) {
+            if (
+              sd.messageId === "pending" &&
+              sd.document.isStreaming &&
+              sd.document.type !== template
+            ) {
+              store.upsertSessionDocument(pid, {
+                ...sd,
+                document: { ...sd.document, isStreaming: false },
+              })
+            }
+          }
+          const pending = prepareSessionDocumentForGeneration(patient?.sessionDocuments, template)
+          store.upsertSessionDocument(pid, pending)
+          window.dispatchEvent(
+            new CustomEvent("fleming:focus-document-tab", { detail: { docId: pending.id } })
+          )
+        }
+
+        const prompt = buildPrompt(promptKey, store)
+
+        store.setScribeCollapsed(true)
+        handleSuggestionRef.current(prompt)
+      })()
     }
 
     const handleReviseDocument = (e: Event) => {
@@ -526,7 +580,7 @@ export function Chat() {
         handleReviseDocument as EventListener
       )
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // Memoize the conversation props to prevent unnecessary rerenders
   const conversationProps = useMemo(
@@ -565,10 +619,11 @@ export function Chat() {
   // Memoize the chat input props
   const chatInputProps = useMemo(
     () => {
-      // Show suggestions when there are no messages, regardless of chatId
+      // New-chat home uses its own product greeting; role suggestions belong to active chats.
       const shouldShowDoctorSuggestions = preferences.userRole === "doctor"
       const hasSuggestions =
         preferences.promptSuggestions &&
+        Boolean(chatId) &&
         messages.length === 0 &&
         (preferences.userRole !== "doctor" || shouldShowDoctorSuggestions)
       
@@ -639,48 +694,6 @@ export function Chat() {
     ]
   )
 
-  // Track when we should prevent transient route changes due to recent chat creation
-  const preventRedirectRef = useRef(false)
-  const [chatIdChangedTime, setChatIdChangedTime] = useState<number | null>(null)
-  
-  // Track when chatId changes
-  useEffect(() => {
-    if (chatId) {
-      setChatIdChangedTime(Date.now())
-    }
-  }, [chatId])
-  
-  // Don't redirect if:
-  // - We're submitting a message (chat might be in the process of being created)
-  // - We're streaming a response (status is streaming)
-  // - We have messages (even if loading failed, we should show them)
-  // - We've sent a message in this session
-  // - The chatId is a temporary ID (chat being created)
-  // - We're still loading chats (wait for background chat creation to complete)
-  // - We just navigated to a new chat (give it time to load)
-  const isTemporaryChat = chatId?.startsWith("temp-chat-")
-  const hasMessages = messages.length > 0
-  const isStreaming = status === "streaming"
-  
-  // Calculate time since chatId changed - CRITICAL to prevent immediate redirects
-  const timeSinceChatIdChange = chatIdChangedTime ? Date.now() - chatIdChangedTime : Infinity
-  const recentlyNavigated = timeSinceChatIdChange < 5000 // Within last 5 seconds
-  
-  // Check sessionStorage for sent message state
-  const hasSentMessageInStorage = useMemo(() => {
-    if (typeof window === 'undefined' || !chatId) return false
-    return sessionStorage.getItem(`hasSentMessage:${chatId}`) === 'true'
-  }, [chatId])
-  
-  // Check if messages are being migrated (stored in sessionStorage)
-  const hasMigratedMessages = useMemo(() => {
-    if (typeof window === 'undefined' || !chatId) return false
-    return (
-      sessionStorage.getItem(`pendingMessages:${chatId}`) !== null ||
-      sessionStorage.getItem(`messages:${chatId}`) !== null
-    )
-  }, [chatId])
-  
   // IMPORTANT: do not auto-redirect from an existing chat route.
   // Older chats may not be present in the in-memory chat list yet while message hydration is in-flight.
 
@@ -700,8 +713,8 @@ export function Chat() {
     // After mount, check actual state
     // CRITICAL: Only show onboarding if no chatId AND no messages
     // This prevents hydration mismatch because we start with server state
-    setShowOnboarding(!chatId && messages.length === 0 && !isSubmitting)
-  }, [chatId, messages.length, isSubmitting])
+    setShowOnboarding(!chatId && messages.length === 0)
+  }, [chatId, messages.length])
   
   // CRITICAL: Clear sessionStorage on home page to prevent stale messages
   useEffect(() => {
@@ -745,14 +758,28 @@ export function Chat() {
     workspaceMode === "clinical" &&
     activePatientWs &&
     (!activePatientWs.chatId || effectiveChatId !== activePatientWs.chatId)
+  const isClinicalPatientChat =
+    isClinicalMode &&
+    workspaceMode === "clinical" &&
+    Boolean(activePatientWs) &&
+    Boolean(activePatientWs?.chatId) &&
+    effectiveChatId === activePatientWs?.chatId
+  const showWelcome =
+    messages.length === 0 && (!chatId || isClinicalPatientChat)
+      ? true
+      : showOnboarding
+
+  const { documentLayout } = useDocumentCanvas()
 
   return (
     <>
       <div className={cn(
         "relative flex h-full w-full flex-col",
-        awaitingPatientConsultRoute
+        documentLayout
+          ? "shrink-0"
+          : awaitingPatientConsultRoute
           ? "items-center justify-center"
-          : showOnboarding
+          : showWelcome
           ? isClinicalMode
             ? "items-center justify-end px-2 sm:px-0"
             : "items-center justify-start px-2 pt-[calc(var(--spacing-app-header)+0.75rem)] sm:px-0 sm:pt-4"
@@ -761,65 +788,37 @@ export function Chat() {
         {awaitingPatientConsultRoute ? (
           <div className="flex flex-col items-center justify-center gap-3 px-4 py-8">
             <div
-              className="size-9 animate-spin rounded-full border-2 border-indigo-500/30 border-t-indigo-500"
+              className="size-9 animate-spin rounded-full border-2 border-emerald-500/25 border-t-emerald-500"
               aria-hidden
             />
             <p className="text-sm text-muted-foreground">Opening patient consult…</p>
           </div>
-        ) : showOnboarding ? (
-          workspaceMode === "chat" ? (
-            <div className="flex h-full w-full max-w-3xl min-h-0 flex-col pb-3 sm:pb-4">
-              <ChatModeWelcome
-                userName={user?.display_name}
-                onSuggestion={handleSuggestion}
-              />
-              <div className="mt-4 sm:mt-5">
-                <ChatInput {...chatInputProps} hasSuggestions={false} />
-              </div>
+        ) : showWelcome && !documentLayout ? (
+          <div className="flex h-full w-full max-w-3xl min-h-0 flex-col pb-3 sm:pb-4">
+            <ChatModeWelcome
+              userName={user?.display_name}
+              onSuggestion={handleSuggestion}
+            />
+            <div className="mt-4 sm:mt-5">
+              <ChatInput {...chatInputProps} hasSuggestions={false} />
             </div>
-          ) : isClinicalMode ? (
-            <div className="flex h-full w-full max-w-3xl min-h-0 flex-col justify-end pb-3 sm:pb-4">
-              <div className="flex flex-1 flex-col items-center justify-center text-center">
-                <div className="flex size-12 items-center justify-center rounded-2xl bg-indigo-500/10 mb-4">
-                  <svg className="size-6 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                    <path d="M2 17l10 5 10-5" />
-                    <path d="M2 12l10 5 10-5" />
-                  </svg>
-                </div>
-                <h2 className="text-lg font-semibold tracking-tight text-foreground">Ready for consult</h2>
-                <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-                  Select a patient from the tab bar or open the calendar to start. Type <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">/</code> for commands.
-                </p>
-              </div>
-              <div>
-                <ChatInput {...chatInputProps} hasSuggestions={false} />
-              </div>
-            </div>
-          ) : (
-            <div className="flex h-full w-full max-w-3xl min-h-0 flex-col pb-3 sm:pb-4">
-              <div className="text-center">
-                <h1 className="text-3xl font-medium tracking-tight">
-                  What&apos;s on your mind?
-                </h1>
-              </div>
-              <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1 sm:mt-5">
-                <HealthHomeSection
-                  onJourneyPrompt={handleSuggestion}
-                  userRole={preferences.userRole}
-                  showWorkspaceLink={false}
-                />
-              </div>
-              <div className="mt-4 sm:mt-5">
-                <ChatInput {...chatInputProps} hasSuggestions={false} />
-              </div>
-            </div>
-          )
+          </div>
+        ) : documentLayout ? (
+          <div className="pointer-events-none absolute h-0 w-0 overflow-hidden opacity-0" aria-hidden>
+            <Conversation {...conversationProps} />
+          </div>
         ) : (
           <>
             <Conversation {...conversationProps} />
             <div className="w-full min-w-0 max-w-full px-2 sm:px-4">
-              <ChatInput {...chatInputProps} />
+              <ChatInput
+                {...chatInputProps}
+                hasSuggestions={
+                  isClinicalMode && workspaceMode === "clinical"
+                    ? false
+                    : chatInputProps.hasSuggestions
+                }
+              />
             </div>
           </>
         )}

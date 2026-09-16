@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server"
-import { getAuthenticatedPracticeContext } from "@/lib/billing/context"
+import { requirePracticePermission } from "@/lib/auth/guard"
 import { getOpenCashDrawerSession, sumCashSalesForSession } from "@/lib/billing/cash-drawer"
 
 export const runtime = "nodejs"
 
 export async function POST(req: Request) {
-  const ctx = await getAuthenticatedPracticeContext()
-  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const guard = await requirePracticePermission("billing:access")
+  if (!guard.ok) return guard.response
+  const ctx = {
+    supabase: guard.context.supabase,
+    userId: guard.context.userId,
+    practiceId: guard.context.activePracticeId,
+  }
 
   let countedCashCents = 0
   let notes = ""

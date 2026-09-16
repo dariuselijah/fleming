@@ -17,7 +17,7 @@ type ToastProps = {
 
 function Toast({ title, description, button, id, status }: ToastProps) {
   return (
-    <div className="border-input bg-popover flex items-center overflow-hidden rounded-xl border p-4 shadow-xs backdrop-blur-xl">
+    <div className="border-panel-border bg-popover shadow-raised flex items-center overflow-hidden rounded-xl border p-4">
       <div className="flex flex-1 items-center">
         {status === "error" ? (
           <Warning className="text-primary mr-3 size-4" />

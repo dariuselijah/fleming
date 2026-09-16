@@ -2,23 +2,33 @@ import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyStitchWebhookSignature } from "@/lib/billing/providers/stitch"
 import { finalizePendingPaymentSuccess } from "@/lib/billing/payments"
+import { requireWebhookSecret } from "@/lib/auth/webhook"
+import { createRequestLogger } from "@/lib/observability/server"
 
 export const runtime = "nodejs"
 
 export async function POST(req: Request) {
+  const log = createRequestLogger(req, "/api/billing/stitch/webhook")
+  const respond = log.withRequestId
   const raw = await req.text()
   const sig = req.headers.get("x-stitch-signature") ?? req.headers.get("stitch-signature")
-  const secret = process.env.STITCH_WEBHOOK_SECRET?.trim() ?? ""
+  const auth = requireWebhookSecret("STITCH_WEBHOOK_SECRET")
+  if (!auth.ok) {
+    log.warn("stitch_webhook_configuration_rejected")
+    return respond(auth.response)
+  }
+  const secret = auth.secret
 
   if (secret && !verifyStitchWebhookSignature(raw, sig, secret)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
+    log.warn("stitch_webhook_invalid_signature")
+    return respond(NextResponse.json({ error: "Invalid signature" }, { status: 401 }))
   }
 
   let event: Record<string, unknown>
   try {
     event = JSON.parse(raw) as Record<string, unknown>
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
+    return respond(NextResponse.json({ error: "Invalid JSON" }, { status: 400 }))
   }
 
   const type = String(event.type ?? "")
@@ -40,12 +50,13 @@ export async function POST(req: Request) {
   })
 
   if (insErr && !insErr.message?.includes("duplicate") && insErr.code !== "23505") {
-    console.error("[stitch webhook] event log", insErr)
+    log.error("stitch_webhook_event_persist_failed", { error: insErr })
   }
 
   const success = /success|paid|completed/i.test(type) || (event as { status?: string }).status === "SUCCESS"
   if (!success || !externalId) {
-    return NextResponse.json({ ok: true, ignored: true })
+    log.info("stitch_webhook_ignored", { eventType: type || "unknown" })
+    return respond(NextResponse.json({ ok: true, ignored: true }))
   }
 
   const { data: pay } = await admin
@@ -56,7 +67,8 @@ export async function POST(req: Request) {
     .maybeSingle()
 
   if (!pay || pay.status === "succeeded") {
-    return NextResponse.json({ ok: true })
+    log.info("stitch_webhook_idempotent")
+    return respond(NextResponse.json({ ok: true }))
   }
 
   try {
@@ -68,9 +80,10 @@ export async function POST(req: Request) {
       paymentMethod: "payshap",
     })
   } catch (e) {
-    console.error("[stitch webhook] finalize", e)
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    log.error("stitch_webhook_finalize_failed", { error: e })
+    return respond(NextResponse.json({ error: "Payment finalization failed" }, { status: 500 }))
   }
 
-  return NextResponse.json({ ok: true })
+  log.info("stitch_webhook_processed")
+  return respond(NextResponse.json({ ok: true }))
 }

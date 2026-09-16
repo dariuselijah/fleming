@@ -2,7 +2,10 @@
  * Smoke test for MediKredit XML parsers (no network).
  * Run: npm run test:medikredit
  */
+import { mergeClaimResponses } from "../lib/medikredit/claim-response-merger"
+import { analyzeAndSplit } from "../lib/medikredit/claim-splitter"
 import { parseClaimXml, parseEligibilityXml, parseFamilyEligibilityXml } from "../lib/medikredit/parse-response"
+import type { ClaimResponse } from "../lib/medikredit/types"
 
 const eligXml = `<?xml version="1.0"?><DOCUMENT version="3.53"><TX tx_cd="20" res="A" tx_nbr="T1"><AUTHS hnet="HN1" auth_nbr="A1"/><MEM/><PAT/></TX></DOCUMENT>`
 const e = parseEligibilityXml(eligXml)
@@ -26,5 +29,53 @@ const claimXml = `<?xml version="1.0"?><DOCUMENT version="3.53"><TX tx_cd="21" r
 const c = parseClaimXml(claimXml)
 if (c.outcome !== "approved") throw new Error("expected approved")
 console.log("claim:", c.outcome, c.itemStatuses.length, "items")
+
+const claimNettXml = `<?xml version="1.0"?><DOCUMENT version="r3.53"><TX tx_cd="21" res="P" tx_nbr="C-NETT"><FIN gross="450.00" nett="450.00"/><ITEM nbr="1" status="W"><HB pay_adv="P" line_num="1" sub_gross="450.00"/><FIN gross="450.00" nett="450.00"/><TAR ind="P"><PROC cd="0190" price="505.60"/></TAR><WARN cd="234" desc="Claim accepted scheme to process" rmr_tp="N"/></ITEM></TX></DOCUMENT>`
+const cn = parseClaimXml(claimNettXml)
+if (cn.outcome !== "approved") throw new Error(`expected P response approved, got ${cn.outcome}`)
+if (cn.approvedAmount !== 450) throw new Error(`expected nett approved amount 450, got ${cn.approvedAmount}`)
+if (cn.patientResponsibility !== 0) throw new Error(`expected zero patient responsibility, got ${cn.patientResponsibility}`)
+if (cn.itemStatuses[0]?.status !== "P") throw new Error(`expected line pay_adv P, got ${cn.itemStatuses[0]?.status}`)
+if (cn.itemStatuses[0]?.patientResponsibility !== 0) {
+  throw new Error(`expected zero line responsibility, got ${cn.itemStatuses[0]?.patientResponsibility}`)
+}
+console.log("claim nett/pay_adv P parsing OK")
+
+/** Claim-level RJ must not be confused with the first line-level RJ. */
+const claimRjXml = `<?xml version="1.0"?><DOCUMENT version="3.53"><TX tx_cd="21" res="R" tx_nbr="C2"><FIN gross="0" net="0"/><ITEM lin_num="1" status="R"><TAR/><RJ cd="01" desc="line"/></ITEM><RJ cd="99" desc="claim"/></TX></DOCUMENT>`
+const cr = parseClaimXml(claimRjXml)
+if (cr.rejectionCode !== "99") throw new Error(`expected claim RJ 99, got ${cr.rejectionCode}`)
+console.log("claim-level RJ parsing OK")
+
+const medBatch = analyzeAndSplit([
+  { lineNumber: 1, tp: 1, nappiCode: "1234567", grossAmount: 10, treatmentDate: "20260115", itemTypeIndicator: "03" },
+])
+if (medBatch.length !== 1 || medBatch[0].key !== "M") throw new Error("medicine-only batch should use key M")
+console.log("analyzeAndSplit medicine-only OK")
+
+const r1: ClaimResponse = {
+  ok: true,
+  outcome: "approved",
+  res: "A",
+  itemStatuses: [],
+  remittanceMessages: [],
+  warnings: [],
+}
+const r2: ClaimResponse = {
+  ok: false,
+  outcome: "rejected",
+  res: "R",
+  rejectionCode: "349",
+  rejectionDescription: "duplicate",
+  duplicateDetected: true,
+  itemStatuses: [],
+  remittanceMessages: [],
+  warnings: [],
+}
+const merged = mergeClaimResponses([r1, r2])
+if (merged.outcome !== "duplicate" || !merged.duplicateDetected || merged.rejectionCode !== "349") {
+  throw new Error(`merge expected duplicate meta, got ${merged.outcome} dup=${merged.duplicateDetected} code=${merged.rejectionCode}`)
+}
+console.log("mergeClaimResponses meta OK")
 
 console.log("medikredit parse OK")

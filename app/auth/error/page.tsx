@@ -17,7 +17,7 @@ function AuthErrorContent() {
   return (
     <div className="w-full max-w-md space-y-8">
       <div className="text-center">
-        <h1 className="text-3xl font-medium tracking-tight text-white sm:text-4xl">
+        <h1 className="text-3xl font-medium tracking-tight text-foreground sm:text-4xl">
           Authentication Error
         </h1>
         <div className="mt-6 rounded-md bg-red-500/10 p-4">
@@ -40,14 +40,14 @@ function AuthErrorContent() {
 
 export default function AuthErrorPage() {
   return (
-    <div className="flex h-screen flex-col bg-zinc-800 text-white">
+    <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
       <header className="p-4">
         <Link
           href="/"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-white hover:bg-zinc-700"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-foreground hover:bg-accent"
         >
-          <ArrowLeft className="size-5 text-white" />
+          <ArrowLeft className="size-5 text-foreground" />
           <span className="font-base ml-2 hidden text-sm sm:inline-block">
             Back to Chat
           </span>
@@ -60,10 +60,10 @@ export default function AuthErrorPage() {
         </Suspense>
       </main>
 
-      <footer className="py-6 text-center text-sm text-zinc-500">
+      <footer className="py-6 text-center text-sm text-muted-foreground">
         <p>
           Need help? {/* @todo */}
-          <Link href="/" className="text-zinc-400 hover:underline">
+          <Link href="/" className="text-muted-foreground hover:underline">
             Contact Support
           </Link>
         </p>

@@ -47,13 +47,13 @@ export const MASTER_NAV_ITEMS: MasterNavItem[] = [
     mode: "clinical",
   },
   {
-    id: "inbox",
-    label: "Inbox",
-    description: "Messages, labs, and alerts",
+    id: "front_desk",
+    label: "Front Desk",
+    description: "Handoffs, messages, labs, and daily tasks",
     icon: Tray,
     permissions: ["frontdesk:access"],
     mode: "admin",
-    adminTab: "inbox",
+    adminTab: "front_desk",
   },
   {
     id: "calendar",

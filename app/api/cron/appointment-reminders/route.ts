@@ -5,9 +5,11 @@
  */
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { requireCronAuthorization } from "@/lib/auth/cron"
 import { sendPatientTemplatedMessage } from "@/lib/comms/communication-service"
 import { mergePracticeAppointmentMetadata } from "@/lib/comms/appointment-metadata"
 import { normalizePhoneE164Za } from "@/lib/comms/patient-phone"
+import { createRequestLogger } from "@/lib/observability/server"
 
 export const maxDuration = 120
 export const dynamic = "force-dynamic"
@@ -33,12 +35,11 @@ function clockLabel(startTime: string | null | undefined): string {
 }
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization")
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+  const log = createRequestLogger(request, "/api/cron/appointment-reminders")
+  const denied = requireCronAuthorization(request)
+  if (denied) {
+    log.warn("appointment_reminders_unauthorized")
+    return log.withRequestId(denied)
   }
 
   try {
@@ -61,7 +62,10 @@ export async function GET(request: Request) {
       .lte("appt_date", windowEnd.toISOString().split("T")[0])
 
     if (!appointments || appointments.length === 0) {
-      return NextResponse.json({ ok: true, message: "No upcoming appointments", stats })
+      log.info("appointment_reminders_complete", stats)
+      return log.withRequestId(
+        NextResponse.json({ ok: true, message: "No upcoming appointments", stats })
+      )
     }
 
     for (const appt of appointments) {
@@ -152,15 +156,18 @@ export async function GET(request: Request) {
           stats.sent1h++
         }
       } catch (err) {
-        console.error(`[appointment-reminders] Failed for appt ${appt.id}:`, err)
+        log.error("appointment_reminder_item_failed", { error: err })
         stats.errors++
       }
     }
 
-    return NextResponse.json({ ok: true, stats })
+    log.info("appointment_reminders_complete", stats)
+    return log.withRequestId(NextResponse.json({ ok: true, stats }))
   } catch (err) {
-    console.error("[appointment-reminders] Fatal:", err)
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
+    log.error("appointment_reminders_failed", { error: err })
+    return log.withRequestId(
+      NextResponse.json({ error: "Appointment reminder job failed" }, { status: 500 })
+    )
   }
 }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { validateTwilioSignature } from "@/lib/comms"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { requireWebhookSecret } from "@/lib/auth/webhook"
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,9 +11,11 @@ export async function POST(req: NextRequest) {
       params[key] = value.toString()
     })
 
+    const auth = requireWebhookSecret("TWILIO_AUTH_TOKEN")
+    if (!auth.ok) return auth.response
     const signature = req.headers.get("X-Twilio-Signature") || ""
     const url = `${process.env.TWILIO_WEBHOOK_BASE_URL || req.nextUrl.origin}/api/comms/messaging/status`
-    if (process.env.TWILIO_AUTH_TOKEN && !validateTwilioSignature(url, params, signature)) {
+    if (auth.secret && !validateTwilioSignature(url, params, signature)) {
       return new NextResponse("Forbidden", { status: 403 })
     }
 

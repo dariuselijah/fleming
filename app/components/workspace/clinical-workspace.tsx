@@ -1,46 +1,29 @@
 "use client"
 
-import { useWorkspace } from "@/lib/clinical-workspace"
+import {
+  buildEncounterAttestation,
+  ENCOUNTER_ATTESTATION_STATEMENT,
+  useWorkspace,
+} from "@/lib/clinical-workspace"
+import { flushEncounterPersistenceNow } from "@/lib/clinical-workspace/encounter-persist-bridge"
 import { useScribe, ScribeProvider } from "@/lib/scribe"
-import { cn } from "@/lib/utils"
 import { motion, AnimatePresence } from "motion/react"
 import { useEffect } from "react"
+import { usePrefetchPatientAiSummary } from "@/lib/patient/use-patient-overview"
+import { useAssistantStore } from "@/app/components/assistant/assistant-store"
+import { AssistantOverlayProvider } from "@/app/components/assistant/assistant-overlay-context"
 import { PatientChatSync } from "./patient-chat-sync"
 import { ClinicalEncounterHydrate } from "./clinical-encounter-hydrate"
 import { ConsultChatTitleSync } from "./consult-chat-title-sync"
 import { PatientTabBar } from "./patient-tab-bar"
 import { WorkspaceHeader } from "./workspace-header"
-import { PaneTimeline } from "./pane-timeline"
-import { PaneCanvas } from "./pane-canvas"
+import { PaneDocumentCanvas } from "./pane-document-canvas"
 import { PaneSidecar } from "./pane-sidecar"
 import { AddPatientModalHost } from "@/app/components/admin/add-patient-modal"
+import { useUser } from "@/lib/user-store/provider"
 
 import dynamic from "next/dynamic"
 
-const CalendarOverlay = dynamic(
-  () => import("@/app/components/overlays/calendar-overlay").then((m) => m.CalendarOverlay),
-  { ssr: false }
-)
-const ResourceLibrary = dynamic(
-  () => import("@/app/components/overlays/resource-library").then((m) => m.ResourceLibrary),
-  { ssr: false }
-)
-const InventoryOverlay = dynamic(
-  () => import("@/app/components/overlays/inventory-overlay").then((m) => m.InventoryOverlay),
-  { ssr: false }
-)
-const SalesPulse = dynamic(
-  () => import("@/app/components/overlays/sales-pulse").then((m) => m.SalesPulse),
-  { ssr: false }
-)
-const DocumentSheet = dynamic(
-  () => import("./document-sheet").then((m) => m.DocumentSheet),
-  { ssr: false }
-)
-const ScribeBlock = dynamic(
-  () => import("@/app/components/clinical-blocks/scribe-block").then((m) => m.ScribeBlock),
-  { ssr: false }
-)
 const AdminDashboard = dynamic(
   () => import("@/app/components/admin/admin-dashboard").then((m) => m.AdminDashboard),
   { ssr: false }
@@ -49,28 +32,33 @@ const CommandBar = dynamic(
   () => import("@/app/components/admin/command-bar").then((m) => m.CommandBar),
   { ssr: false }
 )
-const FrontDeskView = dynamic(
-  () => import("@/app/components/front-desk/front-desk-view").then((m) => m.FrontDeskView),
+const FloatingAssistant = dynamic(
+  () => import("@/app/components/assistant/floating-assistant").then((m) => m.FloatingAssistant),
   { ssr: false }
 )
 
 export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
+  const { user } = useUser()
   const {
     mode,
+    setMode,
+    setAdminTab,
     activePatient,
-    openPatients,
     paneVisibility,
-    overlays,
-    toggleOverlay,
-    closeAllOverlays,
     signConsult,
     submitClaim,
     documentSheet,
     closeDocumentSheet,
-    scribeActive,
   } = useWorkspace()
 
   const hasPatient = !!activePatient
+  const prefetchAiSummary = usePrefetchPatientAiSummary()
+
+  useEffect(() => {
+    if (activePatient?.patientId) {
+      prefetchAiSummary(activePatient.patientId)
+    }
+  }, [activePatient?.patientId, prefetchAiSummary])
 
   const scribe = useScribe({
     enabled: hasPatient,
@@ -78,6 +66,10 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
   })
 
   const { commandBarOpen, setCommandBarOpen } = useWorkspace()
+  const assistantHistoryOpen = useAssistantStore((s) => s.historyOpen)
+  const setAssistantHistoryOpen = useAssistantStore((s) => s.setHistoryOpen)
+  const assistantPillOpen = useAssistantStore((s) => s.pillOpen)
+  const setAssistantPillOpen = useAssistantStore((s) => s.setPillOpen)
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -86,28 +78,54 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
         setCommandBarOpen(!commandBarOpen)
         return
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault()
+        const st = useAssistantStore.getState()
+        if (!st.pillOpen) {
+          st.setPillOpen(true)
+          st.setFocused(true)
+        } else {
+          st.toggleHistory()
+        }
+        return
+      }
       if (e.shiftKey && e.key === "C" && !e.metaKey && !e.ctrlKey) {
         const target = e.target as HTMLElement
         const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
         if (!isInput) {
           e.preventDefault()
-          toggleOverlay("calendar")
+          setMode("admin")
+          setAdminTab("calendar")
         }
       }
       if (e.key === "Escape") {
-        if (commandBarOpen) {
+        if (assistantHistoryOpen) {
+          setAssistantHistoryOpen(false)
+        } else if (assistantPillOpen) {
+          setAssistantPillOpen(false)
+        } else if (commandBarOpen) {
           setCommandBarOpen(false)
         } else if (documentSheet.isOpen) {
           closeDocumentSheet()
-        } else {
-          closeAllOverlays()
         }
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [toggleOverlay, closeAllOverlays, documentSheet.isOpen, closeDocumentSheet, commandBarOpen, setCommandBarOpen])
+  }, [
+    setMode,
+    setAdminTab,
+    documentSheet.isOpen,
+    closeDocumentSheet,
+    commandBarOpen,
+    setCommandBarOpen,
+    assistantHistoryOpen,
+    setAssistantHistoryOpen,
+    assistantPillOpen,
+    setAssistantPillOpen,
+    mode,
+  ])
 
   useEffect(() => {
     function handleCommand(e: Event) {
@@ -116,19 +134,32 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
 
       switch (detail.command) {
         case "calendar":
-          toggleOverlay("calendar")
+          setMode("admin")
+          setAdminTab("calendar")
           break
         case "inventory":
-          toggleOverlay("inventory")
-          break
-        case "library":
-          toggleOverlay("resource_library")
-          break
         case "sales":
-          toggleOverlay("sales")
+          setMode("admin")
+          setAdminTab(detail.command === "inventory" ? "inventory" : "analytics")
           break
         case "sign":
-          if (activePatient) signConsult(activePatient.patientId)
+          if (
+            activePatient &&
+            user?.id &&
+            window.confirm(
+              `Sign this encounter as ${user.display_name?.trim() || user.email || "authenticated clinician"}?\n\n${ENCOUNTER_ATTESTATION_STATEMENT}\n\nSigning makes the encounter read-only.`
+            )
+          ) {
+            signConsult(
+              activePatient.patientId,
+              buildEncounterAttestation({
+                signerUserId: user.id,
+                signerDisplayName: user.display_name,
+                signerEmail: user.email,
+              })
+            )
+            void flushEncounterPersistenceNow()
+          }
           break
         case "submit_claim":
           if (activePatient) submitClaim(activePatient.patientId)
@@ -140,12 +171,13 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
 
     window.addEventListener("fleming:command", handleCommand)
     return () => window.removeEventListener("fleming:command", handleCommand)
-  }, [toggleOverlay, activePatient, signConsult, submitClaim])
+  }, [setMode, setAdminTab, activePatient, signConsult, submitClaim, user])
 
   const scribeContextValue = {
     transcribeAudioFile: scribe.transcribeAudioFile,
     triggerExtraction: scribe.triggerExtraction,
     isTranscribing: scribe.isTranscribing,
+    isExtracting: scribe.isExtracting,
     transcriptionError: scribe.transcriptionError,
     recorderError: scribe.recorderError,
     recorderDuration: scribe.recorderDuration,
@@ -161,6 +193,7 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
       <ClinicalEncounterHydrate />
       <ConsultChatTitleSync />
       <AddPatientModalHost />
+      <AssistantOverlayProvider>
       <div className="relative flex h-full w-full flex-col overflow-hidden">
         <PatientTabBar />
 
@@ -187,17 +220,6 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
             >
               <AdminDashboard />
             </motion.div>
-          ) : mode === "front_desk" ? (
-            <motion.div
-              key="front-desk"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="min-h-0 flex-1 overflow-hidden"
-            >
-              <FrontDeskView />
-            </motion.div>
           ) : (
             <motion.div
               key="clinical"
@@ -211,30 +233,16 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
                 <>
                   <WorkspaceHeader />
                   <div className="flex min-h-0 flex-1 overflow-hidden">
-                    <AnimatePresence>
-                      {paneVisibility.timeline && (
-                        <motion.div
-                          initial={{ width: 0, opacity: 0 }}
-                          animate={{ width: 280, opacity: 1 }}
-                          exit={{ width: 0, opacity: 0 }}
-                          transition={{ type: "spring", stiffness: 400, damping: 35 }}
-                          className="shrink-0 overflow-hidden"
-                        >
-                          <PaneTimeline />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    <PaneCanvas scribeSlot={<ScribeBlock />}>
+                    <PaneDocumentCanvas>
                       {children}
-                    </PaneCanvas>
+                    </PaneDocumentCanvas>
 
                     <AnimatePresence mode="wait">
-                      {paneVisibility.sidecar && !documentSheet.isOpen && (
+                      {paneVisibility.sidecar && (
                         <motion.div
                           key="sidecar"
                           initial={{ width: 0, opacity: 0 }}
-                          animate={{ width: 320, opacity: 1 }}
+                          animate={{ width: 308, opacity: 1 }}
                           exit={{ width: 0, opacity: 0 }}
                           transition={{ type: "spring", stiffness: 400, damping: 35 }}
                           className="shrink-0 overflow-hidden"
@@ -242,10 +250,6 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
                           <PaneSidecar />
                         </motion.div>
                       )}
-                    </AnimatePresence>
-
-                    <AnimatePresence>
-                      {documentSheet.isOpen && <DocumentSheet />}
                     </AnimatePresence>
                   </div>
                 </>
@@ -256,24 +260,13 @@ export function ClinicalWorkspace({ children }: { children: React.ReactNode }) {
           )}
         </AnimatePresence>
 
-        {/* Overlays */}
-        <AnimatePresence>
-          {overlays.calendar && <CalendarOverlay onClose={() => toggleOverlay("calendar")} />}
-        </AnimatePresence>
-        <AnimatePresence>
-          {overlays.resource_library && <ResourceLibrary onClose={() => toggleOverlay("resource_library")} />}
-        </AnimatePresence>
-        <AnimatePresence>
-          {overlays.inventory && <InventoryOverlay onClose={() => toggleOverlay("inventory")} />}
-        </AnimatePresence>
-        <AnimatePresence>
-          {overlays.sales && <SalesPulse onClose={() => toggleOverlay("sales")} />}
-        </AnimatePresence>
-
         <AnimatePresence>
           {commandBarOpen && <CommandBar />}
         </AnimatePresence>
+
+        <FloatingAssistant />
       </div>
+      </AssistantOverlayProvider>
     </ScribeProvider>
   )
 }

@@ -51,7 +51,7 @@ export function PracticeCryptoProvider({ children }: { children: ReactNode }) {
     setError(null)
   }, [])
 
-  /** Rehydrate DEK from server session vault after soft navigation (avoids passphrase on every route change). */
+  /** Rehydrate DEK from server session vault (silent — no passphrase prompt). */
   useEffect(() => {
     if (!practiceId || dekKey) return
     let cancelled = false
@@ -69,7 +69,7 @@ export function PracticeCryptoProvider({ children }: { children: ReactNode }) {
         setDekKey(key)
         setDekBase64(j.dekBase64)
       } catch {
-        /* missing / expired vault — user unlocks with passphrase */
+        /* vault bootstrap failed — patient hints still visible */
       }
     })()
     return () => {

@@ -1,6 +1,7 @@
 name: CI/CD Pipeline
 
 on:
+  pull_request:
   push:
     branches: [main, develop]
     tags: ["v*"]
@@ -8,7 +9,21 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  NEXT_PUBLIC_VERCEL_URL: ${{ vars.NEXT_PUBLIC_VERCEL_URL }}
+  NEXT_PUBLIC_VERCEL_URL: https://example.invalid
+  NEXT_PUBLIC_SUPABASE_URL: https://example.invalid
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-public-placeholder
+  SUPABASE_SERVICE_ROLE_KEY: ci-server-placeholder
+  OPENAI_API_KEY: ci-provider-placeholder
+  CSRF_SECRET: ci-csrf-placeholder-00000000000000000000000000000000
+  ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+  CRON_SECRET: ci-cron-placeholder-00000000000000000000000000000000
+  MEDIKREDIT_DRY_RUN: "0"
+  MEDIKREDIT_ENABLE_XML_PREVIEW: "0"
+  MEDIKREDIT_STORE_RAW_XML: "0"
+  MEDPRAX_CLAIM_PREFLIGHT_MODE: required
+  MEDPRAX_ALLOW_UNVERIFIED_CLAIMS: "0"
+  POLAR_SH_DRY_RUN: "0"
+  STITCH_DRY_RUN: "0"
 
 jobs:
   validate:
@@ -21,7 +36,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
@@ -33,9 +48,13 @@ jobs:
       - name: Run TypeScript checks
         run: npm run type-check
 
-      # TODO: Uncomment when tests are added
-      # - name: Run Tests
-      #   run: npm test
+      - name: Run critical regression tests
+        run: npm run test:ci
+
+      - name: Validate production configuration contract
+        run: npm run check-env:production
+        env:
+          NODE_ENV: production
 
   build:
     name: Build Application
@@ -50,7 +69,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
@@ -89,9 +108,45 @@ jobs:
             package.json
             next.config.ts
 
+  browser:
+    name: Public Browser and Accessibility Smoke
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run public browser and accessibility checks
+        run: npm run test:browser
+        env:
+          E2E_DISABLE_EXTERNAL_SERVICES: "1"
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-artifacts
+          path: |
+            playwright-report
+            test-results/playwright
+          if-no-files-found: ignore
+
   docker:
     name: Build and Push Docker Image
-    needs: [validate, build]
+    needs: [validate, build, browser]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

@@ -27,19 +27,19 @@ function CopyableAuditBlock({
     <div>
       <div className="mb-1.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-white/30">{label}</p>
-          {hint ? <p className="mt-0.5 text-[10px] leading-snug text-white/25">{hint}</p> : null}
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+          {hint ? <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{hint}</p> : null}
         </div>
         <button
           type="button"
           onClick={onCopy}
-          className="shrink-0 inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-white/70 transition-colors hover:bg-white/[0.08] hover:text-white"
+          className="shrink-0 inline-flex items-center gap-1 rounded-md border border-border bg-muted px-2 py-1 text-[10px] font-medium text-foreground/70 transition-colors hover:bg-secondary hover:text-accent-foreground"
         >
           {copied ? <Check className="size-3.5 text-emerald-400" weight="bold" /> : <Copy className="size-3.5" />}
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-white/[0.06] bg-black/40 p-3 font-mono text-[10px] leading-relaxed text-emerald-200/70">
+      <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-3 font-mono text-[10px] leading-relaxed text-emerald-200/70">
         {text}
       </pre>
     </div>
@@ -103,19 +103,19 @@ export function MediKreditAccreditationModal({
             initial={{ scale: 0.96, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.96, opacity: 0 }}
-            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-white/[0.1] bg-[#0c0c0c] shadow-2xl"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl"
           >
-            <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-3">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
               <div>
-                <h2 id="mk-acc-title" className="text-sm font-semibold text-white">
+                <h2 id="mk-acc-title" className="text-sm font-semibold text-foreground">
                   {title ?? "MediKredit transaction"} · {transactionType}
                 </h2>
-                <p className="text-[10px] text-white/35">Accreditation / audit view — raw switch data</p>
+                <p className="text-[10px] text-muted-foreground">Accreditation / audit view — raw switch data</p>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-md p-1.5 text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-accent-foreground"
                 aria-label="Close"
               >
                 <X className="size-4" />
@@ -125,8 +125,8 @@ export function MediKreditAccreditationModal({
             <div className="space-y-4 overflow-y-auto p-5 text-xs">
               <dl className="grid grid-cols-2 gap-2 text-[11px]">
                 <div>
-                  <dt className="text-white/35">TX result (res)</dt>
-                  <dd className="font-mono text-white/80">
+                  <dt className="text-muted-foreground">TX result (res)</dt>
+                  <dd className="font-mono text-foreground/80">
                     {res ?? "—"}
                     {res === "A" && <span className="ml-2 text-emerald-400/90">Approved</span>}
                     {res === "R" && <span className="ml-2 text-rose-400/90">Rejected</span>}
@@ -134,15 +134,15 @@ export function MediKreditAccreditationModal({
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-white/35">Transaction #</dt>
-                  <dd className="font-mono text-white/80">{txNbr ?? "—"}</dd>
+                  <dt className="text-muted-foreground">Transaction #</dt>
+                  <dd className="font-mono text-foreground/80">{txNbr ?? "—"}</dd>
                 </div>
                 <div className="col-span-2">
-                  <dt className="text-white/35">HNet / Jiffy (AUTHS hnet)</dt>
+                  <dt className="text-muted-foreground">HNet / Jiffy (AUTHS hnet)</dt>
                   <dd
                     className={cn(
                       "break-all font-mono",
-                      healthNetworkId ? "text-emerald-200/85" : "text-white/25"
+                      healthNetworkId ? "text-emerald-200/85" : "text-muted-foreground"
                     )}
                   >
                     {healthNetworkId ?? "—"}
@@ -151,11 +151,11 @@ export function MediKreditAccreditationModal({
                 {(rejectionCode || rejectionDescription) && (
                   <>
                     <div>
-                      <dt className="text-white/35">Rejection code</dt>
+                      <dt className="text-muted-foreground">Rejection code</dt>
                       <dd className="text-rose-300/90">{rejectionCode ?? "—"}</dd>
                     </div>
                     <div className="col-span-2">
-                      <dt className="text-white/35">Rejection description</dt>
+                      <dt className="text-muted-foreground">Rejection description</dt>
                       <dd className="text-rose-200/80">{rejectionDescription ?? "—"}</dd>
                     </div>
                   </>
@@ -164,11 +164,11 @@ export function MediKreditAccreditationModal({
 
               {dependents && dependents.length > 0 && (
                 <div>
-                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/30">Dependents (famcheck)</p>
-                  <ul className="space-y-1 rounded-lg border border-white/[0.06] bg-white/[0.02] p-2">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Dependents (famcheck)</p>
+                  <ul className="space-y-1 rounded-lg border border-border bg-muted/40 p-2">
                     {dependents.map((d, i) => (
-                      <li key={i} className="text-[11px] text-white/65">
-                        <span className="text-white/40">dep_cd {d.dep_cd ?? "—"}</span> · {d.name ?? d.id_nbr ?? "—"}
+                      <li key={i} className="text-[11px] text-muted-foreground/85">
+                        <span className="text-muted-foreground">dep_cd {d.dep_cd ?? "—"}</span> · {d.name ?? d.id_nbr ?? "—"}
                       </li>
                     ))}
                   </ul>
@@ -177,10 +177,10 @@ export function MediKreditAccreditationModal({
 
               {remittanceMessages && remittanceMessages.length > 0 && (
                 <div>
-                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/30">RMR</p>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">RMR</p>
                   <ul className="space-y-1">
                     {remittanceMessages.map((r, i) => (
-                      <li key={i} className="rounded border border-white/[0.05] bg-white/[0.02] px-2 py-1 text-[11px]">
+                      <li key={i} className="rounded border border-border bg-muted/40 px-2 py-1 text-[11px]">
                         <span className="font-mono text-amber-200/80">{r.code}</span> — {r.description}
                       </li>
                     ))}
@@ -190,10 +190,10 @@ export function MediKreditAccreditationModal({
 
               {warnings && warnings.length > 0 && (
                 <div>
-                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/30">Warnings</p>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Warnings</p>
                   <ul className="space-y-1">
                     {warnings.map((w, i) => (
-                      <li key={i} className={cn("text-[11px]", w.rmr_tp ? "text-amber-200/70" : "text-white/50")}>
+                      <li key={i} className={cn("text-[11px]", w.rmr_tp ? "text-amber-200/70" : "text-muted-foreground/70")}>
                         {w.cd && <span className="font-mono">{w.cd}</span>} {w.desc}
                       </li>
                     ))}
@@ -202,8 +202,8 @@ export function MediKreditAccreditationModal({
               )}
 
               {(requestInnerXml || requestSoapEnvelope || responseRaw) && (
-                <div className="space-y-4 border-t border-white/[0.06] pt-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-white/40">Wire copy (audit)</p>
+                <div className="space-y-4 border-t border-border pt-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Wire copy (audit)</p>
                   {requestInnerXml ? (
                     <CopyableAuditBlock
                       label="Request — inner DOCUMENT"

@@ -1,26 +1,9 @@
-export function formatZarCents(cents: number | null | undefined): string {
-  const value = Number(cents ?? 0) / 100
-  return `R ${value.toLocaleString("en-ZA", {
+/** Format integer cents as ZAR (e.g. 12500 → "R 125.00"). */
+export function formatZarCents(cents: number): string {
+  const rands = cents / 100
+  return new Intl.NumberFormat("en-ZA", {
+    style: "currency",
+    currency: "ZAR",
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`
-}
-
-export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "—"
-  return new Date(iso).toLocaleString("en-ZA", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  })
-}
-
-export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—"
-  return new Date(iso).toLocaleDateString("en-ZA", { dateStyle: "medium" })
-}
-
-export function parseZarToCents(raw: string): number | null {
-  const n = parseFloat(raw.replace(",", ".").trim())
-  if (!Number.isFinite(n) || n < 0) return null
-  return Math.round(n * 100)
+  }).format(rands)
 }

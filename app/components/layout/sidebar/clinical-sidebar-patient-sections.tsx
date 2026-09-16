@@ -1,6 +1,7 @@
 "use client"
 
-import { useWorkspace } from "@/lib/clinical-workspace"
+import { useWorkspace, useWorkspaceStore } from "@/lib/clinical-workspace"
+import type { ExtractedEntities } from "@/lib/scribe/entity-highlighter"
 import type { MedicalBlock, PatientMedication, VitalReading } from "@/lib/clinical-workspace/types"
 import { searchChronicConditionCatalog } from "@/lib/clinical-workspace/chronic-condition-catalog"
 import {
@@ -20,22 +21,32 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Field, FieldControl, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import {
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalDescription,
+  ModalHeader,
+  ModalTitle,
+} from "@/components/ui/modal"
 import { cn } from "@/lib/utils"
 import {
   CaretRight,
-  FirstAid,
   Flask,
   Heartbeat,
+  ListMagnifyingGlass,
   MagnifyingGlass,
   PencilSimple,
   Pill,
   Plus,
   Scan,
+  Stethoscope,
   Warning,
   X,
 } from "@phosphor-icons/react"
-import { motion, AnimatePresence } from "motion/react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useState } from "react"
 
 /* ── shared collapsible section ───────────────────────────────── */
 
@@ -60,7 +71,7 @@ export function SidebarSection({
 
   return (
     <div className="group/section">
-      <div className="flex w-full items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.04] active:bg-white/[0.06]">
+      <div className="flex w-full items-center gap-1 rounded-lg px-2 py-1 transition-colors hover:bg-sidebar-accent/80">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -68,38 +79,28 @@ export function SidebarSection({
         >
           <CaretRight
             className={cn(
-              "size-3 shrink-0 text-white/25 transition-transform duration-200",
+              "size-3 shrink-0 text-sidebar-foreground/40 transition-transform duration-200",
               open && "rotate-90"
             )}
             weight="bold"
           />
           <span className={cn("flex size-4 items-center justify-center", iconColor)}>{icon}</span>
-          <span className="flex-1 truncate text-[11px] font-semibold text-white/70">{title}</span>
+          <span className="flex-1 truncate text-[12px] font-semibold tracking-tight text-sidebar-foreground/75">
+            {title}
+          </span>
           {typeof count === "number" && count > 0 && (
-            <span className="rounded-full bg-white/[0.06] px-1.5 py-px text-[9px] font-medium tabular-nums text-white/35">
+            <span className="text-micro rounded-md bg-sidebar-accent px-1.5 py-px font-semibold tabular-nums text-sidebar-foreground/50">
               {count}
             </span>
           )}
         </button>
         {trailing ? (
-          <div className="shrink-0 opacity-0 transition-opacity group-hover/section:opacity-100">
+          <div className="shrink-0 opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100">
             {trailing}
           </div>
         ) : null}
       </div>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="px-2 pb-2 pt-1">{children}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {open ? <div className="px-2 pb-2 pt-1">{children}</div> : null}
     </div>
   )
 }
@@ -125,37 +126,42 @@ function SidebarSearchPickerDialog({
   onSearchKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
   children: React.ReactNode
 }) {
+  const searchId = useId()
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="gap-0 border border-white/[0.08] bg-zinc-950/98 p-0 text-white shadow-2xl backdrop-blur-xl sm:max-w-md"
-        hasCloseButton
-      >
-        <DialogHeader className="border-b border-white/[0.06] px-5 py-3.5 text-left">
-          <DialogTitle className="text-sm font-semibold tracking-tight text-white">{title}</DialogTitle>
-          <DialogDescription className="sr-only">Search and select an item</DialogDescription>
-        </DialogHeader>
-        <div className="p-3">
-          <div className="relative">
-            <MagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-white/25" />
-            <input
-              value={query}
-              onChange={(e) => onQueryChange(e.target.value)}
-              onKeyDown={onSearchKeyDown}
-              placeholder={placeholder}
-              autoFocus
-              className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] py-2.5 pl-9 pr-3 text-[13px] text-white outline-none placeholder:text-white/30 focus:border-white/[0.15] focus:ring-1 focus:ring-white/[0.08]"
-            />
-          </div>
+    <Modal open={open} onOpenChange={onOpenChange}>
+      <ModalContent size="md">
+        <ModalHeader>
+          <ModalTitle className="text-sm font-semibold tracking-tight">{title}</ModalTitle>
+          <ModalDescription className="sr-only">Search and select an item</ModalDescription>
+        </ModalHeader>
+        <ModalBody className="p-3">
+          <Field>
+            <FieldLabel htmlFor={searchId} className="sr-only">
+              Search {title}
+            </FieldLabel>
+            <FieldControl className="relative">
+              <MagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id={searchId}
+                value={query}
+                onChange={(e) => onQueryChange(e.target.value)}
+                onKeyDown={onSearchKeyDown}
+                placeholder={placeholder}
+                autoFocus
+                className="border-sidebar-border bg-sidebar-accent pl-9 text-[13px] text-sidebar-foreground"
+              />
+            </FieldControl>
+          </Field>
           <div
             className="mt-2 max-h-[min(52vh,22rem)] overflow-y-auto rounded-lg"
             style={{ scrollbarWidth: "thin" }}
           >
             {children}
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </ModalBody>
+      </ModalContent>
+    </Modal>
   )
 }
 
@@ -189,7 +195,7 @@ export function ClinicalSidebarAllergiesSection() {
     <>
       <SidebarSection
         icon={<Warning className="size-3.5" weight="fill" />}
-        iconColor="text-red-400"
+        iconColor="text-red-600 dark:text-red-400"
         title="Allergies"
         count={allergies.length}
         defaultOpen
@@ -197,7 +203,7 @@ export function ClinicalSidebarAllergiesSection() {
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="inline-flex size-5 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/[0.08] hover:text-white/60"
+            className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/60"
             aria-label="Add allergy"
           >
             <Plus className="size-3" weight="bold" />
@@ -205,13 +211,13 @@ export function ClinicalSidebarAllergiesSection() {
         }
       >
         {allergies.length === 0 ? (
-          <p className="py-0.5 text-[10px] text-white/25">None — tap + (NKDA if applicable)</p>
+          <p className="py-0.5 text-[11px] text-sidebar-foreground/45">None — tap + (NKDA if applicable)</p>
         ) : (
           <div className="flex flex-wrap gap-1">
             {allergies.map((a) => (
               <span
                 key={a}
-                className="group/al inline-flex max-w-full items-center gap-1 rounded-md bg-red-500/10 py-0.5 pl-2 pr-1 text-[10px] font-medium text-red-300"
+                className="group/al inline-flex max-w-full items-center gap-1 rounded-md border border-red-500/15 bg-red-500/10 py-0.5 pl-2 pr-1 text-[11px] font-medium text-red-700 dark:text-red-200"
               >
                 {editing === a ? (
                   <input
@@ -226,7 +232,7 @@ export function ClinicalSidebarAllergiesSection() {
                         setEditValue("")
                       }
                     }}
-                    className="min-w-0 flex-1 bg-transparent text-[10px] text-red-100 outline-none"
+                    className="min-w-0 flex-1 bg-transparent text-[11px] text-red-700 outline-none dark:text-red-100"
                   />
                 ) : (
                   <span className="truncate">{a}</span>
@@ -239,7 +245,7 @@ export function ClinicalSidebarAllergiesSection() {
                         setEditing(a)
                         setEditValue(a)
                       }}
-                      className="rounded p-0.5 text-white/25 opacity-0 transition hover:text-white/70 group-hover/al:opacity-100"
+                      className="rounded p-0.5 text-sidebar-foreground/45 opacity-0 transition hover:text-sidebar-accent-foreground/75 group-hover/al:opacity-100"
                       aria-label="Edit"
                     >
                       <PencilSimple className="size-2.5" weight="bold" />
@@ -247,7 +253,7 @@ export function ClinicalSidebarAllergiesSection() {
                     <button
                       type="button"
                       onClick={() => pid && removeCriticalAllergy(pid, a)}
-                      className="rounded p-0.5 text-white/25 opacity-0 transition hover:text-red-200 group-hover/al:opacity-100"
+                      className="rounded p-0.5 text-sidebar-foreground/45 opacity-0 transition hover:text-red-700 dark:hover:text-red-200 group-hover/al:opacity-100"
                       aria-label="Remove"
                     >
                       <X className="size-2.5" weight="bold" />
@@ -262,11 +268,11 @@ export function ClinicalSidebarAllergiesSection() {
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent
-          className="gap-0 border border-white/[0.08] bg-zinc-950/98 p-0 text-white sm:max-w-sm"
+          className="gap-0 border border-sidebar-border bg-popover/98 p-0 text-sidebar-foreground sm:max-w-sm"
           hasCloseButton
         >
-          <DialogHeader className="border-b border-white/[0.06] px-5 py-3.5 text-left">
-            <DialogTitle className="text-sm font-semibold tracking-tight text-white">Add allergy</DialogTitle>
+          <DialogHeader className="border-b border-sidebar-border px-5 py-3.5 text-left">
+            <DialogTitle className="text-sm font-semibold tracking-tight text-sidebar-foreground">Add allergy</DialogTitle>
             <DialogDescription className="sr-only">Record drug or other allergy</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 p-4">
@@ -275,7 +281,7 @@ export function ClinicalSidebarAllergiesSection() {
               onChange={(e) => setAddValue(e.target.value)}
               placeholder="e.g. Penicillin — rash"
               autoFocus
-              className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-white/30"
+              className="w-full rounded-lg border border-sidebar-border bg-sidebar-accent px-3 py-2.5 text-[13px] text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/45"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && addValue.trim() && pid) {
                   addCriticalAllergy(pid, addValue.trim())
@@ -291,7 +297,7 @@ export function ClinicalSidebarAllergiesSection() {
                   if (pid) addCriticalAllergy(pid, "NKDA")
                   setAddOpen(false)
                 }}
-                className="flex-1 rounded-lg border border-white/10 py-2 text-[11px] font-medium text-white/60 hover:bg-white/[0.06]"
+                className="flex-1 rounded-lg border border-sidebar-border py-2 text-[12px] font-medium text-sidebar-foreground/80 hover:bg-sidebar-accent"
               >
                 NKDA
               </button>
@@ -305,7 +311,7 @@ export function ClinicalSidebarAllergiesSection() {
                     setAddOpen(false)
                   }
                 }}
-                className="flex-1 rounded-lg bg-red-500/20 py-2 text-[11px] font-semibold text-red-200 disabled:opacity-40"
+                className="flex-1 rounded-lg bg-red-500/15 py-2 text-[12px] font-semibold text-red-700 transition-colors hover:bg-red-500/20 disabled:opacity-40 dark:text-red-100"
               >
                 Add
               </button>
@@ -317,14 +323,199 @@ export function ClinicalSidebarAllergiesSection() {
   )
 }
 
-/* ── encounter problems ───────────────────────────────────────── */
+/* ── active visit (structured consult snapshot) ───────────────── */
 
-export function ClinicalSidebarEncounterProblemsSection() {
-  const { activePatient, removeEncounterProblem, addEncounterProblem } = useWorkspace()
+function normVisitLabel(s: string): string {
+  return s.trim().toLowerCase()
+}
+
+function categorizeVisitFindings(
+  problems: string[],
+  entities: ExtractedEntities,
+  chronic: string[]
+) {
+  const chronicSet = new Set(chronic.map(normVisitLabel))
+  const ccPool = new Set(entities.chief_complaint.map(normVisitLabel))
+  const symPool = new Set(entities.symptoms.map(normVisitLabel))
+  const dxPool = new Set(entities.diagnoses.map(normVisitLabel))
+  const riskPool = new Set(entities.risk_factors.map(normVisitLabel))
+
+  let chiefComplaint: string | null = null
+  const symptoms: string[] = []
+  const workingDx: string[] = []
+  const risks: string[] = []
+  const other: string[] = []
+  const seen = new Set<string>()
+
+  for (const p of problems) {
+    const n = normVisitLabel(p)
+    if (!n || seen.has(n)) continue
+    seen.add(n)
+
+    if (ccPool.has(n)) {
+      if (!chiefComplaint) chiefComplaint = p
+      continue
+    }
+    if (symPool.has(n)) {
+      symptoms.push(p)
+      continue
+    }
+    if (dxPool.has(n)) {
+      if (!chronicSet.has(n)) workingDx.push(p)
+      continue
+    }
+    if (riskPool.has(n)) {
+      risks.push(p)
+      continue
+    }
+    other.push(p)
+  }
+
+  if (!chiefComplaint && entities.chief_complaint[0]) {
+    chiefComplaint = entities.chief_complaint[0]
+  }
+
+  return { chiefComplaint, symptoms, workingDx, risks, other }
+}
+
+function countPendingEntities(
+  entities: ExtractedEntities,
+  entityStatus: Record<string, "pending" | "accepted" | "rejected">
+): number {
+  let n = 0
+  const keys = [
+    "chief_complaint",
+    "symptoms",
+    "diagnoses",
+    "medications",
+    "allergies",
+    "vitals",
+    "procedures",
+    "social_history",
+    "family_history",
+    "risk_factors",
+  ] as const
+  for (const key of keys) {
+    for (const item of entities[key] ?? []) {
+      const st = entityStatus[`${key}:${item}`]
+      if (!st || st === "pending") n++
+    }
+  }
+  return n
+}
+
+function VisitChipRow({
+  label,
+  items,
+  tone,
+  limit = 6,
+  expanded,
+  onToggleExpand,
+  onRemove,
+}: {
+  label: string
+  items: string[]
+  tone: "rose" | "sky" | "amber" | "slate"
+  limit?: number
+  expanded?: boolean
+  onToggleExpand?: () => void
+  onRemove?: (item: string) => void
+}) {
+  if (items.length === 0) return null
+  const toneClass =
+    tone === "rose"
+      ? "border-rose-500/15 bg-rose-500/10 text-rose-800 dark:text-rose-200/90"
+      : tone === "sky"
+        ? "border-sky-500/15 bg-sky-500/10 text-sky-800 dark:text-sky-200/90"
+        : tone === "amber"
+          ? "border-amber-500/15 bg-amber-500/10 text-amber-800 dark:text-amber-200/90"
+          : "border-sidebar-border bg-sidebar-accent/60 text-sidebar-foreground/80"
+
+  const visible = expanded ? items : items.slice(0, limit)
+  const hidden = items.length - visible.length
+
+  return (
+    <div className="space-y-1">
+      <p className="text-micro font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/45">
+        {label}
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {visible.map((item) => (
+          <span
+            key={item}
+            className={cn(
+              "group/chip inline-flex max-w-full items-center gap-0.5 rounded-md border py-0.5 pl-2 pr-1 text-[11px] font-medium leading-tight",
+              toneClass
+            )}
+          >
+            <span className="truncate">{item}</span>
+            {onRemove ? (
+              <button
+                type="button"
+                onClick={() => onRemove(item)}
+                className="rounded p-0.5 opacity-0 transition hover:text-red-600 group-hover/chip:opacity-100 dark:hover:text-red-300"
+                aria-label={`Remove ${item}`}
+              >
+                <X className="size-2.5" weight="bold" />
+              </button>
+            ) : null}
+          </span>
+        ))}
+      </div>
+      {hidden > 0 && onToggleExpand ? (
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="text-[11px] font-medium text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground/75"
+        >
+          {expanded ? "Show fewer" : `+${hidden} more`}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+export function ClinicalSidebarActiveVisitSection() {
+  const {
+    activePatient,
+    scribeEntities,
+    scribeEntityStatus,
+    scribeTranscript,
+    removeEncounterProblem,
+    addEncounterProblem,
+  } = useWorkspace()
+  const setSidecarContent = useWorkspaceStore((s) => s.setSidecarContent)
   const [addOpen, setAddOpen] = useState(false)
   const [draft, setDraft] = useState("")
+  const [symptomsExpanded, setSymptomsExpanded] = useState(false)
   const pid = activePatient?.patientId
-  const problems = activePatient?.encounterProblems ?? []
+  const problems = useMemo(
+    () => activePatient?.encounterProblems ?? [],
+    [activePatient?.encounterProblems]
+  )
+  const chronic = useMemo(
+    () => activePatient?.chronicConditions ?? [],
+    [activePatient?.chronicConditions]
+  )
+
+  const groups = useMemo(
+    () => categorizeVisitFindings(problems, scribeEntities, chronic),
+    [problems, scribeEntities, chronic]
+  )
+
+  const pendingReview = useMemo(
+    () => countPendingEntities(scribeEntities, scribeEntityStatus),
+    [scribeEntities, scribeEntityStatus]
+  )
+
+  const findingCount =
+    (groups.chiefComplaint ? 1 : 0) +
+    groups.symptoms.length +
+    groups.workingDx.length +
+    groups.risks.length +
+    groups.other.length
+
+  const hasTranscript = scribeTranscript.trim().length > 20
 
   const commitAdd = useCallback(() => {
     const t = draft.trim()
@@ -334,77 +525,154 @@ export function ClinicalSidebarEncounterProblemsSection() {
     setAddOpen(false)
   }, [addEncounterProblem, draft, pid])
 
+  const openExtraction = useCallback(() => {
+    setSidecarContent({ tab: "intelligence" })
+  }, [setSidecarContent])
+
+  const removeProblem = useCallback(
+    (item: string) => {
+      if (pid) removeEncounterProblem(pid, item)
+    },
+    [pid, removeEncounterProblem]
+  )
+
   if (!activePatient) return null
 
   return (
     <>
       <SidebarSection
-        icon={<FirstAid className="size-3.5" weight="fill" />}
-        iconColor="text-violet-400"
-        title="This visit"
-        count={problems.length}
+        icon={<Stethoscope className="size-3.5" weight="fill" />}
+        iconColor="text-emerald-600 dark:text-emerald-400"
+        title="Active visit"
+        count={findingCount}
         defaultOpen
         trailing={
-          <button
-            type="button"
-            onClick={() => setAddOpen(true)}
-            className="inline-flex size-5 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/[0.08] hover:text-white/60"
-            aria-label="Add problem"
-          >
-            <Plus className="size-3" weight="bold" />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={openExtraction}
+              className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/60"
+              aria-label="Open extraction panel"
+              title="Review AI extraction"
+            >
+              <ListMagnifyingGlass className="size-3" weight="bold" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/60"
+              aria-label="Add finding"
+            >
+              <Plus className="size-3" weight="bold" />
+            </button>
+          </div>
         }
       >
-        {problems.length === 0 ? (
-          <p className="py-0.5 text-[10px] text-white/25">Accept from AI or tap +</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {problems.map((c) => (
-              <li
-                key={c}
-                className="group/row flex items-start gap-2 rounded-md border-l-2 border-violet-500/40 bg-violet-500/[0.06] py-1.5 pl-2.5 pr-2"
-              >
-                <p className="min-w-0 flex-1 text-[11px] leading-snug text-violet-100/95">{c}</p>
+        <div className="space-y-2.5">
+          {(hasTranscript || pendingReview > 0) && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-500/15 bg-gradient-to-r from-emerald-500/[0.07] to-transparent px-2 py-1.5">
+              <span className="text-[11px] font-medium text-emerald-800/90 dark:text-emerald-300/90">
+                {hasTranscript ? "Transcript live" : "Awaiting transcript"}
+              </span>
+              {pendingReview > 0 ? (
                 <button
                   type="button"
-                  onClick={() => pid && removeEncounterProblem(pid, c)}
-                  className="shrink-0 rounded p-1 text-white/25 opacity-0 transition hover:text-red-300 group-hover/row:opacity-100"
-                  aria-label="Remove"
+                  onClick={openExtraction}
+                  className="text-micro shrink-0 rounded-md bg-emerald-500/12 px-1.5 py-0.5 font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
                 >
-                  <X className="size-3" weight="bold" />
+                  {pendingReview} to review →
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
+              ) : null}
+            </div>
+          )}
+
+          {groups.chiefComplaint ? (
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-2.5 py-2">
+              <p className="text-micro font-semibold uppercase tracking-[0.14em] text-emerald-700/75 dark:text-emerald-400/80">
+                Chief complaint
+              </p>
+              <p className="mt-0.5 text-[12px] font-semibold leading-snug tracking-tight text-sidebar-foreground/90">
+                {groups.chiefComplaint}
+              </p>
+            </div>
+          ) : null}
+
+          {findingCount === 0 ? (
+            <div className="rounded-lg border border-dashed border-sidebar-border/80 px-2.5 py-3 text-center">
+              <p className="text-[11px] leading-relaxed text-sidebar-foreground/50">
+                Findings appear here as you scribe or accept AI extraction.
+              </p>
+              {pendingReview > 0 ? (
+                <button
+                  type="button"
+                  onClick={openExtraction}
+                  className="mt-2 text-[11px] font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
+                >
+                  Review {pendingReview} extracted items
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <VisitChipRow
+                label="Presenting symptoms"
+                items={groups.symptoms}
+                tone="rose"
+                expanded={symptomsExpanded}
+                onToggleExpand={() => setSymptomsExpanded((e) => !e)}
+                onRemove={removeProblem}
+              />
+              <VisitChipRow
+                label="Working diagnosis"
+                items={groups.workingDx}
+                tone="sky"
+                onRemove={removeProblem}
+              />
+              <VisitChipRow
+                label="Risk factors"
+                items={groups.risks}
+                tone="amber"
+                limit={4}
+                onRemove={removeProblem}
+              />
+              <VisitChipRow
+                label="Other notes"
+                items={groups.other}
+                tone="slate"
+                limit={4}
+                onRemove={removeProblem}
+              />
+            </>
+          )}
+        </div>
       </SidebarSection>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent
-          className="gap-0 border border-white/[0.08] bg-zinc-950/98 p-0 text-white sm:max-w-md"
+          className="gap-0 border border-sidebar-border bg-popover/98 p-0 text-sidebar-foreground sm:max-w-md"
           hasCloseButton
         >
-          <DialogHeader className="border-b border-white/[0.06] px-5 py-3.5 text-left">
-            <DialogTitle className="text-sm font-semibold tracking-tight text-white">
-              Add problem (this visit)
+          <DialogHeader className="border-b border-sidebar-border px-5 py-3.5 text-left">
+            <DialogTitle className="text-sm font-semibold tracking-tight text-sidebar-foreground">
+              Add visit finding
             </DialogTitle>
-            <DialogDescription className="sr-only">Encounter-only problem</DialogDescription>
+            <DialogDescription className="sr-only">Encounter-only clinical finding</DialogDescription>
           </DialogHeader>
           <div className="p-4">
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               rows={3}
-              placeholder="Working diagnosis, symptom cluster, or concern…"
-              className="w-full resize-none rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-white/30"
+              placeholder="Symptom, working diagnosis, or clinical concern…"
+              className="w-full resize-none rounded-lg border border-sidebar-border bg-sidebar-accent px-3 py-2.5 text-[13px] text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/45"
             />
             <button
               type="button"
               disabled={!draft.trim()}
               onClick={() => void commitAdd()}
-              className="mt-3 w-full rounded-lg bg-violet-500/20 py-2 text-[12px] font-semibold text-violet-200 disabled:opacity-40"
+              className="mt-3 w-full rounded-lg bg-emerald-500/15 py-2 text-[12px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-40 dark:text-emerald-100"
             >
-              Add to list
+              Add to visit
             </button>
           </div>
         </DialogContent>
@@ -412,6 +680,9 @@ export function ClinicalSidebarEncounterProblemsSection() {
     </>
   )
 }
+
+/** @deprecated Use ClinicalSidebarActiveVisitSection */
+export const ClinicalSidebarEncounterProblemsSection = ClinicalSidebarActiveVisitSection
 
 /* ── chronic conditions ───────────────────────────────────────── */
 
@@ -468,7 +739,7 @@ export function ClinicalSidebarChronicSection() {
     <>
       <SidebarSection
         icon={<Heartbeat className="size-3.5" weight="fill" />}
-        iconColor="text-amber-400"
+        iconColor="text-amber-600 dark:text-amber-400"
         title="Chronic"
         count={conditions.length}
         defaultOpen={conditions.length > 0}
@@ -476,7 +747,7 @@ export function ClinicalSidebarChronicSection() {
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="inline-flex size-5 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/[0.08] hover:text-white/60"
+            className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/60"
             aria-label="Add chronic condition"
           >
             <Plus className="size-3" weight="bold" />
@@ -484,13 +755,13 @@ export function ClinicalSidebarChronicSection() {
         }
       >
         {conditions.length === 0 ? (
-          <p className="py-0.5 text-[10px] text-white/25">None — tap + to add</p>
+          <p className="py-0.5 text-[11px] text-sidebar-foreground/45">None — tap + to add</p>
         ) : (
           <div className="flex flex-wrap gap-1">
             {conditions.map((c) => (
               <span
                 key={c}
-                className="group/chip inline-flex items-center gap-1 rounded-md bg-amber-500/10 py-0.5 pl-2 pr-1 text-[10px] font-medium text-amber-200/90"
+                className="group/chip inline-flex items-center gap-1 rounded-md border border-amber-500/15 bg-amber-500/10 py-0.5 pl-2 pr-1 text-[11px] font-medium text-amber-700 dark:text-amber-200/90"
               >
                 {editing === c ? (
                   <input
@@ -505,7 +776,7 @@ export function ClinicalSidebarChronicSection() {
                         setEditValue("")
                       }
                     }}
-                    className="min-w-0 flex-1 bg-transparent px-0.5 text-[10px] text-amber-100 outline-none"
+                    className="min-w-0 flex-1 bg-transparent px-0.5 text-[11px] text-amber-700 outline-none dark:text-amber-100"
                   />
                 ) : (
                   <span className="truncate">{c}</span>
@@ -515,7 +786,7 @@ export function ClinicalSidebarChronicSection() {
                     <button
                       type="button"
                       onClick={() => startEdit(c)}
-                      className="rounded p-0.5 text-white/20 opacity-0 transition hover:text-white/60 group-hover/chip:opacity-100"
+                      className="rounded p-0.5 text-sidebar-foreground/45 opacity-0 transition hover:text-sidebar-accent-foreground/60 group-hover/chip:opacity-100"
                       aria-label="Edit"
                     >
                       <PencilSimple className="size-2.5" weight="bold" />
@@ -523,7 +794,7 @@ export function ClinicalSidebarChronicSection() {
                     <button
                       type="button"
                       onClick={() => pid && removePatientChronicCondition(pid, c)}
-                      className="rounded p-0.5 text-white/20 opacity-0 transition hover:text-red-300 group-hover/chip:opacity-100"
+                      className="rounded p-0.5 text-sidebar-foreground/45 opacity-0 transition hover:text-red-700 dark:hover:text-red-300 group-hover/chip:opacity-100"
                       aria-label="Remove"
                     >
                       <X className="size-2.5" weight="bold" />
@@ -556,7 +827,7 @@ export function ClinicalSidebarChronicSection() {
               key={s}
               type="button"
               onClick={() => addCondition(s)}
-              className="flex w-full rounded-md px-3 py-2 text-left text-[12px] text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white"
+              className="flex w-full rounded-md px-3 py-2 text-left text-[12px] text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             >
               {s}
             </button>
@@ -566,7 +837,7 @@ export function ClinicalSidebarChronicSection() {
               <button
                 type="button"
                 onClick={() => addCondition(query)}
-                className="mt-1 w-full rounded-md border border-dashed border-white/[0.1] px-3 py-2 text-[11px] font-medium text-amber-300/85 transition-colors hover:bg-amber-500/10"
+                className="mt-1 w-full rounded-md border border-dashed border-sidebar-border px-3 py-2 text-[12px] font-medium text-amber-700 transition-colors hover:bg-amber-500/10 dark:text-amber-300/85"
               >
                 Add &ldquo;{query.trim()}&rdquo;
               </button>
@@ -648,7 +919,7 @@ export function ClinicalSidebarMedicationsSection() {
     <>
       <SidebarSection
         icon={<Pill className="size-3.5" weight="fill" />}
-        iconColor="text-sky-400"
+        iconColor="text-sky-600 dark:text-sky-400"
         title="Medications"
         count={meds.length}
         defaultOpen={meds.length > 0}
@@ -656,7 +927,7 @@ export function ClinicalSidebarMedicationsSection() {
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="inline-flex size-5 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/[0.08] hover:text-white/60"
+            className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/60"
             aria-label="Search medications"
           >
             <MagnifyingGlass className="size-3" weight="bold" />
@@ -664,13 +935,13 @@ export function ClinicalSidebarMedicationsSection() {
         }
       >
         {meds.length === 0 ? (
-          <p className="py-0.5 text-[10px] text-white/25">None on encounter</p>
+          <p className="py-0.5 text-[11px] text-sidebar-foreground/45">None on encounter</p>
         ) : (
           <div className="space-y-1">
             {meds.map((m) => (
               <div
                 key={m.id}
-                className="group/med flex items-start gap-2 rounded-md px-1 py-1 transition-colors hover:bg-white/[0.03]"
+                className="group/med flex items-start gap-2 rounded-md px-1 py-1 transition-colors hover:bg-sidebar-accent"
               >
                 {editingId === m.id ? (
                   <div className="min-w-0 flex-1 space-y-1.5">
@@ -682,7 +953,7 @@ export function ClinicalSidebarMedicationsSection() {
                         if (e.key === "Enter") commitEdit()
                         if (e.key === "Escape") setEditingId(null)
                       }}
-                      className="w-full rounded border border-white/[0.12] bg-white/[0.04] px-2 py-1 text-[11px] text-white/90 outline-none"
+                      className="w-full rounded border border-sidebar-border bg-sidebar-accent px-2 py-1 text-[12px] text-sidebar-foreground/90 outline-none"
                       placeholder="Drug name"
                     />
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -693,7 +964,7 @@ export function ClinicalSidebarMedicationsSection() {
                           if (e.key === "Enter") commitEdit()
                           if (e.key === "Escape") setEditingId(null)
                         }}
-                        className="min-w-0 flex-1 rounded border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] text-white/80 outline-none"
+                        className="min-w-0 flex-1 rounded border border-sidebar-border bg-sidebar-accent px-2 py-0.5 text-[11px] text-sidebar-foreground/80 outline-none"
                         placeholder="Dose"
                       />
                       <input
@@ -703,13 +974,13 @@ export function ClinicalSidebarMedicationsSection() {
                           if (e.key === "Enter") commitEdit()
                           if (e.key === "Escape") setEditingId(null)
                         }}
-                        className="min-w-0 flex-1 rounded border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] text-white/80 outline-none"
+                        className="min-w-0 flex-1 rounded border border-sidebar-border bg-sidebar-accent px-2 py-0.5 text-[11px] text-sidebar-foreground/80 outline-none"
                         placeholder="Frequency"
                       />
                       <button
                         type="button"
                         onClick={commitEdit}
-                        className="rounded bg-white/[0.08] px-2 py-0.5 text-[10px] font-medium text-white/70 hover:bg-white/[0.12]"
+                        className="rounded bg-sidebar-accent px-2 py-0.5 text-[11px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent"
                       >
                         Save
                       </button>
@@ -718,9 +989,9 @@ export function ClinicalSidebarMedicationsSection() {
                 ) : (
                   <>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[11px] font-medium text-white/80">{m.name}</p>
+                      <p className="text-[12px] font-medium text-sidebar-foreground/80">{m.name}</p>
                       {(m.dosage || m.frequency) && (
-                        <p className="text-[9px] text-white/30">
+                        <p className="text-micro text-sidebar-foreground/45">
                           {[m.dosage, m.frequency].filter(Boolean).join(" · ")}
                         </p>
                       )}
@@ -728,7 +999,7 @@ export function ClinicalSidebarMedicationsSection() {
                     <button
                       type="button"
                       onClick={() => startEdit(m)}
-                      className="mt-0.5 shrink-0 rounded p-0.5 text-white/15 opacity-0 transition hover:text-white/70 group-hover/med:opacity-100"
+                      className="mt-0.5 shrink-0 rounded p-0.5 text-sidebar-foreground/45 opacity-0 transition hover:text-sidebar-accent-foreground/75 group-hover/med:opacity-100"
                       aria-label="Edit"
                     >
                       <PencilSimple className="size-3" weight="bold" />
@@ -736,7 +1007,7 @@ export function ClinicalSidebarMedicationsSection() {
                     <button
                       type="button"
                       onClick={() => pid && removeSessionMedication(pid, m.id)}
-                      className="mt-0.5 shrink-0 rounded p-0.5 text-white/15 opacity-0 transition hover:text-red-300 group-hover/med:opacity-100"
+                      className="mt-0.5 shrink-0 rounded p-0.5 text-sidebar-foreground/45 opacity-0 transition hover:text-red-700 dark:hover:text-red-300 group-hover/med:opacity-100"
                       aria-label="Remove"
                     >
                       <X className="size-3" weight="bold" />
@@ -757,9 +1028,9 @@ export function ClinicalSidebarMedicationsSection() {
         onQueryChange={setQuery}
         placeholder="Type drug name…"
       >
-        {loading && <p className="py-6 text-center text-[11px] text-white/30">Searching…</p>}
+        {loading && <p className="py-6 text-center text-[12px] text-sidebar-foreground/45">Searching…</p>}
         {!loading && query.length < 2 && (
-          <p className="py-6 text-center text-[11px] text-white/25">Type at least 2 characters</p>
+          <p className="py-6 text-center text-[12px] text-sidebar-foreground/45">Type at least 2 characters</p>
         )}
         {!loading &&
           query.length >= 2 &&
@@ -768,13 +1039,13 @@ export function ClinicalSidebarMedicationsSection() {
               key={s}
               type="button"
               onClick={() => addMed(s)}
-              className="flex w-full rounded-md px-3 py-2 text-left text-[12px] text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white"
+              className="flex w-full rounded-md px-3 py-2 text-left text-[12px] text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             >
               {s}
             </button>
           ))}
         {!loading && query.length >= 2 && suggestions.length === 0 && (
-          <p className="py-6 text-center text-[11px] text-white/25">No matches</p>
+          <p className="py-6 text-center text-[12px] text-sidebar-foreground/45">No matches</p>
         )}
       </SidebarSearchPickerDialog>
     </>
@@ -791,7 +1062,7 @@ export function ClinicalSidebarSocialHistorySection() {
 
   return (
     <SidebarSection
-      icon={<span className="text-[10px]">🧬</span>}
+      icon={<span className="text-[11px]">🧬</span>}
       title="Social history"
       count={lines.length}
       defaultOpen={false}
@@ -800,7 +1071,7 @@ export function ClinicalSidebarSocialHistorySection() {
         {lines.map((line, i) => (
           <li
             key={`${i}-${line.slice(0, 32)}`}
-            className="border-l-2 border-orange-400/25 pl-2 text-[10px] leading-snug text-white/50"
+            className="border-l-2 border-orange-400/25 pl-2 text-[11px] leading-snug text-sidebar-foreground/70"
           >
             {line}
           </li>
@@ -871,7 +1142,7 @@ export function ClinicalSidebarLabsSection() {
     <>
       <SidebarSection
         icon={<Flask className="size-3.5" weight="fill" />}
-        iconColor="text-emerald-400"
+        iconColor="text-emerald-600 dark:text-emerald-400"
         title="Labs"
         count={labs.length}
         defaultOpen={labs.length > 0}
@@ -879,7 +1150,7 @@ export function ClinicalSidebarLabsSection() {
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="inline-flex size-5 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/[0.08] hover:text-white/60"
+            className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/60"
             aria-label="Add lab order"
           >
             <Plus className="size-3" weight="bold" />
@@ -887,13 +1158,13 @@ export function ClinicalSidebarLabsSection() {
         }
       >
         {labs.length === 0 ? (
-          <p className="py-0.5 text-[10px] text-white/25">None — search catalog or tap +</p>
+          <p className="py-0.5 text-[11px] text-sidebar-foreground/45">None — search catalog or tap +</p>
         ) : (
           <ul className="space-y-1">
             {labs.map((b) => (
               <li
                 key={b.id}
-                className="group/lab flex items-start gap-2 rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5"
+                className="group/lab flex items-start gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/50 px-2 py-1.5"
               >
                 <div className="min-w-0 flex-1">
                   {editingId === b.id ? (
@@ -909,15 +1180,15 @@ export function ClinicalSidebarLabsSection() {
                           setEditLabel("")
                         }
                       }}
-                      className="w-full bg-transparent text-[11px] text-white/90 outline-none"
+                      className="w-full bg-transparent text-[12px] text-sidebar-foreground/90 outline-none"
                     />
                   ) : (
                     <>
-                      <p className="text-[11px] font-medium text-white/85">
+                      <p className="text-[12px] font-medium text-sidebar-foreground/85">
                         {b.title ?? String(b.metadata.label ?? "Lab")}
                       </p>
                       {typeof b.metadata.labCategory === "string" && (
-                        <p className="text-[9px] text-white/35">{b.metadata.labCategory}</p>
+                        <p className="text-micro text-sidebar-foreground/45">{b.metadata.labCategory}</p>
                       )}
                     </>
                   )}
@@ -927,7 +1198,7 @@ export function ClinicalSidebarLabsSection() {
                     <button
                       type="button"
                       onClick={() => startEdit(b)}
-                      className="rounded p-1 text-white/25 hover:text-white/70"
+                      className="rounded p-1 text-sidebar-foreground/45 hover:text-sidebar-accent-foreground/75"
                       aria-label="Edit lab"
                     >
                       <PencilSimple className="size-3" weight="bold" />
@@ -935,7 +1206,7 @@ export function ClinicalSidebarLabsSection() {
                     <button
                       type="button"
                       onClick={() => pid && removePatientBlock(pid, b.id)}
-                      className="rounded p-1 text-white/25 hover:text-red-300"
+                      className="rounded p-1 text-sidebar-foreground/45 hover:text-red-700 dark:hover:text-red-300"
                       aria-label="Remove lab"
                     >
                       <X className="size-3" weight="bold" />
@@ -965,7 +1236,7 @@ export function ClinicalSidebarLabsSection() {
         <div className="space-y-2 p-1">
           {aiSuggested.length > 0 && (
             <div>
-              <p className="mb-1 px-2 text-[9px] font-semibold uppercase tracking-wide text-emerald-400/90">
+              <p className="text-micro mb-1 px-2 font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300/90">
                 AI suggested (from transcript)
               </p>
               <div className="flex flex-wrap gap-1 px-1">
@@ -974,7 +1245,7 @@ export function ClinicalSidebarLabsSection() {
                     key={s.id}
                     type="button"
                     onClick={() => addFromCatalog(s)}
-                    className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200/90"
+                    className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-200/90"
                   >
                     {s.label}
                   </button>
@@ -988,10 +1259,10 @@ export function ClinicalSidebarLabsSection() {
                 key={entry.id}
                 type="button"
                 onClick={() => addFromCatalog(entry)}
-                className="flex w-full flex-col rounded-md px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                className="flex w-full flex-col rounded-md px-3 py-2 text-left transition-colors hover:bg-sidebar-accent"
               >
-                <span className="text-[12px] text-white/80">{entry.label}</span>
-                <span className="text-[9px] text-white/35">{entry.category}</span>
+                <span className="text-[12px] text-sidebar-foreground/80">{entry.label}</span>
+                <span className="text-micro text-sidebar-foreground/45">{entry.category}</span>
               </button>
             ))}
           </div>
@@ -1002,7 +1273,7 @@ export function ClinicalSidebarLabsSection() {
               <button
                 type="button"
                 onClick={() => addFreeText()}
-                className="w-full rounded-md border border-dashed border-white/[0.12] px-3 py-2 text-[11px] font-medium text-emerald-300/90 hover:bg-emerald-500/10"
+                className="w-full rounded-md border border-dashed border-sidebar-border px-3 py-2 text-[12px] font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300/90"
               >
                 Add custom &ldquo;{query.trim()}&rdquo;
               </button>
@@ -1055,7 +1326,7 @@ export function ClinicalSidebarVitalsSection() {
     <>
       <SidebarSection
         icon={<Heartbeat className="size-3.5" weight="fill" />}
-        iconColor="text-rose-400"
+        iconColor="text-rose-600 dark:text-rose-400"
         title="Vitals"
         count={activePatient.vitals.length}
         defaultOpen={activePatient.vitals.length > 0}
@@ -1063,7 +1334,7 @@ export function ClinicalSidebarVitalsSection() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="inline-flex size-5 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/[0.08] hover:text-white/60"
+            className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/60"
             aria-label="Add vitals"
           >
             <Plus className="size-3" weight="bold" />
@@ -1073,30 +1344,30 @@ export function ClinicalSidebarVitalsSection() {
         {activePatient.vitals.length > 0 ? (
           <div className="grid grid-cols-2 gap-1">
             {activePatient.vitals.slice(-6).map((v) => (
-              <div key={v.id} className="rounded-md bg-white/[0.03] px-2 py-1.5">
-                <p className="text-[8px] uppercase tracking-wider text-white/20">
+              <div key={v.id} className="rounded-md bg-sidebar-accent px-2 py-1.5">
+                <p className="text-micro uppercase tracking-wider text-sidebar-foreground/45">
                   {v.type.replace("_", " ")}
                 </p>
-                <p className="text-[12px] font-bold tabular-nums text-white/80">
+                <p className="text-[12px] font-bold tabular-nums text-sidebar-foreground/80">
                   {v.value}
                   {v.secondaryValue ? `/${v.secondaryValue}` : ""}
-                  <span className="ml-0.5 text-[8px] font-normal text-white/25">{v.unit}</span>
+                  <span className="text-micro ml-0.5 font-normal text-sidebar-foreground/45">{v.unit}</span>
                 </p>
               </div>
             ))}
           </div>
         ) : (
-          <p className="py-0.5 text-[10px] text-white/25">No vitals — tap +</p>
+          <p className="py-0.5 text-[11px] text-sidebar-foreground/45">No vitals — tap +</p>
         )}
       </SidebarSection>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
-          className="gap-0 border border-white/[0.08] bg-zinc-950/98 p-0 text-white sm:max-w-sm"
+          className="gap-0 border border-sidebar-border bg-popover/98 p-0 text-sidebar-foreground sm:max-w-sm"
           hasCloseButton
         >
-          <DialogHeader className="border-b border-white/[0.06] px-5 py-3.5 text-left">
-            <DialogTitle className="text-sm font-semibold tracking-tight text-white">Add vitals</DialogTitle>
+          <DialogHeader className="border-b border-sidebar-border px-5 py-3.5 text-left">
+            <DialogTitle className="text-sm font-semibold tracking-tight text-sidebar-foreground">Add vitals</DialogTitle>
             <DialogDescription className="sr-only">Record a vital sign</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 p-4">
@@ -1114,10 +1385,10 @@ export function ClinicalSidebarVitalsSection() {
                       setSecondaryValue("")
                     }}
                     className={cn(
-                      "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium",
+                      "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium",
                       selectedType === t
-                        ? "border-rose-500/40 bg-rose-500/15 text-rose-100"
-                        : "border-white/[0.08] text-white/50 hover:bg-white/[0.04]"
+                        ? "border-rose-500/35 bg-rose-500/12 text-rose-700 dark:text-rose-100"
+                        : "border-sidebar-border text-sidebar-foreground/70 hover:bg-sidebar-accent"
                     )}
                   >
                     <Icon className="size-3" />
@@ -1126,24 +1397,24 @@ export function ClinicalSidebarVitalsSection() {
                 )
               })}
             </div>
-            <label className="block text-[10px] text-white/40">
+            <label className="block text-[11px] text-sidebar-foreground/45">
               {cfg.hasSecondary ? "Systolic" : "Value"} ({cfg.unit})
               <input
                 value={primaryValue}
                 onChange={(e) => setPrimaryValue(e.target.value)}
                 inputMode="decimal"
-                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[13px] text-white outline-none"
+                className="mt-1 w-full rounded-lg border border-sidebar-border bg-sidebar-accent px-3 py-2 text-[13px] text-sidebar-foreground outline-none"
                 placeholder={String(cfg.range[0])}
               />
             </label>
             {cfg.hasSecondary && (
-              <label className="block text-[10px] text-white/40">
+              <label className="block text-[11px] text-sidebar-foreground/45">
                 Diastolic (mmHg)
                 <input
                   value={secondaryValue}
                   onChange={(e) => setSecondaryValue(e.target.value)}
                   inputMode="decimal"
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[13px] text-white outline-none"
+                  className="mt-1 w-full rounded-lg border border-sidebar-border bg-sidebar-accent px-3 py-2 text-[13px] text-sidebar-foreground outline-none"
                 />
               </label>
             )}
@@ -1151,7 +1422,7 @@ export function ClinicalSidebarVitalsSection() {
               type="button"
               disabled={!primaryValue.trim()}
               onClick={() => void commit()}
-              className="w-full rounded-lg bg-rose-500/25 py-2.5 text-[12px] font-semibold text-rose-100 disabled:opacity-40"
+              className="w-full rounded-lg bg-rose-500/15 py-2.5 text-[12px] font-semibold text-rose-700 transition-colors hover:bg-rose-500/20 disabled:opacity-40 dark:text-rose-100"
             >
               Save
             </button>
@@ -1194,7 +1465,7 @@ export function ClinicalSidebarImagingSection() {
     <>
       <SidebarSection
         icon={<Scan className="size-3.5" weight="fill" />}
-        iconColor="text-rose-300"
+        iconColor="text-rose-600 dark:text-rose-300"
         title="Imaging"
         count={imaging.length}
         defaultOpen={imaging.length > 0}
@@ -1202,7 +1473,7 @@ export function ClinicalSidebarImagingSection() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="inline-flex size-5 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/[0.08] hover:text-white/60"
+            className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground/60"
             aria-label="Add imaging"
           >
             <Plus className="size-3" weight="bold" />
@@ -1210,24 +1481,24 @@ export function ClinicalSidebarImagingSection() {
         }
       >
         {imaging.length === 0 ? (
-          <p className="py-0.5 text-[10px] text-white/25">None — tap + (CXR, US, CT…)</p>
+          <p className="py-0.5 text-[11px] text-sidebar-foreground/45">None — tap + (CXR, US, CT…)</p>
         ) : (
           <ul className="space-y-1">
             {imaging.map((b) => (
               <li
                 key={b.id}
-                className="group/img flex items-start gap-2 rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5"
+                className="group/img flex items-start gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/50 px-2 py-1.5"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-medium text-white/85">{b.title}</p>
+                  <p className="text-[12px] font-medium text-sidebar-foreground/85">{b.title}</p>
                   {typeof b.metadata?.imagingModality === "string" && (
-                    <p className="text-[9px] text-white/35">{b.metadata.imagingModality}</p>
+                    <p className="text-micro text-sidebar-foreground/45">{b.metadata.imagingModality}</p>
                   )}
                 </div>
                 <button
                   type="button"
                   onClick={() => pid && removePatientBlock(pid, b.id)}
-                  className="shrink-0 rounded p-1 text-white/20 opacity-0 transition hover:text-red-300 group-hover/img:opacity-100"
+                  className="shrink-0 rounded p-1 text-sidebar-foreground/45 opacity-0 transition hover:text-red-700 dark:hover:text-red-300 group-hover/img:opacity-100"
                   aria-label="Remove"
                 >
                   <X className="size-3" weight="bold" />
@@ -1240,11 +1511,11 @@ export function ClinicalSidebarImagingSection() {
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
-          className="gap-0 border border-white/[0.08] bg-zinc-950/98 p-0 text-white sm:max-w-sm"
+          className="gap-0 border border-sidebar-border bg-popover/98 p-0 text-sidebar-foreground sm:max-w-sm"
           hasCloseButton
         >
-          <DialogHeader className="border-b border-white/[0.06] px-5 py-3.5 text-left">
-            <DialogTitle className="text-sm font-semibold tracking-tight text-white">Add imaging</DialogTitle>
+          <DialogHeader className="border-b border-sidebar-border px-5 py-3.5 text-left">
+            <DialogTitle className="text-sm font-semibold tracking-tight text-sidebar-foreground">Add imaging</DialogTitle>
             <DialogDescription className="sr-only">Imaging request</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 p-4">
@@ -1252,19 +1523,19 @@ export function ClinicalSidebarImagingSection() {
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="e.g. CXR PA, echo, MRI lumbar spine"
-              className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-white/30"
+              className="w-full rounded-lg border border-sidebar-border bg-sidebar-accent px-3 py-2.5 text-[13px] text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/45"
             />
             <input
               value={modality}
               onChange={(e) => setModality(e.target.value)}
               placeholder="Modality (optional): XR, US, CT, MRI…"
-              className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[13px] text-white outline-none placeholder:text-white/30"
+              className="w-full rounded-lg border border-sidebar-border bg-sidebar-accent px-3 py-2.5 text-[13px] text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/45"
             />
             <button
               type="button"
               disabled={!label.trim()}
               onClick={() => void addImaging()}
-              className="w-full rounded-lg bg-rose-500/20 py-2.5 text-[12px] font-semibold text-rose-100 disabled:opacity-40"
+              className="w-full rounded-lg bg-rose-500/15 py-2.5 text-[12px] font-semibold text-rose-700 transition-colors hover:bg-rose-500/20 disabled:opacity-40 dark:text-rose-100"
             >
               Add to chart
             </button>

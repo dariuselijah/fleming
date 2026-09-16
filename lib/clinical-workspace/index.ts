@@ -1,5 +1,5 @@
 export * from "./types"
-export { useWorkspaceStore, getActivePatient, createPatientSession, type ScribeSegment } from "./workspace-store"
+export { useWorkspaceStore, getActivePatient, syncActivePatientScribeSnapshot, createPatientSession, type ScribeSegment } from "./workspace-store"
 export { WorkspaceProvider, useWorkspace, useActivePatient, useSOAPNote } from "./workspace-context"
 export {
   detectCommandFromUserMessage,
@@ -10,7 +10,7 @@ export {
   parsePrescriptionItems,
   stripPrescriptionItemsBlock,
 } from "./parse-clinical-response"
-export { buildClinicalContext } from "./build-clinical-context"
+export { buildClinicalContext, buildArtifactGenerationContext } from "./build-clinical-context"
 export {
   shouldPromoteDiagnosisToChronic,
   routeAcceptedDiagnosis,
@@ -21,6 +21,14 @@ export { generateDraftClaim, buildDraftClaimForSubmit } from "./generate-draft-c
 export { mapPracticeClaimRow } from "./map-practice-claim"
 export {
   patientSessionToMedikreditPayload,
+  practicePatientToMedikreditPayload,
   practiceClaimLinesToMedikredit,
 } from "./medikredit-claim-from-session"
 export { fetchPracticeClaimsForWorkspace } from "./refresh-practice-claims"
+export { openPatientFromAdmin } from "./open-patient-from-admin"
+export { printPrescription, type PrintPrescriptionArgs } from "./print-prescription"
+export { parseHandoffMetadata, type ClinicalHandoffMetadata } from "./handoff-metadata"
+export {
+  buildEncounterAttestation,
+  ENCOUNTER_ATTESTATION_STATEMENT,
+} from "./encounter-attestation"

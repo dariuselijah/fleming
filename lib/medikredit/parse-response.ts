@@ -184,6 +184,17 @@ function attrs(el: Element | null): Record<string, string> {
 /** Strip SOAP envelope and decode &lt;request&gt; if present; return inner DOCUMENT or raw. */
 export function unwrapMedikreditResponse(raw: string): string {
   let t = raw.trim()
+  /** Some proxies return the JSON envelope string as `response`; unwrap before XML path. */
+  if (t.startsWith("{") || t.startsWith("[")) {
+    try {
+      const obj = JSON.parse(t) as { response?: unknown; error?: string }
+      if (typeof obj.response === "string" && obj.response.trim()) {
+        t = obj.response.trim()
+      }
+    } catch {
+      /* not JSON — continue as raw */
+    }
+  }
   const replyMatch = /<reply[^>]*>([\s\S]*?)<\/reply>/i.exec(t)
   if (replyMatch) {
     /** MediKredit SOAP often entity-encodes the inner DOCUMENT inside &lt;reply&gt; — must decode before XML parse. */
@@ -208,6 +219,26 @@ function parseRJ(el: Element | null): MedikreditRJ | undefined {
   const a = attrs(el)
   if (!a.cd && !a.desc) return undefined
   return { cd: a.cd, desc: a.desc }
+}
+
+/** Claim-level RJ only — skips `<RJ>` nested under `<ITEM>`. */
+function parseClaimLevelRJ(tx: Element | null): MedikreditRJ | undefined {
+  if (!tx) return undefined
+  const rjs = tx.getElementsByTagName("RJ")
+  for (let i = 0; i < rjs.length; i++) {
+    const el = rjs[i]
+    let p: Element | null = el.parentElement
+    let underItem = false
+    while (p && p !== tx) {
+      if (p.tagName === "ITEM") {
+        underItem = true
+        break
+      }
+      p = p.parentElement
+    }
+    if (!underItem) return parseRJ(el)
+  }
+  return undefined
 }
 
 function parseWARNList(parent: Element | null): MedikreditWarning[] {
@@ -258,16 +289,29 @@ function parseItems(tx: Element | null): MedikreditItemStatus[] {
     const a = attrs(it)
     const rj = parseRJ(it.getElementsByTagName("RJ")[0] ?? null)
     const tar = it.getElementsByTagName("TAR")[0]
+    const procDirect = it.getElementsByTagName("PROC")[0] ?? null
+    const medDirect = it.getElementsByTagName("MED")[0] ?? null
+    const procModCount = procDirect ? procDirect.getElementsByTagName("MOD").length : 0
+    const tarModCount = tar ? tar.getElementsByTagName("MOD").length : 0
     let kind: MedikreditItemStatus["itemKind"] = "unknown"
-    if (tar?.getElementsByTagName("NAPPI").length || tar?.getElementsByTagName("MED").length) kind = "medication"
-    else if (tar?.getElementsByTagName("PROC").length) kind = "procedure"
+    const tpAttr = (a.tp ?? "").trim()
+    if (tpAttr === "3") kind = "modifier"
+    else if (medDirect || tar?.getElementsByTagName("NAPPI").length || tar?.getElementsByTagName("MED").length)
+      kind = "medication"
+    else if (procDirect || tar?.getElementsByTagName("PROC").length) kind = "procedure"
+    else if (tarModCount > 0 || procModCount > 0) kind = "modifier"
     const fin = it.getElementsByTagName("FIN")[0]
     const fa = attrs(fin)
+    const hb = attrs(it.getElementsByTagName("HB")[0] ?? null)
+    const net = fa.net ?? fa.nett
+    const payAdvice = hb.pay_adv?.trim()
+    const status = !rj && (payAdvice === "P" || payAdvice === "A") ? payAdvice : a.status
     out.push({
-      lineNumber: a.lin_num,
-      status: a.status,
+      lineNumber: a.lin_num ?? a.nbr,
+      status,
       gross: fa.gross,
-      net: fa.net,
+      net,
+      patientResponsibility: computeLinePatientResponsibility(fa.gross, net),
       rejectionCode: rj?.cd,
       rejectionDescription: rj?.desc,
       warnings: parseWARNList(it),
@@ -331,7 +375,7 @@ function parseFIN(tx: Element | null): { gross?: string; net?: string } {
   const fin = tx?.getElementsByTagName("FIN")[0]
   if (!fin) return {}
   const a = attrs(fin)
-  return { gross: a.gross, net: a.net }
+  return { gross: a.gross, net: a.net ?? a.nett }
 }
 
 /**
@@ -463,17 +507,61 @@ export function parseFamilyEligibilityXml(xml: string): FamilyEligibilityRespons
   }
 }
 
-export function parseClaimXml(xml: string): ClaimResponse {
-  const inner = unwrapMedikreditResponse(xml)
-  const dom = new JSDOM(inner, { contentType: "text/xml" })
-  const doc = dom.window.document
-  const tx = firstEl(doc, "TX")
-  const p = parseTX(tx)
-  const rj = parseRJ(firstEl(doc, "RJ"))
-  const warns = parseWARNList(tx)
-  const rmrs = parseRMRList(tx)
-  const items = parseItems(tx)
-  const fin = parseFIN(tx)
+function parseZarAmount(s?: string | null): number | undefined {
+  if (s == null || String(s).trim() === "") return undefined
+  const n = parseFloat(String(s).trim().replace(",", "."))
+  return Number.isFinite(n) ? n : undefined
+}
+
+function computeLinePatientResponsibility(gross?: string | null, net?: string | null): number | undefined {
+  const g = parseZarAmount(gross)
+  if (g == null) return undefined
+  const n = parseZarAmount(net) ?? 0
+  return Math.round(Math.max(0, g - n) * 100) / 100
+}
+
+/**
+ * Estimated patient owing (scheme shortfall) from ITEM FIN gross/net, else TX FIN.
+ */
+function computePatientResponsibilityFromClaim(
+  items: MedikreditItemStatus[],
+  fin: { gross?: string; net?: string }
+): number | undefined {
+  let sum = 0
+  let counted = false
+  for (const it of items) {
+    const g = parseZarAmount(it.gross)
+    const n = parseZarAmount(it.net)
+    if (g != null) {
+      const netVal = n ?? 0
+      sum += Math.max(0, g - netVal)
+      counted = true
+    }
+  }
+  if (counted) {
+    const rounded = Math.round(sum * 100) / 100
+    return rounded > 0 ? rounded : 0
+  }
+  const fg = parseZarAmount(fin.gross)
+  const fn = parseZarAmount(fin.net)
+  if (fg != null && fn != null) {
+    const v = Math.max(0, fg - fn)
+    const rounded = Math.round(v * 100) / 100
+    return rounded > 0 ? rounded : 0
+  }
+  return undefined
+}
+
+function buildClaimResponse(
+  inner: string,
+  p: ParsedTX,
+  rj: MedikreditRJ | undefined,
+  items: MedikreditItemStatus[],
+  fin: { gross?: string; net?: string },
+  auths: { hnet?: string; auth_nbr?: string },
+  warns: MedikreditWarning[],
+  rmrs: MedikreditRemittanceMessage[]
+): ClaimResponse {
   const res = p.res ?? ""
 
   const itemRejected = items.filter((i) => i.status === "R" || i.rejectionCode)
@@ -486,14 +574,18 @@ export function parseClaimXml(xml: string): ClaimResponse {
   let outcome: ClaimResponse["outcome"] = "error"
   if (duplicate) outcome = "duplicate"
   else if (res === "R") outcome = "rejected"
-  else if (res === "P") outcome = "pending"
-  else if (res === "A" || res === "") {
+  else if (res === "A" || res === "P" || res === "") {
     if (itemRejected.length > 0 && itemRejected.length === items.length) outcome = "rejected"
     else if (itemRejected.length > 0) outcome = "partially_approved"
     else outcome = "approved"
   }
 
   const approvedAmount = fin.net ? parseFloat(fin.net) : undefined
+
+  let patientResponsibility: number | undefined
+  if (outcome === "approved" || outcome === "partially_approved" || outcome === "rejected") {
+    patientResponsibility = computePatientResponsibilityFromClaim(items, fin)
+  }
 
   return {
     ok: outcome === "approved" || outcome === "partially_approved",
@@ -506,11 +598,195 @@ export function parseClaimXml(xml: string): ClaimResponse {
     rejectionDescription: rj?.desc,
     denialReason: rj?.desc,
     approvedAmount,
-    patientResponsibility: undefined,
+    patientResponsibility,
+    healthNetworkId: auths.hnet,
     itemStatuses: items,
     remittanceMessages: rmrs,
     warnings: warns,
     rawXml: inner,
     duplicateDetected: duplicate,
+  }
+}
+
+function sliceTxInnerDocument(inner: string): string | undefined {
+  const m = /<TX\b[^>]*>([\s\S]*?)<\/TX>/i.exec(inner)
+  return m ? m[1] : undefined
+}
+
+function parseClaimItemsRegex(inner: string): MedikreditItemStatus[] {
+  const out: MedikreditItemStatus[] = []
+  const re = /<ITEM\b([^>]*)>([\s\S]*?)<\/ITEM>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(inner)) !== null) {
+    const a = parseXmlAttrString(m[1])
+    const body = m[2] ?? ""
+    let rji: MedikreditRJ | undefined
+    const rjSelf = /<RJ\b([^/>]*)\/>/i.exec(body)
+    const rjBlock = /<RJ\b([^>]*)>([^<]*)<\/RJ>/i.exec(body)
+    if (rjSelf) {
+      const ra = parseXmlAttrString(rjSelf[1])
+      if (ra.cd || ra.desc) rji = { cd: ra.cd, desc: ra.desc }
+    } else if (rjBlock) {
+      const ra = parseXmlAttrString(rjBlock[1])
+      if (ra.cd || ra.desc) rji = { cd: ra.cd, desc: ra.desc }
+    }
+    const finM = /<FIN\b([^/>]*)\/>/i.exec(body) ?? /<FIN\b([^>]*)>/i.exec(body)
+    const fa = finM ? parseXmlAttrString(finM[1]) : {}
+    out.push({
+      lineNumber: a.lin_num ?? a.nbr,
+      status: a.status,
+      gross: fa.gross,
+      net: fa.net ?? fa.nett,
+      patientResponsibility: computeLinePatientResponsibility(fa.gross, fa.net ?? fa.nett),
+      rejectionCode: rji?.cd,
+      rejectionDescription: rji?.desc,
+      warnings: [],
+      itemKind: "unknown",
+    })
+  }
+  return out
+}
+
+function parseTxLevelFinRegex(txInner: string): { gross?: string; net?: string } {
+  const head = txInner.split(/<ITEM\b/i)[0] ?? txInner
+  const finM = /<FIN\b([^/>]*)\/>/i.exec(head) ?? /<FIN\b([^>]*)>/i.exec(head)
+  if (!finM) return {}
+  const a = parseXmlAttrString(finM[1])
+  return { gross: a.gross, net: a.net ?? a.nett }
+}
+
+function parseAUTHSRegex(scope: string): { hnet?: string; auth_nbr?: string } {
+  const authsM = /<AUTHS\b([^/>]*)\/>/i.exec(scope) ?? /<AUTHS\b([^>]*)>[\s\S]*?<\/AUTHS>/i.exec(scope)
+  if (!authsM) return {}
+  const a = parseXmlAttrString(authsM[1])
+  return { hnet: a.hnet, auth_nbr: a.auth_nbr }
+}
+
+function parseRJFirstInScope(scope: string): MedikreditRJ | undefined {
+  const rjSelf = /<RJ\b([^/>]*)\/>/i.exec(scope)
+  const rjBlock = /<RJ\b([^>]*)>([^<]*)<\/RJ>/i.exec(scope)
+  if (rjSelf) {
+    const a = parseXmlAttrString(rjSelf[1])
+    if (a.cd || a.desc) return { cd: a.cd, desc: a.desc }
+  }
+  if (rjBlock) {
+    const a = parseXmlAttrString(rjBlock[1])
+    if (a.cd || a.desc) return { cd: a.cd, desc: a.desc }
+  }
+  return undefined
+}
+
+function parseWarnRmrsRegex(txInner: string): {
+  warns: MedikreditWarning[]
+  rmrs: MedikreditRemittanceMessage[]
+} {
+  const warns: MedikreditWarning[] = []
+  const rmrs: MedikreditRemittanceMessage[] = []
+  const warnRe = /<WARN\b([^/>]*)\/>/gi
+  let wm: RegExpExecArray | null
+  while ((wm = warnRe.exec(txInner)) !== null) {
+    const a = parseXmlAttrString(wm[1])
+    warns.push({ cd: a.cd, desc: a.desc, rmr_tp: a.rmr_tp })
+  }
+  const rmrRe = /<RMR\b([^/>]*)\/>/gi
+  while ((wm = rmrRe.exec(txInner)) !== null) {
+    const a = parseXmlAttrString(wm[1])
+    if (a.cd || a.code) {
+      rmrs.push({
+        code: a.cd ?? a.code ?? "",
+        description: a.desc ?? a.description ?? "",
+      })
+    }
+  }
+  return { warns, rmrs }
+}
+
+/** When JSDOM rejects the fragment (trailing junk, multi-root, whitespace), salvage TX / ITEM / FIN via regex. */
+function parseClaimXmlRegexFallback(inner: string): ClaimResponse {
+  const txM = /<TX\b([^>]*)>/i.exec(inner)
+  const txA = txM ? parseXmlAttrString(txM[1]) : {}
+  const p: ParsedTX = {
+    res: txA.res ?? null,
+    tx_nbr: txA.tx_nbr ?? null,
+    tx_cd: txA.tx_cd ?? null,
+    dt: txA.dt ?? null,
+    tm: txA.tm ?? null,
+  }
+
+  const txInner = sliceTxInnerDocument(inner) ?? inner
+  const scanForRj = txInner.length >= inner.length * 0.5 ? txInner : inner
+  const rj = parseRJFirstInScope(scanForRj)
+  const { warns, rmrs } = parseWarnRmrsRegex(txInner)
+  const items = parseClaimItemsRegex(inner)
+  const fin = parseTxLevelFinRegex(txInner)
+  const auths = parseAUTHSRegex(txInner)
+
+  if (!txM && items.length === 0 && !p.res) {
+    return {
+      ok: false,
+      outcome: "error",
+      responseMessage: "Unrecognised MediKredit response (not valid claim XML)",
+      itemStatuses: [],
+      remittanceMessages: [],
+      warnings: [],
+      rawXml: inner.slice(0, 8000),
+    }
+  }
+
+  return buildClaimResponse(inner, p, rj, items, fin, auths, warns, rmrs)
+}
+
+export function parseClaimXml(xml: string): ClaimResponse {
+  const inner = unwrapMedikreditResponse(xml)
+  if (!inner || inner.length < 4) {
+    return {
+      ok: false,
+      outcome: "error",
+      responseMessage: "Empty MediKredit response",
+      itemStatuses: [],
+      remittanceMessages: [],
+      warnings: [],
+      rawXml: inner,
+    }
+  }
+  if (/<!DOCTYPE\s+html/i.test(inner) || /<html[\s>]/i.test(inner)) {
+    return {
+      ok: false,
+      outcome: "error",
+      responseMessage: "MediKredit path returned HTML (proxy error page or wrong URL)",
+      itemStatuses: [],
+      remittanceMessages: [],
+      warnings: [],
+      rawXml: inner.slice(0, 4000),
+    }
+  }
+
+  try {
+    const dom = new JSDOM(inner, { contentType: "text/xml" })
+    const doc = dom.window.document
+    const tx = firstEl(doc, "TX")
+    const p = parseTX(tx)
+    const rj = parseClaimLevelRJ(tx)
+    const warns = parseWARNList(tx)
+    const rmrs = parseRMRList(tx)
+    const items = parseItems(tx)
+    const fin = parseFIN(tx)
+    const auths = parseAUTHS(doc, tx)
+    return buildClaimResponse(inner, p, rj, items, fin, auths, warns, rmrs)
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "XML parse failed"
+    const recovered = parseClaimXmlRegexFallback(inner)
+    if (recovered.outcome !== "error" || recovered.itemStatuses.length > 0 || recovered.res) {
+      return recovered
+    }
+    return {
+      ok: false,
+      outcome: "error",
+      responseMessage: reason,
+      itemStatuses: [],
+      remittanceMessages: [],
+      warnings: [],
+      rawXml: inner.slice(0, 8000),
+    }
   }
 }

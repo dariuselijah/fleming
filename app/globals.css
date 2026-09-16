@@ -19,6 +19,15 @@
       opacity: 1;
     }
   }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
 }
 
 @theme inline {
@@ -26,6 +35,16 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --text-micro: var(--type-micro);
+  --text-micro--line-height: var(--type-micro-line-height);
+  --text-caption: var(--type-caption);
+  --text-caption--line-height: var(--type-caption-line-height);
+  --text-body: var(--type-body);
+  --text-body--line-height: var(--type-body-line-height);
+  --spacing-touch: var(--size-touch);
+  --spacing-shell-header: var(--size-shell-header);
+  --ease-calm: var(--motion-ease-calm);
+  --ease-calm-out: var(--motion-ease-calm-out);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -56,6 +75,27 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-panel: var(--panel);
+  --color-panel-foreground: var(--panel-foreground);
+  --color-panel-border: var(--panel-border);
+  --color-panel-muted: var(--panel-muted);
+  --color-glass: var(--glass);
+  --color-glass-border: var(--glass-border);
+  --color-overlay: var(--overlay);
+  --color-overlay-foreground: var(--overlay-foreground);
+  --color-status-success: var(--status-success);
+  --color-status-success-foreground: var(--status-success-foreground);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-foreground: var(--status-warning-foreground);
+  --color-status-danger: var(--status-danger);
+  --color-status-danger-foreground: var(--status-danger-foreground);
+  --color-status-info: var(--status-info);
+  --color-status-info-foreground: var(--status-info-foreground);
+  --shadow-panel: var(--shadow-panel);
+  --shadow-overlay: var(--shadow-overlay);
+  --shadow-glass: var(--shadow-glass);
+  --shadow-raised: var(--elevation-raised);
+  --shadow-floating: var(--elevation-floating);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -71,6 +111,35 @@
 }
 
 :root {
+  color-scheme: light;
+  /*
+   * Clinical Calm foundation
+   * Type: micro is never smaller than 11px; caption/body are 12/14px.
+   * Space: 4px base rhythm, with 44px touch and 56px shell controls.
+   * Motion: short opacity/color transitions; avoid structural springs.
+   * Elevation: borders first, restrained raised/floating shadows second.
+   * Z-index: content < sticky < nav < popover < modal < critical.
+   */
+  --type-micro: 0.6875rem;
+  --type-micro-line-height: 1rem;
+  --type-caption: 0.75rem;
+  --type-caption-line-height: 1.125rem;
+  --type-body: 0.875rem;
+  --type-body-line-height: 1.375rem;
+  --space-unit: 0.25rem;
+  --size-touch: 2.75rem;
+  --size-shell-header: 3.5rem;
+  --duration-instant: 80ms;
+  --duration-fast: 140ms;
+  --duration-calm: 200ms;
+  --motion-ease-calm: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-calm-out: cubic-bezier(0, 0, 0.2, 1);
+  --z-content: 0;
+  --z-sticky: 20;
+  --z-navigation: 40;
+  --z-popover: 60;
+  --z-modal: 100;
+  --z-critical: 200;
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -86,7 +155,7 @@
   --accent: oklch(0.967 0.001 286.375);
   --accent-foreground: oklch(0.21 0.006 285.885);
   --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
@@ -104,9 +173,31 @@
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.705 0.015 286.067);
+  --panel: oklch(0.995 0 0);
+  --panel-foreground: oklch(0.141 0.005 285.823);
+  --panel-border: oklch(0.9 0.006 286.32);
+  --panel-muted: oklch(0.967 0.001 286.375);
+  --glass: oklch(1 0 0 / 72%);
+  --glass-border: oklch(0.21 0.006 285.885 / 10%);
+  --overlay: oklch(1 0 0 / 94%);
+  --overlay-foreground: oklch(0.141 0.005 285.823);
+  --status-success: oklch(0.71 0.17 148);
+  --status-success-foreground: oklch(0.3 0.09 148);
+  --status-warning: oklch(0.78 0.16 80);
+  --status-warning-foreground: oklch(0.36 0.08 70);
+  --status-danger: oklch(0.62 0.22 25);
+  --status-danger-foreground: oklch(0.42 0.16 25);
+  --status-info: oklch(0.62 0.16 235);
+  --status-info-foreground: oklch(0.36 0.1 235);
+  --shadow-panel: 0 12px 40px -28px oklch(0.21 0.006 285.885 / 30%);
+  --shadow-overlay: 0 24px 80px -32px oklch(0.21 0.006 285.885 / 38%);
+  --shadow-glass: 0 18px 60px -36px oklch(0.21 0.006 285.885 / 42%);
+  --elevation-raised: 0 4px 16px -12px oklch(0.21 0.006 285.885 / 24%);
+  --elevation-floating: 0 16px 44px -28px oklch(0.21 0.006 285.885 / 34%);
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(21.34% 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(21.34% 0 0);
@@ -139,6 +230,27 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.274 0.006 286.033);
   --sidebar-ring: oklch(0.705 0.015 286.067);
+  --panel: oklch(26.45% 0 0 / 96%);
+  --panel-foreground: oklch(0.985 0 0);
+  --panel-border: oklch(1 0 0 / 8%);
+  --panel-muted: oklch(1 0 0 / 6%);
+  --glass: oklch(1 0 0 / 6%);
+  --glass-border: oklch(1 0 0 / 10%);
+  --overlay: oklch(18% 0 0 / 92%);
+  --overlay-foreground: oklch(0.985 0 0);
+  --status-success: oklch(0.78 0.19 148);
+  --status-success-foreground: oklch(0.86 0.18 148);
+  --status-warning: oklch(0.83 0.17 80);
+  --status-warning-foreground: oklch(0.88 0.15 80);
+  --status-danger: oklch(0.68 0.22 25);
+  --status-danger-foreground: oklch(0.78 0.2 25);
+  --status-info: oklch(0.74 0.16 235);
+  --status-info-foreground: oklch(0.82 0.14 235);
+  --shadow-panel: 0 20px 60px -36px oklch(0 0 0 / 70%);
+  --shadow-overlay: 0 30px 90px -36px oklch(0 0 0 / 82%);
+  --shadow-glass: 0 24px 80px -40px oklch(0 0 0 / 76%);
+  --elevation-raised: 0 8px 24px -16px oklch(0 0 0 / 56%);
+  --elevation-floating: 0 18px 48px -28px oklch(0 0 0 / 72%);
 }
 
 @layer base {
@@ -147,6 +259,40 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  :where(button, input, select, textarea, [role="button"], [role="menuitem"]):focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--ring) 72%, transparent);
+    outline-offset: 2px;
+  }
+
+  @media (pointer: coarse) {
+    :where(
+      button,
+      input[type="button"],
+      input[type="submit"],
+      input[type="reset"],
+      select,
+      [role="button"],
+      [role="menuitem"]
+    ) {
+      min-width: var(--size-touch);
+      min-height: var(--size-touch);
+      touch-action: manipulation;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

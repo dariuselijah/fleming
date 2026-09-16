@@ -1,28 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createGuestServerClient } from '@/lib/supabase/server-guest'
-import { validateAdminPassword } from '@/lib/admin/password'
+import { NextResponse } from 'next/server'
+import { requirePracticePermission } from '@/lib/auth/guard'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getBenchmarkDashboardData } from '@/lib/benchmark-dashboard'
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
-    const { password } = await request.json()
-    
-    // Allow authenticated requests (for refresh)
-    if (password === 'authenticated') {
-      // Skip password validation for refresh requests
-    } else if (!password) {
-      return NextResponse.json({ error: 'Password required' }, { status: 400 })
-    } else {
-      const isValidPassword = await validateAdminPassword(password)
-      if (!isValidPassword) {
-        return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
-      }
-    }
-
-    const supabase = await createGuestServerClient()
-    if (!supabase) {
-      return NextResponse.json({ error: 'Database connection failed' }, { status: 500 })
-    }
+    const guard = await requirePracticePermission("analytics:access")
+    if (!guard.ok) return guard.response
+    const supabase = createAdminClient()
 
     // Fetch all metrics in parallel
     const [
@@ -149,7 +134,9 @@ export async function POST(request: NextRequest) {
       lastUpdated: new Date().toISOString()
     }
 
-    return NextResponse.json(metrics)
+    return NextResponse.json(metrics, {
+      headers: { "Cache-Control": "private, no-store" },
+    })
   } catch (error) {
     console.error('Metrics API error:', error)
     return NextResponse.json({ error: 'Failed to fetch metrics' }, { status: 500 })

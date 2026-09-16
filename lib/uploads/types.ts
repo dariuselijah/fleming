@@ -79,3 +79,91 @@ export interface UserUploadDetail {
   storageBucket: string
   sourceUnits: UploadSourceUnitDetail[]
 }
+
+export type UploadCollectionStatus =
+  | "pending"
+  | "uploading"
+  | "processing"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "archived"
+
+export type UploadBatchStatus =
+  | "pending"
+  | "queued"
+  | "processing"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "cancelled"
+
+export interface UploadCollectionSummary {
+  id: string
+  name: string
+  description?: string | null
+  status: UploadCollectionStatus
+  totalFiles: number
+  completedFiles: number
+  failedFiles: number
+  processingFiles: number
+  createdAt: string
+  updatedAt: string
+  metadata?: Record<string, unknown>
+  latestBatch?: UploadBatchSummary | null
+}
+
+export interface UploadBatchSummary {
+  id: string
+  collectionId: string
+  status: UploadBatchStatus
+  maxConcurrency: number
+  totalFiles: number
+  processedFiles: number
+  completedFiles: number
+  failedFiles: number
+  progressPercent: number
+  createdAt: string
+  updatedAt: string
+  startedAt?: string | null
+  finishedAt?: string | null
+  errorMessage?: string | null
+  metadata?: Record<string, unknown>
+}
+
+export interface UploadBatchFileState {
+  uploadId: string
+  title: string
+  fileName: string
+  status: UploadStatus
+  latestJobStage?: UploadProgressStage | null
+  latestJobProgress?: number | null
+  lastError?: string | null
+}
+
+export interface UploadBatchStatusPayload {
+  collection: UploadCollectionSummary
+  batch: UploadBatchSummary
+  files: UploadBatchFileState[]
+}
+
+export interface BatchUploadFileInput {
+  fileName: string
+  mimeType: string
+  fileSize: number
+  title?: string
+}
+
+export interface BatchUploadInitToken {
+  uploadId: string
+  bucket: string
+  filePath: string
+  fileName: string
+  title: string
+}
+
+export interface UploadBatchInitPayload {
+  collection: UploadCollectionSummary
+  batch: UploadBatchSummary
+  uploads: BatchUploadInitToken[]
+}

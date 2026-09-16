@@ -276,7 +276,7 @@ export function ChannelTestLab({
           {messagingReady && (
             <div className="space-y-4">
               <div>
-                <label className="mb-1.5 block text-[11px] font-medium text-white/50">
+                <label className="mb-1.5 block text-[11px] font-medium text-muted-foreground/70">
                   Test number (SMS / RCS)
                 </label>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -287,33 +287,33 @@ export function ChannelTestLab({
                     value={messagingPhone}
                     onChange={(e) => setMessagingPhone(e.target.value)}
                     onBlur={persistMessaging}
-                    className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm text-white/85 placeholder:text-white/25 focus:border-cyan-500/35 focus:outline-none focus:ring-1 focus:ring-cyan-500/20"
+                    className="min-w-0 flex-1 rounded-xl border border-panel-border bg-panel-muted px-3 py-2 text-sm text-foreground/85 placeholder:text-muted-foreground/50 focus:border-cyan-500/35 focus:outline-none focus:ring-1 focus:ring-cyan-500/20"
                   />
                   <button
                     type="button"
                     onClick={persistMessaging}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.1] px-2.5 py-1.5 text-[10px] font-medium text-white/50 hover:bg-white/[0.05]"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-panel-border px-2.5 py-1.5 text-[10px] font-medium text-muted-foreground/70 hover:bg-panel-muted"
                   >
                     <FloppyDisk className="size-3.5" />
                     Save
                   </button>
                 </div>
-                <p className="mt-1 text-[10px] text-white/30">
+                <p className="mt-1 text-[10px] text-muted-foreground">
                   Two-way SMS: patients reply to this same practice number; messages land in Inbox. For South Africa,
-                  use a Twilio number with <span className="text-white/45">+27</span> inventory (purchase or port in
+                  use a Twilio number with <span className="text-muted-foreground/65">+27</span> inventory (purchase or port in
                   Twilio). Messaging Service / Content SIDs are optional for rich routing.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+              <div className="rounded-xl border border-panel-border bg-panel-muted/50 p-3">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Plain text
                 </p>
                 <textarea
                   value={plainBody}
                   onChange={(e) => setPlainBody(e.target.value)}
                   rows={2}
-                  className="mb-2 w-full resize-y rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-2 text-xs text-white/80 placeholder:text-white/25"
+                  className="mb-2 w-full resize-y rounded-lg border border-panel-border bg-panel-muted px-2.5 py-2 text-xs text-foreground/80 placeholder:text-muted-foreground/50"
                 />
                 <button
                   type="button"
@@ -328,13 +328,13 @@ export function ChannelTestLab({
 
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Built-in templates
                   </p>
                   <button
                     type="button"
                     onClick={resetTemplates}
-                    className="text-[10px] text-white/35 underline-offset-2 hover:text-white/55 hover:underline"
+                    className="text-[10px] text-muted-foreground underline-offset-2 hover:text-accent-foreground hover:underline"
                   >
                     Reset sample text
                   </button>
@@ -348,12 +348,12 @@ export function ChannelTestLab({
                     return (
                       <li
                         key={def.key}
-                        className="rounded-xl border border-white/[0.06] bg-black/15 px-3 py-2.5"
+                        className="rounded-xl border border-panel-border bg-panel-muted/50 px-3 py-2.5"
                       >
                         <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
                           <div>
-                            <p className="text-xs font-medium text-white/80">{def.title}</p>
-                            <p className="text-[10px] text-white/35">{def.description}</p>
+                            <p className="text-xs font-medium text-foreground/80">{def.title}</p>
+                            <p className="text-[10px] text-muted-foreground">{def.description}</p>
                           </div>
                           <button
                             type="button"
@@ -372,14 +372,14 @@ export function ChannelTestLab({
                         <div className="grid gap-2 sm:grid-cols-2">
                           {keys.map((idx, i) => (
                             <label key={idx} className="block min-w-0">
-                              <span className="mb-0.5 block text-[9px] font-medium uppercase tracking-wide text-white/30">
+                              <span className="mb-0.5 block text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
                                 {def.fieldLabels[i] ?? `Field ${idx}`}
                               </span>
                               <input
                                 type="text"
                                 value={tplVars[def.key]?.[idx] ?? ""}
                                 onChange={(e) => tplFieldUpdater(def.key, idx, e.target.value)}
-                                className="w-full rounded-lg border border-white/[0.08] bg-black/25 px-2 py-1.5 text-[11px] text-white/80"
+                                className="w-full rounded-lg border border-panel-border bg-panel-muted px-2 py-1.5 text-[11px] text-foreground/80"
                               />
                             </label>
                           ))}
@@ -395,7 +395,7 @@ export function ChannelTestLab({
           {voiceReady && (
             <div className="space-y-4 rounded-xl border border-violet-500/15 bg-violet-500/[0.04] p-4 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0">
               <div>
-                <label className="mb-1.5 block text-[11px] font-medium text-white/50">
+                <label className="mb-1.5 block text-[11px] font-medium text-muted-foreground/70">
                   Scenario
                 </label>
                 <select
@@ -408,7 +408,7 @@ export function ChannelTestLab({
                       /* ignore */
                     }
                   }}
-                  className="w-full rounded-xl border border-white/[0.1] bg-black/35 px-3 py-2.5 text-sm text-white/90 focus:border-violet-500/35 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                  className="w-full rounded-xl border border-panel-border bg-background px-3 py-2.5 text-sm text-foreground/90 focus:border-violet-500/35 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
                 >
                   {VOICE_TEST_SCENARIOS.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -416,21 +416,21 @@ export function ChannelTestLab({
                     </option>
                   ))}
                 </select>
-                <p className="mt-2 text-[11px] leading-relaxed text-white/45">{activeScenario.description}</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/65">{activeScenario.description}</p>
               </div>
 
-              <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
+              <div className="rounded-xl border border-panel-border bg-panel-muted p-3">
                 <p className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">
                   <PhoneIncoming className="size-3.5" weight="fill" />
                   Inbound — you dial the practice
                 </p>
                 {voiceInboundNumber ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm text-white/85">{voiceInboundNumber}</span>
+                    <span className="font-mono text-sm text-foreground/85">{voiceInboundNumber}</span>
                     <button
                       type="button"
                       onClick={() => void copyInboundNumber()}
-                      className="inline-flex items-center gap-1 rounded-lg border border-white/[0.1] px-2 py-1 text-[10px] font-medium text-white/55 hover:bg-white/[0.06]"
+                      className="inline-flex items-center gap-1 rounded-lg border border-panel-border px-2 py-1 text-[10px] font-medium text-muted-foreground/75 hover:bg-secondary"
                     >
                       {copiedInbound ? (
                         <Check className="size-3.5 text-emerald-400" weight="bold" />
@@ -445,18 +445,18 @@ export function ChannelTestLab({
                     Practice line not loaded — refresh Channels or finish voice provisioning to see your inbound number.
                   </p>
                 )}
-                <p className="mt-2 text-[10px] text-white/35">
+                <p className="mt-2 text-[10px] text-muted-foreground">
                   From your mobile, call this number and follow the roleplay steps below. Same scenario as outbound —
                   use it to compare behaviour when you initiate the call vs when the AI calls you.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
+              <div className="rounded-xl border border-panel-border bg-panel-muted p-3">
                 <p className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">
                   <PhoneOutgoing className="size-3.5" weight="fill" />
                   Outbound — AI calls your test handset
                 </p>
-                <label className="mb-1.5 block text-[11px] font-medium text-white/50">
+                <label className="mb-1.5 block text-[11px] font-medium text-muted-foreground/70">
                   Your mobile (rings for this test)
                 </label>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -467,18 +467,18 @@ export function ChannelTestLab({
                     value={voicePhone}
                     onChange={(e) => setVoicePhone(e.target.value)}
                     onBlur={persistVoice}
-                    className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm text-white/85 placeholder:text-white/25 focus:border-violet-500/35 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                    className="min-w-0 flex-1 rounded-xl border border-panel-border bg-panel-muted px-3 py-2 text-sm text-foreground/85 placeholder:text-muted-foreground/50 focus:border-violet-500/35 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
                   />
                   <button
                     type="button"
                     onClick={persistVoice}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.1] px-2.5 py-1.5 text-[10px] font-medium text-white/50 hover:bg-white/[0.05]"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-panel-border px-2.5 py-1.5 text-[10px] font-medium text-muted-foreground/70 hover:bg-panel-muted"
                   >
                     <FloppyDisk className="size-3.5" />
                     Save
                   </button>
                 </div>
-                <p className="mt-2 text-[10px] text-white/35">
+                <p className="mt-2 text-[10px] text-muted-foreground">
                   Uses your practice Vapi assistant + Twilio caller ID. E.164 or local 082… — we normalize to +27.
                 </p>
                 <button
@@ -497,20 +497,20 @@ export function ChannelTestLab({
               </div>
 
               <div className="rounded-xl border border-violet-500/20 bg-violet-950/20 p-3">
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Roleplay — say this on the call
                 </p>
-                <ol className="list-decimal space-y-1.5 pl-4 text-[11px] leading-relaxed text-white/70">
+                <ol className="list-decimal space-y-1.5 pl-4 text-[11px] leading-relaxed text-foreground/70">
                   {activeScenario.roleplayLines.map((line, i) => (
                     <li key={i}>{line}</li>
                   ))}
                 </ol>
                 {activeScenario.verifyHint && (
-                  <p className="mt-3 border-t border-white/[0.06] pt-2 text-[10px] leading-relaxed text-white/35">
-                    <span className="text-white/45">Verify:</span> {activeScenario.verifyHint}
+                  <p className="mt-3 border-t border-panel-border pt-2 text-[10px] leading-relaxed text-muted-foreground">
+                    <span className="text-muted-foreground/65">Verify:</span> {activeScenario.verifyHint}
                   </p>
                 )}
-                <p className="mt-2 text-[10px] text-white/30">
+                <p className="mt-2 text-[10px] text-muted-foreground">
                   Outbound mode:{" "}
                   {activeScenario.outboundFirstMessageMode === "assistant-waits-for-user"
                     ? "assistant waits for you to speak first (good for cancel/reschedule drills)."
@@ -521,20 +521,20 @@ export function ChannelTestLab({
           )}
         </div>
 
-        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+        <div className="rounded-xl border border-panel-border bg-panel-muted/50 px-3 py-2.5">
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Automated appointment SMS
           </p>
-          <ul className="list-inside list-disc space-y-1 text-[10px] leading-relaxed text-white/40">
+          <ul className="list-inside list-disc space-y-1 text-[10px] leading-relaxed text-muted-foreground">
             <li>
               24h / 1h reminders run on the{" "}
-              <span className="font-mono text-white/45">/api/cron/appointment-reminders</span> schedule (every 15 min in
-              production). Requires <span className="text-white/50">CRON_SECRET</span> on the request in production.
+              <span className="font-mono text-muted-foreground/65">/api/cron/appointment-reminders</span> schedule (every 15 min in
+              production). Requires <span className="text-muted-foreground/70">CRON_SECRET</span> on the request in production.
             </li>
             <li>
-              Appointments must be <span className="text-white/50">booked</span> or{" "}
-              <span className="text-white/50">confirmed</span>, with a patient mobile on{" "}
-              <span className="font-mono text-white/45">practice_patients.phone_e164</span> (or an existing SMS thread).
+              Appointments must be <span className="text-muted-foreground/70">booked</span> or{" "}
+              <span className="text-muted-foreground/70">confirmed</span>, with a patient mobile on{" "}
+              <span className="font-mono text-muted-foreground/65">practice_patients.phone_e164</span> (or an existing SMS thread).
             </li>
             <li>Times use SAST (UTC+2) to match typical ZA appointment storage.</li>
           </ul>

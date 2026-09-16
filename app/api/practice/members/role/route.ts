@@ -1,20 +1,12 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { createClient } from "@/lib/supabase/server"
-import { getPracticeMembership } from "@/lib/practice/membership-server"
+import { requirePracticePermission } from "@/lib/auth/guard"
 import {
   canChangeMemberRole,
-  isOwnerOrAdmin,
   type PracticeStaffRole,
 } from "@/lib/practice/team-permissions"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function PATCH(req: NextRequest) {
-  const supabase = await createClient()
-  if (!supabase) return NextResponse.json({ error: "Unavailable" }, { status: 500 })
-
-  const { data: { user }, error: authErr } = await supabase.auth.getUser()
-  if (authErr || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
   let body: { practiceId?: string; userId?: string; role?: string }
   try {
     body = (await req.json()) as { practiceId?: string; userId?: string; role?: string }
@@ -35,12 +27,17 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Invalid role" }, { status: 400 })
   }
 
-  const membership = await getPracticeMembership(supabase, user.id, practiceId)
-  if (!membership || !isOwnerOrAdmin(membership.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requirePracticePermission("team:manage", {
+    requestedPracticeId: practiceId,
+  })
+  if (!guard.ok) return guard.response
+  const callerRole = guard.context.activeRole as PracticeStaffRole
 
-  if (targetUserId === user.id && membership.role === "owner" && newRole !== "owner") {
+  if (
+    targetUserId === guard.context.userId &&
+    callerRole === "owner" &&
+    newRole !== "owner"
+  ) {
     return NextResponse.json(
       { error: "Transfer ownership by promoting another owner before changing your own role." },
       { status: 400 }
@@ -65,7 +62,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Member not found" }, { status: 404 })
   }
 
-  if (!canChangeMemberRole(membership.role, targetRow.role, newRole as PracticeStaffRole)) {
+  if (!canChangeMemberRole(callerRole, targetRow.role, newRole as PracticeStaffRole)) {
     return NextResponse.json({ error: "You cannot assign this role" }, { status: 403 })
   }
 

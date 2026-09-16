@@ -95,7 +95,7 @@ const NOTE_TEMPLATES = [
   { id: "icd", label: "ICD-10" },
 ]
 
-export function ScribeBlock() {
+export function ScribeBlock({ variant = "full" }: { variant?: "controls" | "full" }) {
   const {
     scribeActive,
     scribeCollapsed,
@@ -228,15 +228,125 @@ export function ScribeBlock() {
   const isPaused = scribeCtx?.isPaused ?? false
   const isDone = !scribeActive && scribeTranscript.length > 0
 
+  if (variant === "controls") {
+    return (
+      <div className="shrink-0 border-b border-border/25 bg-background/80 px-3 py-2 backdrop-blur-sm">
+        <div className="flex w-full items-center justify-between">
+          <div className="flex items-center gap-2">
+            {scribeActive && (
+              <motion.div
+                animate={{ scale: [1, 1.3, 1] }}
+                transition={{ repeat: Infinity, duration: 1.5 }}
+                className={cn(
+                  "size-2 rounded-full",
+                  isPaused ? "bg-amber-500" : "bg-red-500"
+                )}
+              />
+            )}
+            {isDone && <div className="size-2 rounded-full bg-emerald-500" />}
+            <Microphone
+              className={cn(
+                "size-3.5",
+                scribeActive
+                  ? "text-red-500"
+                  : isDone
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-muted-foreground"
+              )}
+              weight={scribeActive ? "fill" : "regular"}
+            />
+            <span className="text-xs font-semibold">
+              {scribeActive ? "Live Scribe" : "Transcript"}
+            </span>
+            {scribeActive && recorderDuration > 0 && (
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.5 font-mono text-[10px] font-medium",
+                  isPaused
+                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                    : "bg-red-500/10 text-red-600 dark:text-red-400"
+                )}
+              >
+                {formatDuration(recorderDuration)}
+              </span>
+            )}
+            {isTranscribing && (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <SpinnerGap className="size-3 animate-spin" />
+              </span>
+            )}
+            {entityCount > 0 && (
+              <span className="rounded-full bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600 dark:text-indigo-400">
+                {entityCount} entities
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 pl-3">
+            {scribeActive && (
+              <>
+                {isPaused ? (
+                  <button
+                    type="button"
+                    onClick={() => scribeCtx?.resumeRecording()}
+                    className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+                    title="Resume recording"
+                  >
+                    <Play className="size-3" weight="fill" />
+                    Resume
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => scribeCtx?.pauseRecording()}
+                    className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground transition-colors hover:bg-muted/80"
+                    title="Pause recording"
+                  >
+                    <Pause className="size-3" weight="fill" />
+                    Pause
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setScribeActive(false)}
+                  className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500 transition-colors hover:bg-red-500/20"
+                  title="End encounter"
+                >
+                  <Stop className="size-3" weight="fill" />
+                  End
+                </button>
+              </>
+            )}
+            {isDone && !scribeActive && (
+              <button
+                type="button"
+                onClick={handleClear}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
+                  showClearConfirm
+                    ? "bg-red-500/15 text-red-500 hover:bg-red-500/25"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <Trash className="size-3" />
+                {showClearConfirm ? "Confirm?" : "Clear"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: "auto" }}
       exit={{ opacity: 0, height: 0 }}
       transition={{ type: "spring", stiffness: 400, damping: 35 }}
-      className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
+      className="shrink-0 px-3 pt-2"
     >
-      <div className="overflow-hidden rounded-2xl border border-border/50 bg-background/80 shadow-sm backdrop-blur-xl">
+      <div className="overflow-hidden rounded-xl border border-border/40 bg-muted/20">
         {/* Header */}
         <div className="flex w-full items-center justify-between px-4 py-2">
           <button
@@ -397,7 +507,7 @@ export function ScribeBlock() {
                       <button
                         type="button"
                         onClick={saveEdit}
-                        className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-indigo-700"
+                        className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-indigo-700"
                       >
                         <Check className="size-3" weight="bold" />
                         Save
@@ -509,37 +619,10 @@ export function ScribeBlock() {
               <button
                 type="button"
                 onClick={() => contextGateTemplate && handleGenerateNote(contextGateTemplate, true)}
-                className="rounded-md bg-indigo-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700"
+                className="rounded-md bg-indigo-600 px-2.5 py-1 text-[10px] font-semibold text-foreground hover:bg-indigo-700"
               >
                 Generate anyway
               </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {isDone && !generatingTemplate && !contextGateTemplate && !isEditing && (
-          <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ type: "spring", stiffness: 400, damping: 30 }}
-            className="mt-2.5"
-          >
-            <div className="flex items-center gap-2 rounded-xl border border-border/40 bg-background/80 px-3 py-2 backdrop-blur-sm">
-              <Sparkle className="size-4 shrink-0 text-indigo-500" weight="duotone" />
-              <span className="mr-auto text-xs font-medium">Generate</span>
-              {NOTE_TEMPLATES.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => handleGenerateNote(t.id)}
-                  className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-indigo-500/8 hover:text-indigo-600 active:scale-[0.97] dark:hover:text-indigo-400"
-                >
-                  {t.label}
-                </button>
-              ))}
             </div>
           </motion.div>
         )}

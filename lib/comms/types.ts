@@ -1,4 +1,4 @@
-export type ChannelType = "rcs" | "voice" | "sms" | "portal"
+export type ChannelType = "rcs" | "voice" | "sms" | "portal" | "email"
 export type ThreadStatus = "active" | "awaiting_input" | "handoff" | "closed"
 export type ThreadPriority = "low" | "normal" | "high" | "urgent"
 export type FlowType =

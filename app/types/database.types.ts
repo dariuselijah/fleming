@@ -1110,6 +1110,7 @@ export type Database = {
           practice_id: string
           patient_id: string
           provider_user_id: string | null
+          appointment_id: string | null
           status: string
           started_at: string
           ended_at: string | null
@@ -1117,6 +1118,12 @@ export type Database = {
           state_ciphertext: string | null
           state_iv: string | null
           state_version: number
+          encounter_version: number
+          amendment_of_encounter_id: string | null
+          amendment_reason: string | null
+          signed_by_user_id: string | null
+          signed_at: string | null
+          signature_version: number | null
           last_indexed_at: string | null
           created_at: string
           updated_at: string
@@ -1126,6 +1133,7 @@ export type Database = {
           practice_id: string
           patient_id: string
           provider_user_id?: string | null
+          appointment_id?: string | null
           status?: string
           started_at?: string
           ended_at?: string | null
@@ -1133,6 +1141,12 @@ export type Database = {
           state_ciphertext?: string | null
           state_iv?: string | null
           state_version?: number
+          encounter_version?: number
+          amendment_of_encounter_id?: string | null
+          amendment_reason?: string | null
+          signed_by_user_id?: string | null
+          signed_at?: string | null
+          signature_version?: number | null
           last_indexed_at?: string | null
           created_at?: string
           updated_at?: string
@@ -1142,6 +1156,7 @@ export type Database = {
           practice_id?: string
           patient_id?: string
           provider_user_id?: string | null
+          appointment_id?: string | null
           status?: string
           started_at?: string
           ended_at?: string | null
@@ -1149,9 +1164,63 @@ export type Database = {
           state_ciphertext?: string | null
           state_iv?: string | null
           state_version?: number
+          encounter_version?: number
+          amendment_of_encounter_id?: string | null
+          amendment_reason?: string | null
+          signed_by_user_id?: string | null
+          signed_at?: string | null
+          signature_version?: number | null
           last_indexed_at?: string | null
           created_at?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      clinical_document_shares: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          created_by: string | null
+          token_hash: string
+          title: string
+          doc_type: string | null
+          content_ciphertext: string
+          content_iv: string
+          expires_at: string
+          opened_at: string | null
+          revoked_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          created_by?: string | null
+          token_hash: string
+          title: string
+          doc_type?: string | null
+          content_ciphertext: string
+          content_iv: string
+          expires_at: string
+          opened_at?: string | null
+          revoked_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          created_by?: string | null
+          token_hash?: string
+          title?: string
+          doc_type?: string | null
+          content_ciphertext?: string
+          content_iv?: string
+          expires_at?: string
+          opened_at?: string | null
+          revoked_at?: string | null
+          created_at?: string
         }
         Relationships: []
       }
@@ -1674,6 +1743,192 @@ export type Database = {
         }
         Relationships: []
       }
+      patient_attachments: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          uploader_user_id: string | null
+          storage_path: string
+          mime: string
+          size_bytes: number
+          description: string | null
+          category: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          uploader_user_id?: string | null
+          storage_path: string
+          mime?: string
+          size_bytes?: number
+          description?: string | null
+          category?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          uploader_user_id?: string | null
+          storage_path?: string
+          mime?: string
+          size_bytes?: number
+          description?: string | null
+          category?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      patient_chart_facts: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          encounter_id: string | null
+          domain: string
+          summary: string
+          detail: Json
+          occurred_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          encounter_id?: string | null
+          domain: string
+          summary: string
+          detail?: Json
+          occurred_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          encounter_id?: string | null
+          domain?: string
+          summary?: string
+          detail?: Json
+          occurred_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      patient_notes: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          author_user_id: string | null
+          body: string
+          tags: string[]
+          source: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          author_user_id?: string | null
+          body: string
+          tags?: string[]
+          source?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          author_user_id?: string | null
+          body?: string
+          tags?: string[]
+          source?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      patient_ai_rollups: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          latest_summary_at: string
+          model_id: string
+          rollup: string
+          based_on_count: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          latest_summary_at: string
+          model_id: string
+          rollup: string
+          based_on_count?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          latest_summary_at?: string
+          model_id?: string
+          rollup?: string
+          based_on_count?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      practice_encounter_summaries: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string
+          encounter_id: string
+          appointment_id: string | null
+          summary_text: string
+          chief_complaint: string | null
+          key_findings: Json
+          follow_up: string | null
+          model: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id: string
+          encounter_id: string
+          appointment_id?: string | null
+          summary_text: string
+          chief_complaint?: string | null
+          key_findings?: Json
+          follow_up?: string | null
+          model?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string
+          encounter_id?: string
+          appointment_id?: string | null
+          summary_text?: string
+          chief_complaint?: string | null
+          key_findings?: Json
+          follow_up?: string | null
+          model?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       patient_access_tokens: {
         Row: {
           id: string
@@ -2037,6 +2292,81 @@ export type Database = {
         }
         Relationships: []
       }
+      practice_prescription_verifications: {
+        Row: {
+          id: string
+          practice_id: string
+          patient_id: string | null
+          token_hash: string
+          prescriber_name: string | null
+          issued_at: string
+          expires_at: string
+          status: string
+          payload_hash: string | null
+          handoff_message_id: string | null
+          session_document_id: string | null
+          clinical_encounter_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          patient_id?: string | null
+          token_hash: string
+          prescriber_name?: string | null
+          issued_at?: string
+          expires_at: string
+          status?: string
+          payload_hash?: string | null
+          handoff_message_id?: string | null
+          session_document_id?: string | null
+          clinical_encounter_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          patient_id?: string | null
+          token_hash?: string
+          prescriber_name?: string | null
+          issued_at?: string
+          expires_at?: string
+          status?: string
+          payload_hash?: string | null
+          handoff_message_id?: string | null
+          session_document_id?: string | null
+          clinical_encounter_id?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      practice_email_settings: {
+        Row: {
+          practice_id: string
+          inbound_slug: string
+          reply_from_email: string | null
+          enabled: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          practice_id: string
+          inbound_slug: string
+          reply_from_email?: string | null
+          enabled?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          practice_id?: string
+          inbound_slug?: string
+          reply_from_email?: string | null
+          enabled?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       practice_inbox_messages: {
         Row: {
           id: string
@@ -2049,6 +2379,7 @@ export type Database = {
           message_at: string
           payload_ciphertext: string | null
           payload_iv: string | null
+          metadata_json: Json | null
           created_at: string
         }
         Insert: {
@@ -2062,6 +2393,7 @@ export type Database = {
           message_at?: string
           payload_ciphertext?: string | null
           payload_iv?: string | null
+          metadata_json?: Json | null
           created_at?: string
         }
         Update: {
@@ -2075,6 +2407,7 @@ export type Database = {
           message_at?: string
           payload_ciphertext?: string | null
           payload_iv?: string | null
+          metadata_json?: Json | null
           created_at?: string
         }
         Relationships: []
@@ -2304,6 +2637,7 @@ export type Database = {
           practice_id: string
           patient_id: string
           clinical_encounter_id: string | null
+          appointment_id: string | null
           status: string
           lines: unknown[]
           medikredit_response: Record<string, unknown> | null
@@ -2320,6 +2654,7 @@ export type Database = {
           practice_id: string
           patient_id: string
           clinical_encounter_id?: string | null
+          appointment_id?: string | null
           status?: string
           lines?: unknown[]
           medikredit_response?: Record<string, unknown> | null
@@ -2336,6 +2671,7 @@ export type Database = {
           practice_id?: string
           patient_id?: string
           clinical_encounter_id?: string | null
+          appointment_id?: string | null
           status?: string
           lines?: unknown[]
           medikredit_response?: Record<string, unknown> | null
@@ -2593,6 +2929,84 @@ export type Database = {
           pdf_storage_path?: string | null
           snapshot?: Record<string, unknown>
           created_at?: string
+        }
+        Relationships: []
+      }
+      practice_billing_automation_settings: {
+        Row: {
+          practice_id: string
+          auto_submit_claims: boolean
+          auto_send_shortfall_sms: boolean
+          auto_ai_voice_call: boolean
+          overdue_sms_hours: number
+          overdue_voice_hours: number
+          escalation_hours: number
+          default_opening_float_cents: number
+          cash_drawer_variance_alert_cents: number
+          updated_at: string
+        }
+        Insert: {
+          practice_id: string
+          auto_submit_claims?: boolean
+          auto_send_shortfall_sms?: boolean
+          auto_ai_voice_call?: boolean
+          overdue_sms_hours?: number
+          overdue_voice_hours?: number
+          escalation_hours?: number
+          default_opening_float_cents?: number
+          cash_drawer_variance_alert_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          practice_id?: string
+          auto_submit_claims?: boolean
+          auto_send_shortfall_sms?: boolean
+          auto_ai_voice_call?: boolean
+          overdue_sms_hours?: number
+          overdue_voice_hours?: number
+          escalation_hours?: number
+          default_opening_float_cents?: number
+          cash_drawer_variance_alert_cents?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      practice_billing_follow_ups: {
+        Row: {
+          id: string
+          practice_id: string
+          invoice_id: string
+          channel: string
+          status: string
+          vapi_call_id: string | null
+          provider_raw: Record<string, unknown>
+          transcript_ref: string | null
+          created_at: string
+          completed_at: string | null
+        }
+        Insert: {
+          id?: string
+          practice_id: string
+          invoice_id: string
+          channel: string
+          status?: string
+          vapi_call_id?: string | null
+          provider_raw?: Record<string, unknown>
+          transcript_ref?: string | null
+          created_at?: string
+          completed_at?: string | null
+        }
+        Update: {
+          id?: string
+          practice_id?: string
+          invoice_id?: string
+          channel?: string
+          status?: string
+          vapi_call_id?: string | null
+          provider_raw?: Record<string, unknown>
+          transcript_ref?: string | null
+          created_at?: string
+          completed_at?: string | null
         }
         Relationships: []
       }

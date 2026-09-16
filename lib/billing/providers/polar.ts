@@ -19,13 +19,15 @@ export async function createPolarCheckoutForInvoice(opts: {
   const token = process.env.POLAR_SH_ACCESS_TOKEN?.trim()
   const productPriceId = process.env.POLAR_SH_PRODUCT_PRICE_ID?.trim()
 
-  if (process.env.POLAR_SH_DRY_RUN === "1" || !token) {
+  const allowDryRun = process.env.NODE_ENV !== "production"
+  if (allowDryRun && (process.env.POLAR_SH_DRY_RUN === "1" || !token)) {
     const checkoutId = `dry_${opts.invoiceId.slice(0, 8)}`
     const u = new URL("https://polar.sh/checkout/dry-run")
     u.searchParams.set("invoice", opts.invoiceId)
     return { checkoutId, checkoutUrl: u.toString() }
   }
 
+  if (!token) throw new Error("POLAR_SH_ACCESS_TOKEN is required in production")
   if (!productPriceId) {
     throw new Error("Set POLAR_SH_PRODUCT_PRICE_ID for Polar checkout (or POLAR_SH_DRY_RUN=1 for dev)")
   }
@@ -107,10 +109,12 @@ export async function refundPolarPayment(opts: {
   reason?: string | null
 }): Promise<{ refundId: string }> {
   const token = process.env.POLAR_SH_ACCESS_TOKEN?.trim()
-  if (process.env.POLAR_SH_DRY_RUN === "1" || !token) {
+  const allowDryRun = process.env.NODE_ENV !== "production"
+  if (allowDryRun && (process.env.POLAR_SH_DRY_RUN === "1" || !token)) {
     return { refundId: `polar_refund_dry_${Date.now()}` }
   }
 
+  if (!token) throw new Error("POLAR_SH_ACCESS_TOKEN is required in production")
   const paymentId = opts.providerOrderId ?? opts.providerCheckoutId
   if (!paymentId) throw new Error("Polar payment id missing")
 

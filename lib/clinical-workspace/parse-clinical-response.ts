@@ -3,7 +3,10 @@ import type {
   ClinicalDocument,
   ClinicalSource,
   PrescriptionItem,
+  IcdCodeItem,
+  ClaimDocumentItem,
 } from "./types"
+import { normalizeClaimDocumentItems } from "./normalize-claim-items"
 
 const COMMAND_TO_DOC_TYPE: Record<string, ClinicalDocType> = {
   soap: "soap",
@@ -140,14 +143,140 @@ export function stripPrescriptionItemsBlock(content: string): string {
   return content.replace(PRESCRIPTION_ITEMS_BLOCK, "").trim()
 }
 
+// ─── ICD-10 JSON block ────────────────────────────────────────────────────────
+
+const ICD_ITEMS_BLOCK =
+  /===\s*ICD_ITEMS\s*===\s*([\s\S]*?)(?:\n===\s*END_ICD_ITEMS\s*===|$)/i
+const CLAIM_ITEMS_BLOCK =
+  /===\s*CLAIM_ITEMS\s*===\s*([\s\S]*?)(?:\n===\s*END_CLAIM_ITEMS\s*===|$)/i
+
+export function parseIcdItems(content: string): IcdCodeItem[] {
+  const m = content.match(ICD_ITEMS_BLOCK)
+  if (!m) return []
+  const raw = m[1].trim()
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((row: unknown, i: number) => {
+      if (!row || typeof row !== "object") return { id: String(i + 1), code: "?", description: "Unknown" }
+      const o = row as Record<string, unknown>
+      const str = (k: string) => {
+        const v = o[k]
+        return typeof v === "string" && v.trim() ? v.trim() : undefined
+      }
+      return {
+        id: str("id") ?? String(i + 1),
+        code: str("code") ?? "?",
+        description: str("description") ?? "Unknown",
+        confidence: str("confidence"),
+        sourceTag: (str("sourceTag") as IcdCodeItem["sourceTag"]) ?? undefined,
+        sourceExcerpt: str("sourceExcerpt"),
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
+export function stripIcdItemsBlock(content: string): string {
+  return content.replace(ICD_ITEMS_BLOCK, "").trim()
+}
+
+export function parseClaimItems(content: string): ClaimDocumentItem[] {
+  const fromBlock = content.match(CLAIM_ITEMS_BLOCK)
+  if (fromBlock?.[1]) {
+    const raw = fromBlock[1].trim()
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          return parsed.map((row, i) => normalizeClaimRow(row, i)).filter((row) => row.description.trim().length > 0)
+        }
+      } catch {
+        // Continue to markdown fallback.
+      }
+    }
+  }
+
+  const cleaned = stripResponseWrapper(content)
+  const rows = cleaned
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- ") || line.startsWith("* ") || /^\d+\./.test(line))
+
+  if (!rows.length) return []
+  return rows
+    .map((line, i) => normalizeClaimLine(line, i))
+    .filter((row): row is ClaimDocumentItem => Boolean(row))
+}
+
+function normalizeClaimRow(raw: unknown, index: number): ClaimDocumentItem {
+  if (!raw || typeof raw !== "object") {
+    return {
+      id: `claim-line-${index + 1}`,
+      description: "",
+    }
+  }
+  const o = raw as Record<string, unknown>
+  const str = (key: string) => {
+    const val = o[key]
+    return typeof val === "string" && val.trim() ? val.trim() : undefined
+  }
+  const num = (key: string) => {
+    const val = o[key]
+    if (typeof val === "number" && Number.isFinite(val)) return val
+    if (typeof val === "string") {
+      const parsed = Number.parseFloat(val.replace(/[^\d.-]/g, ""))
+      return Number.isFinite(parsed) ? parsed : undefined
+    }
+    return undefined
+  }
+  return {
+    id: str("id") ?? `claim-line-${index + 1}`,
+    description: str("description") ?? str("item") ?? "",
+    icdCode: str("icdCode") ?? str("icd"),
+    tariffCode: str("tariffCode") ?? str("tariff"),
+    nappiCode: str("nappiCode") ?? str("nappi"),
+    quantity: num("quantity") ?? num("qty"),
+    amount: num("amount"),
+  }
+}
+
+function normalizeClaimLine(line: string, index: number): ClaimDocumentItem | null {
+  const trimmed = line.replace(/^[-*]\s+/, "").replace(/^\d+\.\s+/, "").trim()
+  if (!trimmed) return null
+  const amountMatch = trimmed.match(/(?:R|ZAR)?\s*(\d+(?:[.,]\d{1,2})?)(?!.*\d)/i)
+  const amount = amountMatch
+    ? Number.parseFloat(amountMatch[1].replace(",", "."))
+    : undefined
+  const quantityMatch = trimmed.match(/\b(?:qty|quantity)\s*[:=]?\s*(\d+(?:\.\d+)?)/i)
+  const quantity = quantityMatch ? Number.parseFloat(quantityMatch[1]) : undefined
+  const codeMatch = trimmed.match(/\b([A-Z]\d{2}(?:\.\d+)?)\b/)
+  const tariffMatch = trimmed.match(/\b(?:tariff|code)\s*[:=]?\s*([A-Z0-9]{4,10})\b/i)
+
+  return {
+    id: `claim-line-${index + 1}`,
+    description: trimmed,
+    icdCode: codeMatch?.[1],
+    tariffCode: tariffMatch?.[1],
+    quantity: Number.isFinite(quantity ?? NaN) ? quantity : undefined,
+    amount: Number.isFinite(amount ?? NaN) ? amount : undefined,
+  }
+}
+
+export function stripClaimItemsBlock(content: string): string {
+  return content.replace(CLAIM_ITEMS_BLOCK, "").trim()
+}
+
 export function stripResponseWrapper(content: string): string {
-  return stripPrescriptionItemsBlock(
+  return stripClaimItemsBlock(stripIcdItemsBlock(stripPrescriptionItemsBlock(
     content
       .replace(/^=== FLEMING FULL RESPONSE ===\n?/, "")
       .replace(/\n?=== EVIDENCE SOURCES \(\d+\) ===[\s\S]*$/, "")
       .replace(/\n?=== END ===\s*$/, "")
       .trim()
-  )
+  )))
 }
 
 export type BuildClinicalDocumentOptions = {
@@ -194,6 +323,14 @@ export function buildClinicalDocument(
   }
   const prescriptionItems =
     docType === "prescribe" ? parsePrescriptionItems(fullContent) : undefined
+  const icdItems =
+    docType === "icd" ? parseIcdItems(fullContent) : undefined
+  const claimItemsRaw =
+    docType === "claim" ? parseClaimItems(fullContent) : undefined
+  const claimItems =
+    claimItemsRaw && claimItemsRaw.length > 0
+      ? normalizeClaimDocumentItems(claimItemsRaw)
+      : undefined
   const content = stripResponseWrapper(fullContent)
   const id =
     documentIdOverride && documentIdOverride.trim().length > 0
@@ -213,5 +350,7 @@ export function buildClinicalDocument(
       prescriptionItems && prescriptionItems.length > 0
         ? prescriptionItems
         : undefined,
+    icdItems: icdItems && icdItems.length > 0 ? icdItems : undefined,
+    claimItems: claimItems && claimItems.length > 0 ? claimItems : undefined,
   }
 }

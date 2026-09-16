@@ -48,6 +48,7 @@ export function BentoInventory() {
     useWorkspace()
 
   const inventoryImportPanelRequest = useWorkspaceStore((s) => s.inventoryImportPanelRequest)
+  const inventoryMutationError = useWorkspaceStore((s) => s.inventoryMutationError)
   const prevImportReq = useRef(inventoryImportPanelRequest)
 
   const [sortKey, setSortKey] = useState<SortKey>("name")
@@ -125,7 +126,7 @@ export function BentoInventory() {
           <h2 className="text-sm font-semibold text-foreground">Inventory &amp; Consumables</h2>
           <p className="text-[10px] text-muted-foreground">
             {inventory.length} items ·{" "}
-            <span className={cn(lowStock > 0 ? "text-[#FFC107]" : "text-[#00E676]")}>
+            <span className={cn(lowStock > 0 ? "text-status-warning" : "text-status-success")}>
               {lowStock} low stock
             </span>
           </p>
@@ -134,7 +135,7 @@ export function BentoInventory() {
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14]"
+            className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-secondary dark:hover:bg-secondary"
           >
             <Plus className="size-3.5" />
             Add Item
@@ -142,13 +143,19 @@ export function BentoInventory() {
           <button
             type="button"
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14]"
+            className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-secondary dark:hover:bg-secondary"
           >
             <FileXls className="size-3.5" />
             Smart Import
           </button>
         </div>
       </div>
+
+      {inventoryMutationError && (
+        <div className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-[11px] text-red-200">
+          {inventoryMutationError}
+        </div>
+      )}
 
       {/* Category Filter */}
       <div className="flex items-center gap-1.5">
@@ -160,8 +167,8 @@ export function BentoInventory() {
             className={cn(
               "rounded-full px-3 py-1 text-[10px] font-medium transition-colors",
               category === cat
-                ? "bg-muted text-foreground dark:bg-white/[0.12]"
-                : "bg-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:bg-white/[0.03] dark:text-white/30 dark:hover:bg-white/[0.06] dark:hover:text-white/50",
+                ? "bg-muted text-foreground dark:bg-secondary"
+                : "bg-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:bg-panel-muted dark:text-foreground/30 dark:hover:bg-secondary dark:hover:text-accent-foreground",
             )}
           >
             {cat}
@@ -170,11 +177,11 @@ export function BentoInventory() {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-hidden rounded-2xl border border-border bg-card/70 dark:border-white/[0.05] dark:bg-white/[0.015]">
+      <div className="flex-1 overflow-hidden rounded-2xl border border-border bg-card/70 dark:border-panel-border dark:bg-panel-muted/40">
         <div className="h-full overflow-x-auto overflow-y-auto" style={{ scrollbarWidth: "none" }}>
           <table className="w-full min-w-[800px] border-collapse text-left">
             <thead>
-              <tr className="border-b border-border dark:border-white/[0.06]">
+              <tr className="border-b border-border dark:border-panel-border">
                 <ColHeader label="Item (NAPPI)" sortKey="name" current={sortKey} dir={sortDir} onSort={toggleSort} className="min-w-[200px]" />
                 <ColHeader label="Category" sortKey="category" current={sortKey} dir={sortDir} onSort={toggleSort} />
                 <ColHeader label="Stock" sortKey="stock" current={sortKey} dir={sortDir} onSort={toggleSort} />
@@ -195,18 +202,18 @@ export function BentoInventory() {
                   <tr
                     key={item.id}
                     className={cn(
-                      "cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 dark:border-white/[0.03] dark:hover:bg-white/[0.03]",
-                      selectedItem?.id === item.id && "bg-muted/60 dark:bg-white/[0.04]",
+                      "cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 dark:border-panel-border dark:hover:bg-panel-muted",
+                      selectedItem?.id === item.id && "bg-muted/60 dark:bg-panel-muted",
                     )}
                     onClick={() => setSelectedItem(item)}
                   >
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
-                        {isLow && <Warning className="size-3 shrink-0 text-[#FFC107]" weight="fill" />}
+                        {isLow && <Warning className="size-3 shrink-0 text-status-warning" weight="fill" />}
                         <div>
                           <p className="text-[11px] font-medium text-foreground">{item.name}</p>
                           {item.nappiCode && (
-                            <p className="text-[9px] tabular-nums text-muted-foreground dark:text-white/25">
+                            <p className="text-[9px] tabular-nums text-muted-foreground dark:text-foreground/25">
                               NAPPI: {item.nappiCode}
                             </p>
                           )}
@@ -225,12 +232,12 @@ export function BentoInventory() {
                               if (e.key === "Escape") setEditingId(null)
                             }}
                             autoFocus
-                            className="w-14 rounded border border-input bg-background px-1.5 py-0.5 text-[11px] tabular-nums outline-none dark:border-white/[0.1] dark:bg-white/[0.04]"
+                            className="w-14 rounded border border-input bg-background px-1.5 py-0.5 text-[11px] tabular-nums outline-none dark:border-panel-border dark:bg-panel-muted"
                           />
-                          <button type="button" onClick={() => commitEdit(item)} className="text-[#00E676] hover:text-[#00E676]/80">
+                          <button type="button" onClick={() => commitEdit(item)} className="text-status-success hover:text-status-success/80">
                             <Check className="size-3" />
                           </button>
-                          <button type="button" onClick={() => setEditingId(null)} className="text-muted-foreground hover:text-foreground dark:text-white/20 dark:hover:text-white/40">
+                          <button type="button" onClick={() => setEditingId(null)} className="text-muted-foreground hover:text-foreground dark:text-foreground/20 dark:hover:text-accent-foreground">
                             <X className="size-3" />
                           </button>
                         </div>
@@ -240,11 +247,11 @@ export function BentoInventory() {
                           onClick={() => startEdit(item)}
                           className={cn(
                             "text-[11px] tabular-nums font-medium hover:underline",
-                            isLow ? "text-[#FFC107]" : "text-foreground",
+                            isLow ? "text-status-warning" : "text-foreground",
                           )}
                         >
                           {item.currentStock}{" "}
-                          <span className="text-[9px] text-muted-foreground dark:text-white/20">{item.unit}s</span>
+                          <span className="text-[9px] text-muted-foreground dark:text-foreground/20">{item.unit}s</span>
                         </button>
                       )}
                     </td>
@@ -259,13 +266,13 @@ export function BentoInventory() {
                         <span
                           className={cn(
                             "text-[10px] tabular-nums font-medium",
-                            margin < 10 ? "text-[#FFC107]" : "text-[#00E676]",
+                            margin < 10 ? "text-status-warning" : "text-status-success",
                           )}
                         >
                           {margin.toFixed(1)}%
                         </span>
                       ) : (
-                        <span className="text-[10px] text-muted-foreground/70 dark:text-white/15">—</span>
+                        <span className="text-[10px] text-muted-foreground/70 dark:text-muted-foreground/40">—</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-[11px] tabular-nums text-muted-foreground">
@@ -277,7 +284,7 @@ export function BentoInventory() {
                           })
                         : "—"}
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground/50 dark:text-white/15">
+                    <td className="px-3 py-2.5 text-muted-foreground/50 dark:text-muted-foreground/40">
                       <CaretRight className="size-3" />
                     </td>
                   </tr>
@@ -286,7 +293,7 @@ export function BentoInventory() {
               {sorted.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-[11px] text-muted-foreground">
-                    <Package className="mx-auto mb-2 size-6 text-muted-foreground/40 dark:text-white/10" />
+                    <Package className="mx-auto mb-2 size-6 text-muted-foreground/40 dark:text-muted-foreground/30" />
                     No items in this category
                   </td>
                 </tr>
@@ -350,7 +357,6 @@ function ColHeader({
   label,
   sortKey,
   current,
-  dir,
   onSort,
   className,
 }: {
@@ -371,7 +377,7 @@ function ColHeader({
           "flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider transition-colors",
           active
             ? "text-foreground"
-            : "text-muted-foreground hover:text-foreground dark:text-white/25 dark:hover:text-white/40",
+            : "text-muted-foreground hover:text-foreground dark:text-foreground/25 dark:hover:text-accent-foreground",
         )}
       >
         {label}
@@ -411,12 +417,12 @@ function ItemDetailPanel({
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 350, opacity: 0 }}
       transition={{ type: "spring", damping: 30, stiffness: 300 }}
-      className="absolute right-0 top-0 z-20 flex h-full w-[350px] flex-col border-l border-white/[0.06] bg-[#0c0c0e]/95 backdrop-blur-xl"
+      className="absolute right-0 top-0 z-20 flex h-full w-[350px] flex-col border-l border-panel-border bg-panel/95 backdrop-blur-xl"
     >
       {/* Panel header */}
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+      <div className="flex items-center justify-between border-b border-panel-border px-4 py-3">
         <h3 className="text-[12px] font-semibold text-foreground">Item Details</h3>
-        <button type="button" onClick={onClose} className="text-white/30 hover:text-white/60">
+        <button type="button" onClick={onClose} className="text-muted-foreground hover:text-accent-foreground/60">
           <X className="size-4" />
         </button>
       </div>
@@ -428,13 +434,13 @@ function ItemDetailPanel({
           <Field label="NAPPI Code" value={form.nappiCode ?? ""} onChange={(v) => patch({ nappiCode: v || undefined })} />
 
           <div>
-            <label className="mb-1 block text-[9px] font-medium uppercase tracking-wider text-white/25">
+            <label className="mb-1 block text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
               Category
             </label>
             <select
               value={form.category}
               onChange={(e) => patch({ category: e.target.value })}
-              className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-[11px] text-foreground outline-none"
+              className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-1.5 text-[11px] text-foreground outline-none"
             >
               {["Medications", "Consumables", "Equipment"].map((c) => (
                 <option key={c} value={c}>
@@ -459,23 +465,23 @@ function ItemDetailPanel({
 
           {/* Margin display */}
           {form.costPrice != null && form.unitPrice > 0 && (
-            <div className="rounded-lg bg-white/[0.03] px-3 py-2">
-              <span className="text-[9px] font-medium uppercase tracking-wider text-white/25">Margin</span>
-              <p className="text-sm font-semibold text-[#00E676]">
+            <div className="rounded-lg bg-panel-muted px-3 py-2">
+              <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">Margin</span>
+              <p className="text-sm font-semibold text-status-success">
                 {(((form.unitPrice - (form.costPrice ?? 0)) / form.unitPrice) * 100).toFixed(1)}%
               </p>
             </div>
           )}
 
           {/* Stock adjustment */}
-          <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
-            <p className="mb-2 text-[9px] font-medium uppercase tracking-wider text-white/25">
+          <div className="rounded-lg border border-panel-border bg-panel-muted/50 p-3">
+            <p className="mb-2 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
               Stock Adjustment
             </p>
-            <p className="mb-2 text-[11px] text-white/40">
+            <p className="mb-2 text-[11px] text-muted-foreground">
               Current: <span className="font-medium text-foreground">{form.currentStock}</span>{" "}
               {adjustQty !== 0 && (
-                <span className={adjustQty > 0 ? "text-[#00E676]" : "text-[#FFC107]"}>
+                <span className={adjustQty > 0 ? "text-status-success" : "text-status-warning"}>
                   → {Math.max(0, form.currentStock + adjustQty)}
                 </span>
               )}
@@ -484,7 +490,7 @@ function ItemDetailPanel({
               <button
                 type="button"
                 onClick={() => setAdjustQty((q) => q - 1)}
-                className="flex size-7 items-center justify-center rounded-lg bg-white/[0.06] text-foreground hover:bg-white/[0.12]"
+                className="flex size-7 items-center justify-center rounded-lg bg-secondary text-foreground hover:bg-secondary"
               >
                 –
               </button>
@@ -492,12 +498,12 @@ function ItemDetailPanel({
                 type="number"
                 value={adjustQty}
                 onChange={(e) => setAdjustQty(parseInt(e.target.value, 10) || 0)}
-                className="w-16 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1 text-center text-[11px] tabular-nums text-foreground outline-none"
+                className="w-16 rounded-lg border border-panel-border bg-panel-muted/50 px-2 py-1 text-center text-[11px] tabular-nums text-foreground outline-none"
               />
               <button
                 type="button"
                 onClick={() => setAdjustQty((q) => q + 1)}
-                className="flex size-7 items-center justify-center rounded-lg bg-white/[0.06] text-foreground hover:bg-white/[0.12]"
+                className="flex size-7 items-center justify-center rounded-lg bg-secondary text-foreground hover:bg-secondary"
               >
                 +
               </button>
@@ -506,14 +512,14 @@ function ItemDetailPanel({
               placeholder="Reason (optional)"
               value={adjustReason}
               onChange={(e) => setAdjustReason(e.target.value)}
-              className="mt-2 w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-[11px] text-foreground outline-none placeholder:text-white/15"
+              className="mt-2 w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-1.5 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
             />
           </div>
         </div>
       </div>
 
       {/* Panel footer */}
-      <div className="flex items-center justify-between border-t border-white/[0.06] px-4 py-3">
+      <div className="flex items-center justify-between border-t border-panel-border px-4 py-3">
         <button
           type="button"
           onClick={() => onDelete(item.id)}
@@ -526,14 +532,14 @@ function ItemDetailPanel({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-3 py-1.5 text-[11px] text-white/40 hover:text-white/60"
+            className="rounded-lg px-3 py-1.5 text-[11px] text-muted-foreground hover:text-accent-foreground/60"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleSave}
-            className="flex items-center gap-1.5 rounded-lg bg-white/[0.1] px-4 py-1.5 text-[11px] font-semibold text-foreground hover:bg-white/[0.16]"
+            className="flex items-center gap-1.5 rounded-lg bg-secondary px-4 py-1.5 text-[11px] font-semibold text-foreground hover:bg-accent"
           >
             <Check className="size-3.5" />
             Save
@@ -583,11 +589,11 @@ function AddItemModal({
         exit={{ scale: 0.95, opacity: 0 }}
         transition={{ type: "spring", damping: 30, stiffness: 400 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border border-white/[0.06] bg-[#0c0c0e] p-5"
+        className="w-full max-w-md rounded-2xl border border-panel-border bg-panel p-5"
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-foreground">Add Inventory Item</h3>
-          <button type="button" onClick={onClose} className="text-white/30 hover:text-white/60">
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-accent-foreground/60">
             <X className="size-4" />
           </button>
         </div>
@@ -597,13 +603,13 @@ function AddItemModal({
           <div className="grid grid-cols-2 gap-3">
             <Field label="NAPPI Code" value={form.nappiCode ?? ""} onChange={(v) => patch({ nappiCode: v })} />
             <div>
-              <label className="mb-1 block text-[9px] font-medium uppercase tracking-wider text-white/25">
+              <label className="mb-1 block text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
                 Category
               </label>
               <select
                 value={form.category}
                 onChange={(e) => patch({ category: e.target.value })}
-                className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-[11px] text-foreground outline-none"
+                className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-1.5 text-[11px] text-foreground outline-none"
               >
                 {["Medications", "Consumables", "Equipment"].map((c) => (
                   <option key={c} value={c}>
@@ -630,7 +636,7 @@ function AddItemModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-4 py-1.5 text-[11px] text-white/40 hover:text-white/60"
+            className="rounded-lg px-4 py-1.5 text-[11px] text-muted-foreground hover:text-accent-foreground/60"
           >
             Cancel
           </button>
@@ -638,7 +644,7 @@ function AddItemModal({
             type="button"
             onClick={handleSave}
             disabled={!form.name.trim()}
-            className="flex items-center gap-1.5 rounded-lg bg-white/[0.1] px-4 py-1.5 text-[11px] font-semibold text-foreground hover:bg-white/[0.16] disabled:opacity-30"
+            className="flex items-center gap-1.5 rounded-lg bg-secondary px-4 py-1.5 text-[11px] font-semibold text-foreground hover:bg-accent disabled:opacity-30"
           >
             <Plus className="size-3.5" />
             Add Item
@@ -786,11 +792,11 @@ function SmartImportModal({
         exit={{ scale: 0.95, opacity: 0 }}
         transition={{ type: "spring", damping: 30, stiffness: 400 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-2xl border border-white/[0.06] bg-[#0c0c0e] p-5"
+        className="w-full max-w-lg rounded-2xl border border-panel-border bg-panel p-5"
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-foreground">Smart Import</h3>
-          <button type="button" onClick={onClose} className="text-white/30 hover:text-white/60">
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-accent-foreground/60">
             <X className="size-4" />
           </button>
         </div>
@@ -803,10 +809,10 @@ function SmartImportModal({
                 className={cn(
                   "flex size-5 items-center justify-center rounded-full text-[9px] font-bold",
                   step === s
-                    ? "bg-white/[0.15] text-foreground"
+                    ? "bg-secondary text-foreground"
                     : idx < ["upload", "mapping", "done"].indexOf(step)
-                      ? "bg-[#00E676]/20 text-[#00E676]"
-                      : "bg-white/[0.04] text-white/20",
+                      ? "bg-status-success/20 text-status-success"
+                      : "bg-panel-muted text-muted-foreground",
                 )}
               >
                 {idx < ["upload", "mapping", "done"].indexOf(step) ? (
@@ -815,7 +821,7 @@ function SmartImportModal({
                   idx + 1
                 )}
               </div>
-              {idx < 2 && <div className="h-px w-8 bg-white/[0.06]" />}
+              {idx < 2 && <div className="h-px w-8 bg-secondary" />}
             </div>
           ))}
         </div>
@@ -833,15 +839,15 @@ function SmartImportModal({
             className={cn(
               "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed py-12 transition-colors",
               dragging
-                ? "border-[#00E676]/40 bg-[#00E676]/5"
-                : "border-white/[0.08] bg-white/[0.02] hover:border-white/[0.14]",
+                ? "border-status-success/40 bg-status-success/5"
+                : "border-panel-border bg-panel-muted/50 hover:border-ring",
             )}
           >
-            <Upload className="mb-3 size-8 text-white/20" />
+            <Upload className="mb-3 size-8 text-muted-foreground" />
             <p className="text-[12px] font-medium text-foreground">
               Drop file here or click to browse
             </p>
-            <p className="mt-1 text-[10px] text-white/25">Supports .csv and .xlsx</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">Supports .csv and .xlsx</p>
             <input
               ref={inputRef}
               type="file"
@@ -859,13 +865,13 @@ function SmartImportModal({
         {step === "mapping" && parsed && (
           <div>
             {/* Preview */}
-            <div className="mb-4 overflow-hidden rounded-lg border border-white/[0.06]">
+            <div className="mb-4 overflow-hidden rounded-lg border border-panel-border">
               <div className="overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                 <table className="w-full border-collapse text-left">
                   <thead>
-                    <tr className="border-b border-white/[0.06] bg-white/[0.02]">
+                    <tr className="border-b border-panel-border bg-panel-muted/50">
                       {parsed.headers.map((h, i) => (
-                        <th key={i} className="px-2 py-1.5 text-[9px] font-medium uppercase tracking-wider text-white/30">
+                        <th key={i} className="px-2 py-1.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
                           {h}
                         </th>
                       ))}
@@ -873,9 +879,9 @@ function SmartImportModal({
                   </thead>
                   <tbody>
                     {parsed.rows.slice(0, 5).map((row, i) => (
-                      <tr key={i} className="border-b border-white/[0.03]">
+                      <tr key={i} className="border-b border-panel-border">
                         {row.map((cell, j) => (
-                          <td key={j} className="max-w-[120px] truncate px-2 py-1 text-[10px] text-white/40">
+                          <td key={j} className="max-w-[120px] truncate px-2 py-1 text-[10px] text-muted-foreground">
                             {cell}
                           </td>
                         ))}
@@ -884,19 +890,19 @@ function SmartImportModal({
                   </tbody>
                 </table>
               </div>
-              <p className="bg-white/[0.01] px-2 py-1 text-[9px] text-white/20">
+              <p className="bg-panel-muted/40 px-2 py-1 text-[9px] text-muted-foreground">
                 Showing {Math.min(5, parsed.rows.length)} of {parsed.rows.length} rows
               </p>
             </div>
 
             {/* Column mapping */}
-            <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/30">
+            <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               Column Mapping
             </p>
             <div className="grid grid-cols-2 gap-2">
               {REQUIRED_FIELDS.map((field) => (
                 <div key={field}>
-                  <label className="mb-0.5 block text-[9px] font-medium text-white/25">
+                  <label className="mb-0.5 block text-[9px] font-medium text-muted-foreground">
                     {field}
                   </label>
                   <select
@@ -904,7 +910,7 @@ function SmartImportModal({
                     onChange={(e) =>
                       setMapping((m) => ({ ...m, [field]: parseInt(e.target.value, 10) }))
                     }
-                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-[11px] text-foreground outline-none"
+                    className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-2 py-1.5 text-[11px] text-foreground outline-none"
                   >
                     <option value={-1}>— skip —</option>
                     {parsed.headers.map((h, i) => (
@@ -921,7 +927,7 @@ function SmartImportModal({
               <button
                 type="button"
                 onClick={() => setStep("upload")}
-                className="rounded-lg px-3 py-1.5 text-[11px] text-white/40 hover:text-white/60"
+                className="rounded-lg px-3 py-1.5 text-[11px] text-muted-foreground hover:text-accent-foreground/60"
               >
                 Back
               </button>
@@ -929,7 +935,7 @@ function SmartImportModal({
                 type="button"
                 onClick={executeImport}
                 disabled={mapping.Name < 0}
-                className="flex items-center gap-1.5 rounded-lg bg-white/[0.1] px-4 py-1.5 text-[11px] font-semibold text-foreground hover:bg-white/[0.16] disabled:opacity-30"
+                className="flex items-center gap-1.5 rounded-lg bg-secondary px-4 py-1.5 text-[11px] font-semibold text-foreground hover:bg-accent disabled:opacity-30"
               >
                 <Upload className="size-3.5" />
                 Import
@@ -941,11 +947,11 @@ function SmartImportModal({
         {/* Step: Done */}
         {step === "done" && (
           <div className="flex flex-col items-center py-8">
-            <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-[#00E676]/10">
-              <Check className="size-5 text-[#00E676]" />
+            <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-status-success/10">
+              <Check className="size-5 text-status-success" />
             </div>
             <p className="mb-1 text-sm font-semibold text-foreground">Import Complete</p>
-            <p className="text-[11px] text-white/40">
+            <p className="text-[11px] text-muted-foreground">
               Added {importResult.added}
               {importResult.updated > 0 && `, Updated ${importResult.updated}`}
               {importResult.skipped > 0 && `, Skipped ${importResult.skipped}`}
@@ -953,7 +959,7 @@ function SmartImportModal({
             <button
               type="button"
               onClick={onClose}
-              className="mt-5 rounded-lg bg-white/[0.1] px-5 py-1.5 text-[11px] font-semibold text-foreground hover:bg-white/[0.16]"
+              className="mt-5 rounded-lg bg-secondary px-5 py-1.5 text-[11px] font-semibold text-foreground hover:bg-accent"
             >
               Done
             </button>
@@ -979,14 +985,14 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-[9px] font-medium uppercase tracking-wider text-white/25">
+      <label className="mb-1 block text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </label>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-[11px] text-foreground outline-none placeholder:text-white/15"
+        className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-1.5 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
       />
     </div>
   )

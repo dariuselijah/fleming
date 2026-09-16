@@ -20,6 +20,13 @@ import {
   TrendUp,
   CheckCircle,
   PaperPlaneTilt,
+  UserCircle,
+  ChatText,
+  CurrencyCircleDollar,
+  UserPlus,
+  Upload,
+  ArrowsLeftRight,
+  TestTube,
 } from "@phosphor-icons/react"
 import { motion } from "motion/react"
 import { useMemo } from "react"
@@ -42,6 +49,13 @@ const ICON_MAP: Record<string, React.ComponentType<any>> = {
   TrendUp,
   CheckCircle,
   PaperPlaneTilt,
+  UserCircle,
+  ChatText,
+  CurrencyCircleDollar,
+  UserPlus,
+  Upload,
+  ArrowsLeftRight,
+  TestTube,
 }
 
 const CATEGORY_COLORS: Record<CommandCategory, string> = {

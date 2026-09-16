@@ -42,6 +42,7 @@ import {
   createDataStreamResponse,
 } from "ai"
 import { z } from "zod"
+import { llmCallSettingsForModel } from "@/lib/openproviders/model-temperature"
 import {
   incrementMessageCount,
   logUserMessage,
@@ -71,6 +72,16 @@ import {
   buildEvidenceContext,
   buildEvidenceSourceId,
 } from "@/lib/evidence"
+import {
+  dedupeAndReindexCitations,
+  citationsFromProvenance,
+  citationsFromToolResult,
+} from "@/lib/chat-route/citation-dedup"
+import {
+  detectExplicitMultiArtifactRequest,
+  detectArtifactTypeFromMessage,
+  parseArtifactTypeFromToolResultPayload,
+} from "@/lib/chat-route/artifact-intent"
 import type { EvidenceCitation } from "@/lib/evidence"
 import { enrichEvidenceCitationsWithJournalVisuals } from "@/lib/evidence/journal-visuals"
 import {
@@ -86,10 +97,6 @@ import {
 import { UserUploadService } from "@/lib/uploads/server"
 import type { UploadContextSearchMode, UploadTopicContext } from "@/lib/uploads/server"
 import type { UserUploadListItem } from "@/lib/uploads/types"
-import { summarizeTextForNotes } from "@/lib/media/pipeline"
-import { StudyGraphService } from "@/lib/student-workspace/study-graph"
-import { StudyPlannerService } from "@/lib/student-workspace/planner"
-import { StudyReviewService } from "@/lib/student-workspace/review"
 import {
   extractUploadReferenceIds,
   stripUploadReferenceTokens,
@@ -112,11 +119,7 @@ import {
 import { buildPatientClinicalTools } from "@/lib/clinical/chat-patient-tools"
 import { runClinicalAgentHarness } from "@/lib/clinical-agent/graph"
 import { recordCitationContractViolation } from "@/lib/clinical-agent/telemetry"
-import type {
-  ClinicalIncompleteEvidencePolicy,
-  LmsContextSnapshot,
-  LmsProvider,
-} from "@/lib/clinical-agent/graph/types"
+import type { ClinicalIncompleteEvidencePolicy } from "@/lib/clinical-agent/graph/types"
 import {
   runConnectorSearch,
   type ClinicalConnectorId,
@@ -162,107 +165,6 @@ function detectImplicitUploadIntent(query: string): ImplicitUploadIntentSignal {
   return {
     hasImplicitUploadIntent: hasUploadCue,
     preferSlides,
-  }
-}
-
-const LMS_COURSES_TABLE = "student_lms_courses"
-const LMS_ARTIFACTS_TABLE = "student_lms_artifacts"
-const EDUCATIONAL_PROMPT_CUE_PATTERN =
-  /\b(curriculum|course|module|lecture|assignment|syllabus|learning objective|exam|osce|shelf|board|quiz|moodle|canvas|study plan|revision)\b/i
-
-function hasEducationalPromptCue(
-  query: string,
-  learningMode: MedicalStudentLearningMode
-): boolean {
-  if (learningMode !== "ask") return true
-  return EDUCATIONAL_PROMPT_CUE_PATTERN.test(query)
-}
-
-function isMissingLmsTableError(error: unknown): boolean {
-  const message = String((error as { message?: string } | undefined)?.message || "")
-  return /student_lms_courses|student_lms_artifacts|does not exist|42P01/i.test(message)
-}
-
-async function loadMinimalLmsContextSnapshot(input: {
-  supabase: Awaited<ReturnType<typeof createClient>>
-  userId: string
-}): Promise<LmsContextSnapshot | null> {
-  if (!input.supabase) return null
-  const coursesQuery = (input.supabase as any)
-    .from(LMS_COURSES_TABLE)
-    .select("provider, course_name, last_synced_at")
-    .eq("user_id", input.userId)
-    .order("last_synced_at", { ascending: false })
-    .limit(60)
-  const artifactsQuery = (input.supabase as any)
-    .from(LMS_ARTIFACTS_TABLE)
-    .select("provider, title, due_at, synced_at")
-    .eq("user_id", input.userId)
-    .order("synced_at", { ascending: false })
-    .limit(160)
-
-  const [coursesResult, artifactsResult] = await Promise.all([
-    coursesQuery,
-    artifactsQuery,
-  ])
-  if (coursesResult.error && !isMissingLmsTableError(coursesResult.error)) {
-    throw new Error(coursesResult.error.message || "Failed to load LMS courses")
-  }
-  if (artifactsResult.error && !isMissingLmsTableError(artifactsResult.error)) {
-    throw new Error(artifactsResult.error.message || "Failed to load LMS artifacts")
-  }
-
-  const courses = Array.isArray(coursesResult.data)
-    ? (coursesResult.data as Array<Record<string, unknown>>)
-    : []
-  const artifacts = Array.isArray(artifactsResult.data)
-    ? (artifactsResult.data as Array<Record<string, unknown>>)
-    : []
-  if (courses.length === 0 && artifacts.length === 0) return null
-
-  const providerSet = new Set<LmsProvider>()
-  const recentCourseNames: string[] = []
-  const seenCourseNames = new Set<string>()
-  courses.forEach((row) => {
-    const provider = row.provider === "canvas" ? "canvas" : "moodle"
-    providerSet.add(provider)
-    const courseName = typeof row.course_name === "string" ? row.course_name.trim() : ""
-    if (!courseName || seenCourseNames.has(courseName.toLowerCase())) return
-    seenCourseNames.add(courseName.toLowerCase())
-    if (recentCourseNames.length < 4) {
-      recentCourseNames.push(courseName)
-    }
-  })
-
-  const nowMs = Date.now()
-  const days45Ms = 45 * 24 * 60 * 60 * 1000
-  const upcomingDueTitles = artifacts
-    .map((row) => ({
-      title: typeof row.title === "string" ? row.title.trim() : "",
-      dueAt: typeof row.due_at === "string" ? row.due_at : null,
-      provider: row.provider === "canvas" ? "canvas" : "moodle",
-    }))
-    .filter((row) => {
-      if (!row.dueAt) return false
-      const dueMs = Date.parse(row.dueAt)
-      return Number.isFinite(dueMs) && dueMs >= nowMs && dueMs <= nowMs + days45Ms
-    })
-    .sort((left, right) => Date.parse(left.dueAt as string) - Date.parse(right.dueAt as string))
-    .slice(0, 4)
-    .map((row) => row.title)
-    .filter((title) => title.length > 0)
-
-  artifacts.forEach((row) => {
-    const provider = row.provider === "canvas" ? "canvas" : "moodle"
-    providerSet.add(provider)
-  })
-
-  return {
-    courseCount: courses.length,
-    artifactCount: artifacts.length,
-    providerIds: Array.from(providerSet),
-    recentCourseNames,
-    upcomingDueTitles,
   }
 }
 
@@ -491,24 +393,6 @@ function stripInternalArtifactTokens(text: string): string {
     .replace(/\n{3,}/g, "\n\n")
 }
 
-function detectExplicitMultiArtifactRequest(query: string): boolean {
-  if (!query || typeof query !== "string") return false
-  const normalized = query.toLowerCase()
-  if (
-    /\b(?:make|create|generate|produce)\s+\d+\s+(?:documents?|quizzes?|artifacts?)\b/.test(normalized)
-  ) {
-    return true
-  }
-  if (
-    /\b(?:two|three|four|multiple|several|pair|double)\s+(?:documents?|quizzes?|artifacts?)\b/.test(
-      normalized
-    )
-  ) {
-    return true
-  }
-  return /\b(?:more than one|multiple versions|separate quizzes|separate documents)\b/.test(normalized)
-}
-
 function sanitizeAssistantMessagesForStorage(messages: any[]): any[] {
   if (!Array.isArray(messages)) return []
   return messages.map((message) => {
@@ -554,42 +438,6 @@ function sanitizeAssistantMessagesForStorage(messages: any[]): any[] {
 
     return sanitizedMessage
   })
-}
-
-function parseArtifactTypeFromToolResultPayload(
-  payload: unknown
-): "document" | "quiz" | null {
-  if (!payload || typeof payload !== "object") return null
-  const candidate = payload as Record<string, unknown>
-  if (candidate.artifactType === "document" || candidate.artifactType === "quiz") {
-    return candidate.artifactType
-  }
-  return null
-}
-
-function detectArtifactTypeFromMessage(message: any): "document" | "quiz" | null {
-  if (!message || typeof message !== "object") return null
-  const parts = Array.isArray(message.parts) ? message.parts : []
-  for (const part of parts) {
-    if (!part || typeof part !== "object") continue
-    if (part.type === "tool-invocation" && part.toolInvocation?.state === "result") {
-      const parsed = parseArtifactTypeFromToolResultPayload(part.toolInvocation?.result)
-      if (parsed) return parsed
-    }
-    if (part.type === "metadata" && part.metadata && typeof part.metadata === "object") {
-      const metadata = part.metadata as {
-        documentArtifacts?: unknown[]
-        quizArtifacts?: unknown[]
-      }
-      if (Array.isArray(metadata.documentArtifacts) && metadata.documentArtifacts.length > 0) {
-        return "document"
-      }
-      if (Array.isArray(metadata.quizArtifacts) && metadata.quizArtifacts.length > 0) {
-        return "quiz"
-      }
-    }
-  }
-  return null
 }
 
 function extractVisibleAssistantText(message: any): string {
@@ -698,10 +546,7 @@ function ensureArtifactLeadInInMessages(messages: any[]): any[] {
   const artifactType = detectArtifactTypeFromMessage(assistantMessage)
   if (!artifactType) return nextMessages
 
-  const leadIn =
-    artifactType === "quiz"
-      ? "Here is your generated quiz."
-      : "Here is your generated document."
+  const leadIn = "Here is your generated document."
   const visibleText = extractVisibleAssistantText(assistantMessage)
   const hasLeadIn = /here is your generated (quiz|document)\./i.test(visibleText)
   const needsLeadInInjection = !hasLeadIn && visibleText.length < 10
@@ -1231,7 +1076,7 @@ async function fetchPmcOpenAccessReviewCitations(query: string): Promise<Evidenc
   }
 
   console.log(
-    `📚 [PMC REVIEW RESOLVER] Queries=${strategies.length} candidates=${collected.size}`
+    `[EVIDENCE] [PMC REVIEW RESOLVER] Queries=${strategies.length} candidates=${collected.size}`
   )
 
   return dedupeAndReindexCitations(Array.from(collected.values()))
@@ -1260,7 +1105,7 @@ async function runWithTimeBudget<T>(
 
     const elapsedMs = Date.now() - startedAt
     if (elapsedMs >= timeoutMs) {
-      console.warn(`⏱️ [${label}] hit time budget (${timeoutMs}ms), using fallback`)
+      console.warn(`[TIMEOUT] [${label}] hit time budget (${timeoutMs}ms), using fallback`)
     }
     return result
   } catch (error) {
@@ -1268,7 +1113,7 @@ async function runWithTimeBudget<T>(
       clearTimeout(timer)
       timer = null
     }
-    console.warn(`⏱️ [${label}] failed, using fallback:`, error)
+    console.warn(`[TIMEOUT] [${label}] failed, using fallback:`, error)
     return fallbackValue
   }
 }
@@ -1323,6 +1168,13 @@ function mergeDistinctHealthItems(existing: string[], incoming: string[]): strin
   return merged
 }
 
+function looksLikeClinicalPatientContext(source: string): boolean {
+  const normalized = source.toLowerCase()
+  return /\b(?:patient|pt|client)\b/.test(normalized) ||
+    /\b(?:soap|subjective|objective|assessment|plan|chief complaint|hpi|history of present illness|diagnosis|diagnoses|icd-?10|rx|script)\b/.test(normalized) ||
+    /\b(?:he|she|they)\s+(?:has|have|takes|take|is allergic|are allergic|presented|presents|reports)\b/.test(normalized)
+}
+
 function extractHealthPreferencePatchFromPrompts(
   latestUserPrompt: string,
   recentUserPrompts: string[]
@@ -1335,6 +1187,7 @@ function extractHealthPreferencePatchFromPrompts(
     .join("\n")
   const source = [latestRaw, combinedRaw].filter(Boolean).join("\n")
   if (!source.trim()) return {}
+  if (looksLikeClinicalPatientContext(source)) return {}
 
   const labeledHealthGoals = extractLabeledValue(source, [
     "health goals",
@@ -1981,193 +1834,6 @@ function estimateCitationRecencyScore(citation: EvidenceCitation): number {
   if (age <= 5) return 0.45
   if (age <= 8) return 0.25
   return 0.1
-}
-
-function dedupeFigureReferences(
-  references: EvidenceCitation["figureReferences"]
-): EvidenceCitation["figureReferences"] {
-  if (!Array.isArray(references) || references.length === 0) return []
-  const byKey = new Map<string, NonNullable<EvidenceCitation["figureReferences"]>[number]>()
-  for (const reference of references) {
-    if (!reference) continue
-    const key =
-      reference.assetId ||
-      reference.filePath ||
-      `${reference.type || "figure"}:${reference.label || "asset"}`
-    const existing = byKey.get(key)
-    if (!existing) {
-      byKey.set(key, reference)
-      continue
-    }
-    byKey.set(key, {
-      ...existing,
-      ...reference,
-      signedUrl: reference.signedUrl || existing.signedUrl || null,
-      fullUrl: reference.fullUrl || existing.fullUrl || null,
-      filePath: reference.filePath || existing.filePath || null,
-      storageBucket: reference.storageBucket || existing.storageBucket || null,
-    })
-  }
-  return Array.from(byKey.values())
-}
-
-function mergeCitationVisuals(
-  existing: EvidenceCitation,
-  incoming: EvidenceCitation
-): Pick<EvidenceCitation, "previewReference" | "figureReferences"> {
-  const incomingPreview = incoming.previewReference
-  const existingPreview = existing.previewReference
-  const incomingHasPreviewSignal = Boolean(
-    incomingPreview?.filePath || incomingPreview?.signedUrl || incomingPreview?.assetId
-  )
-  const previewReference = incomingHasPreviewSignal
-    ? incomingPreview
-    : existingPreview || incomingPreview || null
-  const figureReferences = dedupeFigureReferences([
-    ...(existing.figureReferences || []),
-    ...(incoming.figureReferences || []),
-  ])
-  return {
-    previewReference,
-    figureReferences,
-  }
-}
-
-function normalizeTitleForDedup(title: string | undefined | null): string {
-  if (!title) return ""
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80)
-}
-
-function titleSimilarity(a: string, b: string): number {
-  if (!a || !b) return 0
-  const na = normalizeTitleForDedup(a)
-  const nb = normalizeTitleForDedup(b)
-  if (na === nb) return 1
-  if (na.length === 0 || nb.length === 0) return 0
-  const tokensA = new Set(na.split(" ").filter(t => t.length > 2))
-  const tokensB = new Set(nb.split(" ").filter(t => t.length > 2))
-  if (tokensA.size === 0 || tokensB.size === 0) return 0
-  let overlap = 0
-  for (const t of tokensA) if (tokensB.has(t)) overlap++
-  return (2 * overlap) / (tokensA.size + tokensB.size)
-}
-
-function dedupeAndReindexCitations(citations: EvidenceCitation[]): EvidenceCitation[] {
-  const citationMetadataScore = (citation: EvidenceCitation): number => {
-    let score = 0
-    if (citation.title?.trim()) score += 3
-    if (citation.journal?.trim()) score += 2
-    if (citation.url?.trim()) score += 3
-    if (citation.pmid?.trim()) score += 2
-    if (citation.doi?.trim()) score += 1
-    if (citation.sourceLabel?.trim()) score += 2
-    if (citation.sourceType?.trim()) score += 1
-    if (citation.studyType?.trim()) score += 1
-    if (citation.snippet?.trim()) score += 1
-    if (citation.sourceId?.trim()) score += 2
-    if (Array.isArray(citation.authors) && citation.authors.length > 0) score += 1
-    if (
-      citation.previewReference?.filePath ||
-      citation.previewReference?.signedUrl ||
-      citation.previewReference?.assetId
-    ) {
-      score += 3
-    }
-    if (Array.isArray(citation.figureReferences) && citation.figureReferences.length > 0) {
-      score += Math.min(4, citation.figureReferences.length)
-    }
-    return score
-  }
-
-  const deduped = new Map<string, EvidenceCitation>()
-  const doiIndex = new Map<string, string>()
-  const titleIndex = new Map<string, string>()
-
-  const mergeInto = (key: string, normalizedCitation: EvidenceCitation) => {
-    const existing = deduped.get(key)
-    if (!existing) {
-      deduped.set(key, normalizedCitation)
-      return
-    }
-    const existingScore = citationMetadataScore(existing)
-    const incomingScore = citationMetadataScore(normalizedCitation)
-    const mergedVisuals = mergeCitationVisuals(existing, normalizedCitation)
-    if (incomingScore >= existingScore) {
-      deduped.set(key, { ...existing, ...normalizedCitation, ...mergedVisuals, sourceId: key })
-    } else {
-      deduped.set(key, { ...normalizedCitation, ...existing, ...mergedVisuals, sourceId: key })
-    }
-  }
-
-  citations.forEach((citation) => {
-    const normalizedCitation: EvidenceCitation = {
-      ...citation,
-      sourceId: buildEvidenceSourceId(citation),
-    }
-    const key =
-      normalizedCitation.sourceId ||
-      normalizedCitation.pmid ||
-      normalizedCitation.doi ||
-      normalizedCitation.url ||
-      `${normalizedCitation.title || "untitled"}:${normalizedCitation.journal || "unknown"}`
-
-    // DOI-based dedup: merge if same DOI already seen under a different key
-    const doi = normalizedCitation.doi?.trim().toLowerCase()
-    if (doi) {
-      const existingKeyForDoi = doiIndex.get(doi)
-      if (existingKeyForDoi && existingKeyForDoi !== key) {
-        mergeInto(existingKeyForDoi, normalizedCitation)
-        return
-      }
-      doiIndex.set(doi, key)
-    }
-
-    // Title similarity dedup: merge if a very similar title exists
-    const normTitle = normalizeTitleForDedup(normalizedCitation.title)
-    if (normTitle.length > 20) {
-      for (const [existingTitle, existingKey] of titleIndex) {
-        if (existingKey !== key && titleSimilarity(normTitle, existingTitle) > 0.85) {
-          mergeInto(existingKey, normalizedCitation)
-          return
-        }
-      }
-      titleIndex.set(normTitle, key)
-    }
-
-    mergeInto(key, normalizedCitation)
-  })
-  return Array.from(deduped.values()).map((citation, index) => ({
-    ...citation,
-    index: index + 1,
-    sourceId: buildEvidenceSourceId(citation),
-  }))
-}
-
-function citationsFromProvenance(provenance: SourceProvenance[]): EvidenceCitation[] {
-  if (!Array.isArray(provenance) || provenance.length === 0) return []
-  return dedupeAndReindexCitations(
-    provenance.map((item, idx) => provenanceToEvidenceCitation(item, idx + 1))
-  )
-}
-
-function citationsFromToolResult(result: unknown): EvidenceCitation[] {
-  if (!result || typeof result !== "object") return []
-  const candidate = result as Record<string, unknown>
-  if (Array.isArray(candidate.provenance)) {
-    return citationsFromProvenance(candidate.provenance as SourceProvenance[])
-  }
-  if (Array.isArray(candidate.citations)) {
-    return dedupeAndReindexCitations(candidate.citations as EvidenceCitation[])
-  }
-  if (Array.isArray(candidate.results)) {
-    return dedupeAndReindexCitations(candidate.results as EvidenceCitation[])
-  }
-  return []
 }
 
 function rankCitationsForQuery(
@@ -3832,8 +3498,15 @@ export async function POST(req: Request) {
       .map((message) => decodeArtifactWorkflowInput(stripUploadReferenceTokens(message.content)))
       .filter((content) => content.trim().length > 0)
       .slice(-8)
+    const shouldSyncPersonalHealthMemory =
+      isAuthenticated &&
+      userId !== "temp" &&
+      validatedSupabase &&
+      userRole === "general" &&
+      !consultPatientId &&
+      !consultPracticeId
     const healthMemorySyncPromise =
-      isAuthenticated && userId !== "temp" && validatedSupabase
+      shouldSyncPersonalHealthMemory
         ? runWithTimeBudget(
             "HEALTH_MEMORY_SYNC",
             () =>
@@ -3957,7 +3630,11 @@ export async function POST(req: Request) {
     const benchStrictMode = BENCH_STRICT_MODE || requestBenchStrictMode
 
     // Run all blocking work in parallel so streaming can start as soon as possible
-    const effectiveModel = model
+    const { isClinicalArtifactCommand, CLINICAL_ARTIFACT_MODEL } = await import(
+      "@/lib/chat-route/clinical-command"
+    )
+    const useArtifactFastPath = isClinicalArtifactCommand(queryText)
+    const effectiveModel: SupportedModel = useArtifactFastPath ? CLINICAL_ARTIFACT_MODEL : model
     const modelConfig = getModelInfo(effectiveModel)
     if (!modelConfig || !modelConfig.apiSdk) {
       return new Response(
@@ -4004,27 +3681,6 @@ export async function POST(req: Request) {
 
     const clinicianRoleFromResolvedRole =
       effectiveUserRole === "doctor" || effectiveUserRole === "medical_student"
-    const shouldLoadLmsContextForTurn =
-      isAuthenticated &&
-      userId !== "temp" &&
-      effectiveUserRole === "medical_student" &&
-      hasEducationalPromptCue(queryText, effectiveLearningMode)
-    const lmsContextPromise: Promise<LmsContextSnapshot | null> =
-      shouldLoadLmsContextForTurn
-        ? runWithTimeBudget(
-            "LMS_CONTEXT_PREFLIGHT",
-            async () => {
-              const supabase = validatedSupabase || (await createClient())
-              if (!supabase) return null
-              return loadMinimalLmsContextSnapshot({
-                supabase,
-                userId,
-              })
-            },
-            900,
-            null
-          )
-        : Promise.resolve(null)
     const effectiveIncompleteEvidencePolicy: ClinicalIncompleteEvidencePolicy =
       ENABLE_COGNITIVE_ORCHESTRATION_FULL
         ? incompleteEvidencePolicyFromRequest ||
@@ -4034,8 +3690,10 @@ export async function POST(req: Request) {
     const freshEvidenceIntent = needsFreshEvidence(queryText)
     /** SOAP is charting from the consult only — no PubMed/web/RAG retrieval. */
     const isSoapCommandRequest = /^\[\/soap\]/i.test(queryText.trim())
+    const isCodingCommandRequest =
+      /^\[\/icd\]/i.test(queryText.trim()) || /^\[\/claim\]/i.test(queryText.trim())
     const finalEnableEvidence =
-      isSoapCommandRequest
+      isSoapCommandRequest || isCodingCommandRequest
         ? false
         : enableEvidenceFromClient === true ||
           clinicianRoleFromResolvedRole ||
@@ -4101,14 +3759,6 @@ export async function POST(req: Request) {
           Awaited<ReturnType<UserUploadService["uploadContextSearch"]>> | null
         >(uploadContextPreflightCacheKey)
       : undefined
-    const shouldRunStudyGraphContext =
-      isAuthenticated &&
-      userId !== "temp" &&
-      queryText.length > 0 &&
-      shouldPreferUploadContext
-    const studyGraphService = new StudyGraphService()
-    const studyPlannerService = new StudyPlannerService()
-    const studyReviewService = new StudyReviewService()
     // L3 answer cache: short-circuit if we have a recent answer for this exact query
     let l3CacheHit: { answer: string; citations: EvidenceCitation[] } | null = null
     if (shouldRunEvidenceSynthesis && queryText.length > 0) {
@@ -4130,7 +3780,7 @@ export async function POST(req: Request) {
     // blocking the initial response on a speculative preflight crawl.
     const webSearchPreflightPromise = Promise.resolve<Awaited<ReturnType<typeof searchWeb>> | null>(null)
 
-    const [evidenceContextResult, uploadContextResult, webSearchPreflight, studyGraphNodeContext] = await Promise.all([
+    const [evidenceContextResult, uploadContextResult, webSearchPreflight] = await Promise.all([
       shouldRunEvidenceSynthesis
         ? runWithTimeBudget(
             "EVIDENCE_SYNTHESIS",
@@ -4146,7 +3796,7 @@ export async function POST(req: Request) {
                 forceEvidence:
                   evidenceSeekingIntent || freshEvidenceIntent || Boolean(clinicianRoleFromResolvedRole),
               }).catch((err) => {
-                console.error("📚 EVIDENCE MODE: Error synthesizing evidence:", err)
+                console.error("[EVIDENCE] MODE: Error synthesizing evidence:", err)
                 return null
               }),
             1800,
@@ -4174,7 +3824,7 @@ export async function POST(req: Request) {
                     maxDurationMs: uploadContextMaxDurationMs,
                   })
                   .catch((err) => {
-                    console.warn("📚 [UPLOAD RETRIEVAL] Structured retrieval failed:", err)
+                    console.warn("[EVIDENCE] [UPLOAD RETRIEVAL] Structured retrieval failed:", err)
                     return null
                   }),
               uploadContextTimeBudgetMs,
@@ -4187,20 +3837,6 @@ export async function POST(req: Request) {
             })
         : Promise.resolve(null),
       webSearchPreflightPromise,
-      shouldRunStudyGraphContext
-        ? runWithTimeBudget(
-            "STUDY_GRAPH_CONTEXT",
-            async () =>
-              studyGraphService.searchNodes({
-                userId,
-                query: queryText,
-                uploadId: selectedUploadIdHint,
-                limit: 6,
-              }),
-            900,
-            []
-          )
-        : Promise.resolve([]),
     ])
 
     const uploadEvidenceCitations =
@@ -4218,7 +3854,7 @@ export async function POST(req: Request) {
                   maxResults: 4,
                 })
                 .catch((err) => {
-                  console.warn("📚 [UPLOAD RETRIEVAL] Legacy retrieval failed:", err)
+                  console.warn("[EVIDENCE] [UPLOAD RETRIEVAL] Legacy retrieval failed:", err)
                   return []
                 }),
             800,
@@ -4228,7 +3864,7 @@ export async function POST(req: Request) {
 
     if (uploadContextResult?.warnings && uploadContextResult.warnings.length > 0) {
       console.log(
-        "📚 [UPLOAD RETRIEVAL] Warnings:",
+        "[EVIDENCE] [UPLOAD RETRIEVAL] Warnings:",
         uploadContextResult.warnings.join(" | ")
       )
     }
@@ -4840,15 +4476,15 @@ export async function POST(req: Request) {
           if (fallbackGuidelineCitations.length > 0) {
             mergedCitations = [...mergedCitations, ...fallbackGuidelineCitations]
             console.log(
-              `📚 [GUIDELINE FALLBACK] Added ${fallbackGuidelineCitations.length} guideline citations`
+              `[EVIDENCE] [GUIDELINE FALLBACK] Added ${fallbackGuidelineCitations.length} guideline citations`
             )
           } else {
             console.warn(
-              "📚 [GUIDELINE FALLBACK] No guideline fallback citations found"
+              "[EVIDENCE] [GUIDELINE FALLBACK] No guideline fallback citations found"
             )
           }
         } catch (error) {
-          console.warn("📚 [GUIDELINE FALLBACK] Failed:", error)
+          console.warn("[EVIDENCE] [GUIDELINE FALLBACK] Failed:", error)
         }
       }
 
@@ -4904,7 +4540,7 @@ export async function POST(req: Request) {
           if (parityCitations.length > 0) {
             mergedCitations = [...mergedCitations, ...parityCitations]
             console.log(
-              `📚 [EVIDENCE PARITY] Added ${parityCitations.length} supplemental citations`
+              `[EVIDENCE] [EVIDENCE PARITY] Added ${parityCitations.length} supplemental citations`
             )
           }
           retrievalGateSummary = {
@@ -4918,7 +4554,7 @@ export async function POST(req: Request) {
             addedCitations: Math.max(0, mergedCitations.length - citationsBeforeGate),
           }
         } catch (error) {
-          console.warn("📚 [EVIDENCE PARITY] Failed:", error)
+          console.warn("[EVIDENCE] [EVIDENCE PARITY] Failed:", error)
           retrievalGateSummary = {
             enabled: true,
             status: "failed",
@@ -5057,6 +4693,8 @@ export async function POST(req: Request) {
           patientId: consultPatientId,
           chatId: effectiveChatId,
           firstUserMessage: queryText.slice(0, 500),
+          omitSoapSections: isSoapCommandRequest,
+          skipRag: useArtifactFastPath,
         })
         if (clinicalBlock) {
           effectiveSystemPrompt += `\n\n${clinicalBlock}`
@@ -5077,17 +4715,6 @@ export async function POST(req: Request) {
         ? `\n\nUSER ATTACHMENT CONTEXT (preview only):\n${attachmentContext}\n\nThis preview may be incomplete for large PDFs. For document/quiz artifact generation, prefer upload tools (inspectUploadStructure, uploadContextSearch, generation tools) over direct preview text.`
         : `\n\nUSER ATTACHMENT CONTEXT (from uploaded document content):\n${attachmentContext}\n\nUse this attachment content directly when answering the user's question. If the user asks whether you can see/read the file, explicitly confirm and reference the attachment by name.`
     }
-    if (Array.isArray(studyGraphNodeContext) && studyGraphNodeContext.length > 0) {
-      const studyGraphBlock = studyGraphNodeContext
-        .slice(0, 6)
-        .map((node: { nodeType: string; label: string; deadlineAt?: string | null }) => {
-          const deadline = node.deadlineAt ? ` | deadline ${node.deadlineAt.slice(0, 10)}` : ""
-          return `- ${node.nodeType}: ${node.label}${deadline}`
-        })
-        .join("\n")
-      effectiveSystemPrompt += `\n\nSTRUCTURED STUDY GRAPH CONTEXT (file-grounded):\n${studyGraphBlock}\n\nUse this as structured context alongside upload citations.`
-    }
-
     if (benchStrictMode && finalEnableEvidence) {
       effectiveSystemPrompt += `\n\n${buildBenchStrictPrompt({
         citationCount: evidenceContext?.context?.citations?.length ?? 0,
@@ -5110,7 +4737,7 @@ export async function POST(req: Request) {
       effectiveSystemPrompt += `\n\n**IMPORTANT: Do NOT include citations, citation markers, or reference numbers in your response. Respond naturally without any [CITATION:X] or [X] markers. Do not include a "Citations" section at the end.`
     }
     if (isSoapCommandRequest) {
-      effectiveSystemPrompt += `\n\n**SOAP NOTE:** Write a polished chart-ready SOAP using only the consultation transcript and structured patient context already in this thread. Do not use transcript source tags like [T], [E], or [H]. Do not add numeric literature citations. If something was not discussed, write "not documented" for that element rather than inferring. Prefer accurate omission over speculation.`
+      effectiveSystemPrompt += `\n\n**SOAP NOTE:** Write a polished chart-ready SOAP using the consultation transcript and structured context in the user message and system prompt. Do not use transcript source tags like [T], [E], or [H]. Do not add numeric literature citations. Use "not documented" only when a section truly lacks data in the provided context — the transcript block is authoritative when present.`
     }
     effectiveSystemPrompt += `\n\nFORMATTING GUARDRAILS:
 - Never output internal tool/source tags such as [tool ...], [tool slide ...], [source ...], or [doc ...].
@@ -5210,15 +4837,15 @@ export async function POST(req: Request) {
     })
 
     if (finalEnableSearch) {
-      console.log("✅ WEB SEARCH ENABLED - Using explicit Exa webSearch tool path")
+      console.log("[WEB SEARCH] Enabled - Using explicit Exa webSearch tool path")
     }
     
     // CRITICAL: Capture evidenceContext in a const to ensure it's available in closure
     const capturedEvidenceContext = evidenceContext
     if (capturedEvidenceContext) {
-      console.log(`📚 [CAPTURE] Captured evidence context with ${capturedEvidenceContext.context.citations.length} citations for onFinish callback`)
+      console.log(`[CAPTURE] Captured evidence context with ${capturedEvidenceContext.context.citations.length} citations for onFinish callback`)
     } else {
-      console.log(`📚 [CAPTURE] No evidence context to capture`)
+      console.log(`[CAPTURE] No evidence context to capture`)
     }
     
     // Optional live PubMed tools for freshness and sparse-corpus gaps
@@ -5714,43 +5341,6 @@ export async function POST(req: Request) {
       }
     }
 
-    const resolveUploadRecordForChatTools = async (uploadId?: string) => {
-      const scopedUploadId =
-        typeof uploadId === "string" && isUuidLike(uploadId)
-          ? uploadId
-          : selectedUploadIdHint && isUuidLike(selectedUploadIdHint)
-            ? selectedUploadIdHint
-            : undefined
-      if (!scopedUploadId) return null
-      if (!isAuthenticated || userId === "temp") return null
-
-      let supabase = validatedSupabase
-      if (!supabase) {
-        supabase = await createClient()
-      }
-      if (!supabase) return null
-
-      const { data, error } = await (supabase as any)
-        .from("user_uploads")
-        .select("id, title, file_name, upload_kind, metadata")
-        .eq("id", scopedUploadId)
-        .eq("user_id", userId)
-        .maybeSingle()
-      if (error || !data) {
-        return null
-      }
-      return {
-        id: data.id as string,
-        title: (data.title as string | null) || (data.file_name as string | null) || "Uploaded material",
-        fileName: (data.file_name as string | null) || null,
-        uploadKind: (data.upload_kind as string | null) || "other",
-        metadata:
-          data.metadata && typeof data.metadata === "object"
-            ? (data.metadata as Record<string, unknown>)
-            : ({} as Record<string, unknown>),
-      }
-    }
-
     if (ENABLE_YOUTUBE_TOOL && supportsTools && queryText.length > 0) {
       console.log("[YOUTUBE INTENT]", {
         shouldEnableYoutubeTool,
@@ -6052,295 +5642,6 @@ export async function POST(req: Request) {
                       cachedQuizArtifact = artifact as Record<string, unknown>
                     }
                     return artifact
-                  },
-                }),
-              }
-            : {}),
-          ...(shouldEnableEvidenceTools
-            ? {
-                generateTimetableFromUploads: tool({
-                  description:
-                    "Generate a study timetable/plan from uploaded materials and inferred timetable metadata.",
-                  parameters: z.object({
-                    title: z.string().min(1).max(120).optional(),
-                    uploadId: z.string().min(1).optional(),
-                    startDate: z
-                      .string()
-                      .regex(/^\d{4}-\d{2}-\d{2}$/)
-                      .optional()
-                      .describe("YYYY-MM-DD"),
-                    endDate: z
-                      .string()
-                      .regex(/^\d{4}-\d{2}-\d{2}$/)
-                      .optional()
-                      .describe("YYYY-MM-DD"),
-                    hoursPerDay: z.number().min(0.5).max(16).default(3),
-                  }),
-                  execute: async ({ title, uploadId, startDate, endDate, hoursPerDay }) => {
-                    if (!isAuthenticated || userId === "temp") {
-                      return {
-                        ok: false,
-                        error: "User must be authenticated to generate a timetable.",
-                      }
-                    }
-
-                    const uploadRecord = await resolveUploadRecordForChatTools(uploadId)
-                    const extraction =
-                      uploadRecord?.metadata?.studyExtraction &&
-                      typeof uploadRecord.metadata.studyExtraction === "object"
-                        ? (uploadRecord.metadata.studyExtraction as Record<string, unknown>)
-                        : null
-                    const timetableEntries = extraction?.timetableEntries
-                    const datedEntries = Array.isArray(timetableEntries)
-                      ? timetableEntries
-                          .map((entry) => {
-                            if (!entry || typeof entry !== "object") return null
-                            const date = typeof entry.date === "string" ? entry.date : null
-                            return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
-                          })
-                          .filter((item): item is string => Boolean(item))
-                      : []
-                    const sortedDates = [...datedEntries].sort((a, b) => a.localeCompare(b))
-
-                    const today = new Date().toISOString().slice(0, 10)
-                    const inferredStart = sortedDates[0] || today
-                    const inferredEnd =
-                      sortedDates.length > 1
-                        ? sortedDates[sortedDates.length - 1]
-                        : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
-                            .toISOString()
-                            .slice(0, 10)
-
-                    const generated = await studyPlannerService.generatePlan({
-                      userId,
-                      title:
-                        title ||
-                        (uploadRecord ? `${uploadRecord.title} timetable` : "Study timetable"),
-                      startDate: startDate || inferredStart,
-                      endDate: endDate || inferredEnd,
-                      hoursPerDay: Math.max(0.5, Math.min(16, Number(hoursPerDay || 3))),
-                    })
-
-                    return {
-                      ok: true,
-                      sourceUploadId: uploadRecord?.id || null,
-                      sourceUploadTitle: uploadRecord?.title || null,
-                      inferredFromUploadDates: datedEntries.length > 0,
-                      plan: generated.plan,
-                      blockCount: generated.blocks.length,
-                      previewBlocks: generated.blocks.slice(0, 10).map((block) => ({
-                        id: block.id,
-                        title: block.title,
-                        startsAt: block.startAt,
-                        endsAt: block.endAt,
-                        status: block.status,
-                      })),
-                    }
-                  },
-                }),
-                rebuildStudyGraphFromUpload: tool({
-                  description:
-                    "Rebuild StudyGraph nodes/edges from a selected upload's extracted study metadata.",
-                  parameters: z.object({
-                    uploadId: z.string().min(1).optional(),
-                  }),
-                  execute: async ({ uploadId }) => {
-                    if (!isAuthenticated || userId === "temp") {
-                      return {
-                        ok: false,
-                        error: "User must be authenticated to rebuild StudyGraph.",
-                      }
-                    }
-                    const uploadRecord = await resolveUploadRecordForChatTools(uploadId)
-                    if (!uploadRecord) {
-                      return {
-                        ok: false,
-                        error: "No upload found. Provide uploadId or reference an upload in chat.",
-                      }
-                    }
-                    const extraction =
-                      uploadRecord.metadata.studyExtraction &&
-                      typeof uploadRecord.metadata.studyExtraction === "object"
-                        ? (uploadRecord.metadata.studyExtraction as Record<string, unknown>)
-                        : null
-                    if (!extraction) {
-                      return {
-                        ok: false,
-                        error:
-                          "This upload has no studyExtraction metadata yet. Reprocess the upload first.",
-                      }
-                    }
-                    const rebuilt = await studyGraphService.rebuildGraphFromUpload({
-                      userId,
-                      uploadId: uploadRecord.id,
-                      uploadTitle: uploadRecord.title,
-                      extraction: extraction as any,
-                    })
-                    return {
-                      ok: true,
-                      uploadId: uploadRecord.id,
-                      nodeCount: rebuilt.nodeCount,
-                      edgeCount: rebuilt.edgeCount,
-                    }
-                  },
-                }),
-                rebalanceTimetablePlan: tool({
-                  description: "Rebalance a generated timetable after missed or shifted blocks.",
-                  parameters: z.object({
-                    planId: z.string().min(1),
-                    missedBlockIds: z.array(z.string().min(1)).optional(),
-                  }),
-                  execute: async ({ planId, missedBlockIds }) => {
-                    if (!isAuthenticated || userId === "temp") {
-                      return {
-                        ok: false,
-                        error: "User must be authenticated to rebalance a timetable.",
-                      }
-                    }
-                    const result = await studyPlannerService.rebalancePlan({
-                      userId,
-                      planId,
-                      missedBlockIds,
-                    })
-                    if (!result) {
-                      return {
-                        ok: false,
-                        error: "Plan not found.",
-                      }
-                    }
-                    return {
-                      ok: true,
-                      planId: result.plan.id,
-                      movedBlockCount: result.blocks.length,
-                      previewBlocks: result.blocks.slice(0, 10).map((block) => ({
-                        id: block.id,
-                        title: block.title,
-                        startsAt: block.startAt,
-                        endsAt: block.endAt,
-                        status: block.status,
-                      })),
-                    }
-                  },
-                }),
-                createReviewQueueFromUploads: tool({
-                  description:
-                    "Generate and fetch a spaced-repetition review queue from uploaded study sources.",
-                  parameters: z.object({
-                    limit: z.number().int().min(1).max(80).default(24),
-                  }),
-                  execute: async ({ limit }) => {
-                    if (!isAuthenticated || userId === "temp") {
-                      return {
-                        ok: false,
-                        error: "User must be authenticated to create review queues.",
-                      }
-                    }
-                    const generatedItems = await studyReviewService.generateReviewItems({
-                      userId,
-                      limit,
-                    })
-                    const due = await studyReviewService.getDueQueue(userId, limit)
-                    return {
-                      ok: true,
-                      generatedCount: generatedItems.length,
-                      dueCount: due.due.length,
-                      duePreview: due.due.slice(0, 10).map((item) => ({
-                        id: item.id,
-                        prompt: item.prompt,
-                        topicLabel: item.topicLabel,
-                        dueAt: item.nextReviewAt,
-                        status: item.status,
-                      })),
-                    }
-                  },
-                }),
-                summarizeLectureUpload: tool({
-                  description:
-                    "Generate lecture notes, summary, and next actionables from an uploaded lecture video or document.",
-                  parameters: z.object({
-                    uploadId: z.string().min(1).optional(),
-                    includeActionables: z.boolean().default(true),
-                  }),
-                  execute: async ({ uploadId, includeActionables }) => {
-                    if (!isAuthenticated || userId === "temp") {
-                      return {
-                        ok: false,
-                        error: "User must be authenticated to summarize uploaded lectures.",
-                      }
-                    }
-
-                    const uploadRecord = await resolveUploadRecordForChatTools(uploadId)
-                    if (!uploadRecord) {
-                      return {
-                        ok: false,
-                        error:
-                          "No upload found. Provide an uploadId or reference an upload in chat first.",
-                      }
-                    }
-
-                    const extraction =
-                      uploadRecord.metadata.studyExtraction &&
-                      typeof uploadRecord.metadata.studyExtraction === "object"
-                        ? (uploadRecord.metadata.studyExtraction as Record<string, unknown>)
-                        : null
-                    const extractionSummary =
-                      extraction && typeof extraction.lectureSummary === "string"
-                        ? extraction.lectureSummary
-                        : null
-                    const extractionActionables =
-                      extraction && Array.isArray(extraction.actionables)
-                        ? extraction.actionables
-                            .map((item) => (typeof item === "string" ? item.trim() : ""))
-                            .filter((item): item is string => item.length > 0)
-                        : []
-                    const extractionTopics =
-                      extraction && Array.isArray(extraction.topicLabels)
-                        ? extraction.topicLabels
-                            .map((item) => (typeof item === "string" ? item.trim() : ""))
-                            .filter((item): item is string => item.length > 0)
-                        : []
-
-                    let summary = extractionSummary || ""
-                    let actionables = extractionActionables
-
-                    if (!summary) {
-                      try {
-                        const detail = await uploadService.getUploadDetail(
-                          userId,
-                          uploadRecord.id
-                        )
-                        if (detail) {
-                          const synthesized = summarizeTextForNotes(
-                            detail.sourceUnits.map((unit) => unit.extractedText || "").join("\n")
-                          )
-                          summary = synthesized.summary
-                          if (actionables.length === 0) {
-                            actionables = synthesized.actionables
-                          }
-                        }
-                      } catch {
-                        // fall through and return best-effort metadata summary
-                      }
-                    }
-
-                    const nextActions = [
-                      actionables[0] || "Ask chat to convert this lecture into a timed study block.",
-                      actionables[1] || "Generate a 10-question viva drill from these notes.",
-                      "Create a spaced-repetition queue from the lecture takeaways.",
-                    ]
-                      .filter((item): item is string => Boolean(item))
-                      .slice(0, 5)
-
-                    return {
-                      ok: true,
-                      uploadId: uploadRecord.id,
-                      uploadTitle: uploadRecord.title,
-                      uploadKind: uploadRecord.uploadKind,
-                      summary: summary || "No transcript summary available yet.",
-                      actionables: includeActionables ? actionables.slice(0, 12) : [],
-                      keyTopics: extractionTopics.slice(0, 12),
-                      nextActions,
-                    }
                   },
                 }),
               }
@@ -7087,9 +6388,6 @@ export async function POST(req: Request) {
       (effectiveUserRole === "medical_student" || effectiveUserRole === "doctor")
 
     if (supportsTools && queryText.trim().length > 0) {
-      const lmsContextForSupervisor = shouldUseLangChainSupervisor
-        ? await lmsContextPromise
-        : null
       if (shouldUseLangChainSupervisor) {
         try {
           langGraphPlan = await runLangChainSupervisor({
@@ -7097,7 +6395,6 @@ export async function POST(req: Request) {
             role: effectiveUserRole,
             learningMode: effectiveLearningMode,
             clinicianMode: effectiveClinicianMode,
-            lmsContext: lmsContextForSupervisor,
             artifactIntent: effectiveArtifactIntent,
             supportsTools,
             evidenceEnabled: finalEnableEvidence,
@@ -7248,14 +6545,9 @@ export async function POST(req: Request) {
     if (shouldEnableEvidenceTools) {
       effectiveSystemPrompt += `\n\nYou may use live evidence tools when needed:
 ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded documents, especially page-specific prompts (e.g., \"page 50\") and follow-up continuity (\"next page\", \"expand this section\")." : ""}
-- ${shouldEnableStructureInspectionTool ? "Use inspectUploadStructure for large uploads to map TOC/headings before generating study artifacts." : "Structure inspection tool is unavailable in this context."}
+- ${shouldEnableStructureInspectionTool ? "Use inspectUploadStructure for large uploads to map TOC/headings before generating document artifacts." : "Structure inspection tool is unavailable in this context."}
 - ${canUseArtifactTools ? "Use refineQuizRequirements before quiz generation when scope is broad or underspecified." : "Quiz refinement/generation tools are unavailable unless upload tools are enabled."}
 - ${canUseArtifactTools ? "Use generateQuizFromUpload only after refinement is complete for quiz intents." : "Quiz artifact generation is unavailable unless upload tools are enabled."}
-- Use generateTimetableFromUploads for study schedule/timetable generation directly from uploads or chat constraints.
-- Use rebuildStudyGraphFromUpload when the user asks to refresh topic/objective/deadline nodes from files.
-- Use rebalanceTimetablePlan when the user asks to shift missed blocks or rebalance a plan.
-- Use summarizeLectureUpload for uploaded lecture videos to return notes, summary, and next actionables.
-- Use createReviewQueueFromUploads to build revision queues from uploaded study materials.
 - Use pubmedSearch/pubmedLookup for latest literature and PMID-grounded facts.
 - Use guidelineSearch for formal recommendations and regional guidance.
 - Use clinicalTrialsSearch for ongoing/new evidence.
@@ -7436,6 +6728,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
 
     const result = streamText({
       model: modelWithSearch,
+      ...llmCallSettingsForModel(effectiveModel),
       system: effectiveSystemPrompt,
       messages: coreMessages,
       tools: runtimeTools,
@@ -7455,59 +6748,12 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
         sanitizedResponseMessages = ensureArtifactLeadInInMessages(
           sanitizedResponseMessages
         )
-        // Extract citations from xAI response if available
-        const xaiCitations = (response as any).experimental_providerMetadata?.citations || 
-                            (response as any).citations || 
-                            []
-        
-        // Check if sources are in message parts
         const allParts = sanitizedResponseMessages.flatMap((m: any) => m.parts || [])
-        const sourceParts = allParts.filter((p: any) => p.type === 'source')
         const toolInvocationParts = allParts.filter((p: any) => p.type === 'tool-invocation')
         
-        // Log full response structure for debugging
-        console.log('\n' + '='.repeat(80))
-        console.log('[WEB SEARCH DEBUG] Response structure:')
-        console.log('  - experimental_providerMetadata:', (response as any).experimental_providerMetadata ? 'EXISTS' : 'undefined')
-        console.log('  - citations:', (response as any).citations ? 'EXISTS' : 'undefined')
-        console.log('  - messages count:', (response as any).messages?.length || 0)
-        console.log('  - total parts:', allParts.length)
-        console.log('  - source parts:', sourceParts.length)
-        console.log('  - tool invocations:', toolInvocationParts.length)
-        
-        if (xaiCitations.length > 0) {
-          console.log(`[WEB SEARCH] ✅ Found ${xaiCitations.length} citations:`, xaiCitations.slice(0, 5))
-        }
-        
-        if (sourceParts.length > 0) {
-          console.log(`[WEB SEARCH] ✅ Found ${sourceParts.length} source parts:`, sourceParts.map((p: any) => p.source).slice(0, 3))
-        }
-        
-        if (toolInvocationParts.length > 0) {
-          console.log(`[WEB SEARCH] ✅ Found ${toolInvocationParts.length} tool invocations`)
-          toolInvocationParts.forEach((p: any, i: number) => {
-            console.log(`  Tool ${i + 1}:`, p.toolInvocation?.toolName, 'state:', p.toolInvocation?.state)
-            if (p.toolInvocation?.result) {
-              console.log(`    Result keys:`, Object.keys(p.toolInvocation.result))
-            }
-          })
-        }
-        
-        // Check message content for URLs
-        const lastMessage =
-          sanitizedResponseMessages[sanitizedResponseMessages.length - 1]
-        if (lastMessage?.content) {
-          const content = typeof lastMessage.content === 'string' ? lastMessage.content : JSON.stringify(lastMessage.content)
-          const urlMatches = content.match(/https?:\/\/[^\s\)\]\[]+/g) || []
-          if (urlMatches.length > 0) {
-            console.log(`[WEB SEARCH] Found ${urlMatches.length} URLs in message content:`, urlMatches.slice(0, 5))
-          }
-        }
         const runtimeToolCitations = dedupeAndReindexCitations(
           toolInvocationParts.flatMap((part: any) => citationsFromToolResult(part?.toolInvocation?.result))
         )
-        
-        console.log('='.repeat(80) + '\n')
         
         // Handle completion in background - CRITICAL: Ensure this always runs
         Promise.resolve().then(async () => {
@@ -7518,7 +6764,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
             const isTempChat = userId === "temp" || isEphemeralChatId(effectiveChatId)
             
             if (isTempChat) {
-              console.log("📚 [CITATION] Temp chat detected - extracting citations but skipping DB save")
+              console.log("[CITATION] Temp chat detected - extracting citations but skipping DB save")
             }
 
             let supabase = validatedSupabase
@@ -7633,7 +6879,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                     : capturedEvidenceContext || evidenceContext
                 
                 if (contextToUse?.context?.citations) {
-                console.log(`📚 [CITATION EXTRACTION] Using evidence context with ${contextToUse.context.citations.length} citations`)
+                console.log(`[CITATION EXTRACTION] Using evidence context with ${contextToUse.context.citations.length} citations`)
                 if (responseText) {
                   const extractionResult = extractReferencedCitations(
                     responseText,
@@ -7644,18 +6890,18 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                   
                   // Log extraction results for debugging
                   if (extractionResult.hasCitations) {
-                    console.log(`📚 [CITATION EXTRACTION] Found ${citationsToSave.length} referenced citations (indices: [${extractionResult.citationIndices.join(', ')}])`)
+                    console.log(`[CITATION EXTRACTION] Found ${citationsToSave.length} referenced citations (indices: [${extractionResult.citationIndices.join(', ')}])`)
                     if (extractionResult.verificationStats.fallbackAdded > 0) {
                       console.warn(
-                        `📚 [CITATION EXTRACTION] Added ${extractionResult.verificationStats.fallbackAdded} fallback citations to preserve minimum evidence references`
+                        `[EVIDENCE] [CITATION EXTRACTION] Added ${extractionResult.verificationStats.fallbackAdded} fallback citations to preserve minimum evidence references`
                       )
                     }
                     if (extractionResult.verificationStats.missingCitations.length > 0) {
-                      console.warn(`📚 [CITATION EXTRACTION] ${extractionResult.verificationStats.missingCitations.length} retrieved citations were not referenced`)
+                      console.warn(`[EVIDENCE] [CITATION EXTRACTION] ${extractionResult.verificationStats.missingCitations.length} retrieved citations were not referenced`)
                     }
                   } else if (contextToUse.context.citations.length > 0) {
-                    console.warn(`📚 [CITATION EXTRACTION] ⚠️ No citation markers found in response despite ${contextToUse.context.citations.length} citations being provided`)
-                    console.warn(`📚 [CITATION EXTRACTION] Response preview: ${responseText.substring(0, 300)}...`)
+                    console.warn(`[EVIDENCE] [CITATION EXTRACTION] WARNING: No citation markers found in response despite ${contextToUse.context.citations.length} citations being provided`)
+                    console.warn(`[EVIDENCE] [CITATION EXTRACTION] Response preview: ${responseText.substring(0, 300)}...`)
                   }
 
                   const utilization = computeCitationUtilization(
@@ -7676,7 +6922,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                       )
                       .slice(0, 8)
                     console.warn(
-                      `📚 [COVERAGE CHECK] Citation utilization ${Math.round(
+                      `[EVIDENCE] [COVERAGE CHECK] Citation utilization ${Math.round(
                         utilization.ratio * 100
                       )}% (${utilization.referencedUnique}/${utilization.totalUnique}); running one refinement pass.`
                     )
@@ -7692,6 +6938,7 @@ ${ENABLE_UPLOAD_CONTEXT_SEARCH ? "- Use uploadContextSearch for user-uploaded do
                             .join("\n")
                           const refinement = await generateText({
                             model: modelWithSearch,
+                            ...llmCallSettingsForModel(effectiveModel),
                             system: `${effectiveSystemPrompt}
 
 Coverage policy for this pass:
@@ -7729,26 +6976,26 @@ Return only the revised answer body with inline citations.`,
                           citationsToSave as EvidenceCitation[]
                         )
                         console.log(
-                          `📚 [COVERAGE CHECK] Post-refinement utilization ${Math.round(
+                          `[EVIDENCE] [COVERAGE CHECK] Post-refinement utilization ${Math.round(
                             refinedUtilization.ratio * 100
                           )}% (${refinedUtilization.referencedUnique}/${refinedUtilization.totalUnique})`
                         )
                       }
                     } catch (refinementError) {
                       console.warn(
-                        "📚 [COVERAGE CHECK] Refinement pass failed:",
+                        "[EVIDENCE] [COVERAGE CHECK] Refinement pass failed:",
                         refinementError
                       )
                     }
                   }
                 } else {
-                  console.warn(`📚 [CITATION EXTRACTION] ⚠️ Could not extract response text for citation parsing`)
+                  console.warn(`[EVIDENCE] [CITATION EXTRACTION] WARNING: Could not extract response text for citation parsing`)
                 }
                 } else {
-                  console.log(`📚 [CITATION EXTRACTION] No evidence context available (capturedEvidenceContext: ${!!capturedEvidenceContext}, evidenceContext: ${!!evidenceContext})`)
+                  console.log(`[CITATION EXTRACTION] No evidence context available (capturedEvidenceContext: ${!!capturedEvidenceContext}, evidenceContext: ${!!evidenceContext})`)
                 }
               } else {
-                console.log(`📚 [CITATION EXTRACTION] Evidence mode is OFF - skipping citation extraction`)
+                console.log(`[CITATION EXTRACTION] Evidence mode is OFF - skipping citation extraction`)
               }
 
               const topicContextForSave = deriveTopicContextFromCitations(
@@ -7773,7 +7020,7 @@ Return only the revised answer body with inline citations.`,
                     allowMultipleArtifacts,
                   })
                   if (citationsToSave.length > 0) {
-                    console.log(`📚 [CITATION SAVE] ✅ Saved ${citationsToSave.length} citations to database`)
+                    console.log(`[CITATION SAVE] Saved ${citationsToSave.length} citations to database`)
                   }
                 } catch (error) {
                   console.error("Failed to save assistant message:", error)
@@ -7797,7 +7044,7 @@ Return only the revised answer body with inline citations.`,
                   }
                 }
               } else if (isTempChat && citationsToSave.length > 0) {
-                console.log(`📚 [CITATION] Temp chat - ${citationsToSave.length} citations extracted but not saved to DB`)
+                console.log(`[CITATION] Temp chat - ${citationsToSave.length} citations extracted but not saved to DB`)
               }
 
               // L3 answer cache: write-behind for repeat queries
@@ -7836,7 +7083,7 @@ Return only the revised answer body with inline citations.`,
     })
 
     const streamingStartTime = performance.now() - startTime
-    console.log(`✅ Streaming started in ${streamingStartTime.toFixed(0)}ms`)
+    console.log(`[STREAM] Streaming started in ${streamingStartTime.toFixed(0)}ms`)
 
     // ENHANCE SYSTEM PROMPT IN BACKGROUND (non-blocking)
     if (effectiveUserRole === "doctor" || effectiveUserRole === "medical_student") {
@@ -7904,7 +7151,7 @@ Return only the revised answer body with inline citations.`,
       })
     }
 
-    console.log("✅ Streaming response ready, returning to client")
+    console.log("[STREAM] Streaming response ready, returning to client")
     
     const responseHeaders: Record<string, string> = {
       'Cache-Control': 'no-cache',

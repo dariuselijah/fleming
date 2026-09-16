@@ -22,9 +22,15 @@ export type EncounterStatePlain = {
   sessionDocuments?: SessionDocument[]
   status: ConsultStatus
   roomNumber?: string
+  /** practice_appointments.id when visit is tied to a booking */
+  appointmentId?: string
   appointmentReason?: string
   consultSigned?: boolean
   consultSignedAt?: string | null
+  signatureAttestation?: PatientSession["signatureAttestation"]
+  encounterVersion?: number
+  amendmentOfEncounterId?: string
+  amendmentReason?: string
   claimSubmitted?: boolean
   claimId?: string
   criticalAllergies?: string[]
@@ -64,6 +70,7 @@ export function serializeEncounterState(
     sessionDocuments: session.sessionDocuments,
     status: session.status,
     roomNumber: session.roomNumber,
+    appointmentId: session.appointmentId,
     appointmentReason: session.appointmentReason,
     consultSigned: session.consultSigned,
     consultSignedAt: session.consultSignedAt
@@ -71,6 +78,10 @@ export function serializeEncounterState(
         ? session.consultSignedAt.toISOString()
         : String(session.consultSignedAt)
       : undefined,
+    signatureAttestation: session.signatureAttestation,
+    encounterVersion: session.encounterVersion ?? 1,
+    amendmentOfEncounterId: session.amendmentOfEncounterId,
+    amendmentReason: session.amendmentReason,
     claimSubmitted: session.claimSubmitted,
     claimId: session.claimId,
     criticalAllergies: session.criticalAllergies,
@@ -99,9 +110,14 @@ export function encounterPlainToSessionPartial(plain: EncounterStatePlain): Part
     sessionDocuments: plain.sessionDocuments ?? [],
     status: plain.status,
     roomNumber: plain.roomNumber,
+    appointmentId: plain.appointmentId,
     appointmentReason: plain.appointmentReason,
     consultSigned: plain.consultSigned,
     consultSignedAt: plain.consultSignedAt ? new Date(plain.consultSignedAt) : undefined,
+    signatureAttestation: plain.signatureAttestation,
+    encounterVersion: plain.encounterVersion ?? 1,
+    amendmentOfEncounterId: plain.amendmentOfEncounterId,
+    amendmentReason: plain.amendmentReason,
     claimSubmitted: plain.claimSubmitted,
     claimId: plain.claimId,
     criticalAllergies: plain.criticalAllergies,

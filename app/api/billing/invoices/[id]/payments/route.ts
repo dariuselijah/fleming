@@ -4,21 +4,30 @@ import {
   recordSucceededManualPayment,
   initCardCheckout,
   initStitchEft,
+  initYocoCheckout,
+  initPayfastCheckout,
+  initPayflexCheckout,
 } from "@/lib/billing/payments"
-import { getAuthenticatedPracticeContext } from "@/lib/billing/context"
+import { requirePracticePermission } from "@/lib/auth/guard"
 import { sendReceiptEmail } from "@/lib/billing/deliver-receipt"
 import { getBillingPdfSignedUrl } from "@/lib/billing/storage"
 import { sendSmsMessage } from "@/lib/comms/twilio"
 import { getPracticeMessagingNumber } from "@/lib/comms/threads"
 import { normalizePhoneE164Za } from "@/lib/comms/patient-phone"
+import { disabledPaymentProviderReason } from "@/lib/billing/providers/availability"
 
 export const runtime = "nodejs"
 
 type Ctx = { params: Promise<{ id: string }> }
 
 export async function POST(req: Request, context: Ctx) {
-  const ctx = await getAuthenticatedPracticeContext()
-  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const guard = await requirePracticePermission("billing:access")
+  if (!guard.ok) return guard.response
+  const ctx = {
+    supabase: guard.context.supabase,
+    userId: guard.context.userId,
+    practiceId: guard.context.activePracticeId,
+  }
   const { id: invoiceId } = await context.params
 
   const idempotencyKey = req.headers.get("x-idempotency-key")?.trim()
@@ -45,6 +54,13 @@ export async function POST(req: Request, context: Ctx) {
   }
 
   const provider = body.provider?.trim() ?? "cash"
+  const disabledReason = disabledPaymentProviderReason(provider)
+  if (disabledReason) {
+    return NextResponse.json(
+      { error: disabledReason, code: "PAYMENT_PROVIDER_NOT_CERTIFIED" },
+      { status: 503 }
+    )
+  }
 
   try {
     if (provider === "cash") {
@@ -187,6 +203,47 @@ export async function POST(req: Request, context: Ctx) {
         receiptId: manual.receiptId,
         invoiceStatus: manual.invoiceStatus,
       })
+    }
+
+    const base = process.env.NEXT_PUBLIC_APP_URL?.trim() || ""
+    const successUrl =
+      body.successUrl?.trim() ||
+      `${base}/portal/success?invoice=${encodeURIComponent(invoiceId)}`
+
+    if (provider === "yoco") {
+      const card = await initYocoCheckout(ctx.supabase, {
+        practiceId: ctx.practiceId,
+        invoiceId,
+        actorUserId: ctx.userId,
+        idempotencyKey,
+        successUrl,
+        cancelUrl: body.cancelUrl,
+      })
+      return NextResponse.json({ checkoutUrl: card.checkoutUrl, paymentId: card.paymentId })
+    }
+
+    if (provider === "payfast") {
+      const card = await initPayfastCheckout(ctx.supabase, {
+        practiceId: ctx.practiceId,
+        invoiceId,
+        actorUserId: ctx.userId,
+        idempotencyKey,
+        successUrl,
+        cancelUrl: body.cancelUrl,
+      })
+      return NextResponse.json({ checkoutUrl: card.checkoutUrl, paymentId: card.paymentId })
+    }
+
+    if (provider === "payflex") {
+      const card = await initPayflexCheckout(ctx.supabase, {
+        practiceId: ctx.practiceId,
+        invoiceId,
+        actorUserId: ctx.userId,
+        idempotencyKey,
+        successUrl,
+        cancelUrl: body.cancelUrl,
+      })
+      return NextResponse.json({ checkoutUrl: card.checkoutUrl, paymentId: card.paymentId })
     }
 
     return NextResponse.json({ error: "Unsupported provider" }, { status: 400 })

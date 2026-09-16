@@ -8,7 +8,7 @@ export type NotificationType =
   | "payment"
   | "system"
 
-export type AdminActionTab = "inbox" | "calendar" | "billing"
+export type AdminActionTab = "front_desk" | "calendar" | "billing"
 
 /**
  * Inserts a dashboard notification + optional inbox strip preview (read by clinical-data-bootstrap / Live Activity).

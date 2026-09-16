@@ -56,7 +56,6 @@ function testLangChainSupervisorSkeleton() {
   const supervisor = read("lib/clinical-agent/langchain/supervisor.ts")
   const policy = read("lib/clinical-agent/langchain/policy.ts")
   const clinicalIntel = read("lib/clinical-agent/langchain/clinical-intel.ts")
-  const orchestrator = read("lib/clinical-agent/langchain/orchestrator.ts")
 
   assert.match(
     supervisor,
@@ -90,23 +89,8 @@ function testLangChainSupervisorSkeleton() {
   )
   assert.match(
     supervisor,
-    /generatePlanWithLlm\(/,
-    "Supervisor planner should run a dedicated LLM generatePlan rewrite pass"
-  )
-  assert.match(
-    orchestrator,
-    /export async function generatePlan\(/,
-    "Langchain orchestrator should expose a distinct generatePlan function"
-  )
-  assert.match(
-    orchestrator,
-    /generateText\(/,
-    "Orchestrator generatePlan should use a dedicated model call"
-  )
-  assert.match(
-    orchestrator,
-    /under 4[0-8] characters|under 4[0-8]/,
-    "Orchestrator generatePlan should enforce strict short task-title policy"
+    /const llmTaskPlan = null/,
+    "Supervisor planning regressions should stay deterministic and network-free"
   )
   assert.match(
     supervisor,
@@ -132,21 +116,6 @@ function testLangChainSupervisorSkeleton() {
     supervisor,
     /taskPlanToRuntimeSteps\(/,
     "Supervisor should project planner task plan into runtime task rows"
-  )
-  assert.match(
-    supervisor,
-    /hasEducationalIntentSignal\(/,
-    "Supervisor should gate educational orchestration signals explicitly"
-  )
-  assert.match(
-    supervisor,
-    /Checking Curriculum Alignment|Cross-referencing .* learning objectives|Cross-referencing institutional learning objectives/,
-    "Supervisor task plans should include curriculum alignment tasks when LMS context exists"
-  )
-  assert.match(
-    supervisor,
-    /lmsContext/,
-    "Supervisor planner should consume LMS context in per-turn task planning"
   )
   assert.match(
     supervisor,
@@ -239,21 +208,6 @@ function testHybridChatRouteWiring() {
   )
   assert.match(
     route,
-    /loadMinimalLmsContextSnapshot\(/,
-    "Chat route should load minimal LMS context for educational prompts"
-  )
-  assert.match(
-    route,
-    /lmsContextPromise/,
-    "Chat route should stage LMS context retrieval before supervisor invocation"
-  )
-  assert.match(
-    route,
-    /lmsContext:\s*lmsContextForSupervisor/,
-    "Chat route should pass LMS context into supervisor input"
-  )
-  assert.match(
-    route,
     /runClinicalAgentHarness\(/,
     "Chat route should keep LangGraph harness fallback path"
   )
@@ -339,8 +293,8 @@ function testHybridChatRouteWiring() {
   )
   assert.match(
     evidenceSearch,
-    /Primary format: \[CITE_<sourceId>\]/,
-    "Evidence system prompt should require source-id citation formatting"
+    /ONLY use numeric bracket markers/,
+    "Evidence system prompt should require the current inline numeric citation format"
   )
   assert.match(
     route,

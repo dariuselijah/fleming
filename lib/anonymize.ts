@@ -11,10 +11,16 @@
 const PII_PATTERNS = {
   // Email addresses
   email: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
-  
+
+  // South African mobile numbers (+27 / 0027 / local 0 prefix)
+  zaPhone: /(?<!\d)(?:(?:\+|00)27[\s.-]?|0)[6-8]\d(?:[\s.-]?\d){7}(?!\d)/g,
+
   // Phone numbers (various formats)
   phone: /(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
-  
+
+  // South African identity numbers (YYMMDD SSSS C A Z)
+  zaIdNumber: /\b\d{13}\b/g,
+
   // Social Security Numbers
   ssn: /\b\d{3}-?\d{2}-?\d{4}\b/g,
   
@@ -60,7 +66,9 @@ const MEDICAL_IDENTIFIERS = [
 // Replacement tokens
 const REPLACEMENTS = {
   email: "[EMAIL_REDACTED]",
+  zaPhone: "[PHONE_REDACTED]",
   phone: "[PHONE_REDACTED]",
+  zaIdNumber: "[SA_ID_REDACTED]",
   ssn: "[SSN_REDACTED]",
   creditCard: "[CARD_REDACTED]",
   ipAddress: "[IP_REDACTED]",
@@ -96,7 +104,11 @@ export function anonymizeText(text: string): string {
   // Remove email addresses
   anonymized = anonymized.replace(PII_PATTERNS.email, REPLACEMENTS.email)
 
+  // Remove South African ID numbers before broad phone/numeric patterns
+  anonymized = anonymized.replace(PII_PATTERNS.zaIdNumber, REPLACEMENTS.zaIdNumber)
+
   // Remove phone numbers
+  anonymized = anonymized.replace(PII_PATTERNS.zaPhone, REPLACEMENTS.zaPhone)
   anonymized = anonymized.replace(PII_PATTERNS.phone, REPLACEMENTS.phone)
 
   // Remove SSNs
@@ -259,14 +271,18 @@ export function containsPII(text: string): boolean {
 
   // Check for any PII patterns
   for (const pattern of Object.values(PII_PATTERNS)) {
+    pattern.lastIndex = 0
     if (pattern.test(text)) {
+      pattern.lastIndex = 0
       return true
     }
   }
 
   // Check for medical identifiers
   for (const pattern of MEDICAL_IDENTIFIERS) {
+    pattern.lastIndex = 0
     if (pattern.test(text)) {
+      pattern.lastIndex = 0
       return true
     }
   }

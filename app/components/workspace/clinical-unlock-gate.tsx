@@ -63,12 +63,23 @@ export function ClinicalUnlockGate({ children }: { children: React.ReactNode }) 
     }
   }, [pass, pass2, createNewPracticeCrypto])
 
-  if (!user?.id || !practiceId || checking) {
+  if (!user?.id || !practiceId) {
     return <>{children}</>
   }
 
   if (unlocked) {
     return <>{children}</>
+  }
+
+  if (checking) {
+    return (
+      <div className="flex h-dvh w-full items-center justify-center bg-background">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+          <Spinner className="size-4 animate-spin" />
+          Checking encrypted workspace…
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -79,14 +90,14 @@ export function ClinicalUnlockGate({ children }: { children: React.ReactNode }) 
           "fixed inset-0 z-[200] flex items-center justify-center bg-black/75 px-4 backdrop-blur-md"
         )}
       >
-        <div className="w-full max-w-md rounded-2xl border border-white/[0.08] bg-[#0c0c0c] p-6 shadow-2xl">
-          <div className="mb-4 flex items-center gap-2 text-white">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-popover p-6 shadow-2xl">
+          <div className="mb-4 flex items-center gap-2 text-foreground">
             <LockKey className="size-5 text-amber-400" weight="duotone" />
             <h2 className="text-sm font-semibold">
               {needsSetup ? "Protect this practice" : "Unlock encrypted workspace"}
             </h2>
           </div>
-          <p className="mb-4 text-[11px] leading-relaxed text-white/45">
+          <p className="mb-4 text-[11px] leading-relaxed text-muted-foreground/65">
             {needsSetup
               ? "Create a passphrase to generate your practice encryption key. You will need it on this device to read patient data. Store it safely — we cannot recover it."
               : "Enter your practice passphrase to decrypt patient records for this session."}
@@ -95,26 +106,26 @@ export function ClinicalUnlockGate({ children }: { children: React.ReactNode }) 
           {needsSetup ? (
             <div className="space-y-3">
               <label className="block">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Passphrase (min 8 characters)
                 </span>
                 <input
                   type="password"
                   value={pass}
                   onChange={(e) => setPass(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs text-white outline-none focus:border-white/20"
+                  className="mt-1 w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground outline-none focus:border-ring"
                   autoComplete="new-password"
                 />
               </label>
               <label className="block">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Confirm
                 </span>
                 <input
                   type="password"
                   value={pass2}
                   onChange={(e) => setPass2(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs text-white outline-none focus:border-white/20"
+                  className="mt-1 w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground outline-none focus:border-ring"
                   autoComplete="new-password"
                 />
               </label>
@@ -122,7 +133,7 @@ export function ClinicalUnlockGate({ children }: { children: React.ReactNode }) 
                 type="button"
                 disabled={busy || pass.length < 8 || pass !== pass2}
                 onClick={() => void onCreate()}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/90 py-2.5 text-xs font-semibold text-black disabled:opacity-40"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40"
               >
                 {busy ? <Spinner className="size-4 animate-spin" /> : null}
                 Create practice key
@@ -131,7 +142,7 @@ export function ClinicalUnlockGate({ children }: { children: React.ReactNode }) 
           ) : (
             <div className="space-y-3">
               <label className="block">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Passphrase
                 </span>
                 <input
@@ -139,7 +150,7 @@ export function ClinicalUnlockGate({ children }: { children: React.ReactNode }) 
                   value={pass}
                   onChange={(e) => setPass(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && void onUnlock()}
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs text-white outline-none focus:border-white/20"
+                  className="mt-1 w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground outline-none focus:border-ring"
                   autoComplete="current-password"
                 />
               </label>
@@ -147,7 +158,7 @@ export function ClinicalUnlockGate({ children }: { children: React.ReactNode }) 
                 type="button"
                 disabled={busy || !pass.trim()}
                 onClick={() => void onUnlock()}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/90 py-2.5 text-xs font-semibold text-black disabled:opacity-40"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40"
               >
                 {busy ? <Spinner className="size-4 animate-spin" /> : null}
                 Unlock

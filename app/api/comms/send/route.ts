@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sendSmsMessage, getPracticeMessagingNumber, getOrCreateThread, appendMessage } from "@/lib/comms"
+import { sendEmailReply } from "@/lib/comms/send-email-reply"
 import { BUILTIN_TEMPLATES, interpolateTemplate, sendTemplateMessage } from "@/lib/comms/templates"
 import { normalizePhoneE164Za } from "@/lib/comms/patient-phone"
 
@@ -49,23 +50,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "threadId or patientPhone required" }, { status: 400 })
     }
 
-    const practiceNumber = await getPracticeMessagingNumber(practiceId)
-    if (!practiceNumber) {
-      return NextResponse.json({ error: "Messaging (RCS/SMS) not configured for this practice" }, { status: 400 })
-    }
-
     let resolvedThreadId = threadId
     let targetPhone = patientPhone ? normalizePhoneE164Za(patientPhone) : ""
+    let threadChannel: string | null = null
 
     if (threadId && !patientPhone) {
       const db = createAdminClient()
       const { data: thread } = await db
         .from("conversation_threads")
-        .select("external_party")
+        .select("external_party, channel")
         .eq("id", threadId)
         .single()
       if (!thread) return NextResponse.json({ error: "Thread not found" }, { status: 404 })
+      threadChannel = thread.channel
       targetPhone = thread.external_party
+    }
+
+    if (threadChannel === "email") {
+      const to = targetPhone.trim()
+      if (!to.includes("@")) {
+        return NextResponse.json({ error: "Invalid email thread" }, { status: 400 })
+      }
+      const text = message!
+      const subject =
+        (variables?.subject as string | undefined)?.trim() ||
+        `Message from your practice`
+      const sent = await sendEmailReply({ to, subject, body: text })
+      if (!sent.ok) return NextResponse.json({ error: sent.error }, { status: 500 })
+
+      await appendMessage({
+        threadId: resolvedThreadId!,
+        practiceId,
+        direction: "outbound",
+        senderType: "staff",
+        body: text,
+        providerMessageId: sent.messageId,
+        deliveryStatus: "sent",
+      })
+
+      return NextResponse.json({ ok: true, threadId: resolvedThreadId })
+    }
+
+    const practiceNumber = await getPracticeMessagingNumber(practiceId)
+    if (!practiceNumber) {
+      return NextResponse.json({ error: "Messaging (RCS/SMS) not configured for this practice" }, { status: 400 })
     }
 
     if (!resolvedThreadId && targetPhone) {

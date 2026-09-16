@@ -2,12 +2,27 @@ import { NextResponse, type NextRequest } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import { isSupabaseEnabled } from "@/lib/supabase/config"
 
-const PUBLIC_PATH_PREFIXES = ["/auth", "/terms", "/privacy", "/scan/patient"]
+// These pages authenticate with an opaque, purpose-bound token in their page/API
+// handlers. Middleware must not require a Supabase session before that validation.
+const PUBLIC_PATH_PREFIXES = [
+  "/auth",
+  "/terms",
+  "/privacy",
+  "/scan/patient",
+  "/portal",
+  "/verify",
+  "/invite",
+  "/share",
+]
+
+function matchesPathPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`)
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  if (PUBLIC_PATH_PREFIXES.some((prefix) => matchesPathPrefix(pathname, prefix))) {
     return NextResponse.next({ request })
   }
 

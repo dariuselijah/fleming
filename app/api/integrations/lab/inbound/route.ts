@@ -29,20 +29,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 })
   }
 
-  const raw = await req.text()
-
-  // TODO: parse HL7, match patient, enqueue practice_inbox / clinical chart updates.
-  return NextResponse.json({
-    ok: true,
-    receivedBytes: raw.length,
-    practiceId: row.practice_id,
-    labPartner: row.lab_partner,
-    integrationStatus: row.status,
-  })
+  return NextResponse.json(
+    {
+      ok: false,
+      status: "unavailable",
+      error:
+        "Lab inbound ingestion is not enabled. Supported payload parsing, patient matching, audit logging, and inbox creation must be released together.",
+      labPartner: row.lab_partner,
+    },
+    { status: 503 }
+  )
 }
 
 export async function GET() {
-  return NextResponse.json({
-    message: "POST HL7 or partner payload with Authorization: Bearer <token> from lab_partner_connections.",
-  })
+  return NextResponse.json(
+    {
+      ok: false,
+      status: "unavailable",
+      message: "Lab inbound ingestion is not currently available.",
+    },
+    { status: 503 }
+  )
 }

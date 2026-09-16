@@ -6,8 +6,6 @@ import {
   normalizeCitationStyle,
   type CitationStyle,
 } from "@/lib/citations/formatters"
-import { deriveStudyExtractionMetadata } from "@/lib/student-workspace/parser"
-import { StudyGraphService } from "@/lib/student-workspace/study-graph"
 import type { EvidenceCitation, UploadVisualReference } from "@/lib/evidence/types"
 import {
   buildImageDocumentFromMediaPipeline,
@@ -5142,14 +5140,8 @@ export class UserUploadService {
         // VLM captioning is optional; continue without it
       }
 
-      const studyExtraction = deriveStudyExtractionMetadata({
-        uploadTitle: upload.title,
-        uploadKind: parsed.kind,
-        sourceUnits: parsed.sourceUnits,
-      })
       parsed.metadata = {
         ...parsed.metadata,
-        studyExtraction,
         ...(vlmCaptionedCount > 0 ? { vlmCaptionedFigures: vlmCaptionedCount } : {}),
       }
 
@@ -5686,24 +5678,6 @@ export class UserUploadService {
           })
           .eq("id", jobId),
       ])
-      try {
-        const studyGraphService = new StudyGraphService(supabase)
-        await studyGraphService.rebuildGraphFromUpload({
-          userId: upload.user_id,
-          uploadId,
-          uploadTitle: upload.title,
-          extraction: studyExtraction,
-          sourceMetadata:
-            upload.metadata && typeof upload.metadata === "object"
-              ? (upload.metadata as Record<string, unknown>)
-              : {},
-        })
-      } catch (studyGraphError) {
-        console.warn(
-          "[Uploads] Study graph refresh skipped:",
-          studyGraphError instanceof Error ? studyGraphError.message : studyGraphError
-        )
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown ingestion error"
       await Promise.all([

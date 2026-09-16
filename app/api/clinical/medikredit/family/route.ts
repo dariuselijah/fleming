@@ -2,10 +2,14 @@ import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { checkFamilyEligibility } from "@/lib/medikredit/eligibility-service"
 import { isMedikreditConfigured } from "@/lib/medikredit/env"
-import { insertEligibilityCheck } from "@/lib/medikredit/persist"
+import { insertEligibilityCheck, publicMedikreditResponse } from "@/lib/medikredit/persist"
 import { assertPracticeMember } from "@/lib/medikredit/practice-guard"
 import { fetchMedikreditProviderSettings } from "@/lib/medikredit/provider-settings"
 import type { MedikreditPatientPayload } from "@/lib/medikredit/types"
+import {
+  resolveOptionByOptionCode,
+  resolveOptionByPlanName,
+} from "@/lib/medikredit/doctor-option-catalog"
 
 export const runtime = "nodejs"
 
@@ -26,6 +30,25 @@ export async function POST(req: Request) {
   const patient = body.patient
   if (!practiceId || !patient?.id || !patient.name) {
     return NextResponse.json({ error: "practiceId and patient (id, name) are required" }, { status: 400 })
+  }
+  const doctorOption =
+    resolveOptionByOptionCode(patient.medicalAidSchemeCode, "DD") ??
+    resolveOptionByPlanName(patient.medicalAidScheme, "DD")
+  if (!doctorOption) {
+    return NextResponse.json(
+      { error: "Select a certified DoctorOption before running famcheck.", code: "DOCTOR_OPTION_REQUIRED" },
+      { status: 422 }
+    )
+  }
+  if (!doctorOption.famcheck) {
+    return NextResponse.json(
+      {
+        error: "The selected DoctorOption does not permit famcheck.",
+        code: "FAMCHECK_NOT_SUPPORTED",
+        optionCode: doctorOption.optionCode,
+      },
+      { status: 422 }
+    )
   }
 
   let userId: string
@@ -59,12 +82,13 @@ export async function POST(req: Request) {
         userId,
       })
     }
-    return NextResponse.json({ result })
+    return NextResponse.json({ result: publicMedikreditResponse(result) })
   } catch (e) {
     console.error("[medikredit/family]", e)
+    const code = (e as Error & { code?: string }).code
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Family eligibility check failed" },
-      { status: 502 }
+      { error: e instanceof Error ? e.message : "Family eligibility check failed", code: code ?? "MEDIKREDIT_TRANSPORT" },
+      { status: (e as Error & { status?: number }).status ?? 502 }
     )
   }
 }

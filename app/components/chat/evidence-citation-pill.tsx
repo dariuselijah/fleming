@@ -733,8 +733,8 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
         transition={{ duration: 0.14, ease: [0.22, 0.9, 0.32, 1] }}
         className={cn(
           "fixed z-50 w-[324px] overflow-hidden rounded-xl",
-          "border border-white/[0.06] bg-zinc-950/85 text-popover-foreground",
-          "shadow-[0_8px_32px_-8px_rgba(0,0,0,0.45)] supports-[backdrop-filter]:bg-zinc-950/65 supports-[backdrop-filter]:backdrop-blur-xl"
+          "border border-border bg-popover/90 text-popover-foreground",
+          "shadow-overlay supports-[backdrop-filter]:bg-popover/75 supports-[backdrop-filter]:backdrop-blur-xl"
         )}
         style={{ left: position.x, top: position.y }}
         onClick={(e) => e.stopPropagation()}
@@ -770,7 +770,7 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
             <button
               onClick={onClose}
               aria-label="Close"
-              className="mt-0.5 shrink-0 rounded-full p-0.5 text-muted-foreground/40 transition-colors hover:bg-white/[0.04] hover:text-foreground"
+              className="mt-0.5 shrink-0 rounded-full p-0.5 text-muted-foreground/40 transition-colors hover:bg-accent hover:text-foreground"
             >
               <X className="h-3 w-3" />
             </button>
@@ -780,7 +780,7 @@ function EvidencePopup({ citation, position, onClose }: EvidencePopupProps) {
           <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground/70">
             <span
               className={cn(
-                "inline-flex shrink-0 items-center rounded px-1 py-px text-[9.5px] font-semibold leading-none text-white/95",
+                "inline-flex shrink-0 items-center rounded px-1 py-px text-[9.5px] font-semibold leading-none text-foreground/95",
                 evidenceColor
               )}
               title={evidenceLabel}
@@ -909,7 +909,7 @@ export function EvidenceSummaryBadge({
       <span className="flex items-center gap-1">
         <span className="text-muted-foreground">Best evidence:</span>
         <span className={cn(
-          "px-1.5 py-0.5 rounded text-[10px] font-semibold text-white",
+          "px-1.5 py-0.5 rounded text-[10px] font-semibold text-foreground",
           evidenceColor
         )}>
           {evidenceShort}

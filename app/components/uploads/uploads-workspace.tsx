@@ -552,7 +552,7 @@ export function UploadsWorkspace({ embedded = false }: { embedded?: boolean } = 
                           <Icon className="size-10" />
                         </div>
                       )}
-                      <div className="absolute top-3 right-3 rounded-full border border-black/10 bg-black/50 px-2 py-1 text-[10px] font-medium text-white backdrop-blur-sm">
+                      <div className="absolute top-3 right-3 rounded-full border border-black/10 bg-black/50 px-2 py-1 text-[10px] font-medium text-foreground backdrop-blur-sm">
                         {upload.uploadKind.toUpperCase()}
                       </div>
                     </div>

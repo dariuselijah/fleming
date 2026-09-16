@@ -1,23 +1,15 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { createClient } from "@/lib/supabase/server"
-import { isOwnerOrAdmin } from "@/lib/practice/team-permissions"
-import { getPracticeMembership } from "@/lib/practice/membership-server"
+import { requirePracticePermission } from "@/lib/auth/guard"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  if (!supabase) return NextResponse.json({ error: "Unavailable" }, { status: 500 })
-
-  const { data: { user }, error: authErr } = await supabase.auth.getUser()
-  if (authErr || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
   const practiceId = req.nextUrl.searchParams.get("practiceId")?.trim()
   if (!practiceId) return NextResponse.json({ error: "practiceId required" }, { status: 400 })
 
-  const membership = await getPracticeMembership(supabase, user.id, practiceId)
-  if (!membership || !isOwnerOrAdmin(membership.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requirePracticePermission("team:manage", {
+    requestedPracticeId: practiceId,
+  })
+  if (!guard.ok) return guard.response
 
   let admin
   try {
@@ -70,6 +62,6 @@ export async function GET(req: NextRequest) {
     practiceName: practiceRow?.name ?? "Practice",
     members,
     invitations: invites ?? [],
-    callerRole: membership.role,
+    callerRole: guard.context.activeRole,
   })
 }

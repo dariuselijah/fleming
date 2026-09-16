@@ -138,7 +138,7 @@ export function EvidenceDeepDivePanel() {
             type="button"
             disabled={loading || query.trim().length < 3}
             onClick={() => void runSearch()}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600/90 px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-600 disabled:opacity-40 dark:bg-emerald-500/85"
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600/90 px-3 py-2 text-[11px] font-semibold text-foreground shadow-sm hover:bg-emerald-600 disabled:opacity-40 dark:bg-emerald-500/85"
           >
             {loading ? (
               <CircleNotch className="size-3.5 animate-spin" />

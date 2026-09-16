@@ -10,7 +10,7 @@ import {
   ChartLineUp,
   Stethoscope,
   SquaresFour,
-  Tray,
+  Hospital,
   CurrencyDollar,
   CaretDown,
   UsersThree,
@@ -37,8 +37,8 @@ const MODE_ITEMS: { id: WorkspaceMode; label: string; icon: typeof Stethoscope }
   { id: "admin", label: "Admin", icon: SquaresFour },
 ]
 
-const ADMIN_TABS: { id: AdminTab; label: string; icon: typeof Tray }[] = [
-  { id: "inbox", label: "Inbox", icon: Tray },
+const ADMIN_TABS: { id: AdminTab; label: string; icon: typeof Hospital }[] = [
+  { id: "front_desk", label: "Front Desk", icon: Hospital },
   { id: "calendar", label: "Calendar", icon: CalendarBlank },
   { id: "billing", label: "Billing", icon: CurrencyDollar },
   { id: "inventory", label: "Inventory", icon: Package },
@@ -55,7 +55,6 @@ export function PatientTabBar() {
     activePatient,
     setActivePatient,
     closePatient,
-    toggleOverlay,
     activeAdminTab,
     setAdminTab,
     activeDoctorId,
@@ -205,7 +204,10 @@ export function PatientTabBar() {
           </AnimatePresence>
           <button
             type="button"
-            onClick={() => toggleOverlay("calendar")}
+            onClick={() => {
+              setMode("admin")
+              setAdminTab("calendar")
+            }}
             className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
             aria-label="Open patient — search or schedule"
           >

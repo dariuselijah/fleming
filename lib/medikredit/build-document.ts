@@ -1,7 +1,8 @@
 import { splitPersonNameParts } from "@/lib/clinical/person-name"
 import { resolveEligibilityPlanOptionCode } from "./doctor-option-catalog"
 import { getMedikreditDefaultOptionCode } from "./env"
-import type { ClaimLineInput, MedikreditPatientPayload, MedikreditProviderSettings } from "./types"
+import type { ClaimLineInput, ItemTypeIndicator, MedikreditPatientPayload, MedikreditProviderSettings } from "./types"
+import { normalizeIcd10ForClaim } from "./normalize-icd"
 import { escapeXmlText } from "./xml-escape"
 
 const DOC_VERSION = "3.53"
@@ -13,8 +14,10 @@ function attr(name: string, value: string | undefined | null): string {
 
 function memAttrs(patient: MedikreditPatientPayload, prov: MedikreditProviderSettings): string {
   const { fname, sname } = splitPersonNameParts(patient.name ?? "")
+  const memNbr = patient.memberNumber?.trim()
   return [
-    attr("mem_acc_nbr", patient.memberNumber),
+    attr("ch_id", memNbr),
+    attr("mem_acc_nbr", memNbr),
     attr("id_nbr", patient.idNumber),
     attr("sname", sname),
     attr("fname", fname),
@@ -26,6 +29,77 @@ function memAttrs(patient: MedikreditPatientPayload, prov: MedikreditProviderSet
 function patAttrs(patient: MedikreditPatientPayload): string {
   const { fname } = splitPersonNameParts(patient.name ?? "")
   return [attr("dep_cd", patient.dependentCode), attr("ch_id", patient.idNumber), attr("fname", fname)].join("")
+}
+
+/** PAT for tx_cd 21 — demographics on PAT; SA ID in id_nbr, not ch_id. */
+function patClaimAttrs(patient: MedikreditPatientPayload): string {
+  const { fname, sname, ini } = splitPersonNameParts(patient.name ?? "")
+  const dep = patient.dependentCode?.trim() || "00"
+  const dob = ymdFromIsoDob(patient.dateOfBirth)
+  const gend = patient.sex === "M" ? "1" : patient.sex === "F" ? "2" : undefined
+  return [
+    attr("dep_cd", dep),
+    attr("dob", dob),
+    attr("id_nbr", patient.idNumber),
+    attr("sname", sname),
+    attr("fname", fname),
+    attr("inits", ini),
+    attr("gend", gend),
+    attr("rlnship", "0"),
+    attr("status", "O"),
+    attr("newborn", "N"),
+  ].join("")
+}
+
+function memClaimAttrs(patient: MedikreditPatientPayload, prov: MedikreditProviderSettings): string {
+  const { fname, sname, ini } = splitPersonNameParts(patient.name ?? "")
+  const memNbr = patient.memberNumber?.trim()
+  return [
+    attr("ch_id", memNbr),
+    attr("mem_acc_nbr", memNbr),
+    attr("sname", sname),
+    attr("inits", ini),
+    attr("fname", fname),
+    attr("mbr_ent", patient.name?.trim()),
+    attr("bhf_nbr", prov.bhfNumber),
+    attr("hpc_nbr", prov.hpcNumber),
+  ].join("")
+}
+
+/**
+ * tx_cd 21 — certified realtime-claim profile (see docs/medikredit-realtime-claims-replication.md).
+ */
+function txAttrsClaim21(
+  prov: MedikreditProviderSettings,
+  txNbr: string,
+  claimOrig: "03" | "04",
+  nbrItems: number,
+  planCode: string
+): string {
+  const ymd = todayYmd()
+  const tm = nowHmSs()
+  return [
+    attr("sp_bhf", prov.bhfNumber),
+    attr("sp_hpc", prov.hpcNumber),
+    attr("grp_prac", prov.groupPracticeNumber),
+    attr("tx_nbr", txNbr),
+    attr("plan", planCode),
+    attr("dt_cr", ymd),
+    attr("dt_os", ymd),
+    attr("dt", ymd),
+    attr("tm", tm),
+    attr("tx_cd", "21"),
+    attr("nbr_items", String(nbrItems)),
+    attr("clm_orig", "E"),
+    attr("msg_fmt", "13"),
+    attr("orig", claimOrig),
+    attr("bin", "2"),
+    attr("cntry_cd", "ZA"),
+    attr("sect_cd", "PR"),
+    attr("pay_adv", "P"),
+    attr("cl_tp", "0"),
+    attr("amd_ind", "0"),
+  ].join("")
 }
 
 function ymdFromIsoDob(iso?: string): string | undefined {
@@ -167,38 +241,75 @@ export function buildFamilyEligibilityDocument(
 </DOCUMENT>`
 }
 
-function modElements(line: ClaimLineInput): string {
+function treatmentYmd(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso.trim())
+  if (m) return `${m[1]}${m[2]}${m[3]}`
+  const digits = iso.replace(/\D/g, "")
+  return digits.length >= 8 ? digits.slice(0, 8) : todayYmd()
+}
+
+function treatmentHms(time?: string): string {
+  if (!time?.trim()) return "120000"
+  const t = time.replace(/:/g, "").trim()
+  if (/^\d{6}$/.test(t)) return t
+  if (/^\d{4}$/.test(t)) return `${t}00`
+  return "120000"
+}
+
+function trmntBlock(line: ClaimLineInput): string {
+  const ymd = treatmentYmd(line.treatmentDate)
+  const tm = treatmentHms(line.treatmentTime)
+  return `<TRMNT${attr("st_dt", ymd)}${attr("st_tm", tm)}${attr("end_dt", ymd)}${attr("end_tm", tm)}/>`
+}
+
+function lineCdgSet(line: ClaimLineInput): ItemTypeIndicator | "02" | "03" {
+  if (line.itemTypeIndicator) return line.itemTypeIndicator
+  if (line.tp === 1) return "03"
+  return "02"
+}
+
+function modifierBlocksInsideProc(line: ClaimLineInput): string {
   const codes = line.modifierCodes ?? (line.modifierCode ? [line.modifierCode] : [])
   if (codes.length === 0) return ""
+  const qty = (line.quantity ?? 1).toFixed(2)
   return codes
     .slice(0, 5)
-    .map((cd, i) => {
-      const seqAttr = line.modifierSequences?.[i] != null ? attr("seq", String(line.modifierSequences[i])) : ""
-      const amtAttr = line.modifierAmounts?.[i] != null ? attr("amt", line.modifierAmounts[i].toFixed(2)) : ""
-      return `<MOD${attr("cd", cd)}${seqAttr}${amtAttr} />`
-    })
+    .map((modCode) => `<MOD${attr("mod", modCode)}${attr("qty", qty)} units="1" unit_tp="06"/>`)
     .join("")
 }
 
-function finLine(line: ClaimLineInput): string {
-  const trmnt = `<TRMNT${attr("dt", line.treatmentDate)}${attr("tm", line.treatmentTime ?? "12:00")} />`
-  const tarCd = line.tariffCode ?? line.modifierCode ?? line.modifierCodes?.[0]
-  const proc =
-    line.tp === 2 || line.tp === 3
-      ? `<PROC${attr("tar_cd", tarCd)}>${trmnt}</PROC>`
-      : ""
-  const med = line.tp === 1 ? `<MED${attr("nappi", line.nappiCode)}>${trmnt}</MED>` : ""
-  const diag = (line.icdCodes ?? [])
+/** Certified tx_cd 21 ITEM shape — no request-side TAR wrapper (switch rejects with RJ 5337). */
+function claimItemBlock(line: ClaimLineInput, prov: MedikreditProviderSettings): string {
+  const gross = line.grossAmount.toFixed(2)
+  const qty = (line.quantity ?? 1).toFixed(2)
+  const cdgSet = lineCdgSet(line)
+  const diagCodes = (line.icdCodes ?? [])
+    .map((c) => normalizeIcd10ForClaim(c))
+    .filter((c): c is string => Boolean(c))
     .slice(0, 4)
-    .map((c) => `<DIAG${attr("cd", c)} />`)
-    .join("")
-  const mods = modElements(line)
-  const cdgSet = line.itemTypeIndicator ?? "01"
-  const qtyAttr = line.quantity != null ? attr("qty", String(line.quantity)) : ""
-  const tarInner = [proc || med, diag, mods].filter(Boolean).join("")
-  return `<ITEM lin_num="${line.lineNumber}" tp="${line.tp}"${attr("cdg_set", cdgSet)}${qtyAttr}>
-    <TAR>${tarInner}</TAR>
-    <FIN gross="${line.grossAmount.toFixed(2)}" net="${line.grossAmount.toFixed(2)}" />
+  const diags = diagCodes.map((c) => `<DIAG stg_ind="01"${attr("cd", c)}/>`).join("\n    ")
+  const addBhf = `<ADD_BHF tp_ind="1"${attr("bhf_nbr", prov.bhfNumber)}${attr("hpc_nbr", prov.hpcNumber)}/>`
+  const lineFin = `<FIN tar_ind="03"${attr("price", gross)} bs_of_cst="3"${attr("gross", gross)}/>`
+
+  let procOrMed = ""
+  if (line.tp === 1) {
+    procOrMed = `<MED${attr("nappi_cd", line.nappiCode)}${attr("qty", qty)} basis_of_eds="3" mix_cd="0" subst_ind=" "/>`
+  } else if (line.tp === 3) {
+    const modCode = line.modifierCode ?? line.modifierCodes?.[0]
+    const modInner =
+      modifierBlocksInsideProc(line) ||
+      (modCode ? `<MOD${attr("mod", modCode)}${attr("qty", qty)} units="1" unit_tp="06"/>` : "")
+    procOrMed = `<PROC>${modInner}${trmntBlock(line)}</PROC>`
+  } else {
+    const mods = modifierBlocksInsideProc(line)
+    procOrMed = `<PROC${attr("tar_cd", line.tariffCode)}${attr("qty", qty)}${attr("units", qty)} unit_tp="06">${mods}${trmntBlock(line)}</PROC>`
+  }
+
+  return `<ITEM lin_num="${line.lineNumber}" pay_adv="P" tp="${line.tp}"${attr("cdg_set", cdgSet)} process_tp="01">
+    ${procOrMed}
+    ${diags}
+    ${addBhf}
+    ${lineFin}
   </ITEM>`
 }
 
@@ -212,19 +323,30 @@ export function buildClaimDocument(
   const hasMed = lines.some((l) => l.tp === 1)
   const orig = opts?.orig ?? (hasMed ? "03" : "04")
   const gross = lines.reduce((s, l) => s + l.grossAmount, 0)
-  const mem = `<MEM${memAttrs(patient, prov)}${attr("scheme_opt", opts?.medicalSchemeOptionCode)} />`
-  const pat = `<PAT${patAttrs(patient)} />`
-  const bhf = prov.bhfNumber ? `<ADD_BHF${attr("nbr", prov.bhfNumber)} />` : ""
-  const items = lines.map((l) => finLine(l)).join("\n    ")
+  const planCode =
+    opts?.medicalSchemeOptionCode?.trim() || eligibilityPlanCode(patient)
+  const mem = `<MEM${memClaimAttrs(patient, prov)}${attr("scheme_opt", opts?.medicalSchemeOptionCode)} />`
+  const pat = `<PAT${patClaimAttrs(patient)} />`
+  /** Scheme prescribing location — required for medication episodes per accreditation pack. */
+  const bhfPrescr =
+    hasMed && prov.bhfNumber?.trim() ? `<BHF${attr("prescr", prov.bhfNumber.trim())} />` : ""
+  const doctor =
+    hasMed && prov.prescriberMemAccNbr?.trim()
+      ? `<DOCTOR${attr("mem_acc_nbr", prov.prescriberMemAccNbr.trim())}${attr("plcsv_cd", "11")}${attr("disp_cd", "01")} />`
+      : ""
+  const items = lines.map((l) => claimItemBlock(l, prov)).join("\n    ")
   const txNbr = `FLEM${Date.now()}${opts?.transactionIdSuffix ?? ""}`
+  const vend = vendEligibilityBlock(prov, txNbr)
+  const txOpen = `<TX${txAttrsClaim21(prov, txNbr, orig, lines.length, planCode)}>`
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<DOCUMENT version="${DOC_VERSION}">
-  <TX tx_cd="21"${attr("dt", todayYmd())}${attr("tm", nowHm())}${attr("orig", orig)}${attr("tx_nbr", txNbr)}>
-    <FIN gross="${gross.toFixed(2)}" net="${gross.toFixed(2)}" />
-    ${mem}
+<DOCUMENT reply_tp="1" version="${DOC_VERSION}">
+  ${txOpen}
+    ${vend ? `${vend}\n    ` : ""}${mem}
     ${pat}
-    ${bhf}
+    ${bhfPrescr}
+    ${doctor}
+    <FIN gross="${gross.toFixed(2)}" />
     ${items}
   </TX>
 </DOCUMENT>`
@@ -251,4 +373,9 @@ function todayYmd(): string {
 function nowHm(): string {
   const d = new Date()
   return `${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}`
+}
+
+function nowHmSs(): string {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}`
 }

@@ -59,6 +59,10 @@ export async function POST(req: NextRequest) {
   if (new Date(inv.expires_at) < new Date()) {
     return NextResponse.json({ error: "This invitation has expired" }, { status: 400 })
   }
+  const acceptedRoles = new Set(["admin", "physician", "nurse", "reception"])
+  if (!acceptedRoles.has(inv.role)) {
+    return NextResponse.json({ error: "Invalid invitation role" }, { status: 400 })
+  }
 
   const { data: existing } = await admin
     .from("practice_members")

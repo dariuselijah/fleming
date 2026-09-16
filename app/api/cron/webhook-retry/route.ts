@@ -5,6 +5,7 @@
 
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { requireCronAuthorization } from "@/lib/auth/cron"
 import { sendSmsMessage, sendWhatsAppMessage } from "@/lib/comms/twilio"
 
 export const maxDuration = 60
@@ -14,13 +15,8 @@ const MAX_RETRIES = 5
 const BACKOFF_BASE_MS = 60_000 // 1 min, doubles each retry
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization")
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-  }
+  const denied = requireCronAuthorization(request)
+  if (denied) return denied
 
   try {
     const db = createAdminClient()

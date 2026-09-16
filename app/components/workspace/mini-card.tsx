@@ -3,33 +3,12 @@
 import { useWorkspace, type MedicalBlock, type MedicalBlockType } from "@/lib/clinical-workspace"
 import { cn } from "@/lib/utils"
 import {
-  Flask,
-  Heartbeat,
   FileText,
-  Receipt,
-  Pill,
-  Image,
-  Microphone,
-  Warning,
-  Clipboard,
-  ArrowRight,
   ArrowSquareOut,
 } from "@phosphor-icons/react"
 import { motion } from "motion/react"
 
-const BLOCK_ICONS: Record<MedicalBlockType, React.ComponentType<any>> = {
-  LAB: Flask,
-  VITAL: Heartbeat,
-  NOTE: FileText,
-  SOAP: Clipboard,
-  CLAIM: Receipt,
-  BILLING: Receipt,
-  PRESCRIPTION: Pill,
-  IMAGING: Image,
-  SCRIBE: Microphone,
-  REFERRAL: ArrowRight,
-  ALERT: Warning,
-}
+import { BLOCK_ICONS } from "./medical-block-timeline-styles"
 
 const BLOCK_ACCENT: Record<MedicalBlockType, string> = {
   LAB: "from-purple-500/5 to-transparent border-purple-500/10",

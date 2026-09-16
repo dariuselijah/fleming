@@ -7,6 +7,7 @@ import type {
   MedicalAidVerification,
   PatientMedication,
   PatientSession,
+  PracticeClaim,
 } from "@/lib/clinical-workspace"
 import {
   findDuplicatePatient,
@@ -21,8 +22,11 @@ import {
   type EncounterStatePlain,
 } from "@/lib/clinical-workspace/encounter-state"
 import { fetchLatestEncounterPlain } from "@/lib/clinical-workspace/fetch-latest-encounter"
+import { buildEncounterSummarySourceText } from "@/lib/clinical/encounter-summary-source"
 import { decryptJson } from "@/lib/crypto/practice-e2ee"
 import { createClient } from "@/lib/supabase/client"
+import { fetchClient } from "@/lib/fetch"
+import { usePatientOverview, usePatientOverviewInvalidation } from "@/lib/patient/use-patient-overview"
 import { useUser } from "@/lib/user-store/provider"
 import { useEligibilityCheck } from "@/lib/hooks/use-eligibility-check"
 import type {
@@ -30,8 +34,17 @@ import type {
   FamilyDependentRow,
   FamilyEligibilityResponse,
 } from "@/lib/medikredit/types"
+import {
+  formatMedikreditYmd,
+  medikreditFamilyRowToPrefill,
+  normalizeFamilyDepCode,
+} from "@/lib/medikredit/family-prefill"
+import { buildFamCheckDirectoryUpdateProposal, type FamCheckDirectoryChange } from "@/lib/medikredit/famcheck-directory-update"
 import { MediKreditAccreditationModal } from "@/app/components/medikredit/medi-kredit-accreditation-modal"
+import { AssistantModalSuppressor } from "@/app/components/assistant/assistant-modal-suppressor"
 import { BentoTile } from "./bento-tile"
+import { PatientDetailPanel } from "./patient-detail-panel"
+import { PatientChartSummary } from "./patient-chart-summary"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import QRCode from "qrcode"
@@ -66,18 +79,28 @@ import {
   CheckCircle,
   XCircle,
   Sparkle,
+  CaretDown,
+  CaretRight,
 } from "@phosphor-icons/react"
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { AnimatePresence, motion } from "motion/react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 type SortKey = "name" | "lastVisit" | "balance" | "status"
 type SortDir = "asc" | "desc"
 
 const STATUS_CONFIG: Record<MedicalAidVerification, { label: string; dot: string; text: string }> = {
-  verified: { label: "Active", dot: "bg-[#00E676]", text: "text-[#00E676]" },
-  pending: { label: "Pending", dot: "bg-[#FFC107]", text: "text-[#FFC107]" },
-  terminated: { label: "Terminated", dot: "bg-[#EF5350]", text: "text-[#EF5350]" },
-  unknown: { label: "Unknown", dot: "bg-white/20", text: "text-white/40" },
+  verified: { label: "Active", dot: "bg-status-success", text: "text-status-success" },
+  pending: { label: "Pending", dot: "bg-status-warning", text: "text-status-warning" },
+  terminated: { label: "Terminated", dot: "bg-status-danger", text: "text-status-danger" },
+  unknown: { label: "Unknown", dot: "bg-secondary", text: "text-muted-foreground" },
 }
 
 const MA_SCHEMES = ["Discovery", "Bonitas", "Momentum", "GEMS", "Medihelp", "Bestmed", "Fedhealth"]
@@ -108,7 +131,7 @@ function ColHeader({
     <button
       type="button"
       onClick={() => onSort(sortKey)}
-      className={cn("group flex items-center gap-1 text-[10px] uppercase tracking-wider text-white/30 transition-colors hover:text-white/60", className)}
+      className={cn("group flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-accent-foreground/60", className)}
     >
       {label}
       {active ? (
@@ -146,15 +169,6 @@ function calculateAge(dob: string): number {
   return age
 }
 
-/** Build Add Patient modal prefill from a famcheck PAT row + principal context. */
-/** Compare scheme dep codes (0 vs 00). */
-function normalizeFamilyDepCode(raw?: string): string | undefined {
-  if (raw == null || String(raw).trim() === "") return undefined
-  const n = parseInt(String(raw).replace(/\D/g, ""), 10)
-  if (Number.isNaN(n)) return String(raw).trim()
-  return String(n).padStart(2, "0")
-}
-
 /** Whether this PAT row is already the open patient, or another record in the directory (by SA ID). */
 function resolveFamilyRowInPractice(
   row: FamilyDependentRow,
@@ -182,48 +196,6 @@ function resolveFamilyRowInPractice(
   return { state: "new" }
 }
 
-/** MediKredit YYYYMMDD (DOB or plan join) → e.g. 31 Jul 1972 */
-function formatMedikreditYmd(ymd: string | undefined): string | null {
-  if (!ymd || !/^\d{8}$/.test(ymd.trim())) return null
-  const y = Number(ymd.slice(0, 4))
-  const m = Number(ymd.slice(4, 6)) - 1
-  const d = Number(ymd.slice(6, 8))
-  const dt = new Date(y, m, d)
-  if (Number.isNaN(dt.getTime())) return null
-  return dt.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })
-}
-
-function medikreditFamilyRowToPrefill(
-  row: FamilyDependentRow,
-  ctx: { scheme?: string; schemeCode?: string; memberNumber?: string; mainMemberName?: string }
-): PatientRegistrationPrefill {
-  let firstName = row.firstNames?.trim()
-  let lastName = row.surname?.trim()
-  if ((!firstName || !lastName) && row.name?.trim()) {
-    const parts = row.name.trim().split(/\s+/).filter(Boolean)
-    if (parts.length === 1) {
-      firstName = firstName || parts[0]
-    } else {
-      lastName = lastName || parts[parts.length - 1]
-      firstName = firstName || parts.slice(0, -1).join(" ")
-    }
-  }
-  return {
-    firstName: firstName || undefined,
-    lastName: lastName || undefined,
-    idNumber: row.id_nbr?.replace(/\D/g, "").slice(0, 13),
-    dateOfBirth: row.dateOfBirthIso,
-    sex: row.gender === "1" ? "M" : row.gender === "2" ? "F" : undefined,
-    hasMedicalAid: true,
-    scheme: ctx.scheme,
-    medicalAidSchemeCode: ctx.schemeCode,
-    memberNumber: ctx.memberNumber,
-    dependentCode: row.dep_cd,
-    mainMemberName: ctx.mainMemberName,
-    medicalAidPlan: row.planDescription,
-  }
-}
-
 export type PracticePatientDraft = Omit<PracticePatient, "id">
 
 // ── Main Component ──
@@ -237,6 +209,8 @@ export function PatientDirectory() {
     setMode,
     setAdminTab,
     openPatient,
+    openPatients,
+    setActivePatient,
     addPatient,
     updatePatient,
     beginNewVisitForPatient,
@@ -247,6 +221,7 @@ export function PatientDirectory() {
   const [sortDir, setSortDir] = useState<SortDir>("asc")
   const [showRegister, setShowRegister] = useState(false)
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null)
+  const [openPatientFileId, setOpenPatientFileId] = useState<string | null>(null)
   const [registerError, setRegisterError] = useState<string | null>(null)
   const patientAddModalOpenNonce = useWorkspaceStore((s) => s.patientAddModalOpenNonce)
   const patientAddModalPrefill = useWorkspaceStore((s) => s.patientAddModalPrefill)
@@ -332,9 +307,23 @@ export function PatientDirectory() {
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
     [patients, selectedPatientId]
   )
+  const filePatient = useMemo(
+    () => patients.find((p) => p.id === openPatientFileId) ?? null,
+    [patients, openPatientFileId]
+  )
+  const selectedPatientDraft = useMemo(
+    () =>
+      openPatients.find(
+        (session) => session.patientId === selectedPatientId && !session.consultSigned
+      ) ?? null,
+    [openPatients, selectedPatientId]
+  )
+  const activeOverviewPatientId = openPatientFileId ?? selectedPatientId
+  const activeOverviewQuery = usePatientOverview(activeOverviewPatientId)
+  usePatientOverviewInvalidation(activeOverviewPatientId, activeOverviewQuery.data ?? null)
 
   const handleBookAppointment = useCallback(
-    (_patient: PracticePatient) => {
+    () => {
       setAdminTab("calendar")
     },
     [setAdminTab]
@@ -437,6 +426,11 @@ export function PatientDirectory() {
     setSelectedPatientId(patient.id)
   }, [])
 
+  const handleOpenPatientFile = useCallback((patient: PracticePatient) => {
+    setSelectedPatientId(patient.id)
+    setOpenPatientFileId(patient.id)
+  }, [])
+
   const handlePatientPersist = useCallback(
     async (id: string, update: Partial<PracticePatient>) => {
       const current = useWorkspaceStore.getState().patients.find((p) => p.id === id)
@@ -449,7 +443,8 @@ export function PatientDirectory() {
         return
       }
       try {
-        const { id: _rowId, ...payload } = merged
+        const payload: Partial<PracticePatient> = { ...merged }
+        delete payload.id
         const { ciphertext, iv } = await encryptPatientProfile(dekKey, payload as Record<string, unknown>)
         const { error } = await supabase
           .from("practice_patients")
@@ -471,22 +466,31 @@ export function PatientDirectory() {
   )
 
   const handleCreatePatient = useCallback(
-    async (draft: PracticePatientDraft) => {
+    async (draft: PracticePatientDraft, dependents: PracticePatientDraft[] = []) => {
       setRegisterError(null)
-      const dup = findDuplicatePatient(patients, {
-        idNumber: draft.idNumber,
-        passportNumber: draft.passportNumber,
-      })
-      if (dup) {
+      const allDrafts = [draft, ...dependents]
+      for (const d of allDrafts) {
+        const dup = findDuplicatePatient(patients, {
+          idNumber: d.idNumber,
+          passportNumber: d.passportNumber,
+        })
+        if (dup) {
+          setRegisterError(
+            `This practice already has a patient with this SA ID or passport number (${dup.name}). Open their file or use a different identifier.`
+          )
+          return
+        }
+      }
+      const supabase = createClient()
+      if (!practiceId || !dekKey || !unlocked || !supabase || !user?.id) {
         setRegisterError(
-          `This practice already has a patient with this SA ID or passport number (${dup.name}). Open their file or use a different identifier.`
+          "Unlock the encrypted clinical workspace before registering a patient. Patient records cannot be saved only on this device."
         )
         return
       }
-      const supabase = createClient()
-      if (practiceId && dekKey && unlocked && supabase && user?.id) {
-        try {
-          const profile = { ...draft } as Record<string, unknown>
+      try {
+        for (const d of allDrafts) {
+          const profile = { ...d } as Record<string, unknown>
           const { ciphertext, iv } = await encryptPatientProfile(dekKey, profile)
           const { data, error } = await supabase
             .from("practice_patients")
@@ -494,23 +498,27 @@ export function PatientDirectory() {
               practice_id: practiceId,
               profile_ciphertext: ciphertext,
               profile_iv: iv,
-              display_name_hint: draft.name,
+              display_name_hint: d.name,
               created_by: user.id,
             })
             .select("id")
             .single()
           if (!error && data?.id) {
-            addPatient({ ...draft, id: data.id as string })
-            setShowRegister(false)
+            addPatient({ ...d, id: data.id as string })
+          } else {
+            console.warn("[PatientDirectory] insert practice_patients", error)
+            setRegisterError("Could not save one or more patients")
             return
           }
-          console.warn("[PatientDirectory] insert practice_patients", error)
-        } catch (e) {
-          console.warn("[PatientDirectory] persist patient", e)
         }
+        setShowRegister(false)
+        if (dependents.length > 0) {
+          toast.success(`Registered ${draft.name} + ${dependents.length} family member(s)`)
+        }
+      } catch (e) {
+        console.warn("[PatientDirectory] persist patient", e)
+        setRegisterError("Could not encrypt and save the patient record")
       }
-      addPatient({ ...draft, id: crypto.randomUUID() })
-      setShowRegister(false)
     },
     [addPatient, dekKey, patients, practiceId, unlocked, user?.id]
   )
@@ -521,12 +529,12 @@ export function PatientDirectory() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Patient Directory</h2>
-          <p className="text-[11px] text-white/30">{stats.total} registered patients</p>
+          <p className="text-[11px] text-muted-foreground">{stats.total} registered patients</p>
         </div>
         <button
           type="button"
           onClick={() => setShowRegister(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.08] hover:text-white"
+          className="flex items-center gap-1.5 rounded-lg border border-panel-border bg-panel-muted px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-secondary hover:text-accent-foreground"
         >
           <Plus className="size-3.5" weight="bold" />
           Add Patient
@@ -536,13 +544,13 @@ export function PatientDirectory() {
       {/* Top Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard label="Total Patients" value={stats.total} />
-        <StatCard label="Verified MA" value={stats.verified} accent="text-[#00E676]" />
-        <StatCard label="Pending Verification" value={stats.pending} accent="text-[#FFC107]" />
+        <StatCard label="Verified MA" value={stats.verified} accent="text-status-success" />
+        <StatCard label="Pending Verification" value={stats.pending} accent="text-status-warning" />
         <StatCard label="Chronic Conditions" value={stats.chronic} accent="text-blue-400" />
         <StatCard
           label="Incomplete profiles"
           value={stats.incompleteProfiles}
-          accent={stats.incompleteProfiles > 0 ? "text-amber-400" : "text-white/30"}
+          accent={stats.incompleteProfiles > 0 ? "text-amber-400" : "text-muted-foreground"}
         />
       </div>
 
@@ -552,21 +560,21 @@ export function PatientDirectory() {
         <BentoTile className="min-h-0 flex-col">
           <div className="mb-3 flex items-center gap-2">
             <div className="relative flex-1">
-              <MagnifyingGlass className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-white/25" />
+              <MagnifyingGlass className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name, ID, member number..."
-                className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] py-2 pl-8 pr-3 text-xs text-foreground placeholder:text-white/20 focus:border-white/[0.12] focus:outline-none"
+                className="w-full rounded-lg border border-panel-border bg-panel-muted/50 py-2 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none"
               />
             </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto" style={{ scrollbarWidth: "none" }}>
             <table className="w-full text-left">
-              <thead className="sticky top-0 z-10 bg-black/80 backdrop-blur-sm">
-                <tr className="border-b border-white/[0.06]">
+              <thead className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm">
+                <tr className="border-b border-panel-border">
                   <th className="pb-2 pl-2 pr-3">
                     <ColHeader label="Patient" sortKey="name" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
                   </th>
@@ -580,7 +588,7 @@ export function PatientDirectory() {
                     <ColHeader label="Balance" sortKey="balance" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} className="justify-end" />
                   </th>
                   <th className="px-3 pb-2 text-right">
-                    <span className="text-[10px] uppercase tracking-wider text-white/30">Actions</span>
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Actions</span>
                   </th>
                 </tr>
               </thead>
@@ -593,14 +601,15 @@ export function PatientDirectory() {
                     onScribe={handleStartScribe}
                     onNewVisit={handleStartNewVisit}
                     onView={handleViewPatient}
+                    onOpenFile={handleOpenPatientFile}
                     isSelected={patient.id === selectedPatientId}
                   />
                 ))}
                 {filtered.length === 0 && (
                   <tr>
                     <td colSpan={5} className="py-16 text-center">
-                      <UserCircle className="mx-auto mb-2 size-8 text-white/10" />
-                      <p className="text-xs text-white/30">
+                      <UserCircle className="mx-auto mb-2 size-8 text-muted-foreground" />
+                      <p className="text-xs text-muted-foreground">
                         {search ? "No patients match your search" : "No patients registered"}
                       </p>
                     </td>
@@ -613,88 +622,108 @@ export function PatientDirectory() {
 
         {/* Right Column */}
         <div className="flex flex-col gap-4">
-          <BentoTile
-            title="Registration Funnel"
-            subtitle="Onboarding status"
-            icon={<IdentificationCard className="size-4" />}
-            glow={stats.pending > 0 ? "amber" : undefined}
-          >
-            <div className="space-y-3">
-              <FunnelRow label="Complete Profiles" value={stats.verified} total={stats.total} color="bg-[#00E676]" />
-              <FunnelRow label="Missing ID/MA Photo" value={stats.pending} total={stats.total} color="bg-[#FFC107]" />
-              <FunnelRow label="Never Visited" value={patients.filter((p) => !p.lastVisit).length} total={stats.total} color="bg-[#EF5350]" />
-            </div>
-          </BentoTile>
-
-          <BentoTile
-            title="Demographic Pulse"
-            subtitle="Patient base overview"
-            icon={<Heartbeat className="size-4" />}
-          >
-            <div className="space-y-4">
-              <div>
-                <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/30">Age Groups</p>
-                <div className="flex gap-1">
-                  {(() => {
-                    const ranges = [
-                      { label: "18-30", min: 18, max: 30 },
-                      { label: "31-45", min: 31, max: 45 },
-                      { label: "46-60", min: 46, max: 60 },
-                      { label: "60+", min: 60, max: 120 },
-                    ]
-                    const counts = ranges.map((r) => patients.filter((p) => (p.age ?? 0) >= r.min && (p.age ?? 0) <= r.max).length)
-                    const max = Math.max(...counts, 1)
-                    return ranges.map((r, i) => (
-                      <div key={r.label} className="flex flex-1 flex-col items-center gap-1">
-                        <div className="relative h-12 w-full rounded-md bg-white/[0.04]">
-                          <div
-                            className="absolute bottom-0 w-full rounded-md bg-blue-500/30"
-                            style={{ height: `${(counts[i] / max) * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-[9px] text-white/30">{r.label}</span>
-                        <span className="text-[10px] font-bold tabular-nums">{counts[i]}</span>
-                      </div>
-                    ))
-                  })()}
+          {selectedPatient ? (
+            <PatientDetailPanel
+              patient={selectedPatient}
+              onClose={() => setSelectedPatientId(null)}
+              onNewVisit={() => selectedPatient && handleStartNewVisit(selectedPatient)}
+              onContinueDraft={
+                selectedPatientDraft
+                  ? () => {
+                      setActivePatient(selectedPatientDraft.patientId)
+                      setMode("clinical")
+                    }
+                  : undefined
+              }
+              onScribe={() => selectedPatient && handleStartScribe(selectedPatient)}
+              onOpenFile={() => selectedPatient && handleOpenPatientFile(selectedPatient)}
+            />
+          ) : (
+            <>
+              <BentoTile
+                title="Registration Funnel"
+                subtitle="Onboarding status"
+                icon={<IdentificationCard className="size-4" />}
+                glow={stats.pending > 0 ? "amber" : undefined}
+              >
+                <div className="space-y-3">
+                  <FunnelRow label="Complete Profiles" value={stats.verified} total={stats.total} color="bg-status-success" />
+                  <FunnelRow label="Missing ID/MA Photo" value={stats.pending} total={stats.total} color="bg-status-warning" />
+                  <FunnelRow label="Never Visited" value={patients.filter((p) => !p.lastVisit).length} total={stats.total} color="bg-status-danger" />
                 </div>
-              </div>
+              </BentoTile>
 
-              <div>
-                <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/30">Top Chronic Conditions</p>
-                <div className="space-y-1">
-                  {(() => {
-                    const condMap: Record<string, number> = {}
-                    patients.forEach((p) => p.chronicConditions?.forEach((c) => { condMap[c] = (condMap[c] ?? 0) + 1 }))
-                    return Object.entries(condMap)
-                      .sort(([, a], [, b]) => b - a)
-                      .slice(0, 4)
-                      .map(([cond, count]) => (
-                        <div key={cond} className="flex items-center justify-between rounded-md px-1.5 py-1 transition-colors hover:bg-white/[0.03]">
-                          <span className="text-[11px] text-white/60">{cond}</span>
-                          <span className="text-[10px] font-bold tabular-nums text-white/40">{count}</span>
-                        </div>
-                      ))
-                  })()}
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/30">Gender</p>
-                <div className="flex gap-3">
-                  {[
-                    { label: "Male", count: patients.filter((p) => p.sex === "M").length, color: "text-blue-400" },
-                    { label: "Female", count: patients.filter((p) => p.sex === "F").length, color: "text-pink-400" },
-                  ].map((g) => (
-                    <div key={g.label} className="flex items-center gap-1.5 text-[11px]">
-                      <span className={cn("font-bold tabular-nums", g.color)}>{g.count}</span>
-                      <span className="text-white/30">{g.label}</span>
+              <BentoTile
+                title="Demographic Pulse"
+                subtitle="Patient base overview"
+                icon={<Heartbeat className="size-4" />}
+              >
+                <div className="space-y-4">
+                  <div>
+                    <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Age Groups</p>
+                    <div className="flex gap-1">
+                      {(() => {
+                        const ranges = [
+                          { label: "18-30", min: 18, max: 30 },
+                          { label: "31-45", min: 31, max: 45 },
+                          { label: "46-60", min: 46, max: 60 },
+                          { label: "60+", min: 60, max: 120 },
+                        ]
+                        const counts = ranges.map((r) => patients.filter((p) => (p.age ?? 0) >= r.min && (p.age ?? 0) <= r.max).length)
+                        const max = Math.max(...counts, 1)
+                        return ranges.map((r, i) => (
+                          <div key={r.label} className="flex flex-1 flex-col items-center gap-1">
+                            <div className="relative h-12 w-full rounded-md bg-panel-muted">
+                              <div
+                                className="absolute bottom-0 w-full rounded-md bg-blue-500/30"
+                                style={{ height: `${(counts[i] / max) * 100}%` }}
+                              />
+                            </div>
+                            <span className="text-[9px] text-muted-foreground">{r.label}</span>
+                            <span className="text-[10px] font-bold tabular-nums">{counts[i]}</span>
+                          </div>
+                        ))
+                      })()}
                     </div>
-                  ))}
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Top Chronic Conditions</p>
+                    <div className="space-y-1">
+                      {(() => {
+                        const condMap: Record<string, number> = {}
+                        patients.forEach((p) => p.chronicConditions?.forEach((c) => { condMap[c] = (condMap[c] ?? 0) + 1 }))
+                        return Object.entries(condMap)
+                          .sort(([, a], [, b]) => b - a)
+                          .slice(0, 4)
+                          .map(([cond, count]) => (
+                            <div key={cond} className="flex items-center justify-between rounded-md px-1.5 py-1 transition-colors hover:bg-panel-muted">
+                              <span className="text-[11px] text-muted-foreground/80">{cond}</span>
+                              <span className="text-[10px] font-bold tabular-nums text-muted-foreground">{count}</span>
+                            </div>
+                          ))
+                      })()}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Gender</p>
+                    <div className="flex gap-3">
+                      {[
+                        { label: "Male", count: patients.filter((p) => p.sex === "M").length, color: "text-blue-400" },
+                        { label: "Female", count: patients.filter((p) => p.sex === "F").length, color: "text-pink-400" },
+                      ].map((g) => (
+                        <div key={g.label} className="flex items-center gap-1.5 text-[11px]">
+                          <span className={cn("font-bold tabular-nums", g.color)}>{g.count}</span>
+                          <span className="text-muted-foreground">{g.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </BentoTile>
+              </BentoTile>
+            </>
+          )}
         </div>
       </div>
 
@@ -716,15 +745,18 @@ export function PatientDirectory() {
 
       {/* Patient File Panel */}
       <AnimatePresence>
-        {selectedPatient && (
+        {filePatient && (
           <PatientFilePanel
-            patient={selectedPatient}
+            patient={filePatient}
             directoryPatients={patients}
             claims={claims}
             medicalSchemes={medicalSchemes}
-            onClose={() => setSelectedPatientId(null)}
+            onClose={() => setOpenPatientFileId(null)}
             onUpdate={handlePatientPersist}
-            onSelectPatientInDirectory={(id) => setSelectedPatientId(id)}
+            onSelectPatientInDirectory={(id) => {
+              setSelectedPatientId(id)
+              setOpenPatientFileId(id)
+            }}
           />
         )}
       </AnimatePresence>
@@ -740,6 +772,7 @@ function PatientRow({
   onScribe,
   onNewVisit,
   onView,
+  onOpenFile,
   isSelected,
 }: {
   patient: PracticePatient
@@ -747,20 +780,21 @@ function PatientRow({
   onScribe: (p: PracticePatient) => void
   onNewVisit: (p: PracticePatient) => void
   onView: (p: PracticePatient) => void
+  onOpenFile: (p: PracticePatient) => void
   isSelected: boolean
 }) {
   const status = STATUS_CONFIG[patient.medicalAidStatus]
   return (
     <tr
       className={cn(
-        "group cursor-pointer border-b border-white/[0.03] transition-colors hover:bg-white/[0.03]",
-        isSelected && "bg-white/[0.05]"
+        "group cursor-pointer border-b border-panel-border transition-colors hover:bg-panel-muted",
+        isSelected && "bg-panel-muted"
       )}
       onClick={() => onView(patient)}
     >
       <td className="py-2.5 pl-2 pr-3">
         <div className="flex items-center gap-2.5">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white/[0.06] text-[10px] font-bold text-white/40">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-muted-foreground">
             {patient.name.split(" ").map((n) => n[0]).join("")}
           </div>
           <div className="min-w-0">
@@ -772,14 +806,14 @@ function PatientRow({
                 </span>
               ) : null}
             </div>
-            <p className="truncate text-[10px] text-white/25">
+            <p className="truncate text-[10px] text-muted-foreground">
               {patient.idNumber ?? "No ID"}{patient.medicalAidScheme ? ` · ${patient.medicalAidScheme}` : ""}
             </p>
           </div>
         </div>
       </td>
       <td className="px-3 py-2.5">
-        <span className="text-[11px] tabular-nums text-white/50">
+        <span className="text-[11px] tabular-nums text-muted-foreground/70">
           {patient.lastVisit
             ? new Date(patient.lastVisit).toLocaleDateString("en-ZA", { day: "numeric", month: "short" })
             : "—"}
@@ -792,7 +826,7 @@ function PatientRow({
         </div>
       </td>
       <td className="px-3 py-2.5 text-right">
-        <span className={cn("text-[11px] font-bold tabular-nums", patient.outstandingBalance > 0 ? "text-[#FFC107]" : "text-white/30")}>
+        <span className={cn("text-[11px] font-bold tabular-nums", patient.outstandingBalance > 0 ? "text-status-warning" : "text-muted-foreground")}>
           {patient.outstandingBalance > 0 ? `R${patient.outstandingBalance.toLocaleString()}` : "—"}
         </span>
       </td>
@@ -801,7 +835,7 @@ function PatientRow({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onBook(patient) }}
-            className="rounded-md border border-white/[0.06] px-2 py-1 text-[10px] text-white/50 transition-colors hover:bg-white/[0.06] hover:text-white"
+            className="rounded-md border border-panel-border px-2 py-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-accent-foreground"
             title="Book appointment"
           >
             <CalendarBlank className="size-3" weight="bold" />
@@ -812,7 +846,7 @@ function PatientRow({
               e.stopPropagation()
               onNewVisit(patient)
             }}
-            className="rounded-md border border-white/[0.06] px-2 py-1 text-[10px] text-white/50 transition-colors hover:bg-sky-500/10 hover:text-sky-400"
+            className="rounded-md border border-panel-border px-2 py-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-sky-500/10 hover:text-sky-400"
             title="New visit — fresh encounter"
           >
             <PlusCircle className="size-3" weight="bold" />
@@ -820,15 +854,15 @@ function PatientRow({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onScribe(patient) }}
-            className="rounded-md border border-white/[0.06] px-2 py-1 text-[10px] text-white/50 transition-colors hover:bg-[#00E676]/10 hover:text-[#00E676]"
+            className="rounded-md border border-panel-border px-2 py-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-status-success/10 hover:text-status-success"
             title="Resume last visit / scribe"
           >
             <Stethoscope className="size-3" weight="bold" />
           </button>
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onView(patient) }}
-            className="rounded-md border border-white/[0.06] px-2 py-1 text-[10px] text-white/50 transition-colors hover:bg-white/[0.06] hover:text-white"
+            onClick={(e) => { e.stopPropagation(); onOpenFile(patient) }}
+            className="rounded-md border border-panel-border px-2 py-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-accent-foreground"
             title="View patient file"
           >
             <Eye className="size-3" weight="bold" />
@@ -843,8 +877,8 @@ function PatientRow({
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
-      <p className="text-[10px] text-white/30">{label}</p>
+    <div className="rounded-xl border border-panel-border bg-panel-muted/50 px-4 py-3">
+      <p className="text-[10px] text-muted-foreground">{label}</p>
       <p className={cn("mt-0.5 text-xl font-bold tabular-nums", accent ?? "text-foreground")}>{value}</p>
     </div>
   )
@@ -857,10 +891,10 @@ function FunnelRow({ label, value, total, color }: { label: string; value: numbe
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-[11px]">
-        <span className="text-white/50">{label}</span>
+        <span className="text-muted-foreground/70">{label}</span>
         <span className="font-bold tabular-nums">{value}</span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.04]">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-panel-muted">
         <div className={cn("h-full rounded-full transition-all", color)} style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -977,6 +1011,10 @@ function normalizeScanSession(row: ScanSessionRow, scanUrl?: string): PatientSca
   }
 }
 
+function familyDepRowKey(d: FamilyDependentRow, i: number) {
+  return [d.dep_cd, d.id_nbr, d.name, d.dobYmd, String(i)].filter(Boolean).join(":")
+}
+
 function AddPatientModal({
   onClose,
   onCreate,
@@ -985,7 +1023,7 @@ function AddPatientModal({
   registrationError,
 }: {
   onClose: () => void
-  onCreate: (p: PracticePatientDraft) => void | Promise<void>
+  onCreate: (p: PracticePatientDraft, dependents?: PracticePatientDraft[]) => void | Promise<void>
   medicalSchemes: MedicalSchemeRow[]
   smartImportPrefillNonce?: number
   registrationError?: string | null
@@ -996,6 +1034,11 @@ function AddPatientModal({
   const [form, setForm] = useState<ManualFormState>(INITIAL_FORM)
   const [schemeOpen, setSchemeOpen] = useState(false)
   const schemeRef = useRef<HTMLDivElement>(null)
+  const { practiceId: modalPracticeId } = usePracticeCrypto()
+  const [maCheckBusy, setMaCheckBusy] = useState(false)
+  const [maCheckHint, setMaCheckHint] = useState<string | null>(null)
+  const [famDependents, setFamDependents] = useState<FamilyDependentRow[]>([])
+  const [selectedFamKeys, setSelectedFamKeys] = useState<Set<string>>(new Set())
 
   const [scanSession, setScanSession] = useState<PatientScanSessionView | null>(null)
   const [scanQrUrl, setScanQrUrl] = useState<string | null>(null)
@@ -1134,6 +1177,54 @@ function AddPatientModal({
 
   const canCreate = form.firstName.trim() && form.lastName.trim()
 
+  const runMedAidCheck = useCallback(async () => {
+    if (!modalPracticeId || !form.hasMedicalAid || !form.memberNumber.trim() || !form.scheme.trim()) {
+      setMaCheckHint("Enter scheme and member number first")
+      return
+    }
+    setMaCheckBusy(true)
+    setMaCheckHint(null)
+    setFamDependents([])
+    setSelectedFamKeys(new Set())
+    try {
+      const synthetic = {
+        id: "00000000-0000-4000-8000-000000000001",
+        name: [form.firstName, form.lastName].filter(Boolean).join(" ").trim() || "Registration",
+        memberNumber: form.memberNumber.trim(),
+        medicalAidScheme: form.scheme.trim(),
+        medicalAidSchemeCode: form.medicalAidSchemeCode.trim() || undefined,
+        dependentCode: form.dependentCode.trim() || "00",
+        idNumber: form.idNumber || undefined,
+      }
+      const elRes = await fetchClient("/api/clinical/medikredit/eligibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ practiceId: modalPracticeId, patient: synthetic, persist: false }),
+      })
+      const elJ = (await elRes.json()) as { result?: { planDescription?: string }; error?: string }
+      if (!elRes.ok) throw new Error(elJ.error || "Eligibility failed")
+      const plan = elJ.result?.planDescription?.trim()
+      if (plan) setForm((f) => ({ ...f, medicalAidPlan: plan }))
+
+      const famRes = await fetchClient("/api/clinical/medikredit/family", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ practiceId: modalPracticeId, patient: synthetic, persist: false }),
+      })
+      const famJ = (await famRes.json()) as { result?: { dependents?: FamilyDependentRow[] }; error?: string }
+      if (!famRes.ok) throw new Error(famJ.error || "Family check failed")
+      const deps = famJ.result?.dependents ?? []
+      setFamDependents(deps)
+      setMaCheckHint(
+        plan ? `Active · ${plan}` : deps.length ? `${deps.length} dependant(s) on file` : "Scheme responded"
+      )
+    } catch (e) {
+      setMaCheckHint(e instanceof Error ? e.message : "Check failed")
+    } finally {
+      setMaCheckBusy(false)
+    }
+  }, [modalPracticeId, form])
+
   const handleCreate = useCallback(() => {
     const name = [form.title, form.firstName, form.lastName].filter(Boolean).join(" ")
     const dob = form.dateOfBirth || undefined
@@ -1173,8 +1264,39 @@ function AddPatientModal({
         address: form.address,
       }),
     }
-    void onCreate(draft)
-  }, [form, onCreate])
+
+    const depDrafts: PracticePatientDraft[] = []
+    for (let i = 0; i < famDependents.length; i++) {
+      const d = famDependents[i]!
+      const key = familyDepRowKey(d, i)
+      if (!selectedFamKeys.has(key)) continue
+      const depName =
+        d.name?.trim() ||
+        [d.firstNames, d.surname].filter(Boolean).join(" ").trim() ||
+        `Dependant ${d.dep_cd ?? i + 1}`
+      let sex: "M" | "F" | "Other" | undefined
+      if (d.gender === "1") sex = "M"
+      else if (d.gender === "2") sex = "F"
+      const idDigits = d.id_nbr?.replace(/\D/g, "") ?? ""
+      depDrafts.push({
+        name: depName,
+        idNumber: idDigits.length === 13 ? idDigits : undefined,
+        dateOfBirth: d.dateOfBirthIso,
+        sex,
+        medicalAidStatus: "pending",
+        medicalAidScheme: form.scheme || undefined,
+        medicalAidSchemeCode: form.medicalAidSchemeCode.trim() || undefined,
+        medicalAidPlan: d.planDescription?.trim() || form.medicalAidPlan.trim() || undefined,
+        memberNumber: form.memberNumber || undefined,
+        dependentCode: d.dep_cd || undefined,
+        outstandingBalance: 0,
+        registeredAt: new Date().toISOString().slice(0, 10),
+        profileIncomplete: true,
+      })
+    }
+
+    void onCreate(draft, depDrafts)
+  }, [form, onCreate, famDependents, selectedFamKeys])
 
   const startScanSession = useCallback(async () => {
     if (!practiceId) {
@@ -1226,27 +1348,28 @@ function AddPatientModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
+      <AssistantModalSuppressor />
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 8 }}
         transition={{ type: "spring", stiffness: 400, damping: 30 }}
-        className="max-h-[85vh] w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0a0a0a] shadow-2xl"
+        className="max-h-[85vh] w-full max-w-xl overflow-hidden rounded-2xl border border-panel-border bg-panel shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-6 py-4">
+        <div className="flex items-center justify-between border-b border-panel-border px-6 py-4">
           <h3 className="text-sm font-semibold">Register New Patient</h3>
-          <button type="button" onClick={onClose} className="rounded-md p-1 text-white/30 hover:text-white">
+          <button type="button" onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:text-accent-foreground">
             <X className="size-4" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-white/[0.06]">
+        <div className="flex border-b border-panel-border">
           {(["manual", "scan"] as const).map((t) => (
             <button
               key={t}
@@ -1254,7 +1377,7 @@ function AddPatientModal({
               onClick={() => setTab(t)}
               className={cn(
                 "flex-1 py-2.5 text-xs font-medium transition-colors",
-                tab === t ? "border-b-2 border-white/60 text-white" : "text-white/30 hover:text-white/60"
+                tab === t ? "border-b-2 border-white/60 text-foreground" : "text-muted-foreground hover:text-accent-foreground/60"
               )}
             >
               {t === "manual" ? "Manual Entry" : "Smart Scan"}
@@ -1263,13 +1386,16 @@ function AddPatientModal({
         </div>
 
         {registrationError ? (
-          <p className="border-b border-white/[0.06] bg-red-500/10 px-6 py-2 text-[11px] text-red-300">
+          <p className="border-b border-panel-border bg-red-500/10 px-6 py-2 text-[11px] text-red-300">
             {registrationError}
           </p>
         ) : null}
 
         {/* Body */}
-        <div className="max-h-[calc(85vh-140px)] overflow-y-auto p-6" style={{ scrollbarWidth: "thin" }}>
+        <div
+          className="max-h-[calc(85vh-140px)] overflow-y-auto p-6 pb-[max(5rem,env(safe-area-inset-bottom))]"
+          style={{ scrollbarWidth: "thin" }}
+        >
           {tab === "manual" ? (
             <div className="space-y-4">
               {/* Personal Info */}
@@ -1280,7 +1406,7 @@ function AddPatientModal({
                   <select
                     value={form.title}
                     onChange={(e) => set("title", e.target.value)}
-                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-2 text-xs text-foreground focus:border-white/[0.12] focus:outline-none"
+                    className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-2 py-2 text-xs text-foreground focus:border-ring focus:outline-none"
                   >
                     <option value="">—</option>
                     {["Mr", "Mrs", "Ms", "Dr"].map((t) => <option key={t} value={t}>{t}</option>)}
@@ -1299,10 +1425,10 @@ function AddPatientModal({
                     onChange={(e) => handleIdChange(e.target.value)}
                     placeholder="e.g. 8501015012083"
                     maxLength={13}
-                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-foreground placeholder:text-white/15 focus:border-white/[0.12] focus:outline-none"
+                    className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none"
                   />
                   {form.idNumber.length > 0 && form.idNumber.length < 13 && (
-                    <p className="mt-1 text-[9px] text-[#FFC107]/60">{13 - form.idNumber.length} digits remaining</p>
+                    <p className="mt-1 text-[9px] text-status-warning/60">{13 - form.idNumber.length} digits remaining</p>
                   )}
                 </div>
                 <Field label="Date of Birth" value={form.dateOfBirth} onChange={(v) => set("dateOfBirth", v)} placeholder="YYYY-MM-DD" />
@@ -1314,7 +1440,7 @@ function AddPatientModal({
                   <select
                     value={form.sex}
                     onChange={(e) => set("sex", e.target.value)}
-                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-2 text-xs text-foreground focus:border-white/[0.12] focus:outline-none"
+                    className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-2 py-2 text-xs text-foreground focus:border-ring focus:outline-none"
                   >
                     <option value="">—</option>
                     <option value="M">Male</option>
@@ -1334,10 +1460,10 @@ function AddPatientModal({
                 <button
                   type="button"
                   onClick={() => set("hasMedicalAid", !form.hasMedicalAid)}
-                  className="flex items-center gap-1.5 text-xs text-white/40 transition-colors hover:text-white/60"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-accent-foreground/60"
                 >
                   {form.hasMedicalAid ? (
-                    <ToggleRight className="size-5 text-[#00E676]" weight="fill" />
+                    <ToggleRight className="size-5 text-status-success" weight="fill" />
                   ) : (
                     <ToggleLeft className="size-5" weight="bold" />
                   )}
@@ -1354,7 +1480,7 @@ function AddPatientModal({
                     transition={{ duration: 0.2 }}
                     className="overflow-hidden"
                   >
-                    <div className="space-y-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+                    <div className="space-y-3 rounded-xl border border-panel-border bg-panel-muted/50 p-4">
                       <div ref={schemeRef} className="relative">
                         <FieldLabel>Scheme</FieldLabel>
                         <input
@@ -1367,10 +1493,10 @@ function AddPatientModal({
                           }}
                           onFocus={() => setSchemeOpen(true)}
                           placeholder="Search by scheme name or option code…"
-                          className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-foreground placeholder:text-white/15 focus:border-white/[0.12] focus:outline-none"
+                          className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none"
                         />
                         {schemeOpen && schemeFiltered.length > 0 && (
-                          <div className="absolute left-0 top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-white/[0.08] bg-[#111] py-1 shadow-xl">
+                          <div className="absolute left-0 top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-panel-border bg-popover py-1 shadow-xl">
                             {schemeFiltered.map((s) => (
                               <button
                                 key={`${s.code}|${s.name}`}
@@ -1380,18 +1506,18 @@ function AddPatientModal({
                                   set("medicalAidSchemeCode", s.code)
                                   setSchemeOpen(false)
                                 }}
-                                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-secondary"
                               >
                                 <div className="flex items-baseline gap-2">
                                   {s.code ? (
-                                    <span className="shrink-0 font-mono text-[10px] font-medium tabular-nums text-[#00E676]/90">
+                                    <span className="shrink-0 font-mono text-[10px] font-medium tabular-nums text-status-success/90">
                                       {s.code}
                                     </span>
                                   ) : null}
-                                  <span className="text-xs text-white/80">{s.name}</span>
+                                  <span className="text-xs text-foreground/80">{s.name}</span>
                                 </div>
                                 {s.administrator ? (
-                                  <span className="text-[10px] text-white/35">{s.administrator}</span>
+                                  <span className="text-[10px] text-muted-foreground">{s.administrator}</span>
                                 ) : null}
                               </button>
                             ))}
@@ -1409,6 +1535,73 @@ function AddPatientModal({
                         onChange={(v) => set("medicalAidPlan", v)}
                         placeholder="Filled from eligibility — e.g. POLMED MARINE"
                       />
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          disabled={maCheckBusy || !modalPracticeId}
+                          onClick={() => void runMedAidCheck()}
+                          className="rounded-lg bg-status-success/15 py-2 text-[11px] font-semibold text-status-success hover:bg-status-success/25 disabled:opacity-40"
+                        >
+                          {maCheckBusy ? "Checking scheme…" : "Quick check · plan + fam"}
+                        </button>
+                        {maCheckHint ? (
+                          <p
+                            className={cn(
+                              "text-[10px] leading-relaxed",
+                              maCheckHint.includes("fail") || maCheckHint.includes("not")
+                                ? "text-amber-200/90"
+                                : "text-muted-foreground/65"
+                            )}
+                          >
+                            {maCheckHint}
+                          </p>
+                        ) : null}
+                        {famDependents.length > 0 ? (
+                          <div className="rounded-lg border border-panel-border bg-panel-muted p-2">
+                            <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
+                              Add dependants to practice
+                            </p>
+                            <ul className="max-h-36 space-y-1 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+                              {famDependents.map((d, i) => {
+                                const key = familyDepRowKey(d, i)
+                                const label =
+                                  d.name?.trim() ||
+                                  [d.firstNames, d.surname].filter(Boolean).join(" ").trim() ||
+                                  `Dep ${d.dep_cd ?? i}`
+                                const selected = selectedFamKeys.has(key)
+                                return (
+                                  <li key={key}>
+                                    <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-panel-muted">
+                                      <input
+                                        type="checkbox"
+                                        checked={selected}
+                                        onChange={() => {
+                                          setSelectedFamKeys((prev) => {
+                                            const next = new Set(prev)
+                                            if (next.has(key)) next.delete(key)
+                                            else next.add(key)
+                                            return next
+                                          })
+                                        }}
+                                        className="rounded border-panel-border"
+                                      />
+                                      <span className="text-[10px] text-foreground/70">
+                                        {label}
+                                        {d.dep_cd ? (
+                                          <span className="ml-1 font-mono text-[9px] text-muted-foreground">· {d.dep_cd}</span>
+                                        ) : null}
+                                        {d.dateOfBirthIso ? (
+                                          <span className="ml-1 text-[9px] text-muted-foreground">{d.dateOfBirthIso}</span>
+                                        ) : null}
+                                      </span>
+                                    </label>
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </motion.div>
                 )}
@@ -1436,8 +1629,8 @@ function AddPatientModal({
                     <Camera className="size-5" weight="bold" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-white">Smart Scan QR</p>
-                    <p className="mt-1 text-xs leading-5 text-white/40">
+                    <p className="text-sm font-semibold text-foreground">Smart Scan QR</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
                       Show this QR code to the patient. Their phone only captures the ID and medical aid card; you
                       confirm or edit everything here before creating the profile.
                     </p>
@@ -1446,13 +1639,13 @@ function AddPatientModal({
               </div>
 
               {!scanSession ? (
-                <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-white/[0.1] p-6 text-center">
-                  <div className="flex size-24 items-center justify-center rounded-3xl bg-white/[0.04] text-white/25">
+                <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-panel-border p-6 text-center">
+                  <div className="flex size-24 items-center justify-center rounded-3xl bg-panel-muted text-muted-foreground">
                     <Camera className="size-10" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-white/80">Start a secure scan session</p>
-                    <p className="mt-1 max-w-sm text-xs leading-5 text-white/35">
+                    <p className="text-sm font-medium text-foreground/80">Start a secure scan session</p>
+                    <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
                       The link expires quickly and pairs this registration modal with one mobile browser.
                     </p>
                   </div>
@@ -1469,25 +1662,25 @@ function AddPatientModal({
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-[180px_1fr]">
-                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 text-center">
-                    <div className="mx-auto flex size-36 items-center justify-center overflow-hidden rounded-2xl bg-white p-2">
+                  <div className="rounded-2xl border border-panel-border bg-panel-muted p-4 text-center">
+                    <div className="mx-auto flex size-36 items-center justify-center overflow-hidden rounded-2xl bg-primary p-2">
                       {scanQrUrl ? (
                         <img src={scanQrUrl} alt="Patient scan QR code" className="size-full" />
                       ) : (
-                        <Spinner className="size-6 animate-spin text-black/50" />
+                        <Spinner className="size-6 animate-spin text-primary-foreground/50" />
                       )}
                     </div>
-                    <p className="mt-3 text-[10px] uppercase tracking-wider text-white/30">Expires in</p>
-                    <p className="text-sm font-semibold text-white/70">{scanExpiresIn ?? "15 min"}</p>
+                    <p className="mt-3 text-[10px] uppercase tracking-wider text-muted-foreground">Expires in</p>
+                    <p className="text-sm font-semibold text-foreground/70">{scanExpiresIn ?? "15 min"}</p>
                     {scanSession.scanUrl ? (
-                      <p className="mt-2 break-all text-[9px] leading-4 text-white/25">{scanSession.scanUrl}</p>
+                      <p className="mt-2 break-all text-[9px] leading-4 text-muted-foreground">{scanSession.scanUrl}</p>
                     ) : null}
                   </div>
 
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                    <div className="flex items-center justify-between rounded-xl border border-panel-border bg-panel-muted px-3 py-2">
                       <div>
-                        <p className="text-xs font-medium text-white/80">
+                        <p className="text-xs font-medium text-foreground/80">
                           {scanSession.status === "submitted"
                             ? "Ready for review"
                             : scanSession.status === "processing"
@@ -1498,7 +1691,7 @@ function AddPatientModal({
                                   ? "Needs retry"
                                   : "Waiting for scan"}
                         </p>
-                        <p className="mt-0.5 text-[10px] text-white/35">
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
                           {scanSession.status === "submitted"
                             ? "Review missing details, then confirm into the form."
                             : scanSession.status === "processing"
@@ -1509,7 +1702,7 @@ function AddPatientModal({
                       {scanSession.status === "processing" ? (
                         <Spinner className="size-4 animate-spin text-emerald-300" />
                       ) : (
-                        <span className="rounded-full bg-white/[0.06] px-2 py-1 text-[10px] capitalize text-white/45">
+                        <span className="rounded-full bg-secondary px-2 py-1 text-[10px] capitalize text-muted-foreground/65">
                           {scanSession.status}
                         </span>
                       )}
@@ -1539,20 +1732,20 @@ function AddPatientModal({
                     ) : null}
 
                     {scanSession.documents.length > 0 ? (
-                      <div className="space-y-2 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+                      <div className="space-y-2 rounded-xl border border-panel-border bg-panel-muted/50 p-3">
                         {scanSession.documents.map((doc) => (
-                          <div key={doc.kind} className="rounded-lg bg-black/20 p-2">
+                          <div key={doc.kind} className="rounded-lg bg-panel-muted p-2">
                             <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-medium text-white/75">{doc.detectedLabel}</p>
-                              <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] text-white/35">
+                              <p className="text-xs font-medium text-foreground/75">{doc.detectedLabel}</p>
+                              <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] text-muted-foreground">
                                 {doc.kind === "id_document" ? "ID" : "Medical aid"}
                               </span>
                             </div>
                             <div className="mt-2 grid gap-1">
                               {Object.entries(doc.fields).slice(0, 5).map(([key, value]) => (
                                 <div key={key} className="flex justify-between gap-3 text-[10px]">
-                                  <span className="text-white/35">{key}</span>
-                                  <span className="text-right text-white/70">{value}</span>
+                                  <span className="text-muted-foreground">{key}</span>
+                                  <span className="text-right text-foreground/70">{value}</span>
                                 </div>
                               ))}
                             </div>
@@ -1566,7 +1759,7 @@ function AddPatientModal({
                         type="button"
                         disabled={scanBusy}
                         onClick={() => void cancelScanSession()}
-                        className="rounded-lg px-3 py-2 text-xs text-white/40 hover:text-white disabled:opacity-50"
+                        className="rounded-lg px-3 py-2 text-xs text-muted-foreground hover:text-accent-foreground disabled:opacity-50"
                       >
                         Cancel session
                       </button>
@@ -1574,7 +1767,7 @@ function AddPatientModal({
                         type="button"
                         disabled={!scanForm || scanSession.status !== "submitted"}
                         onClick={handleConfirmScan}
-                        className="flex items-center gap-1.5 rounded-lg bg-[#00E676]/10 px-4 py-2 text-xs font-medium text-[#00E676] transition-colors hover:bg-[#00E676]/20 disabled:cursor-not-allowed disabled:opacity-35"
+                        className="flex items-center gap-1.5 rounded-lg bg-status-success/10 px-4 py-2 text-xs font-medium text-status-success transition-colors hover:bg-status-success/20 disabled:cursor-not-allowed disabled:opacity-35"
                       >
                         <Check className="size-3.5" weight="bold" />
                         Confirm & Edit
@@ -1589,15 +1782,15 @@ function AddPatientModal({
 
         {/* Footer */}
         {tab === "manual" && (
-          <div className="flex justify-end gap-2 border-t border-white/[0.06] px-6 py-4">
-            <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-xs text-white/40 hover:text-white">
+          <div className="flex justify-end gap-2 border-t border-panel-border px-6 py-4">
+            <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-xs text-muted-foreground hover:text-accent-foreground">
               Cancel
             </button>
             <button
               type="button"
               disabled={!canCreate}
               onClick={handleCreate}
-              className="flex items-center gap-1.5 rounded-lg bg-white/[0.08] px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-white/[0.14] disabled:opacity-30"
+              className="flex items-center gap-1.5 rounded-lg bg-secondary px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-30"
             >
               <Check className="size-3.5" weight="bold" />
               Create Patient
@@ -1644,7 +1837,7 @@ function timeStrHm(h: number, m: number): string {
 }
 
 function addClockMinutes(h: number, mi: number, add: number): { h: number; m: number } {
-  let t = h * 60 + mi + add
+  const t = h * 60 + mi + add
   const hh = Math.floor(t / 60)
   const mm = t % 60
   return { h: hh, m: mm }
@@ -1724,7 +1917,7 @@ function PatientFilePanel({
   patient: PracticePatient
   /** Full practice list — used to avoid duplicate registrations from family check. */
   directoryPatients: PracticePatient[]
-  claims: { id: string; patientId: string; patientName: string; totalAmount: number; status: string; createdAt: string; lines: { description: string; amount: number }[] }[]
+  claims: PracticeClaim[]
   medicalSchemes: MedicalSchemeRow[]
   onClose: () => void
   onUpdate: (id: string, update: Partial<PracticePatient>) => void | Promise<void>
@@ -1780,18 +1973,43 @@ function PatientFilePanel({
   const [checkInBusy, setCheckInBusy] = useState(false)
   const [checkInMessage, setCheckInMessage] = useState<string | null>(null)
   const [accreditation, setAccreditation] = useState<null | "eligibility" | "family">(null)
+  const [famUpdateDialog, setFamUpdateDialog] = useState<{
+    target: PracticePatient
+    changes: FamCheckDirectoryChange[]
+    patch: Partial<PracticePatient>
+  } | null>(null)
+  const [famUpdateBusy, setFamUpdateBusy] = useState(false)
   const [encounterList, setEncounterList] = useState<
-    { id: string; status: string; updated_at: string; started_at: string }[]
+    { id: string; status: string; updated_at: string; started_at: string; appointment_id: string | null }[]
   >([])
+  const [encounterSummaryById, setEncounterSummaryById] = useState<
+    Record<
+      string,
+      {
+        chief_complaint: string | null
+        summary_text: string
+        key_findings: string[]
+        follow_up: string | null
+        created_at: string
+      }
+    >
+  >({})
+  const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({})
   const [historyLoading, setHistoryLoading] = useState(false)
+  const attemptedSummaryBackfillRef = useRef<Set<string>>(new Set())
+  const [encounterSummaryGenErrorById, setEncounterSummaryGenErrorById] = useState<Record<string, string>>({})
+  const [summaryBackfillNonce, setSummaryBackfillNonce] = useState(0)
+  const [retryingSummaryId, setRetryingSummaryId] = useState<string | null>(null)
+  const allergiesEditValue = (patient.allergies ?? []).join(", ")
+  const chronicEditValue = (patient.chronicConditions ?? []).join(", ")
 
   useEffect(() => {
     setEditForm({
       phone: patient.phone ?? "",
       email: patient.email ?? "",
       address: patient.address ?? "",
-      allergies: (patient.allergies ?? []).join(", "),
-      chronicConditions: (patient.chronicConditions ?? []).join(", "),
+      allergies: allergiesEditValue,
+      chronicConditions: chronicEditValue,
       medicalAidScheme: patient.medicalAidScheme ?? "",
       medicalAidSchemeCode: patient.medicalAidSchemeCode ?? "",
       memberNumber: patient.memberNumber ?? "",
@@ -1799,6 +2017,22 @@ function PatientFilePanel({
       mainMemberName: patient.mainMemberName ?? "",
       medicalAidPlan: patient.medicalAidPlan ?? "",
     })
+  }, [
+    allergiesEditValue,
+    chronicEditValue,
+    patient.address,
+    patient.dependentCode,
+    patient.email,
+    patient.id,
+    patient.mainMemberName,
+    patient.medicalAidPlan,
+    patient.medicalAidScheme,
+    patient.medicalAidSchemeCode,
+    patient.memberNumber,
+    patient.phone,
+  ])
+
+  useEffect(() => {
     setEditing(false)
     setSchemeOpen(false)
     setQuickPanel(null)
@@ -1806,20 +2040,12 @@ function PatientFilePanel({
     setFamilyUi({ phase: "idle" })
     setCheckInMessage(null)
     setAccreditation(null)
-  }, [
-    patient.id,
-    patient.phone,
-    patient.email,
-    patient.address,
-    patient.allergies,
-    patient.chronicConditions,
-    patient.medicalAidScheme,
-    patient.medicalAidSchemeCode,
-    patient.memberNumber,
-    patient.dependentCode,
-    patient.mainMemberName,
-    patient.medicalAidPlan,
-  ])
+    setExpandedHistory({})
+    setEncounterSummaryById({})
+    attemptedSummaryBackfillRef.current.clear()
+    setEncounterSummaryGenErrorById({})
+    setSummaryBackfillNonce(0)
+  }, [patient.id])
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -1855,25 +2081,168 @@ function PatientFilePanel({
     if (mkError) toast.error(mkError)
   }, [mkError])
 
-  useEffect(() => {
+  const loadEncounterHistory = useCallback(async () => {
     if (!practiceId || !patient.id) return
     const supabase = createClient()
     if (!supabase) return
+    const [{ data: encounters, error: encounterErr }, { data: summaries, error: summaryErr }] = await Promise.all([
+      supabase
+        .from("clinical_encounters")
+        .select("id, status, updated_at, started_at, appointment_id")
+        .eq("practice_id", practiceId)
+        .eq("patient_id", patient.id)
+        .order("updated_at", { ascending: false }),
+      supabase
+        .from("practice_encounter_summaries")
+        .select("encounter_id, chief_complaint, summary_text, key_findings, follow_up, created_at")
+        .eq("practice_id", practiceId)
+        .eq("patient_id", patient.id)
+        .order("created_at", { ascending: false })
+        .limit(100),
+    ])
+
+    if (encounterErr) {
+      setEncounterList([])
+    } else {
+      setEncounterList(
+        ((encounters ?? []) as {
+          id: string
+          status: string
+          updated_at: string
+          started_at: string
+          appointment_id: string | null
+        }[]).map((row) => ({
+          id: row.id,
+          status: row.status,
+          updated_at: row.updated_at,
+          started_at: row.started_at,
+          appointment_id: row.appointment_id,
+        }))
+      )
+    }
+
+    if (summaryErr) {
+      setEncounterSummaryById({})
+    } else {
+      const next: Record<
+        string,
+        {
+          chief_complaint: string | null
+          summary_text: string
+          key_findings: string[]
+          follow_up: string | null
+          created_at: string
+        }
+      > = {}
+      for (const row of ((summaries ?? []) as unknown as {
+        encounter_id: string
+        chief_complaint: string | null
+        summary_text: string
+        key_findings: unknown
+        follow_up: string | null
+        created_at: string
+      }[])) {
+        next[row.encounter_id] = {
+          chief_complaint: row.chief_complaint,
+          summary_text: row.summary_text,
+          key_findings: Array.isArray(row.key_findings)
+            ? row.key_findings.map((item) => String(item ?? "").trim()).filter(Boolean)
+            : [],
+          follow_up: row.follow_up,
+          created_at: row.created_at,
+        }
+      }
+      setEncounterSummaryById(next)
+    }
+  }, [patient.id, practiceId])
+
+  const generateEncounterSummaryForPatient = useCallback(
+    async (encounterId: string): Promise<{ ok: true } | { ok: false; message: string }> => {
+      if (!practiceId || !patient.id || !dekKey || !unlocked) {
+        return { ok: false, message: "Unlock the clinical workspace to generate visit summaries." }
+      }
+      const supabase = createClient()
+      if (!supabase) return { ok: false, message: "Unable to reach the database." }
+
+      const { data, error } = await supabase
+        .from("clinical_encounters")
+        .select("id, appointment_id, state_ciphertext, state_iv")
+        .eq("practice_id", practiceId)
+        .eq("patient_id", patient.id)
+        .eq("id", encounterId)
+        .maybeSingle()
+
+      if (error || !data?.state_ciphertext || !data?.state_iv) {
+        return { ok: false, message: error?.message ?? "Could not load encrypted encounter." }
+      }
+
+      try {
+        const plain = await decryptJson<EncounterStatePlain>(
+          dekKey,
+          String(data.state_ciphertext),
+          String(data.state_iv)
+        )
+        if (!plain || plain.v !== 1) {
+          return { ok: false, message: "Encounter file is not in a supported format." }
+        }
+        const sourceText = buildEncounterSummarySourceText(plain).trim()
+        if (!sourceText) {
+          return { ok: false, message: "Nothing in this visit to summarize (empty chart)." }
+        }
+        const res = await fetchClient("/api/clinical/encounter-summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            encounterId,
+            patientId: patient.id,
+            appointmentId: data.appointment_id ?? undefined,
+            sourceText,
+          }),
+        })
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string }
+          return { ok: false, message: body.error ?? `${res.status} ${res.statusText}` }
+        }
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : "Unexpected error" }
+      }
+    },
+    [dekKey, patient.id, practiceId, unlocked]
+  )
+
+  const retryEncounterSummary = useCallback(
+    async (encounterId: string) => {
+      setRetryingSummaryId(encounterId)
+      attemptedSummaryBackfillRef.current.delete(encounterId)
+      setEncounterSummaryGenErrorById((prev) => {
+        const next = { ...prev }
+        delete next[encounterId]
+        return next
+      })
+      const result = await generateEncounterSummaryForPatient(encounterId)
+      if (!result.ok) {
+        setEncounterSummaryGenErrorById((prev) => ({ ...prev, [encounterId]: result.message }))
+        toast.error("Could not generate visit summary", { description: result.message })
+      } else {
+        attemptedSummaryBackfillRef.current.add(encounterId)
+        window.dispatchEvent(
+          new CustomEvent("fleming:patient-overview-reload", { detail: { patientId: patient.id } })
+        )
+        await loadEncounterHistory()
+        toast.success("Visit summary saved")
+      }
+      setRetryingSummaryId(null)
+    },
+    [generateEncounterSummaryForPatient, loadEncounterHistory, patient.id]
+  )
+
+  useEffect(() => {
     let cancelled = false
     ;(async () => {
       setHistoryLoading(true)
       try {
-        const { data, error } = await supabase
-          .from("clinical_encounters")
-          .select("id, status, updated_at, started_at")
-          .eq("practice_id", practiceId)
-          .eq("patient_id", patient.id)
-          .order("updated_at", { ascending: false })
-        if (!cancelled && !error && data)
-          setEncounterList(
-            data as { id: string; status: string; updated_at: string; started_at: string }[]
-          )
-        else if (!cancelled && error) setEncounterList([])
+        await loadEncounterHistory()
       } finally {
         if (!cancelled) setHistoryLoading(false)
       }
@@ -1881,7 +2250,56 @@ function PatientFilePanel({
     return () => {
       cancelled = true
     }
-  }, [practiceId, patient.id])
+  }, [loadEncounterHistory])
+
+  useEffect(() => {
+    if (!practiceId || !patient.id || !dekKey || !unlocked) return
+    const missingSigned = encounterList.filter(
+      (enc) =>
+        (enc.status === "signed" || enc.status === "completed") &&
+        !encounterSummaryById[enc.id] &&
+        !attemptedSummaryBackfillRef.current.has(enc.id)
+    )
+    if (missingSigned.length === 0) return
+
+    let cancelled = false
+    ;(async () => {
+      for (const enc of missingSigned.slice(0, 6)) {
+        attemptedSummaryBackfillRef.current.add(enc.id)
+        const result = await generateEncounterSummaryForPatient(enc.id)
+        if (cancelled) return
+        if (!result.ok) {
+          setEncounterSummaryGenErrorById((prev) => ({ ...prev, [enc.id]: result.message }))
+          continue
+        }
+        setEncounterSummaryGenErrorById((prev) => {
+          const next = { ...prev }
+          delete next[enc.id]
+          return next
+        })
+        window.dispatchEvent(
+          new CustomEvent("fleming:patient-overview-reload", { detail: { patientId: patient.id } })
+        )
+      }
+      if (!cancelled) {
+        await loadEncounterHistory()
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    dekKey,
+    encounterList,
+    encounterSummaryById,
+    generateEncounterSummaryForPatient,
+    loadEncounterHistory,
+    patient.id,
+    practiceId,
+    summaryBackfillNonce,
+    unlocked,
+  ])
 
   const runEligibilityCheck = useCallback(async () => {
     setQuickPanel("eligibility")
@@ -1928,6 +2346,43 @@ function PatientFilePanel({
     }
   }, [patient, runFamily, onUpdate])
 
+  /** Opens the strip without toggling closed; runs a new check only from idle (use Re-check after a result). */
+  const handleEligibilityButtonClick = useCallback(() => {
+    setQuickPanel("eligibility")
+    if (eligibilityUi.phase === "idle") void runEligibilityCheck()
+  }, [eligibilityUi.phase, runEligibilityCheck])
+
+  const handleFamilyButtonClick = useCallback(() => {
+    setQuickPanel("family")
+    if (familyUi.phase === "idle") void runFamilyCheck()
+  }, [familyUi.phase, runFamilyCheck])
+
+  const openFamCheckUpdateReview = useCallback(
+    (row: FamilyDependentRow, resolved: ReturnType<typeof resolveFamilyRowInPractice>) => {
+      if (resolved.state === "new") return
+      const target = resolved.state === "self" ? patient : resolved.existing
+      const { patch, changes } = buildFamCheckDirectoryUpdateProposal(row, patient, target)
+      if (changes.length === 0) {
+        toast.message("No updates to apply from FamCheck for this patient")
+        return
+      }
+      setFamUpdateDialog({ target, changes, patch })
+    },
+    [patient]
+  )
+
+  const applyFamCheckUpdate = useCallback(async () => {
+    if (!famUpdateDialog) return
+    setFamUpdateBusy(true)
+    try {
+      await onUpdate(famUpdateDialog.target.id, famUpdateDialog.patch)
+      toast.success("Patient record updated from FamCheck")
+      setFamUpdateDialog(null)
+    } finally {
+      setFamUpdateBusy(false)
+    }
+  }, [famUpdateDialog, onUpdate])
+
   const handleQuickCheckIn = useCallback(() => {
     setCheckInBusy(true)
     setCheckInMessage(null)
@@ -1943,6 +2398,7 @@ function PatientFilePanel({
           createPatientSession({
             patientId: patient.id,
             name: patient.name,
+            appointmentId: existing.id,
             appointmentReason: existing.reason,
             status: "checked_in",
             medicalAidScheme: patient.medicalAidScheme ?? existing.medicalAid,
@@ -1991,6 +2447,7 @@ function PatientFilePanel({
         createPatientSession({
           patientId: patient.id,
           name: patient.name,
+          appointmentId: id,
           appointmentReason: "Walk-in check-in",
           status: "checked_in",
           medicalAidScheme: patient.medicalAidScheme,
@@ -2132,41 +2589,38 @@ function PatientFilePanel({
       animate={{ x: 0 }}
       exit={{ x: "100%" }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="fixed right-0 top-0 z-40 flex h-full w-[50%] min-w-[480px] flex-col border-l border-white/[0.08] bg-[#090909] shadow-2xl"
+      className="fixed right-0 top-0 z-40 flex h-full w-full min-w-0 flex-col border-l border-panel-border bg-panel shadow-2xl sm:w-[min(90vw,760px)]"
     >
       {/* Panel Header */}
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-6 py-4">
+      <div className="flex items-center justify-between border-b border-panel-border px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-full bg-white/[0.06] text-sm font-bold text-white/40">
+          <div className="flex size-10 items-center justify-center rounded-full bg-secondary text-sm font-bold text-muted-foreground">
             {patient.name.split(" ").map((n) => n[0]).join("")}
           </div>
           <div>
             <h3 className="text-sm font-semibold">{patient.name}</h3>
-            <p className="text-[10px] text-white/30">
+            <p className="text-[10px] text-muted-foreground">
               {patient.idNumber ?? "No ID"} · {patient.age ? `${patient.age}y` : "Age unknown"} · {patient.sex ?? "—"}
             </p>
           </div>
         </div>
-        <button type="button" onClick={onClose} className="rounded-md p-1.5 text-white/30 transition-colors hover:bg-white/[0.06] hover:text-white">
+        <button type="button" onClick={onClose} aria-label="Close patient hub" className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-accent-foreground">
           <X className="size-4" />
         </button>
       </div>
 
       {/* Quick actions — eligibility, family, check-in, inbox */}
-      <div className="border-b border-white/[0.06] px-6 py-3">
+      <div className="border-b border-panel-border px-6 py-3">
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => {
-              setQuickPanel((p) => (p === "eligibility" ? null : "eligibility"))
-              if (eligibilityUi.phase === "idle") void runEligibilityCheck()
-            }}
+            onClick={handleEligibilityButtonClick}
             disabled={mkLoading && quickPanel === "eligibility"}
             className={cn(
               "inline-flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-medium transition-all",
               quickPanel === "eligibility"
-                ? "border-white/25 bg-white/[0.08] text-white shadow-sm"
-                : "border-white/[0.08] bg-white/[0.03] text-white/70 hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white"
+                ? "border-panel-border bg-secondary text-foreground shadow-sm"
+                : "border-panel-border bg-panel-muted text-foreground/70 hover:border-ring hover:bg-secondary hover:text-accent-foreground"
             )}
           >
             <ShieldCheck className="size-3.5 text-emerald-400/90" weight="bold" />
@@ -2174,16 +2628,13 @@ function PatientFilePanel({
           </button>
           <button
             type="button"
-            onClick={() => {
-              setQuickPanel((p) => (p === "family" ? null : "family"))
-              if (familyUi.phase === "idle") void runFamilyCheck()
-            }}
+            onClick={handleFamilyButtonClick}
             disabled={mkLoading && quickPanel === "family"}
             className={cn(
               "inline-flex flex-1 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-medium transition-all",
               quickPanel === "family"
-                ? "border-white/25 bg-white/[0.08] text-white shadow-sm"
-                : "border-white/[0.08] bg-white/[0.03] text-white/70 hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white"
+                ? "border-panel-border bg-secondary text-foreground shadow-sm"
+                : "border-panel-border bg-panel-muted text-foreground/70 hover:border-ring hover:bg-secondary hover:text-accent-foreground"
             )}
           >
             <UsersThree className="size-3.5 text-sky-400/90" weight="bold" />
@@ -2195,7 +2646,7 @@ function PatientFilePanel({
             onClick={handleQuickCheckIn}
             className={cn(
               "inline-flex flex-[1.2] min-w-[120px] items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-semibold transition-all",
-              "border-[#00E676]/35 bg-[#00E676]/12 text-[#00E676] hover:bg-[#00E676]/18 disabled:opacity-50"
+              "border-status-success/35 bg-status-success/12 text-status-success hover:bg-status-success/18 disabled:opacity-50"
             )}
           >
             {checkInBusy ? <SpinnerGap className="size-3.5 animate-spin" /> : <CalendarCheck className="size-3.5" weight="bold" />}
@@ -2203,12 +2654,12 @@ function PatientFilePanel({
           </button>
           <button
             type="button"
-            onClick={() => setAdminTab("inbox")}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 text-[11px] font-medium text-white/70 transition-all hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white"
-            title="Open practice inbox"
+            onClick={() => setAdminTab("front_desk")}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-panel-border bg-panel-muted px-2.5 py-2 text-[11px] font-medium text-foreground/70 transition-all hover:border-ring hover:bg-secondary hover:text-accent-foreground"
+            title="Open Front Desk"
           >
-            <ChatCircle className="size-3.5 text-white/50" weight="bold" />
-            Inbox
+            <ChatCircle className="size-3.5 text-muted-foreground/70" weight="bold" />
+            Front Desk
           </button>
         </div>
 
@@ -2221,15 +2672,29 @@ function PatientFilePanel({
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div className="mt-3 overflow-hidden rounded-2xl border border-white/[0.07] bg-gradient-to-b from-white/[0.05] to-transparent shadow-[0_12px_40px_-12px_rgba(0,0,0,0.8)]">
+              <div className="mt-3 overflow-hidden rounded-2xl border border-panel-border bg-gradient-to-b from-white/[0.05] to-transparent shadow-[0_12px_40px_-12px_rgba(0,0,0,0.8)]">
+                <div className="flex items-center justify-end border-b border-panel-border px-2 py-1">
+                  <button
+                    type="button"
+                    onClick={() => setQuickPanel(null)}
+                    className="rounded px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-accent-foreground/75"
+                  >
+                    Collapse
+                  </button>
+                </div>
+                {eligibilityUi.phase === "idle" && (
+                  <div className="px-4 py-3 text-[11px] text-muted-foreground/65">
+                    Tap <span className="text-foreground/70">Eligibility</span> to run the check again.
+                  </div>
+                )}
                 {eligibilityUi.phase === "checking" && (
                   <div className="flex items-center gap-3 px-4 py-4">
                     <div className="flex size-10 items-center justify-center rounded-xl bg-emerald-500/15">
                       <SpinnerGap className="size-5 animate-spin text-emerald-400" />
                     </div>
                     <div>
-                      <p className="text-[11px] font-medium text-white/85">Checking eligibility</p>
-                      <p className="text-[10px] text-white/40">tx_cd 20 · {patient.name}</p>
+                      <p className="text-[11px] font-medium text-foreground/85">Checking eligibility</p>
+                      <p className="text-[10px] text-muted-foreground">tx_cd 20 · {patient.name}</p>
                     </div>
                   </div>
                 )}
@@ -2268,12 +2733,12 @@ function PatientFilePanel({
                                     : "Not eligible"}
                             </span>
                             {(elig.res ?? elig.responseCode) ? (
-                              <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 font-mono text-[10px] text-white/70">
+                              <span className="rounded-full border border-panel-border bg-secondary px-2 py-0.5 font-mono text-[10px] text-foreground/70">
                                 res={elig.res ?? elig.responseCode}
                               </span>
                             ) : null}
                           </div>
-                          <p className="mt-0.5 text-[10px] text-white/35">MediKredit switch · single-member check</p>
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">MediKredit switch · single-member check</p>
                         </div>
                       </div>
                       <Sparkle className="size-4 shrink-0 text-emerald-400/40" weight="fill" />
@@ -2288,38 +2753,38 @@ function PatientFilePanel({
 
                     <div className="mt-4 grid grid-cols-2 gap-3 text-[11px]">
                       {elig.txNbr ? (
-                        <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
-                          <span className="text-[9px] uppercase tracking-wide text-white/35">Transaction</span>
-                          <p className="mt-0.5 font-mono text-[10px] text-white/80">{elig.txNbr}</p>
+                        <div className="rounded-lg border border-panel-border bg-panel-muted px-2.5 py-2">
+                          <span className="text-[9px] uppercase tracking-wide text-muted-foreground">Transaction</span>
+                          <p className="mt-0.5 font-mono text-[10px] text-foreground/80">{elig.txNbr}</p>
                         </div>
                       ) : null}
                       {patient.medicalAidScheme ? (
-                        <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
-                          <span className="text-[9px] uppercase tracking-wide text-white/35">Scheme</span>
-                          <p className="mt-0.5 text-white/80">{patient.medicalAidScheme}</p>
+                        <div className="rounded-lg border border-panel-border bg-panel-muted px-2.5 py-2">
+                          <span className="text-[9px] uppercase tracking-wide text-muted-foreground">Scheme</span>
+                          <p className="mt-0.5 text-foreground/80">{patient.medicalAidScheme}</p>
                         </div>
                       ) : null}
                       {patient.memberNumber ? (
-                        <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
-                          <span className="text-[9px] uppercase tracking-wide text-white/35">Member #</span>
-                          <p className="mt-0.5 tabular-nums text-white/80">{patient.memberNumber}</p>
+                        <div className="rounded-lg border border-panel-border bg-panel-muted px-2.5 py-2">
+                          <span className="text-[9px] uppercase tracking-wide text-muted-foreground">Member #</span>
+                          <p className="mt-0.5 tabular-nums text-foreground/80">{patient.memberNumber}</p>
                         </div>
                       ) : null}
-                      <div className="col-span-2 rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
-                        <span className="text-[9px] uppercase tracking-wide text-white/35">HNet / Jiffy (AUTHS hnet)</span>
+                      <div className="col-span-2 rounded-lg border border-panel-border bg-panel-muted px-2.5 py-2">
+                        <span className="text-[9px] uppercase tracking-wide text-muted-foreground">HNet / Jiffy (AUTHS hnet)</span>
                         <p
                           className={cn(
                             "mt-0.5 break-all font-mono text-[11px]",
-                            elig.healthNetworkId ? "text-emerald-300/95" : "text-white/25"
+                            elig.healthNetworkId ? "text-emerald-300/95" : "text-muted-foreground"
                           )}
                         >
                           {elig.healthNetworkId ?? "—"}
                         </p>
                       </div>
                       {elig.authNumber ? (
-                        <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2">
-                          <span className="text-[9px] uppercase tracking-wide text-white/35">Auth #</span>
-                          <p className="mt-0.5 tabular-nums text-white/80">{elig.authNumber}</p>
+                        <div className="rounded-lg border border-panel-border bg-panel-muted px-2.5 py-2">
+                          <span className="text-[9px] uppercase tracking-wide text-muted-foreground">Auth #</span>
+                          <p className="mt-0.5 tabular-nums text-foreground/80">{elig.authNumber}</p>
                         </div>
                       ) : null}
                     </div>
@@ -2330,8 +2795,8 @@ function PatientFilePanel({
                       </p>
                     )}
                     {elig.rawXml && (
-                      <details className="mt-3 rounded-xl border border-white/[0.06] bg-black/30 px-3 py-2">
-                        <summary className="cursor-pointer text-[10px] font-medium text-white/45">Decoded switch reply</summary>
+                      <details className="mt-3 rounded-xl border border-panel-border bg-panel-muted px-3 py-2">
+                        <summary className="cursor-pointer text-[10px] font-medium text-muted-foreground/65">Decoded switch reply</summary>
                         <pre
                           className={cn(
                             "mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[9px] leading-relaxed",
@@ -2343,9 +2808,9 @@ function PatientFilePanel({
                       </details>
                     )}
                     {elig.responseRaw && (
-                      <details className="mt-2 rounded-xl border border-white/[0.06] bg-black/30 px-3 py-2">
-                        <summary className="cursor-pointer text-[10px] font-medium text-white/45">Full wire response</summary>
-                        <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap font-mono text-[9px] text-white/40">
+                      <details className="mt-2 rounded-xl border border-panel-border bg-panel-muted px-3 py-2">
+                        <summary className="cursor-pointer text-[10px] font-medium text-muted-foreground/65">Full wire response</summary>
+                        <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap font-mono text-[9px] text-muted-foreground">
                           {elig.responseRaw}
                         </pre>
                       </details>
@@ -2359,11 +2824,11 @@ function PatientFilePanel({
                         ))}
                       </ul>
                     )}
-                    <div className="mt-4 flex flex-wrap gap-2 border-t border-white/[0.06] pt-3">
+                    <div className="mt-4 flex flex-wrap gap-2 border-t border-panel-border pt-3">
                       <button
                         type="button"
                         onClick={() => void runEligibilityCheck()}
-                        className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[10px] font-medium text-white/75 transition-colors hover:bg-white/[0.1]"
+                        className="rounded-lg border border-panel-border bg-secondary px-3 py-1.5 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-secondary"
                       >
                         Re-check
                       </button>
@@ -2390,11 +2855,25 @@ function PatientFilePanel({
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.02]">
+              <div className="mt-3 rounded-xl border border-panel-border bg-panel-muted/50">
+                <div className="flex items-center justify-end border-b border-panel-border px-2 py-1">
+                  <button
+                    type="button"
+                    onClick={() => setQuickPanel(null)}
+                    className="rounded px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-accent-foreground/75"
+                  >
+                    Collapse
+                  </button>
+                </div>
+                {familyUi.phase === "idle" && (
+                  <div className="px-4 py-3 text-[11px] text-muted-foreground/65">
+                    Tap <span className="text-foreground/70">Family</span> to run the check again.
+                  </div>
+                )}
                 {familyUi.phase === "checking" && (
                   <div className="flex items-center gap-3 px-4 py-3.5">
                     <SpinnerGap className="size-4 shrink-0 animate-spin text-sky-400/90" />
-                    <p className="text-[11px] text-white/55">Checking household on scheme…</p>
+                    <p className="text-[11px] text-muted-foreground/75">Checking household on scheme…</p>
                   </div>
                 )}
                 {familyUi.phase === "result" && fam && (
@@ -2403,14 +2882,14 @@ function PatientFilePanel({
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <UsersThree className="size-4 text-sky-400/90" weight="bold" />
-                          <span className="text-[13px] font-semibold tracking-tight text-white/90">Household</span>
+                          <span className="text-[13px] font-semibold tracking-tight text-foreground/90">Household</span>
                           {(fam.res ?? fam.responseCode) ? (
-                            <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-white/60">
+                            <span className="rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/80">
                               {fam.res ?? fam.responseCode}
                             </span>
                           ) : null}
                         </div>
-                        <p className="mt-0.5 text-[10px] text-white/35">
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
                           {fam.memberDependentCount != null
                             ? `${fam.memberDependentCount} on file`
                             : `${fam.dependents.length} member${fam.dependents.length === 1 ? "" : "s"}`}
@@ -2419,13 +2898,13 @@ function PatientFilePanel({
                       </div>
                     </div>
 
-                    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-b border-white/[0.05] pb-3 text-[10px]">
+                    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-b border-panel-border pb-3 text-[10px]">
                       <div>
-                        <span className="text-white/30">HNet </span>
+                        <span className="text-muted-foreground">HNet </span>
                         <span
                           className={cn(
                             "font-mono tabular-nums",
-                            fam.healthNetworkId ? "text-emerald-400/90" : "text-white/20"
+                            fam.healthNetworkId ? "text-emerald-400/90" : "text-muted-foreground"
                           )}
                         >
                           {fam.healthNetworkId ?? "—"}
@@ -2433,8 +2912,8 @@ function PatientFilePanel({
                       </div>
                       {fam.memberChId ? (
                         <div>
-                          <span className="text-white/30">ch_id </span>
-                          <span className="font-mono text-white/55">{fam.memberChId}</span>
+                          <span className="text-muted-foreground">ch_id </span>
+                          <span className="font-mono text-muted-foreground/75">{fam.memberChId}</span>
                         </div>
                       ) : null}
                     </div>
@@ -2442,7 +2921,7 @@ function PatientFilePanel({
                     {fam.dependents.length > 0 && (
                       <div className="mt-3">
                         <div className="mb-2 flex items-center justify-between gap-2">
-                          <span className="text-[10px] font-medium uppercase tracking-wider text-white/30">Dependants</span>
+                          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Dependants</span>
                           <button
                             type="button"
                             onClick={() => {
@@ -2469,7 +2948,7 @@ function PatientFilePanel({
                             Add missing only
                           </button>
                         </div>
-                        <ul className="divide-y divide-white/[0.05] rounded-lg border border-white/[0.06] bg-black/20">
+                        <ul className="divide-y divide-white/[0.05] rounded-lg border border-panel-border bg-panel-muted">
                           {fam.dependents.map((d, i) => {
                             const label = (d.name ?? `${d.firstNames ?? ""} ${d.surname ?? ""}`.trim() ?? "Member").trim()
                             const initials = label
@@ -2485,25 +2964,43 @@ function PatientFilePanel({
                             const joinDisplay = d.planJoinDateYmd ? formatMedikreditYmd(d.planJoinDateYmd) : null
                             return (
                               <li key={`${d.dep_cd ?? i}-${d.id_nbr ?? i}`} className="flex gap-3 px-3 py-2.5">
-                                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-[10px] font-semibold text-white/70">
+                                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-[10px] font-semibold text-foreground/70">
                                   {initials || "?"}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-start justify-between gap-2">
-                                    <p className="truncate text-[12px] font-medium text-white/90">{label}</p>
+                                    <p className="truncate text-[12px] font-medium text-foreground/90">{label}</p>
                                     {resolved.state === "self" ? (
-                                      <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300/90">
-                                        <CheckCircle className="size-3" weight="bold" />
-                                        This patient
-                                      </span>
+                                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                                        <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300/90">
+                                          <CheckCircle className="size-3" weight="bold" />
+                                          This patient
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => openFamCheckUpdateReview(d, resolved)}
+                                          className="rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-300 transition-colors hover:bg-sky-500/15"
+                                        >
+                                          Update
+                                        </button>
+                                      </div>
                                     ) : resolved.state === "duplicate" ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => onSelectPatientInDirectory(resolved.existing.id)}
-                                        className="shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-white/75 transition-colors hover:bg-white/[0.09]"
-                                      >
-                                        Open
-                                      </button>
+                                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => openFamCheckUpdateReview(d, resolved)}
+                                          className="rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-300 transition-colors hover:bg-sky-500/15"
+                                        >
+                                          Update
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => onSelectPatientInDirectory(resolved.existing.id)}
+                                          className="rounded-md border border-panel-border bg-panel-muted px-2 py-0.5 text-[10px] font-medium text-foreground/75 transition-colors hover:bg-secondary"
+                                        >
+                                          Open
+                                        </button>
+                                      </div>
                                     ) : (
                                       <button
                                         type="button"
@@ -2524,7 +3021,7 @@ function PatientFilePanel({
                                       </button>
                                     )}
                                   </div>
-                                  <p className="mt-0.5 text-[10px] text-white/38">
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
                                     Dep {d.dep_cd ?? "—"}
                                     {d.id_nbr ? <span className="ml-2 font-mono tabular-nums">{d.id_nbr}</span> : null}
                                     {dobDisplay ? <span className="ml-2">{dobDisplay}</span> : null}
@@ -2533,16 +3030,16 @@ function PatientFilePanel({
                                     ) : null}
                                   </p>
                                   {resolved.state === "duplicate" ? (
-                                    <p className="mt-1 text-[10px] text-white/35">
-                                      Matches <span className="text-white/55">{resolved.existing.name}</span> in directory
+                                    <p className="mt-1 text-[10px] text-muted-foreground">
+                                      Matches <span className="text-muted-foreground/75">{resolved.existing.name}</span> in directory
                                     </p>
                                   ) : null}
                                   {d.planDescription ? (
                                     <p className="mt-1.5 text-[10px] text-emerald-200/75">
-                                      <span className="text-white/30">Plan </span>
+                                      <span className="text-muted-foreground">Plan </span>
                                       {d.planDescription}
                                       {joinDisplay ? (
-                                        <span className="text-white/35"> · joined {joinDisplay}</span>
+                                        <span className="text-muted-foreground"> · joined {joinDisplay}</span>
                                       ) : null}
                                     </p>
                                   ) : null}
@@ -2558,7 +3055,7 @@ function PatientFilePanel({
                       <button
                         type="button"
                         onClick={() => void runFamilyCheck()}
-                        className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[10px] font-medium text-white/70 transition-colors hover:bg-white/[0.07]"
+                        className="rounded-lg border border-panel-border bg-panel-muted px-3 py-1.5 text-[10px] font-medium text-foreground/70 transition-colors hover:bg-secondary"
                       >
                         Re-run
                       </button>
@@ -2566,7 +3063,7 @@ function PatientFilePanel({
                         <button
                           type="button"
                           onClick={() => setAccreditation("family")}
-                          className="rounded-lg border border-white/[0.08] px-3 py-1.5 text-[10px] font-medium text-white/45 transition-colors hover:text-white/65"
+                          className="rounded-lg border border-panel-border px-3 py-1.5 text-[10px] font-medium text-muted-foreground/65 transition-colors hover:text-accent-foreground/65"
                         >
                           Accreditation
                         </button>
@@ -2580,22 +3077,24 @@ function PatientFilePanel({
         </AnimatePresence>
 
         {checkInMessage && (
-          <p className="mt-2 text-[11px] leading-relaxed text-white/45">{checkInMessage}</p>
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/65">{checkInMessage}</p>
         )}
       </div>
 
       {/* Tab Bar */}
-      <div className="flex border-b border-white/[0.06] px-6">
+      <div className="flex overflow-x-auto border-b border-panel-border px-3 sm:px-6" role="tablist" aria-label="Patient hub sections">
         {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
+            role="tab"
+            aria-selected={activeTab === t.id}
             onClick={() => setActiveTab(t.id)}
             className={cn(
               "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors",
               activeTab === t.id
-                ? "border-white/60 text-white"
-                : "border-transparent text-white/30 hover:text-white/60"
+                ? "border-white/60 text-foreground"
+                : "border-transparent text-muted-foreground hover:text-accent-foreground/60"
             )}
           >
             {t.icon}
@@ -2605,9 +3104,18 @@ function PatientFilePanel({
       </div>
 
       {/* Panel Content */}
-      <div className="flex-1 overflow-y-auto p-6" style={{ scrollbarWidth: "thin" }}>
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6" style={{ scrollbarWidth: "thin" }}>
         {activeTab === "overview" && (
           <div className="space-y-5">
+            <PatientChartSummary
+              patient={patient}
+              showActions={false}
+              onOpenBilling={() => setAdminTab("billing")}
+              onOpenCalendar={() => setAdminTab("calendar")}
+            />
+
+            <div className="border-t border-panel-border pt-5" />
+
             {/* Demographics */}
             <div className="flex items-center justify-between">
               <SectionLabel>Demographics</SectionLabel>
@@ -2615,7 +3123,7 @@ function PatientFilePanel({
                 type="button"
                 disabled={saveBusy}
                 onClick={() => (editing ? void handleSaveEdit() : setEditing(true))}
-                className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white disabled:opacity-40"
+                className="flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-accent-foreground disabled:opacity-40"
               >
                 {saveBusy ? (
                   <SpinnerGap className="size-3 animate-spin" weight="bold" />
@@ -2628,7 +3136,7 @@ function PatientFilePanel({
               </button>
             </div>
 
-            <div className="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+            <div className="space-y-2 rounded-xl border border-panel-border bg-panel-muted/50 p-4">
               <InfoRow label="Full Name" value={patient.name} />
               <InfoRow label="ID Number" value={patient.idNumber ?? "—"} />
               <InfoRow label="Date of Birth" value={patient.dateOfBirth ?? "—"} />
@@ -2654,7 +3162,7 @@ function PatientFilePanel({
 
             {/* Medical Aid */}
             <SectionLabel>Medical Aid</SectionLabel>
-            <div className="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+            <div className="space-y-2 rounded-xl border border-panel-border bg-panel-muted/50 p-4">
               <div className="flex items-center gap-2">
                 <span className={cn("size-2 rounded-full", status.dot)} />
                 <span className={cn("text-xs font-medium", status.text)}>{status.label}</span>
@@ -2673,10 +3181,10 @@ function PatientFilePanel({
                       }}
                       onFocus={() => setSchemeOpen(true)}
                       placeholder="Name or option code…"
-                      className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-foreground placeholder:text-white/15 focus:border-white/[0.12] focus:outline-none"
+                      className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none"
                     />
                     {schemeOpen && schemeFilteredEdit.length > 0 && (
-                      <div className="absolute left-0 top-full z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-white/[0.08] bg-[#111] py-1 shadow-xl">
+                      <div className="absolute left-0 top-full z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-panel-border bg-popover py-1 shadow-xl">
                         {schemeFilteredEdit.map((s) => (
                           <button
                             key={`${s.code}|${s.name}`}
@@ -2686,18 +3194,18 @@ function PatientFilePanel({
                               setEdit("medicalAidSchemeCode", s.code)
                               setSchemeOpen(false)
                             }}
-                            className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                            className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-secondary"
                           >
                             <div className="flex items-baseline gap-2">
                               {s.code ? (
-                                <span className="shrink-0 font-mono text-[10px] font-medium tabular-nums text-[#00E676]/90">
+                                <span className="shrink-0 font-mono text-[10px] font-medium tabular-nums text-status-success/90">
                                   {s.code}
                                 </span>
                               ) : null}
-                              <span className="text-xs text-white/80">{s.name}</span>
+                              <span className="text-xs text-foreground/80">{s.name}</span>
                             </div>
                             {s.administrator ? (
-                              <span className="text-[10px] text-white/35">{s.administrator}</span>
+                              <span className="text-[10px] text-muted-foreground">{s.administrator}</span>
                             ) : null}
                           </button>
                         ))}
@@ -2705,7 +3213,7 @@ function PatientFilePanel({
                     )}
                   </div>
                   {editForm.medicalAidSchemeCode ? (
-                    <p className="text-[10px] text-[#00E676]/80">
+                    <p className="text-[10px] text-status-success/80">
                       Option code (TX plan): <span className="font-mono tabular-nums">{editForm.medicalAidSchemeCode}</span>
                     </p>
                   ) : (
@@ -2722,7 +3230,7 @@ function PatientFilePanel({
                       value={editForm.medicalAidPlan}
                       onChange={(v) => setEdit("medicalAidPlan", v)}
                     />
-                    <p className="mt-1 text-[9px] text-white/30">
+                    <p className="mt-1 text-[9px] text-muted-foreground">
                       Populated from MediKredit eligibility or family check (PLAN pln_descr). You can clear or edit if needed.
                     </p>
                   </div>
@@ -2743,7 +3251,7 @@ function PatientFilePanel({
                   <div>
                     <InfoRow label="Benefit plan (switch)" value={patient.medicalAidPlan?.trim() ? patient.medicalAidPlan : "—"} />
                     {!patient.medicalAidPlan?.trim() ? (
-                      <p className="mt-1 text-[9px] text-white/28">Run eligibility or family check to pull plan from the switch.</p>
+                      <p className="mt-1 text-[9px] text-muted-foreground">Run eligibility or family check to pull plan from the switch.</p>
                     ) : null}
                   </div>
                 </>
@@ -2752,7 +3260,7 @@ function PatientFilePanel({
 
             {/* Allergies & Chronic */}
             <SectionLabel>Clinical</SectionLabel>
-            <div className="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+            <div className="space-y-2 rounded-xl border border-panel-border bg-panel-muted/50 p-4">
               {editing ? (
                 <>
                   <EditableRow label="Allergies" value={editForm.allergies} onChange={(v) => setEditForm((f) => ({ ...f, allergies: v }))} />
@@ -2772,44 +3280,177 @@ function PatientFilePanel({
           <div className="space-y-3">
             <SectionLabel>Clinical Sessions</SectionLabel>
             {historyLoading && (
-              <p className="py-4 text-center text-xs text-white/25">Loading sessions…</p>
+              <p className="py-4 text-center text-xs text-muted-foreground">Loading sessions…</p>
             )}
             {!historyLoading &&
               encounterList.map((enc) => (
-                <button
+                <div
                   key={enc.id}
-                  type="button"
-                  onClick={() => void handleOpenClinicalEncounter(enc.id)}
-                  className="w-full rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 text-left transition-colors hover:border-white/[0.12] hover:bg-white/[0.04]"
+                  className="rounded-xl border border-panel-border bg-panel-muted/50 p-4 transition-colors hover:border-ring hover:bg-panel-muted"
                 >
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-white/70">
-                      {new Date(enc.updated_at).toLocaleDateString("en-ZA", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-[9px] font-medium uppercase",
-                        enc.status === "signed" || enc.status === "completed"
-                          ? "bg-[#00E676]/10 text-[#00E676]"
-                          : enc.status === "in_progress"
-                            ? "bg-[#FFC107]/10 text-[#FFC107]"
-                            : "bg-white/[0.06] text-white/40"
+                  <button
+                    type="button"
+                    onClick={() => setExpandedHistory((current) => ({ ...current, [enc.id]: !current[enc.id] }))}
+                    className="w-full text-left"
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        {expandedHistory[enc.id] ? (
+                          <CaretDown className="size-3.5 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <CaretRight className="size-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="text-[11px] font-medium text-foreground/70">
+                          {new Date(enc.updated_at).toLocaleDateString("en-ZA", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[9px] font-medium uppercase",
+                          enc.status === "signed" || enc.status === "completed"
+                            ? "bg-status-success/10 text-status-success"
+                            : enc.status === "in_progress"
+                              ? "bg-status-warning/10 text-status-warning"
+                              : "bg-secondary text-muted-foreground"
+                        )}
+                      >
+                        {enc.status.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                    {!expandedHistory[enc.id] ? (
+                      <p className="text-[10px] text-muted-foreground">
+                        {encounterSummaryGenErrorById[enc.id] ? (
+                          <span className="text-rose-300/85">
+                            Summary failed — {encounterSummaryGenErrorById[enc.id]}
+                          </span>
+                        ) : encounterSummaryById[enc.id]?.chief_complaint ? (
+                          encounterSummaryById[enc.id]?.chief_complaint
+                        ) : enc.status === "signed" || enc.status === "completed" ? (
+                          attemptedSummaryBackfillRef.current.has(enc.id) ? (
+                            <span className="text-amber-200/70">Generating AI summary…</span>
+                          ) : (
+                            "Open to view AI summary and consult details"
+                          )
+                        ) : (
+                          "Open to view AI summary and consult details"
+                        )}
+                      </p>
+                    ) : null}
+                  </button>
+
+                  {expandedHistory[enc.id] ? (
+                    <div className="mt-3 border-t border-panel-border pt-3">
+                      {encounterSummaryById[enc.id] ? (
+                        <div className="space-y-2">
+                          {encounterSummaryById[enc.id]?.chief_complaint ? (
+                            <p className="text-[11px] font-medium text-violet-200/90">
+                              {encounterSummaryById[enc.id]?.chief_complaint}
+                            </p>
+                          ) : null}
+                          <p className="text-[11px] leading-relaxed text-foreground/75">
+                            {encounterSummaryById[enc.id]?.summary_text}
+                          </p>
+                          {encounterSummaryById[enc.id]?.key_findings.length ? (
+                            <ul className="list-inside list-disc text-[10px] text-muted-foreground/65">
+                              {encounterSummaryById[enc.id]?.key_findings.slice(0, 4).map((item, index) => (
+                                <li key={`${enc.id}-${index}`}>{item}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          {encounterSummaryById[enc.id]?.follow_up ? (
+                            <p className="text-[10px] text-amber-200/80">
+                              Follow-up: {encounterSummaryById[enc.id]?.follow_up}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : enc.status === "signed" || enc.status === "completed" ? (
+                        <div className="space-y-2">
+                          {encounterSummaryGenErrorById[enc.id] ? (
+                            <div className="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2">
+                              <p className="text-[10px] font-medium text-rose-200/95">Could not save AI summary</p>
+                              <p className="mt-1 text-[10px] text-rose-200/70">{encounterSummaryGenErrorById[enc.id]}</p>
+                              <button
+                                type="button"
+                                disabled={retryingSummaryId === enc.id}
+                                onClick={() => void retryEncounterSummary(enc.id)}
+                                className="mt-2 rounded-lg border border-panel-border bg-secondary px-3 py-1.5 text-[10px] font-medium text-foreground/80 transition-colors hover:bg-secondary disabled:opacity-50"
+                              >
+                                {retryingSummaryId === enc.id ? "Retrying…" : "Retry summary"}
+                              </button>
+                            </div>
+                          ) : attemptedSummaryBackfillRef.current.has(enc.id) ? (
+                            <p className="text-[10px] text-amber-200/75">AI summary is being generated for this signed consult.</p>
+                          ) : (
+                            <div className="rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2">
+                              <p className="text-[10px] text-muted-foreground/65">
+                                No AI summary saved yet.{!dekKey || !unlocked ? " Unlock the clinical workspace to generate it." : ""}
+                              </p>
+                              {(dekKey && unlocked) ? (
+                                <button
+                                  type="button"
+                                  disabled={retryingSummaryId === enc.id}
+                                  onClick={() => void retryEncounterSummary(enc.id)}
+                                  className="mt-2 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-1.5 text-[10px] font-medium text-sky-300 transition-colors hover:bg-sky-500/15 disabled:opacity-50"
+                                >
+                                  {retryingSummaryId === enc.id ? "Working…" : "Generate summary"}
+                                </button>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-muted-foreground">This consult has not been signed yet, so no AI summary is available.</p>
                       )}
-                    >
-                      {enc.status.replace(/_/g, " ")}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-white/35">Open in clinical workspace — full SOAP, vitals, and documents</p>
-                </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenClinicalEncounter(enc.id)}
+                        className="mt-3 rounded-lg border border-panel-border bg-panel-muted px-3 py-1.5 text-[10px] font-medium text-foreground/70 transition-colors hover:border-ring hover:bg-secondary hover:text-accent-foreground"
+                      >
+                        Open in clinical workspace
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ))}
             {!historyLoading && encounterList.length === 0 && (
-              <p className="py-8 text-center text-xs text-white/20">No clinical sessions recorded</p>
+              <p className="py-8 text-center text-xs text-muted-foreground">No clinical sessions recorded</p>
+            )}
+
+            <SectionLabel>Billing timeline</SectionLabel>
+            {patientClaims.length > 0 ? (
+              patientClaims.slice(0, 10).map((c) => {
+                const mr = c.medikreditResponse as { txNbr?: string; patientResponsibility?: number } | undefined
+                const pr = typeof mr?.patientResponsibility === "number" ? mr.patientResponsibility : null
+                return (
+                  <div
+                    key={c.id}
+                    className="rounded-xl border border-panel-border bg-panel-muted/50 px-3 py-2.5 space-y-0.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-[10px] font-medium text-muted-foreground/75">{c.status.replace(/_/g, " ")}</span>
+                      <span className="text-[9px] tabular-nums text-muted-foreground">
+                        R{c.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-muted-foreground">
+                      {new Date(c.createdAt).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
+                      {mr?.txNbr ? <span className="ml-1 font-mono"> · TX {mr.txNbr}</span> : null}
+                      {pr != null && pr > 0 ? (
+                        <span className="ml-1 text-amber-200/80">· patient liability R{pr.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                      ) : null}
+                    </p>
+                  </div>
+                )
+              })
+            ) : (
+              <p className="text-[10px] text-muted-foreground">No claims yet — Revenue tab has full ledger.</p>
             )}
           </div>
         )}
@@ -2822,9 +3463,9 @@ function PatientFilePanel({
                 <MedicationCard key={med.id} med={med} />
               ))
             ) : (
-              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-8 text-center">
-                <Pill className="mx-auto mb-2 size-6 text-white/10" />
-                <p className="text-xs text-white/30">No medications on file</p>
+              <div className="rounded-xl border border-panel-border bg-panel-muted/50 p-8 text-center">
+                <Pill className="mx-auto mb-2 size-6 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">No medications on file</p>
               </div>
             )}
           </div>
@@ -2832,51 +3473,118 @@ function PatientFilePanel({
 
         {activeTab === "billing" && (
           <div className="space-y-4">
-            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-              <p className="text-[10px] text-white/30">Outstanding Balance</p>
-              <p className={cn("mt-1 text-2xl font-bold tabular-nums", patient.outstandingBalance > 0 ? "text-[#FFC107]" : "text-[#00E676]")}>
+            <div className="rounded-xl border border-panel-border bg-panel-muted/50 p-4">
+              <p className="text-[10px] text-muted-foreground">Outstanding Balance</p>
+              <p className={cn("mt-1 text-2xl font-bold tabular-nums", patient.outstandingBalance > 0 ? "text-status-warning" : "text-status-success")}>
                 R{patient.outstandingBalance.toLocaleString()}
               </p>
             </div>
 
             <SectionLabel>Claims</SectionLabel>
             {patientClaims.length > 0 ? (
-              patientClaims.map((claim) => (
-                <div key={claim.id} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-white/60">{claim.id}</span>
+              patientClaims.map((claim) => {
+                const med = claim.medikreditResponse
+                const mk =
+                  med && typeof med === "object"
+                    ? (med as { txNbr?: unknown; patientResponsibility?: unknown })
+                    : null
+                const tx = typeof mk?.txNbr === "string" ? mk.txNbr.trim() : ""
+                const pr =
+                  typeof mk?.patientResponsibility === "number" && Number.isFinite(mk.patientResponsibility)
+                    ? mk.patientResponsibility
+                    : undefined
+                return (
+                <div key={claim.id} className="rounded-xl border border-panel-border bg-panel-muted/50 p-4">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="max-w-[70%] truncate text-[11px] font-medium text-muted-foreground/80">
+                      {tx ? <span className="font-mono text-[10px] text-muted-foreground">{tx} · </span> : null}
+                      {claim.id}
+                    </span>
                     <span className={cn(
-                      "rounded-full px-2 py-0.5 text-[9px] font-medium uppercase",
-                      claim.status === "paid" ? "bg-[#00E676]/10 text-[#00E676]"
-                        : claim.status === "rejected" ? "bg-[#EF5350]/10 text-[#EF5350]"
-                        : "bg-[#FFC107]/10 text-[#FFC107]"
+                      "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-medium uppercase",
+                      claim.status === "paid" ? "bg-status-success/10 text-status-success"
+                        : claim.status === "rejected" ? "bg-status-danger/10 text-status-danger"
+                        : claim.status === "approved" ? "bg-status-success/10 text-emerald-200"
+                        : claim.status === "partial" ? "bg-purple-500/10 text-purple-200"
+                        : "bg-status-warning/10 text-status-warning"
                     )}>
                       {claim.status}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-white/40">{new Date(claim.createdAt).toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}</span>
-                    <span className="font-bold tabular-nums text-white/70">R{claim.totalAmount.toLocaleString()}</span>
+                  <div className="flex flex-col gap-0.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">{new Date(claim.createdAt).toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}</span>
+                      <span className="font-bold tabular-nums text-foreground/70">R{claim.totalAmount.toLocaleString()}</span>
+                    </div>
+                    {typeof pr === "number" && pr > 0 ? (
+                      <p className="text-[10px] text-amber-200/85">Patient shortfall · R{pr.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+                    ) : null}
                   </div>
                   {claim.lines.length > 0 && (
-                    <div className="mt-2 space-y-1 border-t border-white/[0.04] pt-2">
+                    <div className="mt-2 space-y-1 border-t border-panel-border pt-2">
                       {claim.lines.slice(0, 3).map((line, idx) => (
-                        <div key={idx} className="flex justify-between text-[10px]">
-                          <span className="text-white/30">{line.description}</span>
-                          <span className="tabular-nums text-white/40">R{line.amount}</span>
+                        <div key={idx} className="flex justify-between gap-3 text-[10px]">
+                          <span className="min-w-0 truncate text-muted-foreground">{line.description}</span>
+                          <span className="tabular-nums text-muted-foreground shrink-0">R{line.amount}</span>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
-              ))
+                )
+              })
             ) : (
-              <p className="py-8 text-center text-xs text-white/20">No claims for this patient</p>
+              <p className="py-8 text-center text-xs text-muted-foreground">No claims for this patient</p>
             )}
           </div>
         )}
       </div>
     </motion.div>
+
+    <Dialog open={famUpdateDialog !== null} onOpenChange={(open) => !open && setFamUpdateDialog(null)}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto border-panel-border bg-popover text-foreground sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-foreground">Update from FamCheck</DialogTitle>
+          <DialogDescription className="text-muted-foreground/65">
+            {famUpdateDialog ? (
+              <>
+                Proposed changes for <span className="text-foreground/80">{famUpdateDialog.target.name}</span>. These values
+                come from the household check and your scheme context.
+              </>
+            ) : null}
+          </DialogDescription>
+        </DialogHeader>
+        {famUpdateDialog ? (
+          <ul className="max-h-[min(360px,50vh)] space-y-2 overflow-y-auto pr-1">
+            {famUpdateDialog.changes.map((c) => (
+              <li key={`${c.field}-${c.label}`} className="rounded-lg border border-panel-border bg-background p-2.5">
+                <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{c.label}</p>
+                <p className="mt-0.5 text-[10px] text-rose-200/65 line-through decoration-white/20">{c.before}</p>
+                <p className="text-[11px] font-medium text-emerald-200/95">{c.after}</p>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <DialogFooter className="gap-2 sm:gap-0">
+          <button
+            type="button"
+            onClick={() => setFamUpdateDialog(null)}
+            disabled={famUpdateBusy}
+            className="rounded-lg border border-panel-border bg-panel-muted px-3 py-2 text-xs font-medium text-foreground/75 transition-colors hover:bg-secondary"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={famUpdateBusy || !famUpdateDialog?.changes.length}
+            onClick={() => void applyFamCheckUpdate()}
+            className="rounded-lg border border-status-success/35 bg-status-success/15 px-3 py-2 text-xs font-semibold text-status-success transition-colors hover:bg-status-success/22 disabled:opacity-40"
+          >
+            {famUpdateBusy ? "Saving…" : "Apply updates"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <MediKreditAccreditationModal
       open={accreditation !== null}
@@ -2904,19 +3612,19 @@ function PatientFilePanel({
 
 function MedicationCard({ med }: { med: PatientMedication }) {
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+    <div className="rounded-xl border border-panel-border bg-panel-muted/50 p-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-white/80">{med.name}</p>
+        <p className="text-xs font-medium text-foreground/80">{med.name}</p>
         {med.refillsRemaining !== undefined && (
           <span className={cn(
             "rounded-full px-2 py-0.5 text-[9px] font-medium",
-            med.refillsRemaining > 0 ? "bg-white/[0.06] text-white/40" : "bg-[#EF5350]/10 text-[#EF5350]"
+            med.refillsRemaining > 0 ? "bg-secondary text-muted-foreground" : "bg-status-danger/10 text-status-danger"
           )}>
             {med.refillsRemaining} refills
           </span>
         )}
       </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-white/40">
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-muted-foreground">
         {med.dosage && <span>{med.dosage}</span>}
         {med.frequency && <span>{med.frequency}</span>}
         {med.prescribedBy && <span>Dr. {med.prescribedBy}</span>}
@@ -2929,8 +3637,8 @@ function MedicationCard({ med }: { med: PatientMedication }) {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between py-0.5">
-      <span className="text-[10px] text-white/30">{label}</span>
-      <span className="text-[11px] text-white/60">{value}</span>
+      <span className="text-[10px] text-muted-foreground">{label}</span>
+      <span className="text-[11px] text-muted-foreground/80">{value}</span>
     </div>
   )
 }
@@ -2938,23 +3646,23 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function EditableRow({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <div className="flex items-center justify-between gap-4 py-0.5">
-      <span className="shrink-0 text-[10px] text-white/30">{label}</span>
+      <span className="shrink-0 text-[10px] text-muted-foreground">{label}</span>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-2/3 rounded border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-right text-[11px] text-white/70 focus:border-white/[0.15] focus:outline-none"
+        className="w-2/3 rounded border border-panel-border bg-panel-muted px-2 py-1 text-right text-[11px] text-foreground/70 focus:border-ring focus:outline-none"
       />
     </div>
   )
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="text-[10px] font-semibold uppercase tracking-wider text-white/25">{children}</p>
+  return <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{children}</p>
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-white/30">{children}</label>
+  return <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{children}</label>
 }
 
 function Field({
@@ -2972,13 +3680,13 @@ function Field({
 }) {
   return (
     <div>
-      <FieldLabel>{label}{required && <span className="text-[#EF5350]"> *</span>}</FieldLabel>
+      <FieldLabel>{label}{required && <span className="text-status-danger"> *</span>}</FieldLabel>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-foreground placeholder:text-white/15 focus:border-white/[0.12] focus:outline-none"
+        className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none"
       />
     </div>
   )

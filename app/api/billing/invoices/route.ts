@@ -15,7 +15,7 @@ export async function GET(req: Request) {
   let q = ctx.supabase
     .from("practice_invoices")
     .select(
-      "id, invoice_number, patient_id, claim_id, total_cents, amount_paid_cents, status, billing_mode, created_at, due_at, last_reminded_at, patient_snapshot"
+      "id, invoice_number, patient_id, claim_id, appointment_id, total_cents, amount_paid_cents, status, billing_mode, created_at, due_at, last_reminded_at, patient_snapshot"
     )
     .eq("practice_id", ctx.practiceId)
     .order("created_at", { ascending: false })
@@ -39,6 +39,9 @@ export async function POST(req: Request) {
     billingMode?: BillingMode
     shortfallCents?: number
     practiceId?: string
+    appointmentId?: string | null
+    /** Dangerous: bypass shortfall-only rules for scheme_only (uses cash/PL lines only). */
+    forceFullClaimInvoice?: boolean
   }
   try {
     body = await req.json()
@@ -62,6 +65,8 @@ export async function POST(req: Request) {
       billingMode: body.billingMode ?? "cash",
       actorUserId: ctx.userId,
       shortfallCents: body.shortfallCents,
+      appointmentId: body.appointmentId ?? undefined,
+      forceFullClaimInvoice: body.forceFullClaimInvoice === true,
     })
     return NextResponse.json({ invoiceId })
   } catch (e) {

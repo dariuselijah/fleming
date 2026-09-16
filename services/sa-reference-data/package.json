@@ -1,0 +1,23 @@
+{
+  "name": "@fleming/sa-reference-data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "SA_REFERENCE_DATA_ALLOW_ANON=1 node --import tsx src/server.ts",
+    "start": "node --import tsx src/server.ts",
+    "bootstrap": "node --import tsx src/ingest/bootstrap.ts",
+    "ingest:schemes": "node --import tsx src/ingest/schemes-from-catalog.ts",
+    "ingest:icd10": "node --import tsx src/ingest/icd10-from-mit.ts",
+    "ingest:products": "node --import tsx src/ingest/products-from-file.ts",
+    "ingest:tariffs": "node --import tsx src/ingest/tariffs-from-file.ts",
+    "test:smoke": "node --import tsx src/smoke-test.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

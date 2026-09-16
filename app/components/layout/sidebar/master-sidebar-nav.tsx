@@ -1,7 +1,6 @@
 "use client"
 
 import { CaretDown, LockKey } from "@phosphor-icons/react"
-import { AnimatePresence, motion } from "motion/react"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAppSettingsDialog } from "@/lib/app-settings-dialog-store"
@@ -20,9 +19,6 @@ function lockLabel(item: MasterNavItem) {
   return "Restricted"
 }
 
-const HOVER_OPEN_DELAY_MS = 90
-const HOVER_CLOSE_DELAY_MS = 220
-
 export function MasterSidebarNav() {
   const auth = useAuthContext()
   const router = useRouter()
@@ -35,36 +31,14 @@ export function MasterSidebarNav() {
 
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  function clearTimers() {
-    if (openTimerRef.current) {
-      clearTimeout(openTimerRef.current)
-      openTimerRef.current = null
-    }
-    if (closeTimerRef.current) {
-      clearTimeout(closeTimerRef.current)
-      closeTimerRef.current = null
-    }
-  }
-
-  function scheduleOpen() {
-    clearTimers()
-    openTimerRef.current = setTimeout(() => setOpen(true), HOVER_OPEN_DELAY_MS)
-  }
-
-  function scheduleClose() {
-    clearTimers()
-    closeTimerRef.current = setTimeout(() => setOpen(false), HOVER_CLOSE_DELAY_MS)
-  }
-
-  useEffect(() => () => clearTimers(), [])
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const pendingFocusRef = useRef<"first" | "last" | null>(null)
 
   // Close on outside click and on Escape.
   useEffect(() => {
     if (!open) return
-    function handleMouseDown(e: MouseEvent) {
+    function handlePointerDown(e: PointerEvent) {
       if (
         containerRef.current &&
         !containerRef.current.contains(e.target as Node)
@@ -73,12 +47,15 @@ export function MasterSidebarNav() {
       }
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false)
+      if (e.key === "Escape") {
+        setOpen(false)
+        triggerRef.current?.focus()
+      }
     }
-    document.addEventListener("mousedown", handleMouseDown)
+    document.addEventListener("pointerdown", handlePointerDown)
     document.addEventListener("keydown", handleKey)
     return () => {
-      document.removeEventListener("mousedown", handleMouseDown)
+      document.removeEventListener("pointerdown", handlePointerDown)
       document.removeEventListener("keydown", handleKey)
     }
   }, [open])
@@ -115,6 +92,60 @@ export function MasterSidebarNav() {
     (item) => item.id !== activeItem.id
   )
 
+  useEffect(() => {
+    if (!open || !pendingFocusRef.current) return
+    const enabledItems = itemRefs.current.filter(
+      (item): item is HTMLButtonElement => !!item && !item.disabled
+    )
+    const target =
+      pendingFocusRef.current === "last"
+        ? enabledItems.at(-1)
+        : enabledItems.at(0)
+    pendingFocusRef.current = null
+    target?.focus()
+  }, [open])
+
+  function openMenu(focus: "first" | "last") {
+    pendingFocusRef.current = focus
+    setOpen(true)
+  }
+
+  function handleTriggerKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault()
+      openMenu("first")
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault()
+      openMenu("last")
+    }
+  }
+
+  function handleMenuKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const enabledItems = itemRefs.current.filter(
+      (item): item is HTMLButtonElement => !!item && !item.disabled
+    )
+    if (enabledItems.length === 0) return
+
+    const currentIndex = enabledItems.findIndex(
+      (item) => item === document.activeElement
+    )
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      const direction = event.key === "ArrowDown" ? 1 : -1
+      const nextIndex =
+        (Math.max(currentIndex, 0) + direction + enabledItems.length) %
+        enabledItems.length
+      enabledItems[nextIndex]?.focus()
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault()
+      const target =
+        event.key === "Home" ? enabledItems.at(0) : enabledItems.at(-1)
+      target?.focus()
+    } else if (event.key === "Tab") {
+      setOpen(false)
+    }
+  }
+
   function activate(item: MasterNavItem) {
     if (!auth.hasAnyPermission(item.permissions)) return
     if (item.settings) {
@@ -131,11 +162,11 @@ export function MasterSidebarNav() {
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between px-2">
-        <p className="text-[9px] font-medium uppercase tracking-[0.22em] text-sidebar-foreground/35">
+        <p className="text-micro font-medium uppercase tracking-[0.18em] text-sidebar-foreground/45">
           Navigate
         </p>
         {auth.activePracticeName && (
-          <p className="ml-2 max-w-[60%] truncate text-[9px] tracking-wide text-sidebar-foreground/30">
+          <p className="text-micro ml-2 max-w-[60%] truncate tracking-wide text-sidebar-foreground/45">
             {auth.activePracticeName}
           </p>
         )}
@@ -144,97 +175,77 @@ export function MasterSidebarNav() {
       <div
         ref={containerRef}
         className="relative"
-        onMouseEnter={scheduleOpen}
-        onMouseLeave={scheduleClose}
       >
-        {/* Trigger — only the currently selected item is rendered. */}
         <button
+          ref={triggerRef}
           type="button"
           aria-haspopup="menu"
           aria-expanded={open}
-          onClick={() => {
-            clearTimers()
-            setOpen((prev) => !prev)
+          aria-controls="master-navigation-menu"
+          onClick={(event) => {
+            if (open) {
+              setOpen(false)
+              return
+            }
+            if (event.detail === 0) pendingFocusRef.current = "first"
+            setOpen(true)
           }}
-          onFocus={scheduleOpen}
+          onKeyDown={handleTriggerKeyDown}
           className={cn(
-            "group relative flex h-10 w-full items-center gap-2.5 overflow-hidden rounded-lg pl-3 pr-2 text-left",
-            "bg-white/[0.05] text-white",
-            "transition-colors duration-200",
-            open && "bg-white/[0.075]"
+            "group relative flex min-h-touch w-full items-center gap-2.5 overflow-hidden rounded-lg pl-3 pr-2 text-left",
+            "bg-sidebar-accent text-sidebar-foreground",
+            "transition-colors duration-[var(--duration-fast)] ease-calm",
+            open && "bg-sidebar-accent"
           )}
         >
           <span
             aria-hidden
-            className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-white"
+            className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-sidebar-primary"
           />
           <activeItem.icon
             weight="fill"
-            className="size-[15px] shrink-0 text-white"
+            className="size-[15px] shrink-0 text-sidebar-foreground"
           />
-          <span className="flex-1 truncate text-[12px] font-semibold tracking-tight text-white">
+          <span className="flex-1 truncate text-[12px] font-semibold tracking-tight text-sidebar-foreground">
             {activeItem.label}
           </span>
           <CaretDown
             weight="bold"
             className={cn(
-              "size-3 shrink-0 text-white/45 transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]",
-              open && "rotate-180 text-white/80"
+              "size-3 shrink-0 text-sidebar-foreground/65 transition-transform duration-[var(--duration-fast)] ease-calm",
+              open && "rotate-180 text-sidebar-foreground/80"
             )}
           />
         </button>
 
-        {/* Dropdown — vertical carousel of the remaining items.
-         *  Real frosted-glass: heavy backdrop blur + saturation boost,
-         *  high-opacity solid fallback so text underneath never bleeds
-         *  through (was the previous overlap bug). */}
-        <AnimatePresence>
-          {open && (
-            <motion.div
+        {open && (
+            <div
+              id="master-navigation-menu"
               role="menu"
-              initial={{ opacity: 0, y: -8, scale: 0.985 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -6, scale: 0.985 }}
-              transition={{
-                duration: 0.18,
-                ease: [0.22, 0.9, 0.32, 1],
-              }}
+              aria-label="Workspace navigation"
+              onKeyDown={handleMenuKeyDown}
               className={cn(
-                "absolute left-0 right-0 top-full z-50 mt-1.5 origin-top",
+                "absolute left-0 right-0 top-full z-[var(--z-popover)] mt-1.5 origin-top",
                 "overflow-hidden rounded-xl",
-                "border border-white/[0.09]",
-                // Near-opaque base — Apple-style "vibrancy" material:
-                // mostly solid so text below never bleeds, but the
-                // backdrop blur + saturate still gives the refractive
-                // glass shimmer on whatever pixels do show through.
-                "bg-zinc-950",
-                "shadow-[0_24px_60px_-18px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.07)]",
-                "supports-[backdrop-filter]:bg-zinc-950/92",
-                "supports-[backdrop-filter]:backdrop-blur-2xl",
-                "supports-[backdrop-filter]:backdrop-saturate-[180%]"
+                "border border-sidebar-border",
+                "bg-popover",
+                "shadow-floating",
+                "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-[var(--duration-fast)]"
               )}
-              onMouseEnter={clearTimers}
-              onMouseLeave={scheduleClose}
             >
-              {/* Subtle inner gradient + top-edge highlight for depth. */}
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-b from-white/[0.04] via-transparent to-black/20"
-              />
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-2 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent"
-              />
-
-              <div className="relative flex flex-col py-1.5">
+              <div className="flex flex-col py-1.5">
                 {dropdownItems.map((item, index) => {
                   const enabled = auth.hasAnyPermission(item.permissions)
                   const Icon = item.icon
                   return (
-                    <motion.button
+                    <button
                       key={item.id}
+                      ref={(element) => {
+                        itemRefs.current[index] = element
+                      }}
                       type="button"
                       role="menuitem"
+                      tabIndex={-1}
                       disabled={!enabled}
                       title={
                         enabled
@@ -242,25 +253,16 @@ export function MasterSidebarNav() {
                           : lockLabel(item)
                       }
                       onClick={() => activate(item)}
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        delay: index * 0.022,
-                        duration: 0.16,
-                        ease: [0.22, 0.9, 0.32, 1],
-                      }}
                       className={cn(
-                        "group/item relative flex h-9 w-full items-center gap-2.5 px-3 text-left",
-                        "transition-[background-color,color,transform] duration-150 ease-out",
-                        enabled && "text-white/70 hover:bg-white/[0.06] hover:text-white",
-                        enabled && "active:scale-[0.985]",
-                        !enabled && "cursor-not-allowed text-white/25"
+                        "group/item relative flex min-h-touch w-full items-center gap-2.5 px-3 text-left",
+                        "transition-colors duration-[var(--duration-fast)] ease-calm",
+                        enabled && "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                        !enabled && "cursor-not-allowed text-sidebar-foreground/45"
                       )}
                     >
                       <Icon
                         className={cn(
-                          "size-[14.5px] shrink-0 transition-transform duration-150",
-                          enabled && "group-hover/item:scale-[1.04]"
+                          "size-[14.5px] shrink-0"
                         )}
                         weight="regular"
                       />
@@ -268,15 +270,14 @@ export function MasterSidebarNav() {
                         {item.label}
                       </span>
                       {!enabled && (
-                        <LockKey className="size-3 shrink-0 text-white/35" />
+                        <LockKey className="size-3 shrink-0 text-sidebar-foreground/45" />
                       )}
-                    </motion.button>
+                    </button>
                   )
                 })}
               </div>
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
       </div>
     </div>
   )

@@ -8,6 +8,21 @@ import type { ClaimLineInput, MedikreditPatientPayload } from "@/lib/medikredit/
 export const runtime = "nodejs"
 
 export async function POST(req: Request) {
+  const approvedPreview =
+    process.env.MEDIKREDIT_ENABLE_XML_PREVIEW === "1" &&
+    process.env.NODE_ENV !== "production"
+  const dryRunPreview =
+    process.env.MEDIKREDIT_DRY_RUN === "1" &&
+    process.env.NODE_ENV !== "production"
+  if (!approvedPreview && !dryRunPreview) {
+    return NextResponse.json(
+      {
+        error:
+          "Raw claim XML preview is disabled. Set MEDIKREDIT_ENABLE_XML_PREVIEW=1 only for an approved accreditation workflow.",
+      },
+      { status: 403 }
+    )
+  }
   const supabase = await createClient()
   if (!supabase) {
     return NextResponse.json({ error: "Service unavailable" }, { status: 500 })

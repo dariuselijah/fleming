@@ -198,7 +198,7 @@ export function PerformanceMonitor() {
                       <div key={index} className="flex items-center justify-between text-xs p-1 bg-muted rounded">
                         <span>Session {metrics.length - index}</span>
                         <div className="flex items-center gap-1">
-                          <Badge className={`${grade.color} text-white text-xs`}>
+                          <Badge className={`${grade.color} text-foreground text-xs`}>
                             {grade.grade}
                           </Badge>
                           <span>{formatTime(session.totalResponseTime)}</span>

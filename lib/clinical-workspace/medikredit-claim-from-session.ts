@@ -1,4 +1,5 @@
-import type { ClaimLine, PatientSession, PracticeClaim } from "./types"
+import type { ClaimLine, PatientSession, PracticePatient } from "./types"
+import { normalizeIcd10ForClaim } from "@/lib/medikredit/normalize-icd"
 import type { ClaimLineInput, ItemTypeIndicator, MedikreditPatientPayload } from "@/lib/medikredit/types"
 import { resolveItemTypeIndicator } from "@/lib/medikredit/modifier-engine"
 
@@ -15,6 +16,21 @@ export function patientSessionToMedikreditPayload(p: PatientSession): Medikredit
   }
 }
 
+export function practicePatientToMedikreditPayload(p: PracticePatient): MedikreditPatientPayload {
+  return {
+    id: p.id,
+    name: p.name,
+    idNumber: p.idNumber,
+    memberNumber: p.memberNumber,
+    medicalAidScheme: p.medicalAidScheme,
+    medicalAidSchemeCode: p.medicalAidSchemeCode,
+    dependentCode: p.dependentCode,
+    mainMemberName: p.mainMemberName,
+    dateOfBirth: p.dateOfBirth,
+    sex: p.sex,
+  }
+}
+
 /** Map UI claim lines to MediKredit claim line inputs (treatment date = today in local practice). */
 export function practiceClaimLinesToMedikredit(
   lines: ClaimLine[],
@@ -24,14 +40,15 @@ export function practiceClaimLinesToMedikredit(
     const tp: 1 | 2 | 3 =
       l.medikreditTp ?? (l.nappiCode?.trim() ? 1 : 2)
 
+    const icdNorm = normalizeIcd10ForClaim(l.icdCode)
     const partial: ClaimLineInput = {
       lineNumber: i + 1,
       tp,
       tariffCode: l.tariffCode,
       nappiCode: l.nappiCode,
-      icdCodes: l.icdCode ? [l.icdCode] : undefined,
+      icdCodes: icdNorm ? [icdNorm] : undefined,
       grossAmount: l.amount,
-      treatmentDate,
+      treatmentDate: l.treatmentDate?.trim() || treatmentDate,
       treatmentTime: undefined,
       modifierCodes: l.modifierCodes?.length ? l.modifierCodes : undefined,
       modifierAmounts: l.modifierAmounts?.length ? l.modifierAmounts : undefined,

@@ -1,10 +1,11 @@
-import type { UserUploadDetail, UserUploadListItem } from "./types"
-import { createClient } from "@/lib/supabase/client"
 import type {
   UploadBatchInitPayload,
   UploadBatchStatusPayload,
   UploadCollectionSummary,
-} from "@/lib/student-workspace/types"
+  UserUploadDetail,
+  UserUploadListItem,
+} from "./types"
+import { createClient } from "@/lib/supabase/client"
 
 type UploadProgressCallback = (progress: number) => void
 type UploadStateCallback = (upload: UserUploadListItem) => void

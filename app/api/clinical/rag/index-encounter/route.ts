@@ -107,20 +107,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, indexed: 0 })
   }
 
-  const { error: insErr } = await supabase.from("clinical_rag_chunks").insert(rows)
+  const { error: insErr } = await supabase.from("clinical_rag_chunks").upsert(rows, {
+    onConflict: "encounter_id,chunk_index",
+  })
   if (insErr) {
-    console.error("[rag index] insert", insErr)
-    if (insErr.code === "23505") {
-      const { error: upErr } = await supabase.from("clinical_rag_chunks").upsert(rows, {
-        onConflict: "encounter_id,chunk_index",
-      })
-      if (upErr) {
-        console.error("[rag index] upsert fallback", upErr)
-        return NextResponse.json({ error: upErr.message }, { status: 500 })
-      }
-    } else {
-      return NextResponse.json({ error: insErr.message }, { status: 500 })
-    }
+    console.error("[rag index] upsert", insErr)
+    return NextResponse.json({ error: insErr.message }, { status: 500 })
   }
 
   await supabase

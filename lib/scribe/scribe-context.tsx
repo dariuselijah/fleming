@@ -6,6 +6,7 @@ interface ScribeContextValue {
   transcribeAudioFile: (file: File) => Promise<void>
   triggerExtraction: () => Promise<void>
   isTranscribing: boolean
+  isExtracting: boolean
   transcriptionError: string | null
   recorderError: string | null
   recorderDuration: number

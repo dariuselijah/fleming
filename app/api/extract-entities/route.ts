@@ -1,100 +1,163 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { generateText } from "ai"
+import { generateObject, NoObjectGeneratedError } from "ai"
 import { openproviders } from "@/lib/openproviders"
+import { llmCallSettingsForModel } from "@/lib/openproviders/model-temperature"
+import { z } from "zod"
+import { EMPTY_EXTRACTED, type EntityType } from "@/lib/scribe/entity-highlighter"
 
-const EXTRACTION_PROMPT = `You are an expert medical scribe performing structured clinical extraction from a consultation transcript. Think like a clinician — extract what matters for documentation, diagnosis, and patient safety.
+export const runtime = "nodejs"
+export const maxDuration = 60
 
-Return ONLY valid JSON with two keys: "entities" and "highlights".
+const EXTRACTION_MODEL =
+  (process.env.EXTRACT_ENTITIES_MODEL as string) || "gpt-4o-mini"
 
-─── ENTITIES ───
+const entityKeys = [
+  "chief_complaint",
+  "symptoms",
+  "diagnoses",
+  "medications",
+  "allergies",
+  "vitals",
+  "procedures",
+  "social_history",
+  "family_history",
+  "risk_factors",
+] as const
 
-{
-  "chief_complaint": [
-    "One phrase: laterality + site + nature + duration. E.g. 'Painful erythematous rash on right ankle, worsening over 2 weeks, with purulent drainage'"
-  ],
-  "symptoms": [
-    "Only POSITIVE findings — symptoms the patient IS experiencing.",
-    "Use qualified clinical phrases with OPQRST where available: Onset, Provocation/Palliation, Quality, Region/Radiation, Severity, Timing",
-    "E.g. 'Sharp anterior chest pain, 6/10, worse with coughing and lying down, improved leaning forward, intermittent episodes lasting seconds, onset 3 days ago, radiates to neck'",
-    "Include functional impact: 'pain worse with ambulation, better at rest'",
-    "DO NOT list individual pertinent negatives as separate items. Instead, add ONE summary line at the end: 'ROS otherwise negative (denies SOB, dizziness, palpitations, N/V, fever/chills)'"
-  ],
-  "diagnoses": [
-    "Clinical diagnoses and problem-list items (active, suspected, or historical) — NOT social habits.",
-    "DO NOT put tobacco, alcohol, smoking, or substance-use patterns here; those belong ONLY in social_history.",
-    "Mark historical/resolved conditions clearly: 'childhood asthma (resolved)'",
-    "Include suspected/working diagnoses: 'possible cellulitis (under evaluation)'",
-    "Include chronic problems with context: 'type 2 diabetes, poorly controlled (A1C ~9)'",
-    "E.g. 'chronic back pain (10 years)', 'high cholesterol (on statin)'"
-  ],
-  "medications": [
-    "Every medication mentioned with dose/frequency if stated",
-    "Include PRN medications: 'Tylenol PRN for back pain', 'Advil PRN'",
-    "If patient states a COUNT but can't name all, note it: '2 additional diabetes medications (names unknown)'",
-    "Include insulin status if discussed: 'not on insulin'"
-  ],
-  "allergies": [
-    "Drug name — reaction type and severity",
-    "E.g. 'Penicillin — facial angioedema, respiratory distress (anaphylactoid)'",
-    "If the patient explicitly denies drug allergies, use one line: 'No known drug allergies'",
-    "If allergies were not discussed in the transcript, leave the allergies array empty — do not invent NKDA"
-  ],
-  "vitals": [
-    "Any vital signs WITH values mentioned: 'BP 130/85 mmHg', 'HR 92 bpm', 'Temp 38.2°C'",
-    "Include subjective: 'patient reports feeling febrile (no thermometer at home)'"
-  ],
-  "procedures": [
-    "Past surgeries WITH context: 'sinus surgery for chronic sinusitis (teens)'",
-    "Current/planned tests: 'physical examination of right leg pending'",
-    "Include imaging, labs ordered or mentioned"
-  ],
-  "social_history": [
-    "ALL lifestyle and substance use: smoking, vaping, alcohol (with quantities), recreational drugs, occupation, living situation.",
-    "If the patient discusses tobacco or alcohol use, it MUST appear here and NOT under diagnoses.",
-    "Be SPECIFIC with quantities and patterns:",
-    "Smoking: 'smokes ~2 packs/week, increased recently due to stress'",
-    "Alcohol: 'drinks ~24 beers/week, primarily on weekends'",
-    "Drugs: name each substance or 'denies recreational drug use'",
-    "Employment: 'self-employed accountant, currently partially unemployed'",
-    "Living: 'lives alone in town, children every 2 weeks'",
-    "Self-care: 'poor diabetes self-management, stopped monitoring glucose'"
-  ],
-  "family_history": [
-    "Distinguish maternal vs paternal lineage:",
-    "E.g. 'Maternal: diabetes, hypertension, hypercholesterolemia (widespread)'",
-    "E.g. 'Paternal aunt: lung cancer (heavy smoker); father's side otherwise healthy'"
-  ],
-  "risk_factors": [
-    "SYNTHESIZE clinical risk — don't just echo diagnoses. Reason about what puts this patient at risk:",
-    "E.g. 'Poorly controlled diabetes (A1C ~9) with non-compliance — increased infection risk'",
-    "E.g. 'Peripheral neuropathy with reduced foot sensation — delayed wound detection'",
-    "E.g. 'Active ulcer on contralateral (left) heel — systemic wound-healing impairment'",
-    "E.g. 'Smoking + diabetes — synergistic vascular risk'"
-  ]
+type EntityKey = (typeof entityKeys)[number]
+
+/** Loose schema for the model — caps applied in post-processing so over-generation never 500s. */
+const extractionSchema = z.object({
+  entities: z.object({
+    chief_complaint: z.array(z.string()).default([]),
+    symptoms: z.array(z.string()).default([]),
+    diagnoses: z.array(z.string()).default([]),
+    medications: z.array(z.string()).default([]),
+    allergies: z.array(z.string()).default([]),
+    vitals: z.array(z.string()).default([]),
+    procedures: z.array(z.string()).default([]),
+    social_history: z.array(z.string()).default([]),
+    family_history: z.array(z.string()).default([]),
+    risk_factors: z.array(z.string()).default([]),
+  }),
+  highlights: z
+    .array(
+      z.object({
+        text: z.string(),
+        /** Model may return entity bucket names — normalized to EntityType before response. */
+        type: z.string(),
+      })
+    )
+    .default([]),
+})
+
+const ENTITY_CAPS: Record<EntityKey, number> = {
+  chief_complaint: 2,
+  symptoms: 8,
+  diagnoses: 5,
+  medications: 8,
+  allergies: 5,
+  vitals: 6,
+  procedures: 5,
+  social_history: 4,
+  family_history: 4,
+  risk_factors: 5,
 }
 
-─── HIGHLIGHTS ───
+const HIGHLIGHT_TYPES_FOR_PROMPT =
+  "symptom, diagnosis, medication, vital, procedure, history (use history for social/family/risk/allergy context)"
 
-Array of {"text": "...", "type": "..."} for inline transcript annotation.
+function normalizeHighlightType(raw: string): EntityType {
+  const t = raw.trim().toLowerCase()
+  if (t === "medication" || t === "medications") return "medication"
+  if (t === "diagnosis" || t === "diagnoses") return "diagnosis"
+  if (t === "vital" || t === "vitals") return "vital"
+  if (t === "procedure" || t === "procedures") return "procedure"
+  if (t === "symptom" || t === "symptoms" || t === "chief_complaint") return "symptom"
+  if (t === "social_history" || t === "family_history" || t === "risk_factors") return "history"
+  return "history"
+}
 
-"text" must be an EXACT verbatim substring from the transcript (case-insensitive match).
-"type" is one of: "symptom", "diagnosis", "medication", "vital", "procedure", "history"
+function normalizeHighlights(
+  items: Array<{ text: string; type: string }> | undefined
+): Array<{ text: string; type: EntityType }> {
+  if (!items?.length) return []
+  const out: Array<{ text: string; type: EntityType }> = []
+  const seen = new Set<string>()
+  for (const h of items) {
+    const text = h.text?.trim()
+    if (!text || text.length < 2) continue
+    const key = `${normalizeHighlightType(h.type)}:${text.toLowerCase()}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ text, type: normalizeHighlightType(h.type) })
+    if (out.length >= 25) break
+  }
+  return out
+}
 
-HIGHLIGHT RULES:
-1. Only highlight PATIENT STATEMENTS that contain clinical information, NOT clinician questions
-2. Prefer the LONGEST meaningful phrase: "sharp pain in my chest" not "pain"
-3. For diagnoses: "I've got diabetes" — highlight "I've got diabetes"
-4. For history: "two packs a week" — highlight "two packs a week"
-5. For symptoms: "it's red, turning more red in the area around it" — highlight the whole descriptive phrase
-6. For meds: "Resuvastatin" — highlight the drug name
-7. For allergies: "Penicillin, can't take that" — highlight it
-8. For vitals: "my A1C last time was like nine" — highlight it
-9. Do NOT highlight the same entity more than twice. Prioritize the most descriptive occurrence.
-10. Do NOT highlight single common words (pain, hot, tired) unless they appear in a qualifying phrase
-11. Maximum 40 highlights for a full consultation.
+const EXTRACTION_PROMPT = `Extract structured clinical entities and transcript highlights from a consultation transcript.
 
-Return ONLY the JSON object. No markdown fences, no commentary.`
+Entities: chief_complaint (one short phrase max), symptoms (positive findings only, max 8), diagnoses (max 5), medications (max 8), allergies, vitals, procedures, social_history, family_history, risk_factors.
+
+Rules:
+- Only include facts explicitly stated in the transcript. Do not infer or speculate.
+- Deduplicate: one canonical phrase per concept; prefer clinician-stated terms.
+- Keep each item under 80 characters; concise clinical language.
+- Prefer the most clinically important items when many are mentioned.
+
+Highlights: verbatim substrings from the transcript. Max 25. Prefer patient statements. Use highlight type: ${HIGHLIGHT_TYPES_FOR_PROMPT}.`
+
+function dedupeEntityStrings(items: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of items) {
+    const s = raw.trim()
+    if (!s || s.length < 2) continue
+    const key = s.toLowerCase()
+    if (seen.has(key)) continue
+    const dominated = out.some((existing) => {
+      const el = existing.toLowerCase()
+      return el.includes(key) && el.length > key.length + 4
+    })
+    if (dominated) continue
+    seen.add(key)
+    out.push(s)
+  }
+  return out
+}
+
+function capEntityStrings(items: string[], max: number): string[] {
+  return dedupeEntityStrings(items).slice(0, max)
+}
+
+function normalizeExtractedObject(raw: z.infer<typeof extractionSchema>) {
+  const entities = { ...EMPTY_EXTRACTED }
+  for (const key of entityKeys) {
+    const items = raw.entities[key]
+    if (Array.isArray(items) && items.length > 0) {
+      entities[key] = capEntityStrings(
+        items.filter((s) => typeof s === "string" && s.trim()),
+        ENTITY_CAPS[key]
+      )
+    }
+  }
+  return {
+    entities,
+    highlights: normalizeHighlights(raw.highlights),
+  }
+}
+
+function parseLooseExtractionJson(text: string): z.infer<typeof extractionSchema> | null {
+  try {
+    const parsed = JSON.parse(text) as unknown
+    const result = extractionSchema.safeParse(parsed)
+    return result.success ? result.data : null
+  } catch {
+    return null
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -119,30 +182,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Transcript too short" }, { status: 400 })
     }
 
-    const model = openproviders("gpt-5.2")
+    const model = openproviders(EXTRACTION_MODEL as never)
 
-    const result = await generateText({
-      model,
-      system: EXTRACTION_PROMPT,
-      prompt: transcript.slice(0, 16000),
-      temperature: 0,
-    })
-
-    let parsed: { entities: Record<string, string[]>; highlights: { text: string; type: string }[] }
+    let object: z.infer<typeof extractionSchema>
     try {
-      const cleaned = result.text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()
-      parsed = JSON.parse(cleaned)
-    } catch {
-      return NextResponse.json({
-        error: "Failed to parse extraction",
-        raw: result.text,
-      }, { status: 500 })
+      const result = await generateObject({
+        model,
+        schema: extractionSchema,
+        system: EXTRACTION_PROMPT,
+        prompt: transcript.slice(0, 8000),
+        ...llmCallSettingsForModel(EXTRACTION_MODEL, 0),
+      })
+      object = result.object
+    } catch (genError) {
+      if (genError instanceof NoObjectGeneratedError && genError.text) {
+        const recovered = parseLooseExtractionJson(genError.text)
+        if (recovered) {
+          object = recovered
+        } else {
+          throw genError
+        }
+      } else {
+        throw genError
+      }
     }
 
-    return NextResponse.json({
-      entities: parsed.entities ?? {},
-      highlights: parsed.highlights ?? [],
-    })
+    return NextResponse.json(normalizeExtractedObject(object))
   } catch (error) {
     console.error("[extract-entities] Error:", error)
     return NextResponse.json(

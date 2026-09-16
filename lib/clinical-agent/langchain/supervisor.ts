@@ -11,7 +11,6 @@ import {
   type ClinicalConnectorId,
   type ClinicalIncompleteEvidencePolicy,
   type ClinicalIntentClass,
-  type LmsContextSnapshot,
   type ClinicalModePolicy,
   type ClinicalIntelPreflight,
   type ConfidenceTransition,
@@ -319,7 +318,6 @@ function connectorSpecificRetrievalTaskName(input: {
   query: string
   connectorIds: ClinicalConnectorId[]
   toolNames: string[]
-  curriculumEnabled: boolean
   scenarioFocus: string
 }): string {
   const normalized = input.query.toLowerCase()
@@ -328,9 +326,6 @@ function connectorSpecificRetrievalTaskName(input: {
     /\b(nice|aap|esc|aha|acc|who|cdc)\b/.test(normalized)
   if (hasGuidelineComparison) {
     return taskNameForFocus("Mapping Treatment Divergence", input.scenarioFocus)
-  }
-  if (input.curriculumEnabled && input.connectorIds.length === 0) {
-    return taskNameForFocus("Checking Curriculum Alignment", input.scenarioFocus)
   }
   if (
     input.connectorIds.length === 1 &&
@@ -343,36 +338,6 @@ function connectorSpecificRetrievalTaskName(input: {
     return taskNameForFocus("Auditing Clinical Guidelines", input.scenarioFocus)
   }
   return taskNameForFocus("Auditing Evidence Sources", input.scenarioFocus)
-}
-
-function curriculumTaskName(input: {
-  scenarioFocus: string
-  lmsContext: LmsContextSnapshot | null
-}): string {
-  return taskNameForFocus("Checking Curriculum Alignment", input.scenarioFocus)
-}
-
-function summarizeLmsContext(lmsContext: LmsContextSnapshot | null | undefined): string {
-  if (!lmsContext) return "no LMS context"
-  const providerLabel =
-    lmsContext.providerIds.length > 0 ? lmsContext.providerIds.join("/") : "lms"
-  const courseLabel =
-    lmsContext.recentCourseNames.length > 0
-      ? lmsContext.recentCourseNames.slice(0, 2).join(", ")
-      : "active courses"
-  return `${providerLabel}; ${lmsContext.courseCount} courses; ${lmsContext.artifactCount} artifacts; sample=${courseLabel}`
-}
-
-function hasEducationalIntentSignal(input: {
-  query: string
-  modePolicy: ClinicalModePolicy
-  clinicalIntel: ClinicalIntelPreflight
-  learningMode?: string | null
-}): boolean {
-  if (!input.modePolicy.studentMode) return false
-  if (input.clinicalIntel.entities.workflowIntent === "exam_mode") return true
-  if (input.learningMode && input.learningMode !== "ask") return true
-  return EDUCATIONAL_INTENT_PATTERN.test(input.query)
 }
 
 function chainSequentialDependencies(
@@ -558,29 +523,6 @@ function buildPlannerSelectionHints(input: {
       "uploadContextSearch selected to ground the answer in user-uploaded files."
     )
   }
-  if (/\b(timetable|schedule|study plan|revision plan)\b/.test(normalized)) {
-    addTool(
-      "generateTimetableFromUploads",
-      "Timetable generation tool selected due to explicit study planning intent."
-    )
-    addTool(
-      "rebalanceTimetablePlan",
-      "Rebalancer selected for timetable adjustment and missed-block recovery."
-    )
-  }
-  if (/\b(lecture|video|recording|transcript|summary)\b/.test(normalized)) {
-    addTool(
-      "summarizeLectureUpload",
-      "Lecture summarizer selected for lecture/video extraction workflow."
-    )
-  }
-  if (/\b(review queue|spaced repetition|flashcard|recall)\b/.test(normalized)) {
-    addTool(
-      "createReviewQueueFromUploads",
-      "Review queue builder selected for spaced-repetition workflow."
-    )
-  }
-
   const toolBudget =
     input.depthTier === "simple" ? 2 : input.depthTier === "moderate" ? 5 : 10
   return {
@@ -620,7 +562,6 @@ type PlannerTaskPlanBuildInput = {
   chartPlan: ChartPlanHint
   selectionHints: PlannerSelectionHints
   learningMode?: string | null
-  lmsContext?: LmsContextSnapshot | null
 }
 
 function buildPlannerTaskPlan(input: PlannerTaskPlanBuildInput): PlannerTaskPlanItem[] {
@@ -638,25 +579,10 @@ function buildPlannerTaskPlan(input: PlannerTaskPlanBuildInput): PlannerTaskPlan
       .join(", ") || "none"
   const toolPreview =
     input.selectionHints.preferredToolNames.slice(0, 4).join(", ") || "none"
-  const curriculumEnabled =
-    hasEducationalIntentSignal({
-      query: input.query,
-      modePolicy: input.modePolicy,
-      clinicalIntel: input.clinicalIntel,
-      learningMode: input.learningMode,
-    }) &&
-    Boolean(
-      input.lmsContext &&
-        (input.lmsContext.courseCount > 0 || input.lmsContext.artifactCount > 0)
-    )
-  const curriculumReasoning = `Educational intent with LMS context detected (${summarizeLmsContext(
-    input.lmsContext
-  )}).`
   const retrievalTaskLabel = connectorSpecificRetrievalTaskName({
     query: input.query,
     connectorIds: input.selectionHints.preferredConnectorIds,
     toolNames: input.selectionHints.preferredToolNames,
-    curriculumEnabled,
     scenarioFocus,
   })
 
@@ -666,18 +592,9 @@ function buildPlannerTaskPlan(input: PlannerTaskPlanBuildInput): PlannerTaskPlan
       return [
         createPlannerTask({
           id: "task-compose",
-          taskName: taskNameForFocus(
-            curriculumEnabled
-              ? "Rapid curriculum-aligned synthesis"
-              : "Rapid clinical response",
-            scenarioFocus
-          ),
-          description: curriculumEnabled
-            ? "Return a concise answer aligned to the active curriculum context."
-            : "Return a concise, bounded answer for this direct query.",
-          reasoning: curriculumEnabled
-            ? `${curriculumReasoning} Minimal-depth response requested.`
-            : "Simple request detected; using one-pass synthesis.",
+          taskName: taskNameForFocus("Rapid clinical response", scenarioFocus),
+          description: "Return a concise, bounded answer for this direct query.",
+          reasoning: "Simple request detected; using one-pass synthesis.",
           phase: "composer",
           status: "running",
           isCritical: true,
@@ -685,76 +602,42 @@ function buildPlannerTaskPlan(input: PlannerTaskPlanBuildInput): PlannerTaskPlan
       ]
     }
 
-    const tasks = curriculumEnabled
-      ? [
-          createPlannerTask({
-            id: "task-curriculum-alignment",
-            taskName: curriculumTaskName({ scenarioFocus, lmsContext: input.lmsContext ?? null }),
-            description:
-              "Map response framing to active courses and upcoming learning artifacts.",
-            reasoning: `${curriculumReasoning} Keeping depth strict at two steps.`,
-            phase: "planner",
-            status: "completed",
-            isCritical: true,
-          }),
-          createPlannerTask({
-            id: "task-compose",
-            taskName: taskNameForFocus("Final synthesis for viva-style delivery", scenarioFocus),
-            description:
-              "Compose concise guidance with confidence framing and immediate next step.",
-            reasoning: `Fast-track ${workflowFocus} response tuned for student workflow.`,
-            phase: "composer",
-            status: "pending",
-            isCritical: true,
-          }),
-        ]
-      : [
-          createPlannerTask({
-            id: "task-retrieval",
-            taskName: retrievalTaskLabel,
-            description: "Run only the highest-yield planner-selected source slice.",
-            reasoning: `Connector scope ${connectorPreview}; tool slice ${toolPreview}.`,
-            phase: "retrieval",
-            status: "pending",
-            isCritical: true,
-          }),
-          createPlannerTask({
-            id: "task-compose",
-            taskName: taskNameForFocus("Final synthesis for viva-style delivery", scenarioFocus),
-            description:
-              "Return concise answer with explicit uncertainty bounds and next action.",
-            reasoning: `Fast-track ${workflowFocus} response for ${scenarioFocus}.`,
-            phase: "composer",
-            status: "pending",
-            isCritical: true,
-          }),
-        ]
+    const tasks = [
+      createPlannerTask({
+        id: "task-retrieval",
+        taskName: retrievalTaskLabel,
+        description: "Run only the highest-yield planner-selected source slice.",
+        reasoning: `Connector scope ${connectorPreview}; tool slice ${toolPreview}.`,
+        phase: "retrieval",
+        status: "pending",
+        isCritical: true,
+      }),
+      createPlannerTask({
+        id: "task-compose",
+        taskName: taskNameForFocus("Final synthesis for viva-style delivery", scenarioFocus),
+        description:
+          "Return concise answer with explicit uncertainty bounds and next action.",
+        reasoning: `Fast-track ${workflowFocus} response for ${scenarioFocus}.`,
+        phase: "composer",
+        status: "pending",
+        isCritical: true,
+      }),
+    ]
     return chainSequentialDependencies(tasks)
   }
 
   if (input.depthBudget.tier === "moderate") {
     const target = clamp(input.depthBudget.targetTaskCount, 3, 5)
     const tasks: PlannerTaskPlanItem[] = [
-      curriculumEnabled
-        ? createPlannerTask({
-            id: "task-curriculum-alignment",
-            taskName: curriculumTaskName({ scenarioFocus, lmsContext: input.lmsContext ?? null }),
-            description:
-              "Anchor this response to active course context and assessment cadence.",
-            reasoning: curriculumReasoning,
-            phase: "planner",
-            status: "completed",
-            isCritical: true,
-          })
-        : createPlannerTask({
-            id: "task-intel",
-            taskName: taskNameForFocus("Extracting clinical nuances", scenarioFocus),
-            description: "Extract entities and constraints before retrieval.",
-            reasoning: `Workflow=${workflowFocus}; scenario=${scenarioFocus}.`,
-            phase: "preflight",
-            status: "completed",
-            isCritical: true,
-          }),
+      createPlannerTask({
+        id: "task-intel",
+        taskName: taskNameForFocus("Extracting clinical nuances", scenarioFocus),
+        description: "Extract entities and constraints before retrieval.",
+        reasoning: `Workflow=${workflowFocus}; scenario=${scenarioFocus}.`,
+        phase: "preflight",
+        status: "completed",
+        isCritical: true,
+      }),
       createPlannerTask({
         id: "task-retrieval",
         taskName: retrievalTaskLabel,
@@ -821,19 +704,6 @@ function buildPlannerTaskPlan(input: PlannerTaskPlanBuildInput): PlannerTaskPlan
         status: "pending",
         isCritical: false,
       }),
-      ...(curriculumEnabled
-        ? [
-            createPlannerTask({
-              id: "task-intel",
-              taskName: taskNameForFocus("Extracting clinical nuances", scenarioFocus),
-              description: "Extract entities and constraints before retrieval.",
-              reasoning: `Workflow=${workflowFocus}; scenario=${scenarioFocus}.`,
-              phase: "preflight",
-              status: "completed",
-              isCritical: false,
-            }),
-          ]
-        : []),
     ]
 
     while (tasks.length < target && optionalInsertions.length > 0) {
@@ -847,27 +717,16 @@ function buildPlannerTaskPlan(input: PlannerTaskPlanBuildInput): PlannerTaskPlan
 
   const target = clamp(input.depthBudget.targetTaskCount, 7, 10)
   const tasks: PlannerTaskPlanItem[] = [
-    curriculumEnabled
-      ? createPlannerTask({
-          id: "task-curriculum-alignment",
-          taskName: curriculumTaskName({ scenarioFocus, lmsContext: input.lmsContext ?? null }),
-          description:
-            "Align retrieval and answer framing with active LMS course material.",
-          reasoning: curriculumReasoning,
-          phase: "planner",
-          status: "completed",
-          isCritical: true,
-        })
-      : createPlannerTask({
-          id: "task-intel",
-          taskName: taskNameForFocus("Extracting clinical nuances", scenarioFocus),
-          description:
-            "Extract entities, acuity, and completeness constraints for deep audit.",
-          reasoning: `Workflow=${workflowFocus}; focus=${scenarioFocus}.`,
-          phase: "preflight",
-          status: "completed",
-          isCritical: true,
-        }),
+    createPlannerTask({
+      id: "task-intel",
+      taskName: taskNameForFocus("Extracting clinical nuances", scenarioFocus),
+      description:
+        "Extract entities, acuity, and completeness constraints for deep audit.",
+      reasoning: `Workflow=${workflowFocus}; focus=${scenarioFocus}.`,
+      phase: "preflight",
+      status: "completed",
+      isCritical: true,
+    }),
     createPlannerTask({
       id: "task-hypothesis",
       taskName: taskNameForFocus("Framing competing clinical pathways", scenarioFocus),
@@ -940,20 +799,6 @@ function buildPlannerTaskPlan(input: PlannerTaskPlanBuildInput): PlannerTaskPlan
   ]
 
   const optionalInsertions: PlannerTaskPlanItem[] = [
-    ...(curriculumEnabled
-      ? [
-          createPlannerTask({
-            id: "task-intel",
-            taskName: taskNameForFocus("Extracting clinical nuances", scenarioFocus),
-            description:
-              "Extract entities, acuity, and completeness constraints for deep audit.",
-            reasoning: `Workflow=${workflowFocus}; focus=${scenarioFocus}.`,
-            phase: "preflight",
-            status: "completed",
-            isCritical: false,
-          }),
-        ]
-      : []),
     ...(input.clinicalIntel.completeness.state !== "complete"
       ? [
           createPlannerTask({
@@ -1025,42 +870,16 @@ function buildDeterministicFallbackTaskPlan(
   })
   const chartFeasible =
     input.chartPlan.enabled && input.chartPlan.feasibilityScore >= 0.55
-  const curriculumEnabled =
-    hasEducationalIntentSignal({
-      query: input.query,
-      modePolicy: input.modePolicy,
-      clinicalIntel: input.clinicalIntel,
-      learningMode: input.learningMode,
-    }) &&
-    Boolean(
-      input.lmsContext &&
-        (input.lmsContext.courseCount > 0 || input.lmsContext.artifactCount > 0)
-    )
   const minByTier = input.depthBudget.tier === "simple" ? 1 : input.depthBudget.tier === "moderate" ? 3 : 7
   const maxByTier = input.depthBudget.tier === "simple" ? 2 : input.depthBudget.tier === "moderate" ? 5 : 10
   const target = clamp(input.depthBudget.targetTaskCount, minByTier, maxByTier)
   const tasks: PlannerTaskPlanItem[] = [
-    ...(curriculumEnabled
-      ? [
-          createPlannerTask({
-            id: "task-curriculum-alignment",
-            taskName: curriculumTaskName({ scenarioFocus, lmsContext: input.lmsContext ?? null }),
-            description:
-              "Align answer framing to LMS course context in deterministic fallback mode.",
-            reasoning: summarizeLmsContext(input.lmsContext),
-            phase: "planner",
-            status: "completed",
-            isCritical: true,
-          }),
-        ]
-      : []),
     createPlannerTask({
       id: "task-retrieval",
       taskName: connectorSpecificRetrievalTaskName({
         query: input.query,
         connectorIds: input.selectionHints.preferredConnectorIds,
         toolNames: input.selectionHints.preferredToolNames,
-        curriculumEnabled,
         scenarioFocus,
       }),
       description: "Use planner-lazy fallback retrieval slice when dynamic planning fails.",
@@ -1814,7 +1633,6 @@ function getCompiledSupervisor() {
         chartPlan,
         selectionHints,
         learningMode: state.input.learningMode,
-        lmsContext: state.input.lmsContext,
       })
       const llmTaskPlan = null
       const taskPlan = llmTaskPlan || plannerBuild.taskPlan
@@ -1929,7 +1747,6 @@ function getCompiledSupervisor() {
           query: state.input.query,
           connectorIds: plan.selectedConnectorIds,
           toolNames: plan.selectedToolNames,
-          curriculumEnabled: Boolean(state.input.lmsContext),
           scenarioFocus: scenarioFocusLabel({
             clinicalIntel: state.clinicalIntel,
             query: state.input.query,
@@ -2426,7 +2243,6 @@ function buildFallbackOutput(
     chartPlan,
     selectionHints,
     learningMode: input.learningMode,
-    lmsContext: input.lmsContext,
   })
   let taskPlan = plannerBuild.taskPlan
   taskPlan = updateFirstTaskByPhase(taskPlan, "gatekeeper", {

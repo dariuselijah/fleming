@@ -1,0 +1,142 @@
+[
+  {
+    "code": "A09.0",
+    "description": "Other and unspecified gastroenteritis and colitis of infectious origin",
+    "category": "A00-A09",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "E11.9",
+    "description": "Type 2 diabetes mellitus without complications",
+    "category": "E10-E14",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "E11.8",
+    "description": "Type 2 diabetes mellitus with unspecified complications",
+    "category": "E10-E14",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "I10",
+    "description": "Essential (primary) hypertension",
+    "category": "I10-I15",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "I25.1",
+    "description": "Atherosclerotic heart disease",
+    "category": "I20-I25",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "J06.9",
+    "description": "Acute upper respiratory infection, unspecified",
+    "category": "J00-J06",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "J18.9",
+    "description": "Pneumonia, unspecified",
+    "category": "J12-J18",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "M54.5",
+    "description": "Low back pain",
+    "category": "M50-M54",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "N39.0",
+    "description": "Urinary tract infection, site not specified",
+    "category": "N30-N39",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "R50.9",
+    "description": "Fever, unspecified",
+    "category": "R50-R69",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "Z00.0",
+    "description": "General medical examination",
+    "category": "Z00-Z13",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "U07.1",
+    "description": "COVID-19, virus identified",
+    "category": "U00-U49",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "U07.2",
+    "description": "COVID-19, virus not identified",
+    "category": "U00-U49",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "F32.9",
+    "description": "Depressive episode, unspecified",
+    "category": "F30-F39",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "G43.9",
+    "description": "Migraine, unspecified",
+    "category": "G40-G47",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "K21.0",
+    "description": "Gastro-oesophageal reflux disease with oesophagitis",
+    "category": "K20-K31",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "L30.9",
+    "description": "Dermatitis, unspecified",
+    "category": "L20-L30",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "H10.9",
+    "description": "Conjunctivitis, unspecified",
+    "category": "H10-H13",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "O80",
+    "description": "Single spontaneous delivery",
+    "category": "O80-O84",
+    "asterisk": false,
+    "dagger": false
+  },
+  {
+    "code": "S93.4",
+    "description": "Sprain and strain of ankle",
+    "category": "S90-S99",
+    "asterisk": false,
+    "dagger": false
+  }
+]

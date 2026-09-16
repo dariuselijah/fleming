@@ -22,7 +22,13 @@ if (existsSync(envPath)) {
   config({ path: envPath });
 }
 
-const requiredVars = {
+type EnvVarInfo = {
+  description: string;
+  where: string;
+  example: string;
+};
+
+const requiredVars: Record<string, EnvVarInfo> = {
   'NEXT_PUBLIC_SUPABASE_URL': {
     description: 'Supabase project URL',
     where: 'Supabase Dashboard → Settings → API → Project URL',
@@ -39,6 +45,46 @@ const requiredVars = {
     example: 'sk-...',
   },
 };
+
+if (process.env.NODE_ENV === 'production') {
+  Object.assign(requiredVars, {
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY': {
+      description: 'Supabase browser/server-session key',
+      where: 'Supabase Dashboard → Settings → API',
+      example: 'eyJhbGciOiJIUzI1NiIs...',
+    },
+    'CSRF_SECRET': {
+      description: 'CSRF HMAC secret (at least 32 characters)',
+      where: 'Deployment secret manager',
+      example: '64-character-random-value',
+    },
+    'CRON_SECRET': {
+      description: 'Bearer secret for every /api/cron route',
+      where: 'Deployment secret manager and cron scheduler',
+      example: '64-character-random-value',
+    },
+    'TWILIO_AUTH_TOKEN': {
+      description: 'Twilio request-signature validation token',
+      where: 'Twilio Console',
+      example: 'Twilio auth token',
+    },
+    'VAPI_SERVER_SECRET': {
+      description: 'Vapi webhook HMAC secret',
+      where: 'Vapi webhook configuration',
+      example: 'Vapi server secret',
+    },
+    'RESEND_WEBHOOK_SECRET': {
+      description: 'Resend/Svix inbound webhook signing secret',
+      where: 'Resend webhook dashboard',
+      example: 'whsec_...',
+    },
+    'STITCH_WEBHOOK_SECRET': {
+      description: 'Stitch payment webhook signing secret',
+      where: 'Stitch dashboard',
+      example: 'Stitch webhook secret',
+    },
+  } satisfies Record<string, EnvVarInfo>);
+}
 
 const optionalVars = {
   'NCBI_API_KEY': {

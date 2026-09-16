@@ -147,7 +147,7 @@ export function ChatModeWelcome({
               className="group relative flex items-start gap-3 overflow-hidden rounded-xl border border-border/40 bg-card/30 px-3.5 py-3 text-left transition-all duration-200 hover:-translate-y-px hover:border-border hover:bg-card/70 hover:shadow-[0_4px_16px_-8px_rgba(0,0,0,0.35)]"
             >
               <span
-                className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] ${ex.iconColor} transition-colors group-hover:bg-white/[0.07]`}
+                className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted ${ex.iconColor} transition-colors group-hover:bg-accent`}
               >
                 <ex.icon className="size-3.5" weight="fill" />
               </span>

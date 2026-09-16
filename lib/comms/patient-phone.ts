@@ -1,4 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import type { Database } from "@/app/types/database.types"
+import { loadVaultDek, decryptPracticeAesGcm } from "@/lib/clinical/vault-dek"
 
 /** Normalize caller ID to E.164 for South Africa (+27…). Best-effort for other formats. */
 export function normalizePhoneE164Za(raw: string): string {
@@ -67,7 +70,7 @@ function digitsTail(phone: string): string {
 
 /** Resolve E.164 for appointment/voice outbound (patient row, then WhatsApp thread). */
 export async function resolvePatientPhoneE164(
-  db: ReturnType<typeof createAdminClient>,
+  db: SupabaseClient<Database> | ReturnType<typeof createAdminClient>,
   practiceId: string,
   patientId: string | null
 ): Promise<string | null> {
@@ -87,16 +90,106 @@ export async function resolvePatientPhoneE164(
 
   const { data: thread } = await db
     .from("conversation_threads")
-    .select("external_party")
+    .select("external_party, channel")
     .eq("practice_id", practiceId)
     .eq("patient_id", patientId)
-    .eq("channel", "whatsapp")
+    .in("channel", ["whatsapp", "sms", "rcs", "voice"])
     .order("last_message_at", { ascending: false })
     .limit(1)
     .maybeSingle()
 
   if (thread?.external_party) {
-    return normalizePhoneE164Za(thread.external_party as string)
+    const party = String(thread.external_party)
+    if (party.includes("@")) return null
+    return normalizePhoneE164Za(party)
   }
   return null
+}
+
+async function phoneFromEncryptedProfile(
+  db: SupabaseClient<Database>,
+  userId: string,
+  practiceId: string,
+  patientId: string
+): Promise<string | null> {
+  const dek = await loadVaultDek(db, userId, practiceId)
+  if (!dek) return null
+
+  const { data: row } = await db
+    .from("practice_patients")
+    .select("profile_ciphertext, profile_iv")
+    .eq("id", patientId)
+    .eq("practice_id", practiceId)
+    .maybeSingle()
+
+  if (!row?.profile_ciphertext || !row.profile_iv) return null
+
+  const profileJson = decryptPracticeAesGcm(dek, row.profile_ciphertext, row.profile_iv)
+  if (!profileJson) return null
+
+  try {
+    const profile = JSON.parse(profileJson) as { phone?: string; mobile?: string }
+    const raw = profile.phone?.trim() || profile.mobile?.trim()
+    return raw ? normalizePhoneE164Za(raw) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Full phone resolution for outbound SMS: explicit override → column → encrypted profile → threads/hints.
+ * Backfills `phone_e164` when a non-column source succeeds.
+ */
+export async function resolvePatientPhoneForComms(
+  db: SupabaseClient<Database>,
+  practiceId: string,
+  patientId: string,
+  opts?: {
+    userId?: string | null
+    fallbackPhone?: string | null
+    backfill?: boolean
+  }
+): Promise<string | null> {
+  const backfill = opts?.backfill !== false
+  let source: "override" | "column" | "profile" | "resolver" = "column"
+  let phone: string | null = null
+
+  const override = opts?.fallbackPhone?.trim()
+  if (override) {
+    phone = normalizePhoneE164Za(override)
+    source = "override"
+  }
+
+  if (!phone) {
+    const { data: patient } = await db
+      .from("practice_patients")
+      .select("phone_e164")
+      .eq("id", patientId)
+      .eq("practice_id", practiceId)
+      .maybeSingle()
+    if (patient?.phone_e164?.trim()) {
+      phone = patient.phone_e164.trim()
+      source = "column"
+    }
+  }
+
+  if (!phone && opts?.userId) {
+    phone = await phoneFromEncryptedProfile(db, opts.userId, practiceId, patientId)
+    if (phone) source = "profile"
+  }
+
+  if (!phone) {
+    phone = await resolvePatientPhoneE164(db, practiceId, patientId)
+    if (phone) source = "resolver"
+  }
+
+  if (phone && backfill && source !== "column") {
+    await db
+      .from("practice_patients")
+      .update({ phone_e164: phone })
+      .eq("id", patientId)
+      .eq("practice_id", practiceId)
+  }
+
+  return phone
 }

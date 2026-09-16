@@ -3,6 +3,33 @@ import { ModelConfig } from "../types"
 
 const openaiModels: ModelConfig[] = [
   {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    provider: "OpenAI",
+    providerId: "openai",
+    modelFamily: "GPT-5",
+    baseProviderId: "openai",
+    description:
+      "Fast, high-quality model for clinical artifact generation (SOAP, ICD, claims).",
+    tags: ["latest", "fast", "clinical", "tools"],
+    useCases: ["Clinical notes", "ICD-10 coding", "Billing claims"],
+    contextWindow: 400000,
+    inputCost: 1.25,
+    outputCost: 10,
+    priceUnit: "per 1M tokens",
+    vision: true,
+    tools: true,
+    audio: false,
+    reasoning: true,
+    openSource: false,
+    speed: "Fast",
+    intelligence: "High",
+    apiDocs: "https://developers.openai.com/api/docs/models/gpt-5.5",
+    modelPage: "https://developers.openai.com/api/docs/models/gpt-5.5",
+    icon: "openai",
+    apiSdk: (apiKey?: string) => openproviders("gpt-5.5", undefined, apiKey),
+  },
+  {
     id: "gpt-5.4",
     name: "GPT-5.4",
     provider: "OpenAI",

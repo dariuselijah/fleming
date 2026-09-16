@@ -1,27 +1,8 @@
-import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { decryptPracticeAesGcm, vaultOpenDek } from "@/lib/server/clinical-vault"
+import { requirePracticePermission } from "@/lib/auth/guard"
+import { decryptPracticeAesGcm } from "@/lib/server/clinical-vault"
+import { loadVaultDek } from "@/lib/clinical/vault-dek"
 import type { MedicalBlock } from "@/lib/clinical-workspace/types"
-
-async function loadVaultDek(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-  practiceId: string
-): Promise<string | null> {
-  if (!supabase) return null
-  const { data, error } = await supabase
-    .from("clinical_session_keys")
-    .select("enc_dek, dek_iv, expires_at")
-    .eq("user_id", userId)
-    .eq("practice_id", practiceId)
-    .gt("expires_at", new Date().toISOString())
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (error || !data?.enc_dek || !data?.dek_iv) return null
-  return vaultOpenDek(data.enc_dek, data.dek_iv)
-}
 
 export type PatientDocumentListItem = {
   id: string
@@ -51,26 +32,19 @@ function categorizeDocType(t: string): PatientDocumentListItem["category"] {
  * GET aggregated decrypted documents/blocks across encounters for a patient.
  */
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  if (!supabase) {
-    return NextResponse.json({ error: "Database unavailable" }, { status: 500 })
-  }
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
   const { searchParams } = new URL(req.url)
   const patientId = searchParams.get("patientId")
   const practiceId = searchParams.get("practiceId")
   if (!patientId || !practiceId) {
     return NextResponse.json({ error: "patientId and practiceId required" }, { status: 400 })
   }
+  const guard = await requirePracticePermission("clinical:access", {
+    requestedPracticeId: practiceId,
+  })
+  if (!guard.ok) return guard.response
+  const { supabase, userId } = guard.context
 
-  const dek = await loadVaultDek(supabase, user.id, practiceId)
+  const dek = await loadVaultDek(supabase, userId, practiceId)
   if (!dek) {
     return NextResponse.json(
       { error: "Practice vault locked — unlock in clinical workspace." },

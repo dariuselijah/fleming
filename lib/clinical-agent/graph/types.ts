@@ -149,22 +149,11 @@ export type RetrievalFallbackNote = {
   detail?: string
 }
 
-export type LmsProvider = "moodle" | "canvas"
-
-export type LmsContextSnapshot = {
-  courseCount: number
-  artifactCount: number
-  providerIds: LmsProvider[]
-  recentCourseNames: string[]
-  upcomingDueTitles: string[]
-}
-
 export type ClinicalGraphInput = {
   query: string
   role: GraphRole
   learningMode?: string | null
   clinicianMode?: string | null
-  lmsContext?: LmsContextSnapshot | null
   artifactIntent?: "none" | "quiz"
   supportsTools: boolean
   evidenceEnabled: boolean

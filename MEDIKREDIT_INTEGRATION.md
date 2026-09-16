@@ -1,3 +1,101 @@
+# MediKredit integration
+
+This document describes the current Fleming implementation. The official MediKredit/PHISC accreditation pack remains the source of truth for production certification.
+
+## Runtime architecture
+
+The browser sends structured patient and claim JSON to authenticated Next.js routes:
+
+- `POST /api/clinical/medikredit/eligibility`
+- `POST /api/clinical/medikredit/family`
+- `POST /api/clinical/medikredit/claim`
+- `POST /api/clinical/medikredit/claim/preview`
+- `POST /api/clinical/medikredit/reversal`
+
+Server code in `lib/medikredit/` builds inner `DOCUMENT` 3.53 XML. Live traffic is proxy-only: `lib/medikredit/client.ts` posts `{ action, xmlData }` to `{CLINICAL_PROXY_URL}/api/medikredit`. The proxy owns MediKredit credentials and creates the SOAP envelope. Fleming does not send direct live SOAP.
+
+`MEDIKREDIT_DRY_RUN=1` returns canned XML and never contacts MediKredit. Do not run `npm run test:medikredit:claim-live` during local or CI verification.
+
+## Transactions
+
+- `tx_cd=20`: member eligibility
+- `tx_cd=30`: family/dependant check
+- `tx_cd=21`: real-time claim
+- `tx_cd=11`: reversal
+
+Builders are in `lib/medikredit/build-document.ts`; parsing is in `lib/medikredit/parse-response.ts`.
+
+## Claim safety gates
+
+`app/api/clinical/medikredit/claim/route.ts` enforces the following before transport:
+
+1. Complete member/dependant demographics: member number, dependant code, date of birth, and binary MediKredit sex.
+2. A valid treatment date on every line, plus tariff or NAPPI identifiers as appropriate.
+3. Primary ICD-10 and modifier validation.
+4. DoctorOption resolution from the certified catalog in `lib/medikredit/doctor-option-catalog.ts`.
+5. A successful eligibility check from the preceding 24 hours, or a famcheck when the DoctorOption requires it.
+6. Medprax server preflight.
+7. A recent-submission fingerprint guard.
+
+Medprax live behavior is fail-closed:
+
+```env
+MEDPRAX_CLAIM_PREFLIGHT_MODE=required
+```
+
+An unverified bypass requires both:
+
+```env
+MEDPRAX_CLAIM_PREFLIGHT_MODE=disabled
+MEDPRAX_ALLOW_UNVERIFIED_CLAIMS=1
+```
+
+That bypass is an operational/certification decision, not a fallback.
+
+## Persistence and audit
+
+- `eligibility_checks` stores parsed eligibility/famcheck results.
+- `practice_claims` stores current claim state and parsed adjudication.
+- `practice_claim_events` is append-only history for submission, duplicate, reversal, and resubmission events.
+- Reversal updates the source claim to `reversed` only after an accepted switch response.
+- Corrected resubmissions may link through `resubmission_of_claim_id`; the original must already be reversed.
+- Duplicate drafts link through `duplicate_of_claim_id` where a persisted draft exists.
+
+Schema additions are in `supabase/migrations/20260721115955_revenue_claim_integrity.sql`.
+
+Routine API responses do not expose raw request/response XML. Parsed fields are returned instead. Raw XML is stored only when `MEDIKREDIT_STORE_RAW_XML=1`; leave this unset for normal production operation.
+
+## Billing UI
+
+The authoritative operator surface is `app/components/admin/billing-work-queue.tsx`, entered through `app/components/admin/bento-billing-entry.tsx`. Only the shared claim detail/create components remain in `app/components/admin/bento-claims.tsx`; the legacy Bento claims workspace has been removed.
+
+The clinical claim editors are:
+
+- `app/components/workspace/billing-claim-panel.tsx`
+- `app/components/workspace/claim-preview-modal.tsx`
+
+Patient/dependant payload mapping and treatment dates are normalized in `lib/clinical-workspace/medikredit-claim-from-session.ts`.
+
+## Verification
+
+Network-free golden checks run with:
+
+```bash
+npm run test:medikredit
+npm run test:revenue
+```
+
+These tests build/parse XML and validate safety gates without contacting MediKredit, Medprax, or payment networks.
+
+## External certification gaps
+
+Production activation still requires:
+
+- MediKredit accreditation against approved provider/vendor identifiers and allow-listed proxy egress.
+- Confirmation of the exact DoctorOption/famcheck rules for each contracted scheme.
+- Medprax contract-response fixtures for each supported discipline and plan.
+- Signed-off reversal windows and reverse/resubmit operator procedure.
+- POPIA retention approval if raw XML storage is enabled.
 # MediKredit integration (PerkilyHealth Pro)
 
 This document describes how the application integrates with **MediKredit** (South African medical scheme switch): XML/SOAP transport, eligibility and family checks, AI-assisted claim construction, submission and response parsing, RMRs and rejections, and how the frontend maps and displays results—including per-line item status.
@@ -11,7 +109,7 @@ This document describes how the application integrates with **MediKredit** (Sout
 | Layer | Role |
 |--------|------|
 | **React app (browser)** | Calls **Next.js API routes** with `practiceId` + patient/claim JSON — never sees MediKredit passwords. |
-| **Next.js server** (`app/api/clinical/medikredit/*`) | Builds inner DOCUMENT XML; sends either **direct** SOAP to `MEDIKREDIT_API_URL` with Basic auth, or — when `CLINICAL_PROXY_URL` is set — JSON to the proxy’s `POST /api/medikredit` (`lib/medikredit/client.ts`). |
+| **Next.js server** (`app/api/clinical/medikredit/*`) | Builds inner DOCUMENT XML; for live traffic sends JSON to the proxy’s `POST /api/medikredit` when `CLINICAL_PROXY_URL` is set (`lib/medikredit/client.ts`). Direct SOAP from Next.js is disabled. |
 | **MediKredit** | HTTPS endpoint (e.g. `https://services.medikredit.co.za:4436`), S2PI `submit-*` style SOAP (or reached via proxy). |
 
 ### Clinical proxy (`CLINICAL_PROXY_URL`)
@@ -30,7 +128,7 @@ When `CLINICAL_PROXY_URL` is set (e.g. `http://localhost:3001` for local xai-pro
 |---------|------------------|
 | Types, SOAP envelope, XML escape, DOCUMENT builders (`tx_cd` 11/20/21/30) | `lib/medikredit/types.ts`, `soap-envelope.ts`, `xml-escape.ts`, `build-document.ts` |
 | Response parsing (TX, RJ, ITEM, RMR, WARN, PAT) | `lib/medikredit/parse-response.ts` |
-| HTTPS + Basic auth (server-only) | `lib/medikredit/client.ts`, `env.ts` |
+| JSON proxy transport + timeouts (server-only) | `lib/medikredit/client.ts`; optional env shape in `env.ts` |
 | Eligibility + famcheck | `lib/medikredit/eligibility-service.ts` |
 | Claims: submit, reversal, chronic retry `631364`, duplicates | `lib/medikredit/claim-service.ts`, `duplicate-claim.ts` |
 | Procedure vs medicine split + merge | `lib/medikredit/claim-splitter.ts`, `claim-response-merger.ts` |
@@ -43,7 +141,7 @@ When `CLINICAL_PROXY_URL` is set (e.g. `http://localhost:3001` for local xai-pro
 | Patient directory (live checks) | `app/components/admin/patient-directory.tsx` |
 | DB migration | `supabase/migrations/20260409180000_medikredit_integration.sql` |
 
-**Security:** For direct SOAP, switch credentials live in **server env** (`MEDIKREDIT_API_URL`, `MEDIKREDIT_USERNAME`, `MEDIKREDIT_PASSWORD`). With `CLINICAL_PROXY_URL`, configure credentials on the proxy instead. Use `MEDIKREDIT_DRY_RUN=1` for canned responses without calling the switch.
+**Security:** Switch credentials (`MEDIKREDIT_API_URL`, `MEDIKREDIT_USERNAME`, `MEDIKREDIT_PASSWORD`) must be configured on the **clinical proxy** process that receives `CLINICAL_PROXY_URL` traffic — never in the browser. Fleming’s copy of `MEDIKREDIT_*` is optional for documentation/local tooling only. Use `MEDIKREDIT_DRY_RUN=1` for canned responses without calling the switch.
 
 ---
 
@@ -65,8 +163,8 @@ Eligibility and famcheck XML are built in `lib/medikredit/build-document.ts` (`b
 ## 4. Request flow: browser → Next.js API → MediKredit
 
 1. **Browser** POSTs JSON to `/api/clinical/medikredit/*` with `practiceId` and patient / claim payloads (no raw credentials).
-2. **Server** loads `medikredit_providers` for BHF/HPC/etc., builds inner **DOCUMENT** XML. For **direct** SOAP it then wraps with **`createSoapEnvelope`** (`lib/medikredit/soap-envelope.ts`) — inner XML is **HTML-entity–escaped** inside `<request>...</request>`. For **`CLINICAL_PROXY_URL`**, that envelope is built on the proxy; Fleming sends only the inner XML as `xmlData`.
-3. **`sendMedikreditSoap`** (`lib/medikredit/client.ts`): **direct** → POST to `MEDIKREDIT_API_URL` with `Content-Type: text/xml`, `SOAPAction`, **Basic** auth; **proxy** → `POST {CLINICAL_PROXY_URL}/api/medikredit` with JSON `{ action, xmlData }`, then use the `response` string from the JSON body.
+2. **Server** loads `medikredit_providers` for BHF/HPC/etc., builds inner **DOCUMENT** XML. The SOAP envelope is built on the clinical proxy; Fleming sends only the inner XML as `xmlData` (see `createSoapEnvelope` in the proxy / `lib/medikredit/soap-envelope.ts` for the escape rules).
+3. **`sendMedikreditSoap`** (`lib/medikredit/client.ts`): `POST {CLINICAL_PROXY_URL}/api/medikredit` with JSON `{ action, xmlData }`, then use the `response` string from the JSON body. If `CLINICAL_PROXY_URL` is unset and dry-run is off, the route returns a configuration error.
 4. **Response** is parsed on the server with **jsdom** (`parse-response.ts`): unwrap SOAP / `<reply>` / `<request>`, then read `<TX>`, `<RJ>`, `<ITEM>`, `<RMR>`, `<WARN>`, `<PAT>`.
 
 ---

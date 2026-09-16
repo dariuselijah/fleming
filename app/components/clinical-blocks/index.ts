@@ -1,6 +1,5 @@
 export { SOAPBlock } from "./soap-block"
 export { VitalsEntryBlock } from "./vitals-block"
 export { LabBlock } from "./lab-block"
-export { ClaimBlock } from "./claim-block"
 export { PrescriptionBlock } from "./prescription-block"
 export { ScribeBlock } from "./scribe-block"

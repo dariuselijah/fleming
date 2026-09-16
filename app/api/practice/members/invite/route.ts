@@ -1,12 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { createClient } from "@/lib/supabase/server"
+import { requirePracticePermission } from "@/lib/auth/guard"
 import { hashInviteToken, newInviteToken } from "@/lib/practice/invite-token"
-import { getPracticeMembership } from "@/lib/practice/membership-server"
 import { sendPracticeInviteEmail } from "@/lib/practice/send-practice-invite-email"
 import {
   ROLE_LABEL,
   canInviteAsRole,
-  isOwnerOrAdmin,
   type PracticeStaffRole,
 } from "@/lib/practice/team-permissions"
 import { NextRequest, NextResponse } from "next/server"
@@ -28,12 +26,6 @@ function resendFrom(): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient()
-  if (!supabase) return NextResponse.json({ error: "Unavailable" }, { status: 500 })
-
-  const { data: { user }, error: authErr } = await supabase.auth.getUser()
-  if (authErr || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
   let body: { practiceId?: string; email?: string; role?: string }
   try {
     body = (await req.json()) as { practiceId?: string; email?: string; role?: string }
@@ -54,12 +46,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid role" }, { status: 400 })
   }
 
-  const membership = await getPracticeMembership(supabase, user.id, practiceId)
-  if (!membership || !isOwnerOrAdmin(membership.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requirePracticePermission("team:manage", {
+    requestedPracticeId: practiceId,
+  })
+  if (!guard.ok) return guard.response
+  const callerRole = guard.context.activeRole as PracticeStaffRole
 
-  if (!canInviteAsRole(membership.role, role as PracticeStaffRole)) {
+  if (!canInviteAsRole(callerRole, role as PracticeStaffRole)) {
     return NextResponse.json({ error: "You cannot assign this role" }, { status: 403 })
   }
 
@@ -80,7 +73,7 @@ export async function POST(req: NextRequest) {
       practice_id: practiceId,
       email: emailRaw,
       role,
-      invited_by: user.id,
+      invited_by: guard.context.userId,
       token_hash: tokenHash,
       expires_at: expiresAt,
     })
@@ -130,22 +123,16 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const supabase = await createClient()
-  if (!supabase) return NextResponse.json({ error: "Unavailable" }, { status: 500 })
-
-  const { data: { user }, error: authErr } = await supabase.auth.getUser()
-  if (authErr || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
   const practiceId = req.nextUrl.searchParams.get("practiceId")?.trim()
   const invitationId = req.nextUrl.searchParams.get("invitationId")?.trim()
   if (!practiceId || !invitationId) {
     return NextResponse.json({ error: "practiceId and invitationId required" }, { status: 400 })
   }
 
-  const membership = await getPracticeMembership(supabase, user.id, practiceId)
-  if (!membership || !isOwnerOrAdmin(membership.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requirePracticePermission("team:manage", {
+    requestedPracticeId: practiceId,
+  })
+  if (!guard.ok) return guard.response
 
   let admin
   try {

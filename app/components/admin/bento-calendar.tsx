@@ -1,21 +1,34 @@
 "use client"
 
-import { useWorkspace, createPatientSession, useWorkspaceStore } from "@/lib/clinical-workspace"
-import type { PracticeAppointment, PracticePatient, AppointmentStatus, PaymentType } from "@/lib/clinical-workspace"
+import {
+  useWorkspace,
+  createPatientSession,
+  useWorkspaceStore,
+  fetchPracticeClaimsForWorkspace,
+} from "@/lib/clinical-workspace"
+import type {
+  PracticeAppointment,
+  PracticePatient,
+  AppointmentStatus,
+  PaymentType,
+  AppointmentClaimDraftLine,
+  ClaimLine,
+  ClaimLineType,
+} from "@/lib/clinical-workspace"
+import { fetchClient } from "@/lib/fetch"
+import { usePracticeCrypto } from "@/lib/clinical-workspace/practice-crypto-context"
 import { cn } from "@/lib/utils"
 import {
   UserCircle,
   ShieldCheck,
-  ArrowRight,
   Plus,
   X,
   Stethoscope,
-  CurrencyDollar,
-  Receipt,
   Tag,
   CaretLeft,
   CaretRight,
   CalendarBlank,
+  Trash,
 } from "@phosphor-icons/react"
 import { motion, AnimatePresence } from "motion/react"
 import { useCallback, useMemo, useState, useRef, useEffect } from "react"
@@ -27,34 +40,29 @@ import {
   validHourValues,
   validMinuteValues,
 } from "@/lib/practice/appointment-hours"
-
-const SERVICE_CATALOG: { name: string; cpt: string; price: number }[] = [
-  { name: "Consultation", cpt: "0191", price: 580 },
-  { name: "Follow-up", cpt: "0190", price: 420 },
-  { name: "Extended Consultation", cpt: "0192", price: 780 },
-  { name: "Procedure", cpt: "0193", price: 950 },
-  { name: "ECG", cpt: "3744", price: 180 },
-  { name: "Blood Draw", cpt: "3739", price: 120 },
-]
+import { SERVICE_CATALOG } from "@/lib/practice/service-catalog"
+import { AssistantModalSuppressor } from "@/app/components/assistant/assistant-modal-suppressor"
+import { requestAppointmentsRefresh } from "@/lib/clinical-workspace/appointments-refresh-bus"
+import { toast } from "sonner"
 
 const STATUS_COLOR: Record<AppointmentStatus, string> = {
   booked: "border-l-white/20",
   confirmed: "border-l-cyan-500",
   checked_in: "border-l-blue-500",
   in_progress: "border-l-indigo-500",
-  completed: "border-l-[#00E676]",
-  no_show: "border-l-[#EF5350]",
+  completed: "border-l-[status-success]",
+  no_show: "border-l-[status-danger]",
   cancelled: "border-l-white/10",
 }
 
 const STATUS_DOT: Record<AppointmentStatus, string> = {
-  booked: "bg-white/20",
+  booked: "bg-secondary",
   confirmed: "bg-cyan-500",
   checked_in: "bg-blue-500",
   in_progress: "bg-indigo-500",
-  completed: "bg-[#00E676]",
-  no_show: "bg-[#EF5350]",
-  cancelled: "bg-white/10",
+  completed: "bg-status-success",
+  no_show: "bg-status-danger",
+  cancelled: "bg-secondary",
 }
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
@@ -135,10 +143,27 @@ function fuzzyMatch(query: string, target: string): boolean {
   return qi === q.length
 }
 
+/** Match appointment to a day-view cell (per-provider column). Unassigned visits show in the first column only. */
+function appointmentForDayCell(
+  dayAppointments: PracticeAppointment[],
+  colId: string,
+  columns: { id: string }[],
+  hour: number,
+  minute: number
+): PracticeAppointment | undefined {
+  return dayAppointments.find((a) => {
+    if (a.hour !== hour || a.minute !== minute) return false
+    if (a.providerId === colId) return true
+    if (!a.providerId && columns[0]?.id === colId) return true
+    return false
+  })
+}
+
 export function BentoCalendar() {
   const {
     openPatient,
     setMode,
+    setAdminTab,
     patients,
     appointments,
     addAppointment,
@@ -154,8 +179,10 @@ export function BentoCalendar() {
   const [showCreate, setShowCreate] = useState(false)
   const [showDatePicker, setShowDatePicker] = useState(false)
   const datePickerRef = useRef<HTMLDivElement>(null)
+  const { practiceId } = usePracticeCrypto()
 
   const calendarFocusRequest = useWorkspaceStore((s) => s.calendarFocusRequest)
+  const calendarHiddenProviderIds = useWorkspaceStore((s) => s.calendarHiddenProviderIds)
   const lastCalendarFocusNonce = useRef(0)
 
   const currentDate = parseDate(selectedDate)
@@ -170,30 +197,49 @@ export function BentoCalendar() {
     setSelected(appt)
   }, [calendarFocusRequest, appointments, setSelectedDate])
 
-  const dayAppointments = useMemo(
+  const visibleProviders = useMemo(
+    () => practiceProviders.filter((p) => !calendarHiddenProviderIds.includes(p.id)),
+    [practiceProviders, calendarHiddenProviderIds]
+  )
+
+  const dayAppointmentsAll = useMemo(
     () => appointments.filter((a) => a.date === selectedDate),
     [appointments, selectedDate]
   )
 
-  const weekStart = useMemo(() => startOfWeek(currentDate), [selectedDate])
+  const dayAppointments = useMemo(() => {
+    if (practiceProviders.length === 0) return dayAppointmentsAll
+    if (visibleProviders.length === 0) return []
+    if (visibleProviders.length === practiceProviders.length) return dayAppointmentsAll
+    return dayAppointmentsAll.filter(
+      (a) => !a.providerId || visibleProviders.some((p) => p.id === a.providerId)
+    )
+  }, [dayAppointmentsAll, practiceProviders, visibleProviders])
+
+  const dayColumns = useMemo(
+    () => visibleProviders.map((p) => ({ id: p.id, name: p.name })),
+    [visibleProviders]
+  )
+
+  const weekStart = useMemo(() => startOfWeek(currentDate), [currentDate])
   const weekDates = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
     [weekStart]
   )
   const weekAppointments = useMemo(() => {
     const dateStrs = new Set(weekDates.map(fmtDate))
-    return appointments.filter((a) => dateStrs.has(a.date))
-  }, [appointments, weekDates])
+    const list = appointments.filter((a) => dateStrs.has(a.date))
+    if (practiceProviders.length === 0) return list
+    if (visibleProviders.length === 0) return []
+    if (visibleProviders.length === practiceProviders.length) return list
+    return list.filter(
+      (a) => !a.providerId || visibleProviders.some((p) => p.id === a.providerId)
+    )
+  }, [appointments, weekDates, practiceProviders, visibleProviders])
 
-  const booked = dayAppointments.length
+  const booked = dayAppointments.filter((a) => a.status !== "cancelled").length
   const completed = dayAppointments.filter((a) => a.status === "completed").length
   const checkedIn = dayAppointments.filter((a) => a.status === "checked_in" || a.status === "in_progress").length
-
-  const apptMap = useMemo(() => {
-    const m = new Map<string, PracticeAppointment>()
-    for (const a of dayAppointments) m.set(`${a.hour}:${a.minute}`, a)
-    return m
-  }, [dayAppointments])
 
   const dayOfWeek = currentDate.getDay()
   const { closed: dayClosed, openMin, closeMin } = useMemo(
@@ -213,6 +259,7 @@ export function BentoCalendar() {
         createPatientSession({
           patientId: a.patientId,
           name: a.patientName,
+          appointmentId: a.id,
           appointmentReason: a.reason,
           status: a.status === "checked_in" ? "checked_in" : "waiting",
           medicalAidScheme: pat?.medicalAidScheme ?? a.medicalAid,
@@ -266,7 +313,7 @@ export function BentoCalendar() {
             <button
               type="button"
               onClick={() => (viewMode === "day" ? navigateDay(-1) : navigateWeek(-1))}
-              className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/70"
+              className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-muted-foreground dark:hover:bg-secondary dark:hover:text-accent-foreground/70"
             >
               <CaretLeft className="size-4" weight="bold" />
             </button>
@@ -275,9 +322,9 @@ export function BentoCalendar() {
               <button
                 type="button"
                 onClick={() => setShowDatePicker(!showDatePicker)}
-                className="flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors hover:bg-muted dark:hover:bg-white/[0.06]"
+                className="flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors hover:bg-muted dark:hover:bg-secondary"
               >
-                <CalendarBlank className="size-3.5 text-muted-foreground dark:text-white/40" />
+                <CalendarBlank className="size-3.5 text-muted-foreground dark:text-muted-foreground" />
                 <span className="text-sm font-semibold text-foreground">{dateLabel}</span>
               </button>
 
@@ -305,20 +352,20 @@ export function BentoCalendar() {
             <button
               type="button"
               onClick={() => (viewMode === "day" ? navigateDay(1) : navigateWeek(1))}
-              className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-white/40 dark:hover:bg-white/[0.06] dark:hover:text-white/70"
+              className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:text-muted-foreground dark:hover:bg-secondary dark:hover:text-accent-foreground/70"
             >
               <CaretRight className="size-4" weight="bold" />
             </button>
 
-            <div className="ml-2 flex rounded-lg border border-border p-0.5 dark:border-white/[0.06]">
+            <div className="ml-2 flex rounded-lg border border-border p-0.5 dark:border-panel-border">
               <button
                 type="button"
                 onClick={() => setViewMode("day")}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-[10px] font-semibold transition-colors",
                   viewMode === "day"
-                    ? "bg-muted text-foreground dark:bg-white/[0.1]"
-                    : "text-muted-foreground hover:text-foreground dark:text-white/30 dark:hover:text-white/50"
+                    ? "bg-muted text-foreground dark:bg-secondary"
+                    : "text-muted-foreground hover:text-foreground dark:text-foreground/30 dark:hover:text-accent-foreground"
                 )}
               >
                 Day
@@ -329,8 +376,8 @@ export function BentoCalendar() {
                 className={cn(
                   "rounded-md px-2.5 py-1 text-[10px] font-semibold transition-colors",
                   viewMode === "week"
-                    ? "bg-muted text-foreground dark:bg-white/[0.1]"
-                    : "text-muted-foreground hover:text-foreground dark:text-white/30 dark:hover:text-white/50"
+                    ? "bg-muted text-foreground dark:bg-secondary"
+                    : "text-muted-foreground hover:text-foreground dark:text-foreground/30 dark:hover:text-accent-foreground"
                 )}
               >
                 Week
@@ -344,7 +391,7 @@ export function BentoCalendar() {
                 Booked: <span className="font-bold text-foreground">{booked}</span>
               </span>
               <span className="text-muted-foreground">
-                Done: <span className="font-bold text-[#00E676]">{completed}</span>
+                Done: <span className="font-bold text-status-success">{completed}</span>
               </span>
               <span className="text-muted-foreground">
                 Waiting: <span className="font-bold text-blue-400">{checkedIn}</span>
@@ -353,7 +400,7 @@ export function BentoCalendar() {
             <button
               type="button"
               onClick={() => setShowCreate(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14]"
+              className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted/80 dark:bg-secondary dark:hover:bg-secondary"
             >
               <Plus className="size-3.5" />
               New Appointment
@@ -363,7 +410,7 @@ export function BentoCalendar() {
 
         {/* View */}
         {viewMode === "day" ? (
-          <DayView slots={daySlots} dayClosed={dayClosed} apptMap={apptMap} onSelect={setSelected} />
+          <DayView slots={daySlots} dayClosed={dayClosed} columns={dayColumns} dayAppointments={dayAppointments} onSelect={setSelected} />
         ) : (
           <WeekView
             weekDates={weekDates}
@@ -391,7 +438,11 @@ export function BentoCalendar() {
           >
             <DetailPane
               appointment={selected}
+              practiceId={practiceId}
+              practiceProviders={practiceProviders}
               onClose={() => setSelected(null)}
+              onUpdateAppointment={updateAppointment}
+              onOpenBilling={() => setAdminTab("billing")}
               onStartScribe={() => {
                 handleOpenPatient(selected)
                 setSelected(null)
@@ -405,6 +456,7 @@ export function BentoCalendar() {
       <AnimatePresence>
         {showCreate && (
           <CreateAppointmentModal
+            practiceId={practiceId}
             patients={patients}
             appointments={appointments}
             practiceProviders={practiceProviders}
@@ -427,18 +479,20 @@ export function BentoCalendar() {
 function DayView({
   slots,
   dayClosed,
-  apptMap,
+  columns,
+  dayAppointments,
   onSelect,
 }: {
   slots: { hour: number; minute: number }[]
   dayClosed: boolean
-  apptMap: Map<string, PracticeAppointment>
+  columns: { id: string; name: string }[]
+  dayAppointments: PracticeAppointment[]
   onSelect: (a: PracticeAppointment) => void
 }) {
   if (dayClosed || slots.length === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-border bg-card/70 px-6 py-16 dark:border-white/[0.05] dark:bg-white/[0.015]">
-        <CalendarBlank className="mb-3 size-10 text-muted-foreground/40 dark:text-white/15" />
+      <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-border bg-card/70 px-6 py-16 dark:border-panel-border dark:bg-panel-muted/40">
+        <CalendarBlank className="mb-3 size-10 text-muted-foreground/40 dark:text-muted-foreground/40" />
         <p className="max-w-sm text-center text-[13px] leading-relaxed text-muted-foreground">
           {dayClosed
             ? "This practice is closed on this day. Change operating hours in Settings → Practice."
@@ -448,15 +502,35 @@ function DayView({
     )
   }
 
+  if (columns.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-panel-border bg-panel-muted/40 px-6 py-16">
+        <CalendarBlank className="mb-3 size-10 text-muted-foreground" />
+        <p className="max-w-sm text-center text-[13px] leading-relaxed text-muted-foreground">
+          No providers visible. Turn on at least one provider under <strong className="text-muted-foreground/70">Practice Management</strong> → Providers.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div
-      className="flex-1 overflow-y-auto rounded-2xl border border-border bg-card/70 dark:border-white/[0.05] dark:bg-white/[0.015]"
+      className="flex-1 overflow-y-auto rounded-2xl border border-border bg-card/70 dark:border-panel-border dark:bg-panel-muted/40"
       style={{ scrollbarWidth: "none" }}
     >
+      {columns.length > 1 ? (
+        <div className="sticky top-0 z-[1] flex border-b border-panel-border bg-panel/92 backdrop-blur-md">
+          <div className="w-14 shrink-0" />
+          {columns.map((col) => (
+            <div key={col.id} className="min-w-0 flex-1 border-l border-panel-border px-2 py-1.5 text-center">
+              <span className="block truncate text-[10px] font-semibold text-muted-foreground/75">{col.name}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="relative">
         {slots.map(({ hour, minute }) => {
           const key = `${hour}:${minute}`
-          const appt = apptMap.get(key)
           const ts = timeStr(hour, minute)
           const isHalfHour = minute === 30
 
@@ -465,31 +539,51 @@ function DayView({
               key={key}
               className={cn(
                 "flex min-h-[44px] items-stretch",
-                isHalfHour ? "border-t border-border/50 dark:border-white/[0.03]" : "border-t border-border dark:border-white/[0.06]"
+                isHalfHour ? "border-t border-border/50 dark:border-panel-border" : "border-t border-border dark:border-panel-border"
               )}
             >
               <div className="flex w-14 shrink-0 items-start justify-end pr-3 pt-1.5">
-                {!isHalfHour && <span className="text-[10px] tabular-nums text-muted-foreground dark:text-white/25">{ts}</span>}
+                {!isHalfHour && <span className="text-[10px] tabular-nums text-muted-foreground dark:text-foreground/25">{ts}</span>}
               </div>
-              <div className="flex-1 py-0.5 pr-2">
-                {appt && (
-                  <button
-                    type="button"
-                    onClick={() => onSelect(appt)}
+              {columns.map((col) => {
+                const appt = appointmentForDayCell(dayAppointments, col.id, columns, hour, minute)
+                return (
+                  <div
+                    key={`${col.id}-${key}`}
                     className={cn(
-                      "flex w-full items-center gap-2.5 rounded-lg border-l-2 bg-muted/40 px-3 py-2 text-left transition-all hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.06]",
-                      STATUS_COLOR[appt.status]
+                      "min-w-0 flex-1 py-0.5 pr-1",
+                      columns.length > 1 && "border-l border-panel-border"
                     )}
                   >
-                    <span className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[appt.status])} />
-                    <div className="min-w-0 flex-1">
-                      <span className="text-[12px] font-medium text-foreground">{appt.patientName}</span>
-                      <span className="ml-2 text-[10px] text-muted-foreground dark:text-white/30">{appt.reason}</span>
-                    </div>
-                    <PaymentBadge paymentType={appt.paymentType} medicalAid={appt.medicalAid} />
-                  </button>
-                )}
-              </div>
+                    {appt ? (
+                      <button
+                        type="button"
+                        onClick={() => onSelect(appt)}
+                        className={cn(
+                          "flex w-full items-center gap-1.5 rounded-lg border-l-2 bg-panel-muted px-2 py-1.5 text-left transition-all hover:bg-secondary",
+                          STATUS_COLOR[appt.status],
+                          appt.status === "cancelled" &&
+                            "opacity-45 line-through decoration-rose-400/70 [text-decoration-thickness:1px]"
+                        )}
+                      >
+                        <span className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[appt.status])} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-[11px] font-medium text-foreground">{appt.patientName}</span>
+                            {appt.status === "cancelled" ? (
+                              <span className="rounded-full bg-rose-500/20 px-1.5 py-px text-[7px] font-bold uppercase tracking-wide text-rose-200/95">
+                                Cancelled
+                              </span>
+                            ) : null}
+                          </div>
+                          <span className="block truncate text-[9px] text-muted-foreground">{appt.reason}</span>
+                        </div>
+                        <PaymentBadge paymentType={appt.paymentType} medicalAid={appt.medicalAid} />
+                      </button>
+                    ) : null}
+                  </div>
+                )
+              })}
             </div>
           )
         })}
@@ -528,7 +622,7 @@ function WeekView({
 
   return (
     <div
-      className="flex-1 overflow-y-auto rounded-2xl border border-border bg-card/70 dark:border-white/[0.05] dark:bg-white/[0.015]"
+      className="flex-1 overflow-y-auto rounded-2xl border border-border bg-card/70 dark:border-panel-border dark:bg-panel-muted/40"
       style={{ scrollbarWidth: "none" }}
     >
       <div className="grid h-full grid-cols-7 divide-x divide-white/[0.04]">
@@ -544,11 +638,11 @@ function WeekView({
                 type="button"
                 onClick={() => onDateClick(d)}
                 className={cn(
-                  "border-b border-border px-2 py-2 text-center transition-colors hover:bg-muted/50 dark:border-white/[0.05] dark:hover:bg-white/[0.04]",
-                  isSelected && "bg-muted/60 dark:bg-white/[0.04]"
+                  "border-b border-border px-2 py-2 text-center transition-colors hover:bg-muted/50 dark:border-panel-border dark:hover:bg-panel-muted",
+                  isSelected && "bg-muted/60 dark:bg-panel-muted"
                 )}
               >
-                <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground dark:text-white/30">
+                <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground dark:text-foreground/30">
                   {WEEKDAYS[(d.getDay() + 6) % 7]}
                 </div>
                 <div
@@ -568,12 +662,14 @@ function WeekView({
                     type="button"
                     onClick={() => onSelect(a)}
                     className={cn(
-                      "w-full rounded-md border-l-2 bg-muted/40 px-1.5 py-1 text-left transition-all hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.06]",
-                      STATUS_COLOR[a.status]
+                      "w-full rounded-md border-l-2 bg-panel-muted px-1.5 py-1 text-left transition-all hover:bg-secondary",
+                      STATUS_COLOR[a.status],
+                      a.status === "cancelled" &&
+                        "opacity-45 line-through decoration-rose-400/70 [text-decoration-thickness:1px]"
                     )}
                   >
                     <div className="truncate text-[10px] font-medium text-foreground">{a.patientName}</div>
-                    <div className="text-[9px] tabular-nums text-muted-foreground dark:text-white/30">{a.startTime}</div>
+                    <div className="text-[9px] tabular-nums text-muted-foreground dark:text-foreground/30">{a.startTime}</div>
                   </button>
                 ))}
               </div>
@@ -589,61 +685,392 @@ function WeekView({
 
 function DetailPane({
   appointment,
+  practiceId,
+  practiceProviders,
   onClose,
   onStartScribe,
+  onUpdateAppointment,
+  onOpenBilling,
 }: {
   appointment: PracticeAppointment
+  practiceId: string | null
+  practiceProviders: { id: string; name: string }[]
   onClose: () => void
   onStartScribe: () => void
+  onUpdateAppointment: (id: string, update: Partial<PracticeAppointment>) => void
+  onOpenBilling: () => void
 }) {
+  const [reason, setReason] = useState(appointment.reason ?? "")
+  const [service, setService] = useState(appointment.service ?? "Consultation")
+  const [duration, setDuration] = useState(appointment.duration)
+  const [providerId, setProviderId] = useState(appointment.providerId)
+  const [notes, setNotes] = useState(appointment.notes ?? "")
+  const [icdInput, setIcdInput] = useState((appointment.icdCodes ?? []).join(", "))
+  const [totalFee, setTotalFee] = useState(appointment.totalFee ?? 0)
+  const [draftLines, setDraftLines] = useState<AppointmentClaimDraftLine[]>(appointment.claimLineDrafts ?? [])
+  const [saving, setSaving] = useState(false)
+  const [claimBusy, setClaimBusy] = useState(false)
+  const [encCtx, setEncCtx] = useState<{ chiefComplaint?: string; summary?: string } | null>(null)
+  const [ctxOpen, setCtxOpen] = useState(true)
+
+  useEffect(() => {
+    setReason(appointment.reason ?? "")
+    setService(appointment.service ?? "Consultation")
+    setDuration(appointment.duration)
+    setProviderId(appointment.providerId)
+    setNotes(appointment.notes ?? "")
+    setIcdInput((appointment.icdCodes ?? []).join(", "))
+    setTotalFee(appointment.totalFee ?? 0)
+    setDraftLines(appointment.claimLineDrafts ?? [])
+  }, [appointment.id])
+
+  useEffect(() => {
+    if (!appointment.patientId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetchClient(`/api/patients/${appointment.patientId}/ai-summary`)
+        if (!res.ok || cancelled) return
+        const j = (await res.json()) as { latestChiefComplaint?: string; rollup?: string; latestSummaryText?: string }
+        if (!cancelled) {
+          setEncCtx({
+            chiefComplaint: j.latestChiefComplaint ?? undefined,
+            summary: j.rollup ?? j.latestSummaryText ?? undefined,
+          })
+        }
+      } catch {
+        /* optional */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [appointment.patientId])
+
+  const buildMetadataPayload = useCallback(
+    (linkedOverride?: string) => {
+      const meta: Record<string, unknown> = {
+        claim_line_drafts: draftLines.map((d) => ({
+          id: d.id,
+          description: d.description,
+          amount: d.amount,
+          line_type: d.lineType,
+        })),
+      }
+      const link = linkedOverride ?? appointment.linkedClaimId
+      if (link) meta.linked_claim_id = link
+      return meta
+    },
+    [draftLines, appointment.linkedClaimId]
+  )
+
+  const persist = useCallback(async () => {
+    if (!practiceId) return
+    setSaving(true)
+    try {
+      const codes = icdInput
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean)
+      const res = await fetchClient(`/api/practice/appointments/${appointment.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: reason.trim() || null,
+          service: service.trim() || null,
+          duration_minutes: duration,
+          provider_staff_id: providerId || null,
+          notes: notes.trim() || null,
+          icd_codes: codes.length ? codes : null,
+          total_fee: totalFee > 0 ? totalFee : null,
+          metadata: buildMetadataPayload(),
+        }),
+      })
+      if (!res.ok) throw new Error("Could not save appointment")
+      onUpdateAppointment(appointment.id, {
+        reason: reason.trim() || undefined,
+        service,
+        duration,
+        providerId,
+        notes: notes.trim() || undefined,
+        icdCodes: codes.length ? codes : undefined,
+        totalFee: totalFee > 0 ? totalFee : undefined,
+        claimLineDrafts: draftLines,
+      })
+      requestAppointmentsRefresh()
+    } catch (e) {
+      console.warn(e)
+    } finally {
+      setSaving(false)
+    }
+  }, [
+    practiceId,
+    appointment.id,
+    reason,
+    service,
+    duration,
+    providerId,
+    notes,
+    icdInput,
+    totalFee,
+    draftLines,
+    buildMetadataPayload,
+    onUpdateAppointment,
+  ])
+
+  const attachClaim = async () => {
+    if (!practiceId) return
+    setClaimBusy(true)
+    try {
+      await persist()
+      const icdFirst = icdInput.split(",")[0]?.trim()
+      const lines: ClaimLine[] = []
+      const mainType: ClaimLineType = appointment.paymentType === "medical_aid" ? "medical_aid" : "cash"
+      if (totalFee > 0 || service.trim()) {
+        lines.push({
+          id: `appt-${appointment.id}-main`,
+          description: service.trim() || "Consultation",
+          amount: totalFee > 0 ? totalFee : 0,
+          lineType: mainType,
+          status: "draft",
+          icdCode: icdFirst || undefined,
+        })
+      }
+      for (const d of draftLines) {
+        lines.push({
+          id: d.id,
+          description: d.description,
+          amount: d.amount,
+          lineType: d.lineType,
+          status: "draft",
+        })
+      }
+      if (lines.length === 0 || lines.every((l) => l.amount <= 0 && !l.description.trim())) {
+        throw new Error("Add a service fee or at least one billable line")
+      }
+
+      const res = await fetchClient("/api/clinical/practice-claims/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          practiceId,
+          patientId: appointment.patientId,
+          clinicalEncounterId: appointment.linkedConsultId ?? null,
+          claimId: appointment.linkedClaimId ?? null,
+          appointmentId: appointment.id,
+          lines,
+        }),
+      })
+      const j = (await res.json()) as { claimId?: string; error?: string }
+      if (!res.ok) throw new Error(j.error || "Could not create claim")
+
+      const claimId = j.claimId!
+      await fetchClient(`/api/practice/appointments/${appointment.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metadata: buildMetadataPayload(claimId),
+        }),
+      })
+      onUpdateAppointment(appointment.id, {
+        linkedClaimId: claimId,
+        claimLineDrafts: draftLines,
+      })
+      const rows = await fetchPracticeClaimsForWorkspace(practiceId)
+      useWorkspaceStore.getState().setClaims(rows)
+      onOpenBilling()
+    } catch (e) {
+      console.warn(e)
+      toast.error(e instanceof Error ? e.message : "Attach claim failed")
+    } finally {
+      setClaimBusy(false)
+    }
+  }
+
+  const addDraftLine = () => {
+    setDraftLines((prev) => [
+      ...prev,
+      {
+        id: `dl-${crypto.randomUUID()}`,
+        description: "",
+        amount: 0,
+        lineType: "cash",
+      },
+    ])
+  }
+
   return (
-    <div className="flex h-full w-[320px] flex-col rounded-2xl border border-white/[0.05] bg-white/[0.02]">
-      <div className="flex items-center justify-between border-b border-white/[0.05] px-4 py-3">
+    <div className="flex h-full w-[320px] flex-col rounded-2xl border border-panel-border bg-panel-muted/50">
+      <div className="flex items-center justify-between border-b border-panel-border px-4 py-3">
         <div>
           <h3 className="text-[13px] font-semibold">{appointment.patientName}</h3>
-          <p className="text-[10px] text-white/30">
-            {appointment.startTime}–{appointment.endTime} · {appointment.service ?? "Consultation"}
+          <p className="text-[10px] text-muted-foreground tabular-nums">
+            {appointment.startTime}–{appointment.endTime} (24h) · {service || "Consultation"}
           </p>
         </div>
-        <button type="button" onClick={onClose} className="text-white/30 hover:text-white/60">
+        <button type="button" onClick={onClose} className="text-muted-foreground hover:text-accent-foreground/60">
           <X className="size-4" />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
+      <div className="flex-1 overflow-y-auto pb-[max(4rem,env(safe-area-inset-bottom))]" style={{ scrollbarWidth: "none" }}>
         <div className="space-y-4 p-4">
-          {/* Status chip */}
           <div className="flex flex-wrap gap-1.5">
             <span
               className={cn(
                 "flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase",
                 appointment.status === "completed"
-                  ? "bg-[#00E676]/10 text-[#00E676]"
+                  ? "bg-status-success/10 text-status-success"
                   : appointment.status === "in_progress"
                     ? "bg-indigo-500/10 text-indigo-400"
                     : appointment.status === "checked_in"
                       ? "bg-blue-500/10 text-blue-400"
                       : appointment.status === "no_show"
-                        ? "bg-[#EF5350]/10 text-[#EF5350]"
+                        ? "bg-status-danger/10 text-status-danger"
                         : appointment.status === "cancelled"
-                          ? "bg-white/[0.04] text-white/30"
-                          : "bg-white/[0.06] text-white/50"
+                          ? "bg-panel-muted text-muted-foreground"
+                          : "bg-secondary text-muted-foreground/70"
               )}
             >
               <span className={cn("size-1.5 rounded-full", STATUS_DOT[appointment.status])} />
               {STATUS_LABEL[appointment.status]}
             </span>
             <PaymentBadge paymentType={appointment.paymentType} medicalAid={appointment.medicalAid} />
+            {appointment.linkedClaimId ? (
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[8px] font-semibold text-amber-300">
+                Claim linked
+              </span>
+            ) : null}
           </div>
 
-          <DetailRow icon={<UserCircle className="size-3.5" />} label="Patient" value={appointment.patientName} />
-          <DetailRow icon={<Stethoscope className="size-3.5" />} label="Reason" value={appointment.reason ?? "—"} />
-          <DetailRow icon={<CalendarBlank className="size-3.5" />} label="Date" value={appointment.date} />
-          <DetailRow
-            icon={<Receipt className="size-3.5" />}
-            label="Duration"
-            value={`${appointment.duration} min`}
-          />
+          {encCtx?.chiefComplaint || encCtx?.summary ? (
+            <div className="rounded-xl border border-cyan-500/15 bg-cyan-500/[0.04] p-3">
+              <button
+                type="button"
+                onClick={() => setCtxOpen(!ctxOpen)}
+                className="flex w-full items-center justify-between text-left"
+              >
+                <span className="text-[10px] font-semibold text-cyan-200/90">AI context · last visit</span>
+                <span className="text-[9px] text-muted-foreground">{ctxOpen ? "Hide" : "Show"}</span>
+              </button>
+              {ctxOpen ? (
+                <div className="mt-2 space-y-2 text-[11px] leading-relaxed text-muted-foreground/75">
+                  {encCtx.chiefComplaint ? (
+                    <p>
+                      <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Chief complaint
+                      </span>
+                      <br />
+                      {encCtx.chiefComplaint}
+                    </p>
+                  ) : null}
+                  {encCtx.summary ? (
+                    <p className="line-clamp-6 text-[10px] text-muted-foreground/65">{encCtx.summary}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <label className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">Reason</label>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              onBlur={() => void persist()}
+              className="w-full rounded-lg border border-panel-border bg-panel-muted px-2 py-1.5 text-[11px] outline-none focus:border-panel-border"
+              placeholder="Visit reason…"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">Service</label>
+              <select
+                value={service}
+                onChange={(e) => {
+                  setService(e.target.value)
+                  const svc = SERVICE_CATALOG.find((s) => s.name === e.target.value)
+                  if (svc?.price != null) setTotalFee(svc.price)
+                  if (svc?.defaultDurationMinutes != null) setDuration(svc.defaultDurationMinutes)
+                }}
+                onBlur={() => void persist()}
+                className="mt-1 w-full rounded-lg border border-panel-border bg-panel-muted px-2 py-1.5 text-[11px] outline-none"
+              >
+                {SERVICE_CATALOG.map((s) => (
+                  <option key={s.name} value={s.name}>
+                    {s.name} — R{s.price}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">Duration (min)</label>
+              <select
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                onBlur={() => void persist()}
+                className="mt-1 w-full rounded-lg border border-panel-border bg-panel-muted px-2 py-1.5 text-[11px] outline-none"
+              >
+                {[15, 30, 45, 60, 90].map((m) => (
+                  <option key={m} value={m}>
+                    {m} min
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">Provider</label>
+            <select
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value)}
+              onBlur={() => void persist()}
+              className="mt-1 w-full rounded-lg border border-panel-border bg-panel-muted px-2 py-1.5 text-[11px] outline-none"
+            >
+              {practiceProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">ICD-10 (comma-separated)</label>
+            <input
+              value={icdInput}
+              onChange={(e) => setIcdInput(e.target.value)}
+              onBlur={() => void persist()}
+              placeholder="e.g. I10, E11.9"
+              className="mt-1 w-full rounded-lg border border-panel-border bg-panel-muted px-2 py-1.5 text-[11px] outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">Notes</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onBlur={() => void persist()}
+              rows={2}
+              className="mt-1 w-full resize-none rounded-lg border border-panel-border bg-panel-muted px-2 py-1.5 text-[11px] outline-none"
+              placeholder="Optional notes…"
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">Total fee (ZAR)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={totalFee || ""}
+              onChange={(e) => setTotalFee(parseFloat(e.target.value) || 0)}
+              onBlur={() => void persist()}
+              className="mt-1 w-full rounded-lg border border-panel-border bg-panel-muted px-2 py-1.5 text-[11px] tabular-nums outline-none"
+            />
+          </div>
 
           {appointment.medicalAid && (
             <>
@@ -654,42 +1081,86 @@ function DetailPane({
             </>
           )}
 
-          {appointment.icdCodes && appointment.icdCodes.length > 0 && (
-            <div>
-              <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-white/20">ICD-10 Codes</p>
-              <div className="flex flex-wrap gap-1">
-                {appointment.icdCodes.map((c) => (
-                  <span key={c} className="rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold text-blue-400">
-                    {c}
-                  </span>
-                ))}
-              </div>
+          <div className="rounded-xl border border-panel-border bg-panel-muted p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[10px] font-medium text-muted-foreground/70">Items & fees (claim)</p>
+              <button
+                type="button"
+                onClick={addDraftLine}
+                className="text-[9px] font-medium text-cyan-400 hover:text-cyan-300"
+              >
+                + Add
+              </button>
             </div>
-          )}
+            <div className="space-y-2">
+              {draftLines.map((d) => (
+                <div key={d.id} className="flex flex-col gap-1 rounded-lg border border-panel-border bg-panel-muted/50 p-2">
+                  <input
+                    value={d.description}
+                    onChange={(e) =>
+                      setDraftLines((prev) => prev.map((x) => (x.id === d.id ? { ...x, description: e.target.value } : x)))
+                    }
+                    onBlur={() => void persist()}
+                    placeholder="Item"
+                    className="w-full rounded border border-panel-border bg-transparent px-1.5 py-1 text-[10px] outline-none"
+                  />
+                  <div className="flex gap-1">
+                    <input
+                      type="number"
+                      value={d.amount || ""}
+                      onChange={(e) =>
+                        setDraftLines((prev) =>
+                          prev.map((x) => (x.id === d.id ? { ...x, amount: parseFloat(e.target.value) || 0 } : x))
+                        )
+                      }
+                      onBlur={() => void persist()}
+                      className="w-20 rounded border border-panel-border bg-transparent px-1.5 py-1 text-[10px] tabular-nums"
+                    />
+                    <select
+                      value={d.lineType}
+                      onChange={(e) =>
+                        setDraftLines((prev) =>
+                          prev.map((x) =>
+                            x.id === d.id ? { ...x, lineType: e.target.value as ClaimLineType } : x
+                          )
+                        )
+                      }
+                      onBlur={() => void persist()}
+                      className="flex-1 rounded border border-panel-border bg-transparent px-1 py-1 text-[9px]"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="medical_aid">Medical aid</option>
+                      <option value="patient_liability">Patient liability</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setDraftLines((prev) => prev.filter((x) => x.id !== d.id))}
+                      className="text-muted-foreground hover:text-rose-400"
+                    >
+                      <Trash className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={!practiceId || claimBusy || !appointment.patientId}
+              onClick={() => void attachClaim()}
+              className="mt-3 w-full rounded-lg bg-gradient-to-r from-violet-500/20 to-cyan-500/20 py-2 text-[10px] font-semibold text-foreground/85 ring-1 ring-white/10 hover:from-violet-500/30 hover:to-cyan-500/30 disabled:opacity-40"
+            >
+              {claimBusy ? "Attaching…" : appointment.linkedClaimId ? "Update draft claim" : "Attach claim to billing"}
+            </button>
+          </div>
 
-          {appointment.notes && (
-            <div>
-              <p className="mb-1 text-[9px] font-medium uppercase tracking-wider text-white/20">Notes</p>
-              <p className="text-[11px] leading-relaxed text-white/50">{appointment.notes}</p>
-            </div>
-          )}
+          <DetailRow icon={<CalendarBlank className="size-3.5" />} label="Date" value={appointment.date} />
+          <DetailRow icon={<UserCircle className="size-3.5" />} label="Patient" value={appointment.patientName} />
 
-          {appointment.totalFee != null && (
-            <div className="rounded-lg border border-white/[0.04] bg-white/[0.02] p-3">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1 text-[10px] text-white/40">
-                  <CurrencyDollar className="size-3" /> Total Fee
-                </span>
-                <span className="text-sm font-bold tabular-nums text-foreground">
-                  R{appointment.totalFee.toLocaleString()}
-                </span>
-              </div>
-            </div>
-          )}
+          {saving ? <p className="text-[9px] text-muted-foreground">Saving…</p> : null}
         </div>
       </div>
 
-      <div className="border-t border-white/[0.05] p-4">
+      <div className="border-t border-panel-border p-4 pb-[max(5rem,env(safe-area-inset-bottom))]">
         <button
           type="button"
           onClick={onStartScribe}
@@ -706,7 +1177,7 @@ function DetailPane({
 function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div>
-      <p className="mb-0.5 flex items-center gap-1 text-[9px] font-medium uppercase tracking-wider text-white/20">
+      <p className="mb-0.5 flex items-center gap-1 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
         {icon}
         {label}
       </p>
@@ -718,9 +1189,16 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
 function PaymentBadge({ paymentType, medicalAid }: { paymentType: PaymentType; medicalAid?: string }) {
   if (paymentType === "medical_aid") {
     return (
-      <span className="flex items-center gap-0.5 rounded-full bg-[#00E676]/10 px-1.5 py-0.5 text-[8px] font-semibold text-[#00E676]">
+      <span className="flex items-center gap-0.5 rounded-full bg-status-success/10 px-1.5 py-0.5 text-[8px] font-semibold text-status-success">
         <ShieldCheck className="size-2.5" weight="fill" />
         {medicalAid ?? "MA"}
+      </span>
+    )
+  }
+  if (paymentType === "card") {
+    return (
+      <span className="rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[8px] font-semibold text-sky-300">
+        Card
       </span>
     )
   }
@@ -728,11 +1206,11 @@ function PaymentBadge({ paymentType, medicalAid }: { paymentType: PaymentType; m
     return (
       <span className="flex items-center gap-0.5 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[8px] font-semibold text-purple-400">
         <ShieldCheck className="size-2.5" weight="fill" />
-        Split
+        Shortfall
       </span>
     )
   }
-  return <span className="rounded-full bg-[#FFC107]/10 px-1.5 py-0.5 text-[8px] font-semibold text-[#FFC107]">Cash</span>
+  return <span className="rounded-full bg-status-warning/10 px-1.5 py-0.5 text-[8px] font-semibold text-status-warning">Cash</span>
 }
 
 /* ─── Mini Calendar ──────────────────────────────────────── */
@@ -763,21 +1241,21 @@ function MiniCalendar({ selectedDate, onSelect }: { selectedDate: Date; onSelect
   }
 
   return (
-    <div className="w-[240px] rounded-xl border border-white/[0.08] bg-[#0c0c0c] p-3 shadow-2xl">
+    <div className="w-[240px] rounded-xl border border-panel-border bg-popover p-3 shadow-2xl">
       <div className="mb-2 flex items-center justify-between">
-        <button type="button" onClick={prevMonth} className="rounded p-0.5 text-white/40 hover:text-white/70">
+        <button type="button" onClick={prevMonth} className="rounded p-0.5 text-muted-foreground hover:text-accent-foreground/70">
           <CaretLeft className="size-3.5" weight="bold" />
         </button>
         <span className="text-[11px] font-semibold text-foreground">
           {MONTH_NAMES[viewMonth]} {viewYear}
         </span>
-        <button type="button" onClick={nextMonth} className="rounded p-0.5 text-white/40 hover:text-white/70">
+        <button type="button" onClick={nextMonth} className="rounded p-0.5 text-muted-foreground hover:text-accent-foreground/70">
           <CaretRight className="size-3.5" weight="bold" />
         </button>
       </div>
       <div className="grid grid-cols-7 gap-0.5 text-center">
         {WEEKDAYS.map((wd) => (
-          <div key={wd} className="py-1 text-[8px] font-semibold uppercase text-white/20">
+          <div key={wd} className="py-1 text-[8px] font-semibold uppercase text-muted-foreground">
             {wd.charAt(0)}
           </div>
         ))}
@@ -795,8 +1273,8 @@ function MiniCalendar({ selectedDate, onSelect }: { selectedDate: Date; onSelect
                 isSel
                   ? "bg-foreground font-bold text-background"
                   : isToday
-                    ? "bg-white/[0.08] font-bold text-foreground"
-                    : "text-white/50 hover:bg-white/[0.06] hover:text-foreground"
+                    ? "bg-secondary font-bold text-foreground"
+                    : "text-muted-foreground/70 hover:bg-secondary hover:text-foreground"
               )}
             >
               {d.getDate()}
@@ -811,6 +1289,7 @@ function MiniCalendar({ selectedDate, onSelect }: { selectedDate: Date; onSelect
 /* ─── Create Appointment Modal ──────────────────────────── */
 
 function CreateAppointmentModal({
+  practiceId,
   patients,
   appointments,
   practiceProviders,
@@ -819,6 +1298,7 @@ function CreateAppointmentModal({
   onClose,
   onCreate,
 }: {
+  practiceId: string | null
   patients: PracticePatient[]
   appointments: PracticeAppointment[]
   practiceProviders: { id: string; name: string; specialty?: string }[]
@@ -837,14 +1317,16 @@ function CreateAppointmentModal({
   const [duration, setDuration] = useState(30)
   const [service, setService] = useState("Consultation")
   const [paymentType, setPaymentType] = useState<PaymentType>("cash")
+  const [cashCardMode, setCashCardMode] = useState<"cash" | "card">("cash")
   const [medicalAid, setMedicalAid] = useState("")
   const [memberNumber, setMemberNumber] = useState("")
-  const [coPay, setCoPay] = useState("")
-  const [maAmount, setMaAmount] = useState("")
   const [providerId, setProviderId] = useState("")
   const [icdCodes, setIcdCodes] = useState("")
   const [notes, setNotes] = useState("")
   const [reason, setReason] = useState("")
+  const [reasonFromLastVisit, setReasonFromLastVisit] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const patientInputRef = useRef<HTMLInputElement>(null)
   const calendarRef = useRef<HTMLDivElement>(null)
 
@@ -885,6 +1367,30 @@ function CreateAppointmentModal({
   }, [practiceProviders])
 
   useEffect(() => {
+    if (!selectedPatient?.id) {
+      setReasonFromLastVisit(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetchClient(`/api/patients/${selectedPatient.id}/ai-summary`)
+        if (!res.ok || cancelled) return
+        const j = (await res.json()) as { latestChiefComplaint?: string | null }
+        const cc = j.latestChiefComplaint?.trim()
+        if (cancelled || !cc) return
+        setReason(cc)
+        setReasonFromLastVisit(true)
+      } catch {
+        /* optional */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedPatient?.id])
+
+  useEffect(() => {
     if (modalDayClosed) return
     const c = clampStartTime(selectedHour, selectedMinute, openMin, closeMin, duration)
     const ho = validHourValues(openMin, closeMin, duration)
@@ -907,12 +1413,14 @@ function CreateAppointmentModal({
     const startMin = selectedHour * 60 + selectedMinute
     const endMin = startMin + duration
     return appointments.some((a) => {
+      if (a.status === "cancelled") return false
       if (a.date !== date) return false
+      if (a.providerId && a.providerId !== providerId) return false
       const aStart = a.hour * 60 + a.minute
       const aEnd = aStart + a.duration
       return startMin < aEnd && endMin > aStart
     })
-  }, [appointments, date, selectedHour, selectedMinute, duration])
+  }, [appointments, date, selectedHour, selectedMinute, duration, providerId])
 
   useEffect(() => {
     if (selectedPatient && paymentType === "medical_aid") {
@@ -931,7 +1439,7 @@ function CreateAppointmentModal({
     return () => document.removeEventListener("mousedown", handler)
   }, [showCalendar])
 
-  const handleCreate = useCallback(() => {
+  const handleCreate = useCallback(async () => {
     if (!selectedPatient || modalDayClosed || !providerId) return
     const st = timeStr(selectedHour, selectedMinute)
     const et = timeStr(endHour.hour, endHour.minute)
@@ -939,8 +1447,8 @@ function CreateAppointmentModal({
       .split(",")
       .map((c) => c.trim())
       .filter(Boolean)
-
-    onCreate({
+    const finalPaymentType: PaymentType = paymentType === "medical_aid" ? "medical_aid" : cashCardMode
+    const nextAppointment: PracticeAppointment = {
       id: `appt-${Date.now()}`,
       patientId: selectedPatient.id,
       patientName: selectedPatient.name,
@@ -954,26 +1462,76 @@ function CreateAppointmentModal({
       reason: reason || service,
       service,
       status: "booked",
-      paymentType,
-      medicalAid: paymentType !== "cash" ? medicalAid : undefined,
-      memberNumber: paymentType !== "cash" ? memberNumber : undefined,
+      paymentType: finalPaymentType,
+      medicalAid: finalPaymentType === "medical_aid" ? medicalAid : undefined,
+      memberNumber: finalPaymentType === "medical_aid" ? memberNumber : undefined,
       notes: notes || undefined,
       icdCodes: codes.length > 0 ? codes : undefined,
       totalFee: selectedSvc?.price ?? 0,
-    })
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      if (!practiceId) {
+        throw new Error("Open a practice workspace before booking an appointment.")
+      }
+      if (practiceId) {
+        const response = await fetch("/api/appointments/book", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patientId: selectedPatient.id,
+            providerStaffId: providerId,
+            apptDate: date,
+            startTime: st,
+            endTime: et,
+            durationMinutes: duration,
+            reason: reason || service,
+            service,
+            paymentType: finalPaymentType,
+            medicalAid: finalPaymentType === "medical_aid" ? medicalAid || null : null,
+            memberNumber: finalPaymentType === "medical_aid" ? memberNumber || null : null,
+            notes: notes || null,
+            icdCodes: codes.length > 0 ? codes : null,
+            totalFee: selectedSvc?.price ?? 0,
+          }),
+        })
+        const payload = (await response.json().catch(() => ({}))) as {
+          appointment?: { id?: string }
+          error?: string
+        }
+        if (!response.ok || !payload.appointment?.id) {
+          const unavailable = payload.error?.startsWith("slot_invalid:")
+          throw new Error(
+            unavailable
+              ? "That slot is no longer available. Refresh the calendar and choose another time."
+              : payload.error || "Could not create appointment"
+          )
+        }
+        nextAppointment.id = String(payload.appointment.id)
+      }
+
+      onCreate(nextAppointment)
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Could not create appointment")
+    } finally {
+      setSaving(false)
+    }
   }, [
     selectedPatient, selectedHour, selectedMinute, endHour, duration,
-    service, paymentType, medicalAid, memberNumber, providerId,
-    date, icdCodes, notes, reason, selectedSvc, onCreate, modalDayClosed,
+    service, paymentType, cashCardMode, medicalAid, memberNumber, providerId,
+    date, icdCodes, notes, reason, selectedSvc, onCreate, modalDayClosed, practiceId,
   ])
 
   return (
     <>
+      <AssistantModalSuppressor />
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+        className="fixed inset-0 z-[130] bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       />
       <motion.div
@@ -981,12 +1539,15 @@ function CreateAppointmentModal({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 20, scale: 0.97 }}
         transition={{ type: "spring", stiffness: 500, damping: 35 }}
-        className="fixed inset-x-0 top-[8%] z-[51] mx-auto w-full max-w-lg"
+        className="fixed inset-x-0 top-[8%] z-[131] mx-auto w-full max-w-lg"
       >
-        <div className="max-h-[84vh] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0c0c0c] p-5 shadow-2xl" style={{ scrollbarWidth: "none" }}>
+        <div
+          className="max-h-[84vh] overflow-y-auto rounded-2xl border border-panel-border bg-popover p-5 pb-[max(5rem,env(safe-area-inset-bottom))] shadow-2xl"
+          style={{ scrollbarWidth: "none" }}
+        >
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold">New Appointment</h3>
-            <button type="button" onClick={onClose} className="text-white/30 hover:text-white/60">
+            <button type="button" onClick={onClose} className="text-muted-foreground hover:text-accent-foreground/60">
               <X className="size-4" />
             </button>
           </div>
@@ -1005,7 +1566,7 @@ function CreateAppointmentModal({
                   }}
                   onFocus={() => patientSearch.trim() && setShowPatientDropdown(true)}
                   placeholder="Search patient name..."
-                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none placeholder:text-white/20 focus:border-white/[0.15]"
+                  className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] outline-none placeholder:text-muted-foreground/50 focus:border-ring"
                 />
                 {selectedPatient && (
                   <button
@@ -1015,7 +1576,7 @@ function CreateAppointmentModal({
                       setPatientSearch("")
                       patientInputRef.current?.focus()
                     }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-accent-foreground/60"
                   >
                     <X className="size-3" />
                   </button>
@@ -1026,7 +1587,7 @@ function CreateAppointmentModal({
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -4 }}
-                      className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-lg border border-white/[0.08] bg-[#111] shadow-xl"
+                      className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-lg border border-panel-border bg-popover shadow-xl"
                       style={{ scrollbarWidth: "none" }}
                     >
                       {filteredPatients.map((p) => (
@@ -1038,13 +1599,13 @@ function CreateAppointmentModal({
                             setPatientSearch("")
                             setShowPatientDropdown(false)
                           }}
-                          className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-secondary"
                         >
-                          <UserCircle className="size-4 text-white/30" />
+                          <UserCircle className="size-4 text-muted-foreground" />
                           <div>
                             <div className="text-[11px] font-medium text-foreground">{p.name}</div>
                             {p.medicalAidScheme && (
-                              <div className="text-[9px] text-white/30">
+                              <div className="text-[9px] text-muted-foreground">
                                 {p.medicalAidScheme} · {p.memberNumber}
                               </div>
                             )}
@@ -1063,9 +1624,9 @@ function CreateAppointmentModal({
                 <button
                   type="button"
                   onClick={() => setShowCalendar(!showCalendar)}
-                  className="flex w-full items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] text-foreground transition-colors hover:border-white/[0.15]"
+                  className="flex w-full items-center gap-2 rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] text-foreground transition-colors hover:border-ring"
                 >
-                  <CalendarBlank className="size-3.5 text-white/40" />
+                  <CalendarBlank className="size-3.5 text-muted-foreground" />
                   {parseDate(date).toLocaleDateString("en-ZA", {
                     weekday: "short",
                     month: "short",
@@ -1097,7 +1658,7 @@ function CreateAppointmentModal({
             {/* Time picker */}
             <Field label="Time">
               {modalDayClosed ? (
-                <p className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[12px] text-white/35">
+                <p className="rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] text-muted-foreground">
                   Practice is closed this day — pick another date or update hours in Settings → Practice.
                 </p>
               ) : (
@@ -1116,7 +1677,7 @@ function CreateAppointmentModal({
                     onSelect={setSelectedMinute}
                     format={(v) => String(v).padStart(2, "0")}
                   />
-                  <div className="flex items-end pb-1 pl-1 text-[11px] text-white/30">
+                  <div className="flex items-end pb-1 pl-1 text-[11px] text-muted-foreground">
                     → {timeStr(endHour.hour, endHour.minute)}
                   </div>
                 </div>
@@ -1129,7 +1690,7 @@ function CreateAppointmentModal({
                 <select
                   value={duration}
                   onChange={(e) => setDuration(Number(e.target.value))}
-                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none focus:border-white/[0.15]"
+                  className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] outline-none focus:border-ring"
                 >
                   {[15, 30, 45, 60].map((m) => (
                     <option key={m} value={m}>
@@ -1141,8 +1702,13 @@ function CreateAppointmentModal({
               <Field label="Service">
                 <select
                   value={service}
-                  onChange={(e) => setService(e.target.value)}
-                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none focus:border-white/[0.15]"
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setService(v)
+                    const svc = SERVICE_CATALOG.find((s) => s.name === v)
+                    if (svc?.defaultDurationMinutes != null) setDuration(svc.defaultDurationMinutes)
+                  }}
+                  className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] outline-none focus:border-ring"
                 >
                   {SERVICE_CATALOG.map((s) => (
                     <option key={s.name} value={s.name}>
@@ -1154,25 +1720,28 @@ function CreateAppointmentModal({
             </div>
 
             {/* Payment type */}
-            <Field label="Payment Type">
-              <div className="flex gap-1.5">
-                {(["cash", "medical_aid", "split"] as PaymentType[]).map((pt) => (
+            <Field label="Payment">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(["medical_aid", "cash"] as const).map((pt) => (
                   <button
                     key={pt}
                     type="button"
-                    onClick={() => setPaymentType(pt)}
+                    onClick={() => {
+                      setPaymentType(pt === "medical_aid" ? "medical_aid" : cashCardMode)
+                    }}
                     className={cn(
-                      "flex-1 rounded-lg py-2 text-center text-[11px] font-semibold transition-all",
-                      paymentType === pt
-                        ? pt === "cash"
-                          ? "bg-[#FFC107]/15 text-[#FFC107] ring-1 ring-[#FFC107]/30"
-                          : pt === "medical_aid"
-                            ? "bg-[#00E676]/15 text-[#00E676] ring-1 ring-[#00E676]/30"
-                            : "bg-purple-500/15 text-purple-400 ring-1 ring-purple-500/30"
-                        : "bg-white/[0.04] text-white/30 hover:bg-white/[0.06]"
+                      "rounded-xl border px-3 py-2 text-left transition-all",
+                      (pt === "medical_aid" ? paymentType === "medical_aid" : paymentType !== "medical_aid")
+                        ? pt === "medical_aid"
+                          ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                          : "border-amber-300/25 bg-amber-300/10 text-amber-200"
+                        : "bg-panel-muted text-muted-foreground hover:bg-secondary"
                     )}
                   >
-                    {pt === "cash" ? "Cash" : pt === "medical_aid" ? "Medical Aid" : "Split"}
+                    <div className="text-[11px] font-semibold">{pt === "medical_aid" ? "Medical Aid" : "Cash / Card"}</div>
+                    <div className="mt-1 text-[10px] text-current/70">
+                      {pt === "medical_aid" ? "Scheme billed first" : "Patient settles at the desk or via link"}
+                    </div>
                   </button>
                 ))}
               </div>
@@ -1180,7 +1749,7 @@ function CreateAppointmentModal({
 
             {/* MA fields */}
             <AnimatePresence>
-              {paymentType !== "cash" && (
+              {paymentType === "medical_aid" && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
@@ -1195,7 +1764,7 @@ function CreateAppointmentModal({
                           value={medicalAid}
                           onChange={(e) => setMedicalAid(e.target.value)}
                           placeholder="e.g. Discovery"
-                          className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none placeholder:text-white/20 focus:border-white/[0.15]"
+                          className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] outline-none placeholder:text-muted-foreground/50 focus:border-ring"
                         />
                       </Field>
                       <Field label="Member #">
@@ -1203,34 +1772,41 @@ function CreateAppointmentModal({
                           value={memberNumber}
                           onChange={(e) => setMemberNumber(e.target.value)}
                           placeholder="Member number"
-                          className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none placeholder:text-white/20 focus:border-white/[0.15]"
+                          className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] outline-none placeholder:text-muted-foreground/50 focus:border-ring"
                         />
                       </Field>
                     </div>
-                    {paymentType === "split" && (
-                      <div className="grid grid-cols-2 gap-3">
-                        <Field label="MA Amount">
-                          <input
-                            value={maAmount}
-                            onChange={(e) => setMaAmount(e.target.value)}
-                            placeholder="R0.00"
-                            className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none placeholder:text-white/20 focus:border-white/[0.15]"
-                          />
-                        </Field>
-                        <Field label="Patient Co-pay">
-                          <input
-                            value={coPay}
-                            onChange={(e) => setCoPay(e.target.value)}
-                            placeholder="R0.00"
-                            className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none placeholder:text-white/20 focus:border-white/[0.15]"
-                          />
-                        </Field>
-                      </div>
-                    )}
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {paymentType !== "medical_aid" && (
+              <Field label="Preferred Tender">
+                <div className="flex gap-2">
+                  {(["cash", "card"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setCashCardMode(mode)
+                        setPaymentType(mode)
+                      }}
+                      className={cn(
+                        "flex-1 rounded-lg py-2 text-center text-[11px] font-semibold transition-all",
+                        cashCardMode === mode
+                          ? mode === "cash"
+                            ? "bg-status-warning/15 text-status-warning ring-1 ring-[status-warning]/30"
+                            : "bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30"
+                          : "bg-panel-muted text-muted-foreground hover:bg-secondary"
+                      )}
+                    >
+                      {mode === "cash" ? "Cash" : "Card"}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            )}
 
             {/* Provider */}
             <Field label="Provider">
@@ -1243,7 +1819,7 @@ function CreateAppointmentModal({
                 <select
                   value={providerId}
                   onChange={(e) => setProviderId(e.target.value)}
-                  className="relative z-[60] w-full cursor-pointer rounded-lg border border-white/[0.08] bg-[#141414] px-3 py-2 text-[12px] text-foreground outline-none focus:border-white/[0.15]"
+                  className="relative z-[60] w-full cursor-pointer rounded-lg border border-panel-border bg-popover px-3 py-2 text-[12px] text-foreground outline-none focus:border-ring"
                 >
                   {practiceProviders.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -1258,11 +1834,31 @@ function CreateAppointmentModal({
             {/* Reason + ICD-10 */}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Reason">
+                {reasonFromLastVisit ? (
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[9px] font-medium text-cyan-200/90">
+                      Prefilled from last visit
+                    </span>
+                    <button
+                      type="button"
+                      className="text-[9px] text-muted-foreground hover:text-accent-foreground/60"
+                      onClick={() => {
+                        setReason("")
+                        setReasonFromLastVisit(false)
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                ) : null}
                 <input
                   value={reason}
-                  onChange={(e) => setReason(e.target.value)}
+                  onChange={(e) => {
+                    setReason(e.target.value)
+                    setReasonFromLastVisit(false)
+                  }}
                   placeholder="Visit reason..."
-                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none placeholder:text-white/20 focus:border-white/[0.15]"
+                  className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] outline-none placeholder:text-muted-foreground/50 focus:border-ring"
                 />
               </Field>
               <Field label="ICD-10 Codes">
@@ -1270,7 +1866,7 @@ function CreateAppointmentModal({
                   value={icdCodes}
                   onChange={(e) => setIcdCodes(e.target.value.toUpperCase())}
                   placeholder="e.g. I10, E11.9"
-                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none placeholder:text-white/20 focus:border-white/[0.15]"
+                  className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] outline-none placeholder:text-muted-foreground/50 focus:border-ring"
                 />
               </Field>
             </div>
@@ -1281,21 +1877,27 @@ function CreateAppointmentModal({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Optional notes..."
-                className="w-full rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-[12px] outline-none placeholder:text-white/20 focus:border-white/[0.15]"
+                className="w-full rounded-lg border border-panel-border bg-panel-muted/50 px-3 py-2 text-[12px] outline-none placeholder:text-muted-foreground/50 focus:border-ring"
               />
             </Field>
 
             {/* Price + conflict */}
             {selectedSvc && (
-              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                <span className="text-[10px] text-white/40">CPT {selectedSvc.cpt}</span>
+              <div className="flex items-center justify-between rounded-lg bg-panel-muted px-3 py-2">
+                <span className="text-[10px] text-muted-foreground">CPT {selectedSvc.cpt}</span>
                 <span className="text-xs font-bold tabular-nums text-foreground">R{selectedSvc.price}</span>
               </div>
             )}
 
             {conflict && (
-              <div className="rounded-lg border border-[#FFC107]/20 bg-[#FFC107]/5 px-3 py-2 text-[11px] font-medium text-[#FFC107]">
+              <div className="rounded-lg border border-status-warning/20 bg-status-warning/5 px-3 py-2 text-[11px] font-medium text-status-warning">
                 ⚠ Time slot conflict — another appointment overlaps this window
+              </div>
+            )}
+
+            {error && (
+              <div className="rounded-lg border border-status-danger/20 bg-status-danger/5 px-3 py-2 text-[11px] font-medium text-status-danger">
+                {error}
               </div>
             )}
           </div>
@@ -1304,22 +1906,22 @@ function CreateAppointmentModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-3 py-1.5 text-[11px] text-white/40 hover:text-white/60"
+              className="rounded-lg px-3 py-1.5 text-[11px] text-muted-foreground hover:text-accent-foreground/60"
             >
               Cancel
             </button>
             <button
               type="button"
-              onClick={handleCreate}
-              disabled={!selectedPatient || modalDayClosed || !providerId}
+              onClick={() => void handleCreate()}
+              disabled={!selectedPatient || modalDayClosed || !providerId || saving}
               className={cn(
                 "rounded-lg px-4 py-1.5 text-[11px] font-bold transition-opacity",
-                selectedPatient && !modalDayClosed && providerId
+                selectedPatient && !modalDayClosed && providerId && !saving
                   ? "bg-foreground text-background hover:opacity-90"
-                  : "cursor-not-allowed bg-white/[0.06] text-white/20"
+                  : "cursor-not-allowed bg-secondary text-muted-foreground"
               )}
             >
-              Create
+              {saving ? "Creating..." : "Create"}
             </button>
           </div>
         </div>
@@ -1355,10 +1957,10 @@ function ScrollTimePicker({
 
   return (
     <div className="flex flex-col">
-      <span className="mb-1 text-[9px] font-medium uppercase text-white/20">{label}</span>
+      <span className="mb-1 text-[9px] font-medium uppercase text-muted-foreground">{label}</span>
       <div
         ref={containerRef}
-        className="h-[128px] w-14 overflow-y-auto rounded-lg border border-white/[0.08] bg-white/[0.02]"
+        className="h-[128px] w-14 overflow-y-auto rounded-lg border border-panel-border bg-panel-muted/50"
         style={{ scrollbarWidth: "none", scrollSnapType: "y mandatory" }}
       >
         {values.map((v) => (
@@ -1369,7 +1971,7 @@ function ScrollTimePicker({
             style={{ height: ITEM_H, scrollSnapAlign: "start" }}
             className={cn(
               "flex w-full items-center justify-center text-[13px] font-semibold tabular-nums transition-colors",
-              v === selected ? "bg-white/[0.1] text-foreground" : "text-white/25 hover:bg-white/[0.04] hover:text-white/50"
+              v === selected ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-panel-muted hover:text-accent-foreground"
             )}
           >
             {format(v)}
@@ -1385,7 +1987,7 @@ function ScrollTimePicker({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-white/25">{label}</label>
+      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</label>
       {children}
     </div>
   )

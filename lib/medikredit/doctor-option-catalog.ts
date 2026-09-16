@@ -551,6 +551,20 @@ export function getOptionsBySchemeCode(schemeCode: string): DoctorOption[] {
   return _bySchemeCode!.get(schemeCode) ?? []
 }
 
+/** Resolve a catalog row when the patient stores the six-digit doctor option code. */
+export function resolveOptionByOptionCode(
+  optionCode: string | undefined,
+  claimType: DoctorClaimType
+): DoctorOption | null {
+  if (!optionCode?.trim()) return null
+  ensureIndex()
+  return (
+    _allExpanded!.find(
+      (option) => option.optionCode === optionCode.trim() && option.claimType === claimType
+    ) ?? null
+  )
+}
+
 /**
  * Primary lookup: resolve the exact option for a given (schemeCode, claimType).
  * For schemes with acute/chronic split, pass the optional flag to narrow further.

@@ -124,7 +124,7 @@ export function EvidenceReferencesSection({
           {/* Evidence quality summary */}
           <div className="flex items-center gap-1.5">
             <span className={cn(
-              "flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white",
+              "flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-foreground",
               EVIDENCE_LEVEL_COLORS[highestLevel]
             )}>
               <Star weight="fill" className="h-2.5 w-2.5" />
@@ -171,7 +171,7 @@ export function EvidenceReferencesSection({
                     {/* Level header */}
                     <div className="flex items-center gap-2">
                       <span className={cn(
-                        "px-2 py-0.5 rounded text-[10px] font-semibold text-white",
+                        "px-2 py-0.5 rounded text-[10px] font-semibold text-foreground",
                         EVIDENCE_LEVEL_COLORS[level]
                       )}>
                         Level {level}
@@ -400,7 +400,7 @@ export function EvidenceIndicator({ level, className }: EvidenceIndicatorProps) 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-semibold text-white",
+        "inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-semibold text-foreground",
         EVIDENCE_LEVEL_COLORS[level],
         className
       )}

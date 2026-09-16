@@ -1,6 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { panelSurface } from "@/lib/theme/surfaces"
 import { motion } from "motion/react"
 import type { ReactNode } from "react"
 
@@ -15,10 +16,10 @@ interface BentoTileProps {
 }
 
 const GLOW_RING: Record<string, string> = {
-  green: "ring-1 ring-[#00E676]/20",
-  amber: "ring-1 ring-[#FFC107]/20",
-  red: "ring-1 ring-[#EF5350]/20",
-  blue: "ring-1 ring-blue-500/20",
+  green: "ring-1 ring-status-success/20",
+  amber: "ring-1 ring-status-warning/20",
+  red: "ring-1 ring-status-danger/20",
+  blue: "ring-1 ring-status-info/20",
 }
 
 export function BentoTile({ children, className, title, subtitle, icon, action, glow }: BentoTileProps) {
@@ -31,7 +32,7 @@ export function BentoTile({ children, className, title, subtitle, icon, action, 
       transition={{ type: "spring", stiffness: 400, damping: 35 }}
       className={cn(
         "relative flex flex-col overflow-hidden rounded-2xl",
-        "border border-border/80 bg-card/95 shadow-sm backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.03] dark:shadow-none",
+        panelSurface,
         glow && GLOW_RING[glow],
         className
       )}
@@ -42,7 +43,7 @@ export function BentoTile({ children, className, title, subtitle, icon, action, 
             {icon && <span className="text-muted-foreground">{icon}</span>}
             <div>
               {title && <h3 className="text-[13px] font-semibold text-foreground">{title}</h3>}
-              {subtitle && <p className="text-[10px] text-muted-foreground dark:text-white/40">{subtitle}</p>}
+              {subtitle && <p className="text-[10px] text-muted-foreground">{subtitle}</p>}
             </div>
           </div>
           {action}

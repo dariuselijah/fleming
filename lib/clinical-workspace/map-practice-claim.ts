@@ -1,4 +1,5 @@
 import type { ClaimLine, ClaimStatus, PracticeClaim } from "./types"
+import { claimLineStatusFromMedikreditItem } from "@/lib/medikredit/enrich-claim-lines"
 
 type ClaimLineJson = {
   lineNumber?: number
@@ -12,17 +13,10 @@ type ClaimLineJson = {
   modifierCode?: string
 }
 
-function lineStatusFromMedikredit(
-  itemStatuses: unknown,
-  index: number
-): ClaimStatus {
+function lineStatusFromMedikredit(itemStatuses: unknown, index: number): ClaimStatus {
   if (!Array.isArray(itemStatuses)) return "submitted"
-  const row = itemStatuses[index] as { status?: string } | undefined
-  const s = row?.status?.toUpperCase()
-  if (s === "A" || s === "P") return "approved"
-  if (s === "R") return "rejected"
-  if (s === "W") return "submitted"
-  return "submitted"
+  const row = itemStatuses[index] as import("@/lib/medikredit/types").MedikreditItemStatus | undefined
+  return claimLineStatusFromMedikreditItem(row)
 }
 
 function buildLineDescription(l: ClaimLineJson, index: number): string {
@@ -41,6 +35,7 @@ function mapRowStatus(s: string): ClaimStatus {
   if (s === "approved") return "approved"
   if (s === "rejected") return "rejected"
   if (s === "paid") return "paid"
+  if (s === "reversed") return "reversed"
   return "submitted"
 }
 
@@ -72,10 +67,19 @@ export function mapPracticeClaimRow(
 
   let lines: ClaimLine[]
   if (linesIn.length > 0 && isWorkspaceClaimLine(linesIn[0])) {
-    lines = (linesIn as unknown as ClaimLine[]).map((l) => ({
-      ...l,
-      status: rowStatus === "draft" ? "draft" : l.status,
-    }))
+    let maIdx = 0
+    lines = (linesIn as unknown as ClaimLine[]).map((l) => {
+      const baseDraft = rowStatus === "draft"
+      if (baseDraft) return { ...l, status: "draft" as ClaimStatus }
+      if (l.lineType !== "medical_aid") return l
+      const fromPers = l.mediAdjudication?.schemeStatus
+      if (fromPers) {
+        return { ...l, status: claimLineStatusFromMedikreditItem({ status: fromPers }) }
+      }
+      const st = lineStatusFromMedikredit(itemStatuses, maIdx)
+      maIdx++
+      return { ...l, status: st }
+    })
   } else {
     lines = linesIn.map((raw, idx) => {
       const l = raw as ClaimLineJson

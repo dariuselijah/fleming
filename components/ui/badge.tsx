@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { statusToneClasses } from "@/lib/theme/status"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 import * as React from "react"
@@ -13,9 +14,19 @@ const badgeVariants = cva(
         secondary:
           "border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
         destructive:
-          "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/70",
+          "border-transparent bg-destructive text-destructive-foreground [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/70",
         outline:
           "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        neutral:
+          "border-transparent bg-muted text-muted-foreground [a&]:hover:bg-muted/80",
+        success:
+          `border-transparent ${statusToneClasses.success} [a&]:hover:bg-status-success/20`,
+        warning:
+          `border-transparent ${statusToneClasses.warning} [a&]:hover:bg-status-warning/20`,
+        danger:
+          `border-transparent ${statusToneClasses.danger} [a&]:hover:bg-status-danger/20`,
+        info:
+          `border-transparent ${statusToneClasses.info} [a&]:hover:bg-status-info/20`,
       },
     },
     defaultVariants: {

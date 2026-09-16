@@ -9,11 +9,13 @@ export function getMedikreditEnv(): MedikreditEnvConfig | null {
   return { apiUrl, username, password }
 }
 
-/** True when direct MediKredit env, JSON proxy base, or dry-run is available. */
+/** True when JSON proxy base or dry-run is available. Direct live SOAP is intentionally disabled. */
 export function isMedikreditConfigured(): boolean {
-  if (process.env.MEDIKREDIT_DRY_RUN === "1") return true
+  if (process.env.MEDIKREDIT_DRY_RUN === "1" && process.env.NODE_ENV !== "production") {
+    return true
+  }
   if (getClinicalProxyBase()) return true
-  return getMedikreditEnv() !== null
+  return false
 }
 
 export function requireMedikreditEnv(): MedikreditEnvConfig {

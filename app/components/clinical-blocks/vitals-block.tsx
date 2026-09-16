@@ -201,7 +201,7 @@ export function VitalsEntryBlock() {
             type="button"
             onClick={handleSubmit}
             disabled={!primaryValue}
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-foreground transition-colors hover:bg-indigo-700 disabled:opacity-40"
           >
             <Check className="size-4" weight="bold" />
           </button>

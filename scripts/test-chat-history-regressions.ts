@@ -310,7 +310,7 @@ function testSharedArticleCitationSanitization() {
   )
   assert.match(
     messageAssistant,
-    /<ReferencesSection citations={sourcesCitations} title="Sources"/,
+    /<ReferencesSection citations={meaningfulSourcesCitations} title="Sources"/,
     "Assistant renderer should expose one unified Sources section"
   )
 }

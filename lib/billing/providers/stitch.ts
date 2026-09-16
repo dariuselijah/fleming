@@ -18,8 +18,9 @@ export async function createStitchPaymentLink(opts: {
 }): Promise<{ paymentUrl: string; externalId: string }> {
   const clientId = process.env.STITCH_CLIENT_ID?.trim()
   const clientSecret = process.env.STITCH_CLIENT_SECRET?.trim()
+  const allowDryRun = process.env.NODE_ENV !== "production"
 
-  if (!clientId || !clientSecret || process.env.STITCH_DRY_RUN === "1") {
+  if (allowDryRun && (!clientId || !clientSecret || process.env.STITCH_DRY_RUN === "1")) {
     const externalId = `stitch_dry_${opts.invoiceId.slice(0, 8)}`
     const u = new URL("https://secure.stitch.money/dry-run")
     u.searchParams.set("invoice", opts.invoiceId)
@@ -27,6 +28,9 @@ export async function createStitchPaymentLink(opts: {
     return { paymentUrl: u.toString(), externalId }
   }
 
+  if (!clientId || !clientSecret) {
+    throw new Error("STITCH_CLIENT_ID and STITCH_CLIENT_SECRET are required in production")
+  }
   const token = await getStitchAccessToken(clientId, clientSecret)
   const userInteraction = await createStitchUserInteraction(token, {
     amountCents: opts.amountCents,
@@ -138,8 +142,12 @@ export async function refundStitchPayment(opts: {
 }): Promise<{ refundId: string }> {
   const clientId = process.env.STITCH_CLIENT_ID?.trim()
   const clientSecret = process.env.STITCH_CLIENT_SECRET?.trim()
-  if (!clientId || !clientSecret || process.env.STITCH_DRY_RUN === "1") {
+  const allowDryRun = process.env.NODE_ENV !== "production"
+  if (allowDryRun && (!clientId || !clientSecret || process.env.STITCH_DRY_RUN === "1")) {
     return { refundId: `stitch_refund_dry_${Date.now()}` }
+  }
+  if (!clientId || !clientSecret) {
+    throw new Error("STITCH_CLIENT_ID and STITCH_CLIENT_SECRET are required in production")
   }
 
   const paymentId = opts.providerOrderId ?? opts.providerCheckoutId

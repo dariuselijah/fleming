@@ -12,4 +12,7 @@ Related governance docs:
 - `docs/benchmark-governance.md`
 - `docs/benchmark-methodology-public.md`
 - `docs/healthcare-benchmark-runbook.md`
+- `docs/release/production-operations-runbook.md`
+- `docs/release/compliance-certification-checklist.md`
+- `docs/release/staged-pilot-runbook.md`
 

@@ -20,6 +20,8 @@ export async function POST(req: Request) {
     clinicalEncounterId?: string | null
     claimId?: string | null
     lines?: unknown[]
+    appointmentId?: string | null
+    resubmissionOfClaimId?: string | null
   }
   try {
     body = await req.json()
@@ -47,6 +49,23 @@ export async function POST(req: Request) {
 
   const clinicalEncounterId = body.clinicalEncounterId?.trim() || null
   const existingId = body.claimId?.trim()
+  const resubmissionOfClaimId = body.resubmissionOfClaimId?.trim() || null
+
+  if (resubmissionOfClaimId) {
+    const { data: original, error: originalError } = await supabase
+      .from("practice_claims")
+      .select("id, patient_id, status")
+      .eq("id", resubmissionOfClaimId)
+      .eq("practice_id", practiceId)
+      .maybeSingle()
+    if (originalError) return NextResponse.json({ error: originalError.message }, { status: 500 })
+    if (!original || original.patient_id !== patientId || original.status !== "reversed") {
+      return NextResponse.json(
+        { error: "A corrected draft can only link to a reversed claim for this patient." },
+        { status: 409 }
+      )
+    }
+  }
 
   const { data: patient, error: patientErr } = await supabase
     .from("practice_patients")
@@ -76,16 +95,32 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Only draft claims can be updated" }, { status: 409 })
     }
 
-    const { error: upErr } = await supabase
+    const appointmentId = body.appointmentId?.trim() || null
+    const updatePayload: Record<string, unknown> = {
+      lines: lines as Record<string, unknown>[],
+      clinical_encounter_id: clinicalEncounterId,
+      updated_at: new Date().toISOString(),
+    }
+    if (appointmentId) updatePayload.appointment_id = appointmentId
+    if (resubmissionOfClaimId) updatePayload.resubmission_of_claim_id = resubmissionOfClaimId
+
+    let { error: upErr } = await supabase
       .from("practice_claims")
-      .update({
-        lines: lines as Record<string, unknown>[],
-        clinical_encounter_id: clinicalEncounterId,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload as never)
       .eq("id", existingId)
       .eq("practice_id", practiceId)
       .eq("status", "draft")
+
+    if (upErr && /appointment_id/i.test(upErr.message)) {
+      delete updatePayload.appointment_id
+      const retry = await supabase
+        .from("practice_claims")
+        .update(updatePayload as never)
+        .eq("id", existingId)
+        .eq("practice_id", practiceId)
+        .eq("status", "draft")
+      upErr = retry.error
+    }
 
     if (upErr) {
       console.error("[practice-claims/draft PATCH]", upErr)
@@ -94,19 +129,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ claimId: existingId })
   }
 
-  const { data: inserted, error: insErr } = await supabase
+  const appointmentId = body.appointmentId?.trim() || null
+  const insertPayload: Record<string, unknown> = {
+    practice_id: practiceId,
+    patient_id: patientId,
+    clinical_encounter_id: clinicalEncounterId,
+    status: "draft",
+    lines: lines as Record<string, unknown>[],
+    medikredit_response: null,
+    created_by: userId,
+  }
+  if (appointmentId) insertPayload.appointment_id = appointmentId
+  if (resubmissionOfClaimId) insertPayload.resubmission_of_claim_id = resubmissionOfClaimId
+
+  let { data: inserted, error: insErr } = await supabase
     .from("practice_claims")
-    .insert({
-      practice_id: practiceId,
-      patient_id: patientId,
-      clinical_encounter_id: clinicalEncounterId,
-      status: "draft",
-      lines: lines as Record<string, unknown>[],
-      medikredit_response: null,
-      created_by: userId,
-    })
+    .insert(insertPayload as never)
     .select("id")
     .single()
+
+  if (insErr && /appointment_id/i.test(insErr.message)) {
+    delete insertPayload.appointment_id
+    const retry = await supabase
+      .from("practice_claims")
+      .insert(insertPayload as never)
+      .select("id")
+      .single()
+    inserted = retry.data
+    insErr = retry.error
+  }
 
   if (insErr) {
     console.error("[practice-claims/draft POST]", insErr)

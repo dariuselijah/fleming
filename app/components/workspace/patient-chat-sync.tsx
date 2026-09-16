@@ -29,7 +29,7 @@ export function PatientChatSync() {
     const userId = user?.id
     if (!userId || !activePatientId) return
 
-    const { openPatients, setPatientSessionChatId } = useWorkspaceStore.getState()
+    const { openPatients } = useWorkspaceStore.getState()
     const activePatient = openPatients.find((p) => p.patientId === activePatientId)
     if (!activePatient || !isPracticePatientUuid(activePatient.patientId)) return
 
@@ -47,7 +47,14 @@ export function PatientChatSync() {
         if (cancelled || inFlightRef.current !== patientKey) return
 
         if (routeChatId && list.some((c) => c.id === routeChatId)) {
-          setPatientSessionChatId(patientKey, routeChatId)
+          const st = useWorkspaceStore.getState()
+          const current = st.openPatients.find((p) => p.patientId === patientKey)
+          const prev = current?.chatId ?? null
+          if (prev && prev !== routeChatId) {
+            st.switchPatientConsultChat(patientKey, routeChatId)
+          } else {
+            st.setPatientSessionChatId(patientKey, routeChatId)
+          }
           return
         }
 
@@ -87,7 +94,16 @@ export function PatientChatSync() {
 
         if (cancelled || inFlightRef.current !== patientKey || !targetId) return
 
-        setPatientSessionChatId(patientKey, targetId)
+        {
+          const st = useWorkspaceStore.getState()
+          const current = st.openPatients.find((p) => p.patientId === patientKey)
+          const prev = current?.chatId ?? null
+          if (prev && prev !== targetId) {
+            st.switchPatientConsultChat(patientKey, targetId)
+          } else {
+            st.setPatientSessionChatId(patientKey, targetId)
+          }
+        }
 
         const currentRoute =
           pathname?.startsWith("/c/")

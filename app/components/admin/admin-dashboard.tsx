@@ -1,22 +1,25 @@
 "use client"
 
 import { useWorkspace } from "@/lib/clinical-workspace"
+import { cn } from "@/lib/utils"
 import { motion, AnimatePresence } from "motion/react"
 import dynamic from "next/dynamic"
 
 const BentoCalendar = dynamic(() => import("./bento-calendar").then((m) => m.BentoCalendar), { ssr: false })
-const RevenueWorkspace = dynamic(() => import("./revenue/revenue-workspace").then((m) => m.RevenueWorkspace), { ssr: false })
+const BentoBillingEntry = dynamic(() => import("./bento-billing-entry").then((m) => m.BentoBillingEntry), {
+  ssr: false,
+})
 const BentoInventory = dynamic(() => import("./bento-inventory").then((m) => m.BentoInventory), { ssr: false })
 const BentoSales = dynamic(() => import("./bento-sales").then((m) => m.BentoSales), { ssr: false })
 const PatientDirectory = dynamic(() => import("./patient-directory").then((m) => m.PatientDirectory), { ssr: false })
-const CommsInbox = dynamic(() => import("./comms-inbox").then((m) => m.CommsInbox), { ssr: false })
+const WorkQueue = dynamic(() => import("./work-queue/work-queue").then((m) => m.WorkQueue), { ssr: false })
 const ChannelSetup = dynamic(() => import("./channel-setup").then((m) => m.ChannelSetup), { ssr: false })
 
 const TAB_MAP: Record<string, React.ComponentType> = {
   calendar: BentoCalendar,
-  billing: RevenueWorkspace,
+  billing: BentoBillingEntry,
   inventory: BentoInventory,
-  inbox: CommsInbox,
+  front_desk: WorkQueue,
   analytics: BentoSales,
   patients: PatientDirectory,
   channels: ChannelSetup,
@@ -25,9 +28,17 @@ const TAB_MAP: Record<string, React.ComponentType> = {
 export function AdminDashboard() {
   const { activeAdminTab } = useWorkspace()
   const TabComponent = TAB_MAP[activeAdminTab]
+  // These tabs manage their own internal scrolling — give them a fixed height context
+  const isConstrained = activeAdminTab === "front_desk" || activeAdminTab === "billing"
 
   return (
-    <div className="h-full flex-1 overflow-y-auto p-5" style={{ scrollbarWidth: "none" }}>
+    <div
+      className={cn(
+        "h-full flex-1",
+        isConstrained ? "min-h-0 overflow-hidden" : "overflow-y-auto p-5"
+      )}
+      style={isConstrained ? undefined : { scrollbarWidth: "none" }}
+    >
       <AnimatePresence mode="wait">
         <motion.div
           key={activeAdminTab}

@@ -54,17 +54,29 @@ export interface MedikreditRJ {
   desc?: string
 }
 
+/** Persisted per-line MediKredit ITEM outcome on `practice_claims.lines`. */
+export type MediAdjudicationSnapshot = {
+  schemeStatus?: string
+  gross?: string
+  net?: string
+  patientResponsibility?: number
+  rejectionCode?: string
+  rejectionDescription?: string
+  warnings?: Array<{ cd?: string; desc?: string }>
+}
+
 export interface MedikreditItemStatus {
   lineNumber?: string
   status?: string
   /** A approved, R rejected, W warning, P processed */
   gross?: string
   net?: string
+  patientResponsibility?: number
   rejectionCode?: string
   rejectionDescription?: string
   warnings?: MedikreditWarning[]
-  /** procedure vs med inferred in parser */
-  itemKind?: "procedure" | "medication" | "unknown"
+  /** procedure vs medication vs modifier inferred in parser */
+  itemKind?: "procedure" | "medication" | "modifier" | "unknown"
 }
 
 export interface MedikreditRemittanceMessage {

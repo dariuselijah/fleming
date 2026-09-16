@@ -24,7 +24,7 @@ import { parseArgs } from 'util';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { pipeline } from 'node:stream/promises';
-import { Transform } from 'node:stream';
+import { Transform, type TransformCallback } from 'node:stream';
 
 // Load environment variables
 const envLocalPath = resolve(process.cwd(), '.env.local');
@@ -78,7 +78,7 @@ class StreamingXMLParser extends Transform {
     super({ objectMode: true });
   }
 
-  _transform(chunk: Buffer, encoding: string, callback: Function) {
+  _transform(chunk: Buffer, encoding: string, callback: TransformCallback) {
     this.buffer += chunk.toString('utf-8');
     
     let startIdx = 0;
@@ -143,7 +143,7 @@ class StreamingXMLParser extends Transform {
     callback();
   }
 
-  _flush(callback: Function) {
+  _flush(callback: TransformCallback) {
     // Process any remaining buffer
     if (this.articleBuffer && this.inArticle) {
       this.onArticle(this.articleBuffer);

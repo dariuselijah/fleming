@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { requireCronAuthorization } from "@/lib/auth/cron"
 
 export const runtime = "nodejs"
 
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET?.trim()
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const denied = requireCronAuthorization(req)
+  if (denied) return denied
 
   const admin = createAdminClient()
   const month = new Date().toISOString().slice(0, 7)

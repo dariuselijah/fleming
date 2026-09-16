@@ -206,8 +206,8 @@ function testUploadIntentRoutingAndCaching() {
   )
   assert.match(
     messageAssistant,
-    /if \(hasEvidenceMarkers && sources\.length === 0\)/,
-    "Message assistant should still extract citations from sources when evidence markers exist"
+    /if \(sources\.length > 0\)/,
+    "Message assistant should still extract citations whenever source results exist"
   )
 }
 

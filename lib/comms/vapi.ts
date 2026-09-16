@@ -151,5 +151,10 @@ export function validateVapiSignature(body: string, signature: string): boolean 
   // Vapi uses HMAC-SHA256
   const crypto = require("crypto") as typeof import("crypto")
   const expected = crypto.createHmac("sha256", secret).update(body).digest("hex")
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
+  const expectedBuffer = Buffer.from(expected)
+  const signatureBuffer = Buffer.from(signature.trim())
+  return (
+    expectedBuffer.length === signatureBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, signatureBuffer)
+  )
 }

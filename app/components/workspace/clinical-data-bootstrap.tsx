@@ -10,6 +10,12 @@ import {
 } from "@/lib/clinical-workspace/practice-crypto-context"
 import { useWorkspaceStore } from "@/lib/clinical-workspace"
 import { fetchPracticeClaimsForWorkspace } from "@/lib/clinical-workspace/refresh-practice-claims"
+import { onAppointmentsRefresh } from "@/lib/clinical-workspace/appointments-refresh-bus"
+import { onPatientsRefresh } from "@/lib/clinical-workspace/patients-refresh-bus"
+import {
+  emitWorkQueueInboxRefresh,
+  emitWorkQueueThreadsRefresh,
+} from "@/lib/admin/work-queue-refresh-bus"
 import type {
   AdminNotification,
   AdminTab,
@@ -59,6 +65,32 @@ export function PracticeIdBootstrap() {
 }
 
 function mapAppointmentRow(r: Record<string, unknown>): PracticeAppointment {
+  const meta =
+    r.metadata && typeof r.metadata === "object" && !Array.isArray(r.metadata)
+      ? (r.metadata as Record<string, unknown>)
+      : {}
+  const draftsRaw = meta.claim_line_drafts
+  let claimLineDrafts: PracticeAppointment["claimLineDrafts"]
+  if (Array.isArray(draftsRaw)) {
+    claimLineDrafts = draftsRaw
+      .map((row) => {
+        if (typeof row !== "object" || row === null) return null
+        const o = row as Record<string, unknown>
+        const lt = o.line_type ?? o.lineType
+        const lineType =
+          lt === "medical_aid" || lt === "cash" || lt === "patient_liability"
+            ? lt
+            : "cash"
+        return {
+          id: String(o.id ?? `d-${Math.random().toString(36).slice(2)}`),
+          description: String(o.description ?? ""),
+          amount: typeof o.amount === "number" ? o.amount : Number(o.amount) || 0,
+          lineType,
+        }
+      })
+      .filter(Boolean) as PracticeAppointment["claimLineDrafts"]
+  }
+
   return {
     id: String(r.id),
     patientId: r.patient_id ? String(r.patient_id) : "",
@@ -80,6 +112,8 @@ function mapAppointmentRow(r: Record<string, unknown>): PracticeAppointment {
     icdCodes: Array.isArray(r.icd_codes) ? (r.icd_codes as string[]) : undefined,
     totalFee: r.total_fee != null ? Number(r.total_fee) : undefined,
     linkedConsultId: r.linked_consult_id ? String(r.linked_consult_id) : undefined,
+    linkedClaimId: meta.linked_claim_id ? String(meta.linked_claim_id) : undefined,
+    claimLineDrafts,
   }
 }
 
@@ -109,11 +143,20 @@ function mapInboxRow(r: Record<string, unknown>): InboxMessage {
     timestamp: String(r.message_at ?? r.created_at ?? new Date().toISOString()),
     read: Boolean(r.read_flag),
     patientId: r.patient_id ? String(r.patient_id) : undefined,
+    payloadCiphertext: r.payload_ciphertext ? String(r.payload_ciphertext) : undefined,
+    payloadIv: r.payload_iv ? String(r.payload_iv) : undefined,
+    metadata: r.metadata_json && typeof r.metadata_json === "object" ? (r.metadata_json as Record<string, unknown>) : undefined,
   }
 }
 
 function mapNotifRow(r: Record<string, unknown>): AdminNotification {
-  const tab = r.action_tab ? (String(r.action_tab) as AdminTab) : undefined
+  const rawTab = r.action_tab ? String(r.action_tab) : undefined
+  const tab =
+    rawTab === "inbox"
+      ? "front_desk"
+      : rawTab
+        ? (rawTab as AdminTab)
+        : undefined
   return {
     id: String(r.id),
     type: r.type as AdminNotification["type"],
@@ -122,7 +165,7 @@ function mapNotifRow(r: Record<string, unknown>): AdminNotification {
     timestamp: String(r.notif_at ?? r.created_at ?? new Date().toISOString()),
     read: Boolean(r.read_flag),
     actionRoute:
-      tab && ["inbox", "calendar", "billing", "inventory", "analytics", "patients", "channels"].includes(tab)
+      tab && ["front_desk", "calendar", "billing", "inventory", "analytics", "patients", "channels"].includes(tab)
         ? { tab, entityId: r.action_entity_id ? String(r.action_entity_id) : undefined }
         : undefined,
   }
@@ -164,7 +207,7 @@ function mapPracticeHourRow(r: Record<string, unknown>): PracticeBusinessHour {
 
 export function ClinicalDataBootstrap() {
   const { user } = useUser()
-  const { practiceId, dekKey, unlocked } = usePracticeCrypto()
+  const { practiceId, dekKey } = usePracticeCrypto()
 
   useEffect(() => {
     if (!user?.id || !practiceId) return
@@ -238,8 +281,107 @@ export function ClinicalDataBootstrap() {
     }
   }, [user?.id, practiceId, user?.display_name, user?.email])
 
+  // Targeted refresh when the assistant (or any other module) mutates appointments.
+  // Only re-fetches the appointments list — cheap and keeps the calendar in sync.
   useEffect(() => {
-    if (!user?.id || !practiceId || !unlocked || !dekKey) return
+    if (!practiceId) return
+    const supabase = createClient()
+    if (!supabase) return
+    let inflight = false
+    const refresh = async () => {
+      if (inflight) return
+      inflight = true
+      try {
+        const { data } = await supabase
+          .from("practice_appointments")
+          .select("*")
+          .eq("practice_id", practiceId)
+          .order("appt_date", { ascending: true })
+        if (data) {
+          useWorkspaceStore.setState({
+            appointments: data.map((r) => mapAppointmentRow(r as Record<string, unknown>)),
+          })
+        }
+      } catch (e) {
+        console.warn("[ClinicalDataBootstrap] refresh appointments", e)
+      } finally {
+        inflight = false
+      }
+    }
+    return onAppointmentsRefresh(refresh)
+  }, [practiceId])
+
+  useEffect(() => {
+    if (!practiceId || !dekKey) return
+    const supabase = createClient()
+    if (!supabase) return
+    const refreshPatients = async () => {
+      try {
+        const { data: rows } = await supabase
+          .from("practice_patients")
+          .select("id, profile_ciphertext, profile_iv, display_name_hint")
+          .eq("practice_id", practiceId)
+        const patients: PracticePatient[] = []
+        for (const row of rows ?? []) {
+          const r = row as Record<string, unknown>
+          if (!r.profile_ciphertext || !r.profile_iv) {
+            if (r.display_name_hint) {
+              patients.push({
+                id: String(r.id),
+                name: String(r.display_name_hint),
+                medicalAidStatus: "unknown",
+                outstandingBalance: 0,
+                registeredAt: new Date().toISOString().slice(0, 10),
+              })
+            }
+            continue
+          }
+          try {
+            const profile = await decryptPatientProfile<Partial<PracticePatient>>(
+              dekKey,
+              String(r.profile_ciphertext),
+              String(r.profile_iv)
+            )
+            patients.push({
+              id: String(r.id),
+              name: String(profile.name ?? r.display_name_hint ?? "Patient"),
+              idNumber: profile.idNumber,
+              dateOfBirth: profile.dateOfBirth,
+              age: profile.age,
+              sex: profile.sex,
+              phone: profile.phone,
+              email: profile.email,
+              address: profile.address,
+              emergencyContact: profile.emergencyContact,
+              medicalAidStatus: profile.medicalAidStatus ?? "unknown",
+              medicalAidScheme: profile.medicalAidScheme,
+              medicalAidSchemeCode: profile.medicalAidSchemeCode,
+              memberNumber: profile.memberNumber,
+              dependentCode: profile.dependentCode,
+              mainMemberName: profile.mainMemberName,
+              mainMemberId: profile.mainMemberId,
+              chronicConditions: profile.chronicConditions,
+              allergies: profile.allergies,
+              currentMedications: profile.currentMedications,
+              lastVisit: profile.lastVisit,
+              outstandingBalance: profile.outstandingBalance ?? 0,
+              registeredAt: profile.registeredAt ?? new Date().toISOString().slice(0, 10),
+              profileIncomplete: profile.profileIncomplete,
+            })
+          } catch {
+            /* skip row */
+          }
+        }
+        useWorkspaceStore.setState({ patients })
+      } catch (e) {
+        console.warn("[ClinicalDataBootstrap] refresh patients", e)
+      }
+    }
+    return onPatientsRefresh(refreshPatients)
+  }, [practiceId, dekKey])
+
+  useEffect(() => {
+    if (!user?.id || !practiceId || !dekKey) return
     const supabase = createClient()
     if (!supabase) return
     let cancelled = false
@@ -308,7 +450,53 @@ export function ClinicalDataBootstrap() {
     return () => {
       cancelled = true
     }
-  }, [user?.id, practiceId, unlocked, dekKey])
+  }, [user?.id, practiceId, dekKey])
+
+  useEffect(() => {
+    if (!practiceId) return
+    const supabase = createClient()
+    if (!supabase) return
+
+    const refreshInbox = async () => {
+      try {
+        const { data: inbox } = await supabase
+          .from("practice_inbox_messages")
+          .select("*")
+          .eq("practice_id", practiceId)
+          .order("message_at", { ascending: false })
+        if (inbox) {
+          useWorkspaceStore.setState({
+            inboxMessages: inbox.map((r) => mapInboxRow(r as Record<string, unknown>)),
+          })
+          emitWorkQueueInboxRefresh()
+        }
+      } catch (e) {
+        console.warn("[ClinicalDataBootstrap] refresh inbox", e)
+      }
+    }
+
+    const channel = supabase
+      .channel(`admin-work-queue-${practiceId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "practice_inbox_messages", filter: `practice_id=eq.${practiceId}` },
+        () => {
+          void refreshInbox()
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_threads", filter: `practice_id=eq.${practiceId}` },
+        () => {
+          emitWorkQueueThreadsRefresh()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [practiceId])
 
   return null
 }

@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { PracticeHours, PracticeService, PracticeFAQ } from "./types"
 import { findPatientByPracticePhone, normalizePhoneE164Za } from "./patient-phone"
+import { bookAppointmentForPractice } from "@/lib/practice/book-appointment-server"
 
 const supabase = () => createAdminClient()
 
@@ -104,54 +105,37 @@ export async function bookAppointment(opts: {
   providerStaffId?: string
   paymentType?: string
 }): Promise<{ id: string; success: boolean; message: string }> {
+  if (!opts.patientId) {
+    return { id: "", success: false, message: "A patient record is required before booking." }
+  }
   const db = supabase()
   const duration = opts.durationMinutes || 30
   const endTime = opts.endTime || minutesToTime(timeToMinutes(opts.startTime) + duration)
-
-  // Conflict check
-  const { data: conflicts } = await db
-    .from("practice_appointments")
-    .select("id")
-    .eq("practice_id", opts.practiceId)
-    .eq("appt_date", opts.date)
-    .eq("start_time", opts.startTime)
-    .in("status", ["booked", "confirmed", "checked_in", "in_progress"])
-    .limit(1)
-
-  if (conflicts && conflicts.length > 0) {
-    return { id: "", success: false, message: "That time slot is no longer available. Please choose another." }
-  }
-
-  const hourVal = parseInt(opts.startTime.split(":")[0])
-  const minuteVal = parseInt(opts.startTime.split(":")[1])
-
-  const { data, error } = await db
-    .from("practice_appointments")
-    .insert({
-      practice_id: opts.practiceId,
-      patient_id: opts.patientId || null,
-      patient_name_snapshot: opts.patientName,
-      provider_staff_id: opts.providerStaffId || null,
-      appt_date: opts.date,
-      start_time: opts.startTime,
-      end_time: endTime,
-      hour_val: hourVal,
-      minute_val: minuteVal,
-      duration_minutes: duration,
-      reason: opts.reason,
-      service: opts.service,
-      status: "booked",
-      payment_type: opts.paymentType || "cash",
-    })
-    .select("id")
-    .single()
-
-  if (error) {
-    return { id: "", success: false, message: `Booking failed: ${error.message}` }
+  const paymentType =
+    opts.paymentType === "medical_aid" || opts.paymentType === "card" ? opts.paymentType : "cash"
+  const result = await bookAppointmentForPractice(db, opts.practiceId, {
+    patientId: opts.patientId,
+    apptDate: opts.date,
+    startTime: opts.startTime,
+    endTime,
+    durationMinutes: duration,
+    providerStaffId: opts.providerStaffId,
+    service: opts.service,
+    reason: opts.reason,
+    paymentType,
+  })
+  if (!result.ok) {
+    return {
+      id: "",
+      success: false,
+      message: result.error.startsWith("slot_invalid:")
+        ? "That time slot is no longer available. Please choose another."
+        : `Booking failed: ${result.error}`,
+    }
   }
 
   return {
-    id: data.id,
+    id: String(result.appointment.id),
     success: true,
     message: `Appointment booked for ${opts.date} at ${opts.startTime}`,
   }

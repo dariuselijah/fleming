@@ -1,12 +1,10 @@
 import type { ExtractedEntities } from "@/lib/scribe/entity-highlighter"
+import { escapeClinicalXml } from "@/lib/clinical/vault-dek"
+import { trimClinicalTranscript } from "@/lib/clinical-workspace/transcript-cap"
 import type { PatientSession } from "./types"
 
 function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+  return escapeClinicalXml(s)
 }
 
 /**
@@ -72,8 +70,7 @@ export function buildClinicalContextXml(
   }
 
   if (transcript.trim()) {
-    const trimmed = transcript.length > 6000 ? transcript.slice(-6000) : transcript
-    parts.push(`<scribe_transcript>${escapeXml(trimmed)}</scribe_transcript>`)
+    parts.push(`<scribe_transcript>${escapeXml(trimClinicalTranscript(transcript))}</scribe_transcript>`)
   }
 
   const entityLines: string[] = []
@@ -83,17 +80,39 @@ export function buildClinicalContextXml(
     if (!items?.length) continue
     const filtered = items.filter((item) => {
       const status = entityStatus?.[`${key}:${item}`]
-      if (status === "rejected") return false
-      if (entityStatus === undefined) return true
-      return status === "accepted"
+      return status !== "rejected"
     })
     if (filtered.length === 0) continue
     const label = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
     entityLines.push(`${label}: ${filtered.join("; ")}`)
   }
   if (entityLines.length > 0) {
-    parts.push(`<extracted_entities status_filtered="accepted_or_pending">${escapeXml(entityLines.join("\n"))}</extracted_entities>`)
+    parts.push(
+      `<extracted_entities note="Use transcript + entities below; exclude rejected only">${escapeXml(entityLines.join("\n"))}</extracted_entities>`
+    )
+  }
+
+  if (patient?.vitals?.length) {
+    const vitalsLine = patient.vitals
+      .map((v) => {
+        const val = v.secondaryValue ? `${v.value}/${v.secondaryValue}` : v.value
+        return `${v.type.replace(/_/g, " ")}: ${val} ${v.unit}`.trim()
+      })
+      .join("; ")
+    parts.push(`<visit_vitals>${escapeXml(vitalsLine)}</visit_vitals>`)
   }
 
   return parts.join("\n\n")
+}
+
+/** Context block appended to artifact slash-commands (SOAP, claim, ICD, etc.). */
+export function buildArtifactGenerationContext(
+  transcript: string,
+  entities: ExtractedEntities,
+  patient: PatientSession | null | undefined,
+  entityStatus?: Record<string, "pending" | "accepted" | "rejected">
+): string {
+  const xml = buildClinicalContextXml(transcript, entities, patient, entityStatus)
+  if (!xml.trim()) return ""
+  return `\n\n--- CONSULTATION CONTEXT (authoritative for this visit) ---\n${xml}\n--- END CONSULTATION CONTEXT ---`
 }

@@ -3,6 +3,7 @@
 import { useUser } from "@/lib/user-store/provider"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import { useWorkspace } from "@/lib/clinical-workspace"
+import { flushEncounterPersistenceNow } from "@/lib/clinical-workspace/encounter-persist-bridge"
 import { useAuthContext } from "@/lib/auth/provider"
 import type { Chats } from "@/lib/chat-store/types"
 import {
@@ -44,7 +45,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
   const { user } = useUser()
   const auth = useAuthContext()
   const { chats, createNewChat, deleteChat } = useChats()
-  const { activePatient, setPatientSessionChatId } = useWorkspace()
+  const { activePatient, setPatientSessionChatId, switchPatientConsultChat } = useWorkspace()
   const pathname = usePathname()
   const router = useRouter()
   const [creating, setCreating] = useState(false)
@@ -68,12 +69,19 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
   }, [chats, activePatient?.patientId])
 
   const openChat = useCallback(
-    (chatId: string) => {
+    async (chatId: string) => {
       if (!activePatient) return
-      setPatientSessionChatId(activePatient.patientId, chatId)
+      if (routeChatId === chatId && activePatient.chatId === chatId) return
+      // Persist the full consult (transcript + docs + SOAP + state) before switching threads.
+      await flushEncounterPersistenceNow()
+      if (activePatient.chatId && activePatient.chatId !== chatId) {
+        switchPatientConsultChat(activePatient.patientId, chatId)
+      } else {
+        setPatientSessionChatId(activePatient.patientId, chatId)
+      }
       router.push(`/c/${chatId}`, { scroll: false })
     },
-    [activePatient, router, setPatientSessionChatId]
+    [activePatient, router, routeChatId, setPatientSessionChatId, switchPatientConsultChat]
   )
 
   const patientUuidOk = activePatient ? isPracticePatientUuid(activePatient.patientId) : false
@@ -89,6 +97,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
     }
     setCreating(true)
     try {
+      await flushEncounterPersistenceNow()
       const label = new Date().toLocaleString(undefined, {
         month: "short",
         day: "numeric",
@@ -106,7 +115,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
         activePatient.patientId
       )
       if (chat?.id && !chat.id.startsWith("optimistic-")) {
-        setPatientSessionChatId(activePatient.patientId, chat.id)
+        switchPatientConsultChat(activePatient.patientId, chat.id)
         router.push(`/c/${chat.id}`, { scroll: false })
       } else if (!chat?.id) {
         toast.error("Could not create a new consult chat.")
@@ -121,7 +130,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
     createNewChat,
     creating,
     router,
-    setPatientSessionChatId,
+    switchPatientConsultChat,
     user?.id,
   ])
 
@@ -156,17 +165,17 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
 
   const deleteDialog = (
     <AlertDialog open={!!chatToDelete} onOpenChange={(open) => !open && setChatToDelete(null)}>
-      <AlertDialogContent className="border-white/10 bg-zinc-950 text-white sm:max-w-md">
+      <AlertDialogContent className="border-border bg-popover text-foreground sm:max-w-md">
         <AlertDialogHeader>
-          <AlertDialogTitle className="text-white">Delete this consult?</AlertDialogTitle>
-          <AlertDialogDescription className="text-white/55">
+          <AlertDialogTitle className="text-foreground">Delete this consult?</AlertDialogTitle>
+          <AlertDialogDescription className="text-muted-foreground/75">
             {chatToDelete?.title
               ? `“${(chatToDelete.title || "Consult").slice(0, 120)}${(chatToDelete.title?.length ?? 0) > 120 ? "…" : ""}” will be removed. This cannot be undone.`
               : "This consult thread will be removed. This cannot be undone."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="border-white/15 bg-transparent text-white hover:bg-white/10">
+          <AlertDialogCancel className="border-border bg-transparent text-foreground hover:bg-secondary">
             Cancel
           </AlertDialogCancel>
           <AlertDialogAction
@@ -187,17 +196,17 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
     return (
       <>
         {deleteDialog}
-        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3.5">
+        <div className="rounded-2xl border border-border bg-muted/40 p-3.5">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-white/35">
-              <ChatCircle className="size-3.5 text-indigo-400" weight="bold" />
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <ChatCircle className="size-3.5 text-emerald-600 dark:text-emerald-400" weight="bold" />
               Consults
             </div>
             <button
               type="button"
               onClick={handleNewConsult}
               disabled={creating || !patientUuidOk}
-              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-white/15 bg-white/[0.04] px-2.5 py-1.5 text-[10px] font-medium text-white/50 transition-colors hover:border-indigo-400/40 hover:bg-indigo-500/10 hover:text-white/90 disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border bg-muted px-2.5 py-1.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:border-emerald-500/30 hover:bg-emerald-500/10 hover:text-accent-foreground disabled:opacity-50"
               title={
                 patientUuidOk
                   ? "New consult chat"
@@ -213,7 +222,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
             style={{ scrollbarWidth: "thin" }}
           >
             {patientChats.length === 0 ? (
-              <p className="py-2 text-center text-[11px] leading-relaxed text-white/25">
+              <p className="py-2 text-center text-[11px] leading-relaxed text-muted-foreground">
                 No consult threads yet
               </p>
             ) : (
@@ -226,16 +235,16 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
                     className={cn(
                       "flex w-full items-stretch gap-1 rounded-xl border transition-colors",
                       active
-                        ? "border-indigo-400/35 bg-indigo-500/15"
-                        : "border-transparent bg-white/[0.03] hover:bg-white/[0.06]"
+                        ? "border-emerald-500/25 bg-sidebar-accent shadow-sm"
+                        : "border-transparent bg-muted/50 hover:bg-secondary"
                     )}
                   >
                     <button
                       type="button"
-                      onClick={() => openChat(c.id)}
+                      onClick={() => void openChat(c.id)}
                       className={cn(
                         "min-w-0 flex-1 px-3 py-2 text-left text-[11px] font-medium transition-colors",
-                        active ? "text-white" : "text-white/55 hover:text-white/85"
+                        active ? "text-foreground" : "text-muted-foreground/75 hover:text-accent-foreground"
                       )}
                     >
                       <span className="line-clamp-2">{title}</span>
@@ -243,7 +252,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
                     <button
                       type="button"
                       onClick={() => setChatToDelete(c)}
-                      className="shrink-0 rounded-r-xl px-2 text-white/25 transition-colors hover:bg-red-500/15 hover:text-red-300"
+                      className="shrink-0 rounded-r-xl px-2 text-muted-foreground transition-colors hover:bg-red-500/15 hover:text-red-300"
                       title="Delete consult"
                       aria-label="Delete consult"
                     >
@@ -281,7 +290,7 @@ export function PatientConsultChatsBar(props?: { variant?: ConsultChatsBarVarian
               >
                 <button
                   type="button"
-                  onClick={() => openChat(c.id)}
+                  onClick={() => void openChat(c.id)}
                   className={cn(
                     "max-w-[10rem] truncate px-2 py-1 text-left text-[10px] font-medium transition-colors",
                     active ? "text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"

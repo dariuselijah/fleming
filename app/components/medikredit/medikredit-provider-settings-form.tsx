@@ -253,7 +253,7 @@ export function MedikreditProviderSettingsForm({
           <p
             className={cn(
               "mt-1 text-[11px]",
-              variant === "onboarding" ? "text-muted-foreground/75 dark:text-white/25" : "text-muted-foreground"
+              variant === "onboarding" ? "text-muted-foreground/75 dark:text-muted-foreground/50" : "text-muted-foreground"
             )}
           >
             Used for Medprax contract tariff lookups. Leave blank to use environment default.
@@ -262,7 +262,7 @@ export function MedikreditProviderSettingsForm({
       </div>
 
       {variant === "onboarding" ? (
-        <p className="text-[11px] text-muted-foreground/75 dark:text-white/25">
+        <p className="text-[11px] text-muted-foreground/75 dark:text-muted-foreground/50">
           Prescriber MEM account is stored for claim/DOCTOR elements; VEND uses vendor ID, works, PC, and version for eligibility (RJ 2420
           if missing).
         </p>
@@ -411,7 +411,7 @@ function OnboardingOrSettingsField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={cn(
-          "mt-1.5 w-full rounded-xl border border-input bg-background text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/35 focus:ring-2 focus:ring-primary/15 dark:border-white/[0.1] dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/20",
+          "mt-1.5 w-full rounded-xl border border-input bg-background text-foreground outline-none placeholder:text-muted-foreground/45 focus:border-primary/35 focus:ring-2 focus:ring-primary/15 dark:border-border dark:bg-muted dark:text-foreground dark:placeholder:text-muted-foreground/50",
           comfortable ? "px-3.5 py-2.5 text-sm" : "px-2.5 py-2 text-[11px]"
         )}
       />
@@ -439,7 +439,7 @@ function ToggleRow({
       whileHover={{ backgroundColor: "hsl(var(--muted) / 0.55)" }}
       whileTap={{ scale: 0.995 }}
       className={cn(
-        "flex w-full items-center gap-4 rounded-2xl border border-border bg-background text-left transition-colors dark:border-white/[0.07] dark:bg-white/[0.02]",
+        "flex w-full items-center gap-4 rounded-2xl border border-border bg-background text-left transition-colors dark:border-border dark:bg-muted/40",
         comfortable ? "p-4" : "p-2.5"
       )}
     >
@@ -451,11 +451,11 @@ function ToggleRow({
         className={cn(
           "relative flex shrink-0 items-center rounded-full transition-colors",
           comfortable ? "h-7 w-[3.25rem] p-0.5" : "h-5 w-9 p-px",
-          enabled ? "bg-primary" : "bg-muted dark:bg-white/10"
+          enabled ? "bg-primary" : "bg-muted dark:bg-secondary"
         )}
       >
         <motion.span
-          className={cn("block rounded-full bg-white shadow-md", comfortable ? "size-6" : "size-4")}
+          className={cn("block rounded-full bg-primary shadow-md", comfortable ? "size-6" : "size-4")}
           initial={false}
           animate={{ x: enabled ? (comfortable ? 24 : 18) : 0 }}
           transition={springSnappy}
@@ -486,7 +486,7 @@ function SaveButton({
       whileHover={{ scale: disabled ? 1 : 1.01 }}
       whileTap={{ scale: disabled ? 1 : 0.98 }}
       className={cn(
-        "flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40 dark:bg-white dark:text-zinc-950 dark:hover:bg-white/95",
+        "flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90",
         comfortable ? "py-3 text-sm" : "py-2 text-[11px]"
       )}
     >

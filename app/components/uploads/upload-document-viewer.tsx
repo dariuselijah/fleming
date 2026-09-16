@@ -214,7 +214,7 @@ export function UploadDocumentViewer({
         className="absolute inset-0 h-full w-full cursor-default bg-black/50 backdrop-blur-[2px]"
         aria-label="Close viewer backdrop"
       />
-      <div className="relative z-10 mx-auto mt-4 flex h-[calc(100dvh-2rem)] w-[calc(100vw-1.5rem)] max-w-[1700px] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-background/95 shadow-2xl sm:mt-6 sm:h-[calc(100dvh-3rem)] sm:w-[calc(100vw-3rem)]">
+      <div className="relative z-10 mx-auto mt-4 flex h-[calc(100dvh-2rem)] w-[calc(100vw-1.5rem)] max-w-[1700px] flex-col overflow-hidden rounded-[28px] border border-border bg-background/95 shadow-2xl sm:mt-6 sm:h-[calc(100dvh-3rem)] sm:w-[calc(100vw-3rem)]">
         <div className="border-b border-border/60 bg-background px-5 py-4">
           <p className="text-muted-foreground text-[10px] uppercase tracking-[0.22em]">Uploads Viewer</p>
           <div className="mt-2 flex items-center justify-between gap-4">

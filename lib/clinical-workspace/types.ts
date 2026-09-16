@@ -1,3 +1,5 @@
+import type { ExtractedEntities, HighlightSpan } from "@/lib/scribe/entity-highlighter"
+
 export type MedicalBlockType =
   | "SCRIBE"
   | "LAB"
@@ -64,6 +66,15 @@ export interface SOAPNote {
   }
 }
 
+export interface EncounterAttestation {
+  version: 1
+  statement: string
+  signerUserId: string
+  signerDisplayName: string
+  signerEmail?: string
+  signedAt: string
+}
+
 /** The four SOAP body fields (excludes `ghostText` metadata on SOAPNote). */
 export type SOAPBodySection = keyof Pick<
   SOAPNote,
@@ -112,6 +123,8 @@ export interface PatientSession {
   patientId: string
   /** Row id in clinical_encounters when persisted. */
   clinicalEncounterId?: string
+  /** practice_appointments.id when consult was opened from a scheduled visit */
+  appointmentId?: string
   name: string
   age?: number
   sex?: "M" | "F" | "Other"
@@ -131,6 +144,13 @@ export interface PatientSession {
   status: ConsultStatus
   consultSigned?: boolean
   consultSignedAt?: Date
+  /** Immutable signer confirmation stored inside the encrypted encounter payload. */
+  signatureAttestation?: EncounterAttestation
+  /** Starts at 1 and increments when a signed encounter is amended. */
+  encounterVersion?: number
+  /** Signed encounter that this amendment supersedes; the original remains unchanged. */
+  amendmentOfEncounterId?: string
+  amendmentReason?: string
   claimSubmitted?: boolean
   claimId?: string
   /** Edited claim lines before MediKredit send; initialized when preview opens */
@@ -148,6 +168,23 @@ export interface PatientSession {
   acceptHistory?: AcceptHistoryEntry[]
   /** Last evidence deep-dive run (Evidence tab + chat /evidence sync) */
   evidenceDeepDive?: EvidenceDeepDiveState | null
+  /** In-memory scribe state when switching between open patient tabs */
+  scribeSnapshot?: ScribeSnapshot
+}
+
+export interface ScribeSnapshot {
+  transcript: string
+  segments: ScribeSegmentSnapshot[]
+  entities: ExtractedEntities
+  highlights: HighlightSpan[]
+  entityStatus: Record<string, "pending" | "accepted" | "rejected">
+}
+
+export interface ScribeSegmentSnapshot {
+  speaker: string | null
+  startSec: number | null
+  endSec: number | null
+  text: string
 }
 
 export type ConsultStatus =
@@ -159,7 +196,7 @@ export type ConsultStatus =
   | "finished"
   | "no_show"
 
-export type WorkspaceMode = "chat" | "clinical" | "front_desk" | "admin"
+export type WorkspaceMode = "chat" | "clinical" | "admin"
 
 export type SidecarTab =
   | "intelligence"
@@ -174,8 +211,6 @@ export interface SidecarPayload {
   query?: string
   data?: Record<string, unknown>
 }
-
-export type OverlayType = "calendar" | "inventory" | "resource_library" | "sales"
 
 export type ClinicalDocType = "soap" | "summary" | "evidence" | "interactions" | "drug" | "icd" | "prescribe" | "refer" | "vitals" | "verify" | "claim"
 
@@ -200,6 +235,29 @@ export interface PrescriptionItem {
   reasoning?: string
 }
 
+export interface IcdCodeItem {
+  id: string
+  code: string
+  description: string
+  /** "High" | "Medium" | "Low" */
+  confidence?: string
+  /** Source tag: T=transcript, E=extracted entity, H=history */
+  sourceTag?: "T" | "E" | "H"
+  /** Excerpt from transcript/notes that supports this code */
+  sourceExcerpt?: string
+}
+
+export interface ClaimDocumentItem {
+  id: string
+  description: string
+  icdCode?: string
+  tariffCode?: string
+  nappiCode?: string
+  quantity?: number
+  amount?: number
+  treatmentDate?: string
+}
+
 export interface SessionDocument {
   id: string
   messageId: string
@@ -219,6 +277,8 @@ export interface ClinicalDocument {
   patientName?: string
   sources?: ClinicalSource[]
   prescriptionItems?: PrescriptionItem[]
+  icdItems?: IcdCodeItem[]
+  claimItems?: ClaimDocumentItem[]
 }
 
 export interface ClinicalSource {
@@ -249,7 +309,7 @@ export interface PracticeFlowEntry {
 // ── Admin ──
 
 export type AdminTab =
-  | "inbox"
+  | "front_desk"
   | "calendar"
   | "billing"
   | "inventory"
@@ -306,7 +366,7 @@ export interface PatientMedication {
   refillsRemaining?: number
 }
 
-export type ClaimStatus = "draft" | "submitted" | "partial" | "approved" | "rejected" | "paid"
+export type ClaimStatus = "draft" | "submitted" | "partial" | "approved" | "rejected" | "paid" | "reversed"
 export type ClaimLineType = "medical_aid" | "cash" | "patient_liability"
 
 export interface ClaimLine {
@@ -321,6 +381,8 @@ export interface ClaimLine {
   amount: number
   lineType: ClaimLineType
   status: ClaimStatus
+  /** Last scheme ITEM adjudication (persisted after switch response). */
+  mediAdjudication?: import("@/lib/medikredit/types").MediAdjudicationSnapshot
   /** Up to 5 PHISC modifier codes attached to this line */
   modifierCodes?: string[]
   /** Parallel array of modifier ZAR amounts (informational, electronic only) */
@@ -331,6 +393,8 @@ export interface ClaimLine {
   itemTypeIndicator?: string
   /** Audit marker for whether the line originated from Medprax or manual entry */
   lineSource?: "medprax" | "manual"
+  /** ISO date of service sent as TRMNT st_dt/end_dt. */
+  treatmentDate?: string
 }
 
 export interface PracticeClaim {
@@ -392,7 +456,7 @@ export interface PracticeBusinessHour {
 
 export interface InboxMessage {
   id: string
-  channel: "rcs" | "voice" | "sms" | "portal" | "lab" | "email"
+  channel: "rcs" | "voice" | "sms" | "portal" | "lab" | "email" | "document"
   from: string
   preview: string
   timestamp: string
@@ -403,6 +467,9 @@ export interface InboxMessage {
   priority?: "low" | "normal" | "high" | "urgent"
   currentFlow?: string
   unreadCount?: number
+  payloadCiphertext?: string
+  payloadIv?: string
+  metadata?: Record<string, unknown>
 }
 
 export type NotificationType =
@@ -429,7 +496,15 @@ export interface AdminNotification {
 }
 
 export type AppointmentStatus = "booked" | "confirmed" | "checked_in" | "in_progress" | "completed" | "no_show" | "cancelled"
-export type PaymentType = "cash" | "medical_aid" | "split"
+export type PaymentType = "cash" | "card" | "medical_aid" | "split"
+
+/** Optional fee lines staged on an appointment before attaching a draft claim */
+export interface AppointmentClaimDraftLine {
+  id: string
+  description: string
+  amount: number
+  lineType: ClaimLineType
+}
 
 export interface PracticeAppointment {
   id: string
@@ -452,9 +527,22 @@ export interface PracticeAppointment {
   icdCodes?: string[]
   totalFee?: number
   linkedConsultId?: string
+  /** From `practice_appointments.metadata` */
+  linkedClaimId?: string
+  claimLineDrafts?: AppointmentClaimDraftLine[]
 }
 
 export type BillingSubTab = "claims" | "invoices" | "outstanding" | "payments"
+export type BillingQueueFilter =
+  | "all"
+  | "analytics"
+  | "reconciliation"
+  | "needs_action"
+  | "claims"
+  | "unpaid"
+  | "partial"
+  | "paid"
+  | "overdue"
 
 /** Filters the main inbox notification strip + panel from the left sidebar */
 export type InboxNotificationFilter = "all" | "unread" | "action_required"

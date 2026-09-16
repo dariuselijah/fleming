@@ -32,7 +32,7 @@ export default async function PortalSuccessPage({
   return (
     <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-6 px-6 py-16">
       <h1 className="text-center text-2xl font-semibold">Payment status</h1>
-      <p className="text-center text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-center text-sm text-muted-foreground">
         {verification.verified
           ? "Thank you. Payment is confirmed and your receipt is ready."
           : sp.status === "success"
@@ -40,19 +40,19 @@ export default async function PortalSuccessPage({
             : "Payment was not completed. You can return to the invoice link to try again."}
       </p>
       {(verification.invoiceNumber || sp.invoice) && (
-        <p className="text-center text-xs text-zinc-500">Invoice reference: {verification.invoiceNumber ?? sp.invoice}</p>
+        <p className="text-center text-xs text-muted-foreground">Invoice reference: {verification.invoiceNumber ?? sp.invoice}</p>
       )}
       {verification.receiptUrl && (
         <a
           href={verification.receiptUrl}
-          className="rounded-xl bg-blue-600 px-4 py-2 text-center text-sm font-semibold text-white"
+          className="rounded-xl bg-primary px-4 py-2 text-center text-sm font-semibold text-primary-foreground"
         >
           Download receipt
         </a>
       )}
       <Link
         href={`/portal/${encodeURIComponent(token)}`}
-        className="text-center text-sm text-blue-600 underline underline-offset-2"
+        className="text-center text-sm text-primary underline underline-offset-2"
       >
         Back to portal
       </Link>

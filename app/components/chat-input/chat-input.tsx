@@ -49,7 +49,7 @@ import { LearningModeSelector } from "./learning-mode-selector"
 import type { FileUploadSummary, FileUploadStatus } from "../chat/use-file-upload"
 import { useCommandBar } from "@/lib/command-bar/use-command-bar"
 import type { SlashCommand } from "@/lib/command-bar/command-registry"
-import { useWorkspaceStore, buildClinicalContext } from "@/lib/clinical-workspace"
+import { useWorkspaceStore, buildArtifactGenerationContext } from "@/lib/clinical-workspace"
 import { useChatDictation } from "@/lib/hooks/use-chat-dictation"
 import { AnimatePresence } from "motion/react"
 import dynamic from "next/dynamic"
@@ -132,7 +132,8 @@ export function ChatInput({
   const { preferences } = useUserPreferences()
   const isDoctor_ = preferences.userRole === "doctor"
   const isMedicalStudent_ = preferences.userRole === "medical_student"
-  const isClinicalWorkspaceActive_ = isDoctor_
+  const workspaceMode_ = useWorkspaceStore((s) => s.mode)
+  const isClinicalWorkspaceActive_ = workspaceMode_ === "clinical"
   const [isButtonDisabled, setIsButtonDisabled] = useState(true)
   const [tabsDismissed, setTabsDismissed] = useState(false)
   const [isUploadsPickerOpen, setIsUploadsPickerOpen] = useState(false)
@@ -187,16 +188,15 @@ export function ChatInput({
       const patient = store.openPatients.find(
         (p) => p.patientId === store.activePatientId
       )
-      const ctx = buildClinicalContext(
+      const ctx = buildArtifactGenerationContext(
         store.scribeTranscript,
         store.scribeEntities,
         patient,
         store.scribeEntityStatus
       )
-      const CTX_BLOCK = ctx ? `\n\n${ctx}` : ""
       const CONCISE = "Be concise and clinically precise. No preamble. Bullet points preferred. Tag each statement with [T] (from transcript), [E] (from extracted entities), or [H] (from patient history) to indicate its source."
       const SOAP_FROM_CONSULT =
-        "Be concise and clinically precise. Chart-ready SOAP from the consultation context only. Do not tag lines with [T], [E], or [H]. If something was not discussed, write \"not documented\" rather than guessing."
+        "Be concise and clinically precise. Chart-ready SOAP from the CONSULTATION CONTEXT below. Only write \"not documented\" when a section has no data in that context. Do not tag lines with [T], [E], or [H]."
       const OPEN_EVIDENCE_STYLE =
         "OpenEvidence-style: lead with actionable recommendations, then conditional/alternative paths. " +
         "Cite ONLY with numbered in-text markers [1], [2] matching retrieved evidence — never use [T], [E], or [H]. " +
@@ -204,38 +204,38 @@ export function ChatInput({
         "=== EVIDENCE SOURCES (N) ===\n[1] Title\nJournal: … | Year: … | URL: …\n…\n=== END ==="
       const COMMAND_PROMPTS: Record<string, (a: string) => string> = {
         summary: (a) => a
-          ? `[/summary] Clinical summary focusing on: ${a}. Sections: Presenting Complaint, Exam Findings, Assessment, Plan. ${CONCISE}${CTX_BLOCK}`
-          : `[/summary] Generate a clinical summary for the current consult: Presenting Complaint, Exam Findings, Assessment, Plan. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/summary] Clinical summary focusing on: ${a}. Sections: Presenting Complaint, Exam Findings, Assessment, Plan. ${CONCISE}${ctx}`
+          : `[/summary] Generate a clinical summary for the current consult: Presenting Complaint, Exam Findings, Assessment, Plan. ${CONCISE}${ctx}`,
         interactions: (a) => a
-          ? `[/interactions] Check drug interactions for: ${a}. List severity, mechanism, recommendation. ${CONCISE}${CTX_BLOCK}`
-          : `[/interactions] Check drug interactions for all current medications. Flag contraindications. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/interactions] Check drug interactions for: ${a}. List severity, mechanism, recommendation. ${CONCISE}${ctx}`
+          : `[/interactions] Check drug interactions for all current medications. Flag contraindications. ${CONCISE}${ctx}`,
         evidence: (a) => a
-          ? `[/evidence] Evidence-based answer for: ${a}. ${OPEN_EVIDENCE_STYLE}${CTX_BLOCK}`
-          : `[/evidence] Evidence-based guidelines and literature for this presentation. ${OPEN_EVIDENCE_STYLE}${CTX_BLOCK}`,
+          ? `[/evidence] Evidence-based answer for: ${a}. ${OPEN_EVIDENCE_STYLE}${ctx}`
+          : `[/evidence] Evidence-based guidelines and literature for this presentation. ${OPEN_EVIDENCE_STYLE}${ctx}`,
         drug: (a) => a
-          ? `[/drug] Drug info for: ${a}. Include dosing, route, frequency, side effects, interactions. ${CONCISE}${CTX_BLOCK}`
-          : `[/drug] Drug information for current medications: dosing, side effects, interactions. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/drug] Drug info for: ${a}. Include dosing, route, frequency, side effects, interactions. ${CONCISE}${ctx}`
+          : `[/drug] Drug information for current medications: dosing, side effects, interactions. ${CONCISE}${ctx}`,
         icd: (a) => a
-          ? `[/icd] ICD-10 codes for: ${a}. Code, description, confidence. Primary first. ${CONCISE}${CTX_BLOCK}`
-          : `[/icd] Suggest ICD-10 codes based on the consultation. Code, description, confidence. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/icd] ICD-10 codes for: ${a}. Code, description, confidence (High/Medium/Low), source tag [T]/[E]/[H], sourceExcerpt.\nAfter the narrative append:\n=== ICD_ITEMS ===\n[{"id":"1","code":"...","description":"...","confidence":"High","sourceTag":"T","sourceExcerpt":"..."}]\n=== END_ICD_ITEMS ===${ctx}`
+          : `[/icd] Suggest ICD-10 codes based on the consultation. Code, description, confidence.\nAfter the narrative append:\n=== ICD_ITEMS ===\n[{"id":"1","code":"...","description":"...","confidence":"High","sourceTag":"T","sourceExcerpt":"..."}]\n=== END_ICD_ITEMS ===${ctx}`,
         prescribe: (a) => a
-          ? `[/prescribe] Prescribe: ${a}. Drug, strength, route, frequency, duration, quantity. Check interactions. ${CONCISE}${CTX_BLOCK}`
-          : `[/prescribe] Help prescribe medication. Drug, strength, route, frequency, duration. Check interactions. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/prescribe] Prescribe: ${a}. Drug, strength, route, frequency, duration, quantity. Check interactions. ${CONCISE}${ctx}`
+          : `[/prescribe] Help prescribe medication. Drug, strength, route, frequency, duration. Check interactions. ${CONCISE}${ctx}`,
         refer: (a) => a
-          ? `[/refer] Referral letter to: ${a}. Reason, clinical summary, investigations, questions. ${CONCISE}${CTX_BLOCK}`
-          : `[/refer] Generate referral letter. Reason, clinical summary, investigations, specialist questions. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/refer] Referral letter to: ${a}. Reason, clinical summary, investigations, questions. ${CONCISE}${ctx}`
+          : `[/refer] Generate referral letter. Reason, clinical summary, investigations, specialist questions. ${CONCISE}${ctx}`,
         soap: (a) => a
-          ? `[/soap] SOAP note focusing on: ${a}. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${SOAP_FROM_CONSULT}${CTX_BLOCK}`
-          : `[/soap] Create a SOAP note from this consultation. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${SOAP_FROM_CONSULT}${CTX_BLOCK}`,
+          ? `[/soap] SOAP note focusing on: ${a}. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${SOAP_FROM_CONSULT}${ctx}`
+          : `[/soap] Create a SOAP note from this consultation. Format with ## Subjective, ## Objective, ## Assessment, ## Plan. ${SOAP_FROM_CONSULT}${ctx}`,
         vitals: (a) => a
-          ? `[/vitals] Record vitals: ${a}. BP, HR, RR, Temp, SpO2, Weight, Height, BMI. Interpret abnormalities. ${CONCISE}${CTX_BLOCK}`
-          : `[/vitals] Document vital-sign set: BP, HR, RR, Temp, SpO2, Weight, Height, BMI, Pain. Interpret abnormalities. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/vitals] Record vitals: ${a}. BP, HR, RR, Temp, SpO2, Weight, Height, BMI. Interpret abnormalities. ${CONCISE}${ctx}`
+          : `[/vitals] Document vital-sign set: BP, HR, RR, Temp, SpO2, Weight, Height, BMI, Pain. Interpret abnormalities. ${CONCISE}${ctx}`,
         verify: (a) => a
-          ? `[/verify] Verify medical aid eligibility for: ${a}. ${CONCISE}${CTX_BLOCK}`
-          : `[/verify] Verify patient medical aid eligibility. Member status, benefits, pre-auth. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/verify] Verify medical aid eligibility for: ${a}. ${CONCISE}${ctx}`
+          : `[/verify] Verify patient medical aid eligibility. Member status, benefits, pre-auth. ${CONCISE}${ctx}`,
         claim: (a) => a
-          ? `[/claim] Billing claim: ${a}. ICD-10 codes, tariff codes, line items. ${CONCISE}${CTX_BLOCK}`
-          : `[/claim] Prepare billing claim from consultation. ICD-10, tariffs, line items. ${CONCISE}${CTX_BLOCK}`,
+          ? `[/claim] Generate a MediKredit-ready billing claim: ${a}. Each line needs tariffCode OR nappiCode, primary icdCode, quantity, grossAmount (ZAR), tp (1=NAPPI, 2=tariff).\nAfter the narrative append:\n=== CLAIM_ITEMS ===\n[{"id":"1","description":"Consultation","icdCode":"I10","tariffCode":"0190","nappiCode":"","quantity":1,"amount":450,"tp":2}]\n=== END_CLAIM_ITEMS ===${ctx}`
+          : `[/claim] Generate a MediKredit-ready medical billing claim from this consultation. Each line must include tariffCode OR nappiCode, primary icdCode, quantity, grossAmount (ZAR), and tp (1=NAPPI, 2=tariff).\nAfter the narrative append:\n=== CLAIM_ITEMS ===\n[{"id":"1","description":"Consultation","icdCode":"I10","tariffCode":"0190","nappiCode":"","quantity":1,"amount":450,"tp":2}]\n=== END_CLAIM_ITEMS ===${ctx}`,
       }
 
       const promptFn = COMMAND_PROMPTS[command.id]
@@ -705,7 +705,7 @@ export function ChatInput({
           />
         </div>
       )}
-      {hasSuggestions && (
+      {hasSuggestions && !isClinicalWorkspaceActive_ && (
         <PromptSystem
           onValueChange={onValueChange}
           onSuggestion={onSuggestion}

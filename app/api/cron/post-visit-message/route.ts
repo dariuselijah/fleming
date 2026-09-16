@@ -3,6 +3,7 @@
  */
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { requireCronAuthorization } from "@/lib/auth/cron"
 import { resolvePatientPhoneE164 } from "@/lib/comms/patient-phone"
 import { mergePracticeAppointmentMetadata } from "@/lib/comms/appointment-metadata"
 import { getPracticeName } from "@/lib/comms/tools"
@@ -17,13 +18,8 @@ function firstNameFromSnapshot(name: string | null | undefined): string {
 }
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization")
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-  }
+  const denied = requireCronAuthorization(request)
+  if (denied) return denied
 
   try {
     const db = createAdminClient()

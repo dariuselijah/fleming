@@ -31,6 +31,7 @@ import { notifyAdmins, addInboxStripMessage } from "@/lib/comms/notify"
 import { createPatientAccessToken } from "@/lib/portal/tokens"
 import type { PortalTokenPurpose } from "@/lib/portal/tokens"
 import type { Json } from "@/app/types/database.types"
+import { requireWebhookSecret } from "@/lib/auth/webhook"
 
 function extractEndOfCallFields(msg: Record<string, unknown>) {
   const artifact = (msg.artifact as Record<string, unknown>) || {}
@@ -61,8 +62,10 @@ export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text()
 
+    const auth = requireWebhookSecret("VAPI_SERVER_SECRET")
+    if (!auth.ok) return auth.response
     const signature = req.headers.get("x-vapi-signature") || ""
-    if (process.env.VAPI_SERVER_SECRET && !validateVapiSignature(rawBody, signature)) {
+    if (auth.secret && !validateVapiSignature(rawBody, signature)) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 403 })
     }
 
@@ -738,7 +741,7 @@ async function handleEndOfCall(payload: Record<string, unknown>) {
     type: "patient_message",
     title: `Call ended — ${callerLabel}`,
     detail: summary || transcript?.slice(0, 240) || undefined,
-    actionTab: "inbox",
+    actionTab: "front_desk",
     actionEntityId: thread.id,
   })
   await addInboxStripMessage({
@@ -883,7 +886,7 @@ async function dispatchVoiceRecommendedNextAction(opts: {
         type: "alert",
         title: "Patient needs callback",
         detail: "Voice assistant requested staff follow-up.",
-        actionTab: "inbox",
+        actionTab: "front_desk",
         actionEntityId: threadId,
       })
       await updateThreadStatus(threadId, { status: "handoff", priority: "high" })

@@ -1,0 +1,110 @@
+[
+  {
+    "year": 2026,
+    "schemeCode": "GEMS",
+    "schemeName": "Government Employees Medical Scheme",
+    "planOptionCode": "PRIVATE",
+    "disciplineCode": "014",
+    "tariffCode": "0190",
+    "description": "Consultation - New patient or existing patient with new complaint",
+    "networkFlag": "contracted",
+    "amountCents": 48500,
+    "sourceFileId": "gems-2026-medical-practitioners-seed"
+  },
+  {
+    "year": 2026,
+    "schemeCode": "GEMS",
+    "schemeName": "Government Employees Medical Scheme",
+    "planOptionCode": "PRIVATE",
+    "disciplineCode": "014",
+    "tariffCode": "0191",
+    "description": "Consultation - Follow-up / existing complaint",
+    "networkFlag": "contracted",
+    "amountCents": 34200,
+    "sourceFileId": "gems-2026-medical-practitioners-seed"
+  },
+  {
+    "year": 2026,
+    "schemeCode": "GEMS",
+    "schemeName": "Government Employees Medical Scheme",
+    "planOptionCode": "PRIVATE",
+    "disciplineCode": "014",
+    "tariffCode": "0192",
+    "description": "Consultation - Prolonged",
+    "networkFlag": "non_contracted",
+    "amountCents": 52000,
+    "sourceFileId": "gems-2026-medical-practitioners-seed"
+  },
+  {
+    "year": 2026,
+    "schemeCode": "DISCOVERY",
+    "schemeName": "Discovery Health Medical Scheme",
+    "planOptionCode": "614117",
+    "disciplineCode": "014",
+    "tariffCode": "0190",
+    "description": "Consultation",
+    "networkFlag": "network",
+    "amountCents": 51200,
+    "sourceFileId": "discovery-2026-dhr-seed"
+  },
+  {
+    "year": 2026,
+    "schemeCode": "DISCOVERY",
+    "schemeName": "Discovery Health Medical Scheme",
+    "planOptionCode": "614117",
+    "disciplineCode": "014",
+    "tariffCode": "0191",
+    "description": "Follow-up consultation",
+    "networkFlag": "network",
+    "amountCents": 36800,
+    "sourceFileId": "discovery-2026-dhr-seed"
+  },
+  {
+    "year": 2026,
+    "schemeCode": "DISCOVERY",
+    "schemeName": "Discovery Health Medical Scheme",
+    "planOptionCode": "PRIVATE",
+    "disciplineCode": "014",
+    "tariffCode": "0190",
+    "description": "Consultation (cash / private rate seed)",
+    "networkFlag": "any",
+    "amountCents": 65000,
+    "sourceFileId": "private-2026-seed"
+  },
+  {
+    "year": 2026,
+    "schemeCode": "BONITAS",
+    "schemeName": "Bonitas Medical Fund",
+    "planOptionCode": "664823",
+    "disciplineCode": "014",
+    "tariffCode": "0190",
+    "description": "GP consultation",
+    "networkFlag": "network",
+    "amountCents": 47000,
+    "sourceFileId": "medscheme-bonitas-2026-seed"
+  },
+  {
+    "year": 2026,
+    "schemeCode": "MOMENTUM",
+    "schemeName": "Momentum Medical Scheme",
+    "planOptionCode": "639802",
+    "disciplineCode": "014",
+    "tariffCode": "0190",
+    "description": "Consultation",
+    "networkFlag": "network",
+    "amountCents": 45500,
+    "sourceFileId": "momentum-2026-seed"
+  },
+  {
+    "year": 2026,
+    "schemeCode": "PRIVATE",
+    "schemeName": "Private / cash",
+    "planOptionCode": "PRIVATE",
+    "disciplineCode": "014",
+    "tariffCode": "0201",
+    "description": "Procedure / consumable line (seed)",
+    "networkFlag": "any",
+    "amountCents": 15000,
+    "sourceFileId": "private-2026-seed"
+  }
+]

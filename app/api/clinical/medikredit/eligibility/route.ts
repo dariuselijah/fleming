@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { checkEligibility } from "@/lib/medikredit/eligibility-service"
 import { isMedikreditConfigured } from "@/lib/medikredit/env"
-import { insertEligibilityCheck } from "@/lib/medikredit/persist"
+import { insertEligibilityCheck, publicMedikreditResponse } from "@/lib/medikredit/persist"
 import { assertPracticeMember } from "@/lib/medikredit/practice-guard"
 import { fetchMedikreditProviderSettings } from "@/lib/medikredit/provider-settings"
 import type { MedikreditPatientPayload } from "@/lib/medikredit/types"
@@ -59,12 +59,13 @@ export async function POST(req: Request) {
         userId,
       })
     }
-    return NextResponse.json({ result })
+    return NextResponse.json({ result: publicMedikreditResponse(result) })
   } catch (e) {
     console.error("[medikredit/eligibility]", e)
+    const code = (e as Error & { code?: string }).code
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Eligibility check failed" },
-      { status: 502 }
+      { error: e instanceof Error ? e.message : "Eligibility check failed", code: code ?? "MEDIKREDIT_TRANSPORT" },
+      { status: (e as Error & { status?: number }).status ?? 502 }
     )
   }
 }

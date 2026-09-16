@@ -10,13 +10,33 @@ import {
   PracticeIdBootstrap,
   ClinicalDataBootstrap,
 } from "@/app/components/workspace/clinical-data-bootstrap"
-import { ClinicalUnlockGate } from "@/app/components/workspace/clinical-unlock-gate"
 import { ClinicalPersistence } from "@/app/components/workspace/clinical-persistence"
+import { ClinicalUnlockGate } from "@/app/components/workspace/clinical-unlock-gate"
 import { ClaimPreviewModal } from "@/app/components/workspace/claim-preview-modal"
 import { OnboardingChecklist } from "@/app/components/onboarding/onboarding-checklist"
 import { AppSettingsDialogHost } from "@/app/components/layout/settings/app-settings-dialog-host"
+import { useBreakpoint } from "@/app/hooks/use-breakpoint"
+import { IconButton } from "@/components/ui/icon-button"
+import { useSidebar } from "@/components/ui/sidebar"
+import { Surface } from "@/components/ui/surface"
 import { useAuthContext } from "@/lib/auth/provider"
+import { List } from "@phosphor-icons/react"
 import { useEffect } from "react"
+
+function MobileNavigationButton() {
+  const { toggleSidebar } = useSidebar()
+
+  return (
+    <IconButton
+      aria-label="Open navigation"
+      variant="surface"
+      onClick={toggleSidebar}
+      className="fixed left-3 top-3 z-[var(--z-navigation)] md:hidden"
+    >
+      <List className="size-5" weight="bold" />
+    </IconButton>
+  )
+}
 
 function WorkspaceRoleSync({
   defaultMode,
@@ -42,7 +62,9 @@ function WorkspaceRoleSync({
 export function LayoutApp({ children }: { children: React.ReactNode }) {
   const { preferences } = useUserPreferences()
   const auth = useAuthContext()
+  const isMobile = useBreakpoint(768)
   const hasSidebar = preferences.layout === "sidebar"
+  const showSidebar = hasSidebar || isMobile
   const isPracticeWorkspace =
     !!auth.activePracticeId || preferences.userRole === "doctor"
 
@@ -59,12 +81,18 @@ export function LayoutApp({ children }: { children: React.ReactNode }) {
             canUseAdmin={auth.hasPermission("admin:access")}
           />
           <PracticeIdBootstrap />
+          <ClinicalDataBootstrap />
+          <ClinicalPersistence />
+          <ClaimPreviewModal />
           <ClinicalUnlockGate>
-            <ClinicalDataBootstrap />
-            <ClinicalPersistence />
-            <ClaimPreviewModal />
-            <div className="bg-background flex h-dvh w-full overflow-hidden">
-              {hasSidebar && <AppSidebar />}
+          <Surface
+            variant="base"
+            radius="none"
+            data-clinical-shell
+            className="flex h-dvh w-full overflow-hidden"
+          >
+            {showSidebar && <AppSidebar />}
+            {isMobile && <MobileNavigationButton />}
               <div className="relative flex h-full w-0 flex-shrink flex-grow flex-col overflow-hidden">
                 <ClinicalWorkspace>
                   <main className="@container relative h-full w-full flex-shrink flex-grow overflow-y-auto">
@@ -73,22 +101,28 @@ export function LayoutApp({ children }: { children: React.ReactNode }) {
                   </main>
                 </ClinicalWorkspace>
               </div>
-            </div>
-            <OnboardingChecklist />
+          </Surface>
           </ClinicalUnlockGate>
+          <OnboardingChecklist />
         </WorkspaceProvider>
       </PracticeCryptoProvider>
     )
   }
 
   return (
-    <div className="bg-background flex h-dvh w-full overflow-hidden">
+    <Surface
+      variant="base"
+      radius="none"
+      data-clinical-shell
+      className="flex h-dvh w-full overflow-hidden"
+    >
       <AppSettingsDialogHost />
-      {hasSidebar && <AppSidebar />}
+      {showSidebar && <AppSidebar />}
+      {isMobile && !hasSidebar && <MobileNavigationButton />}
       <main className="@container relative h-dvh w-0 flex-shrink flex-grow overflow-y-auto">
         <Header hasSidebar={hasSidebar} />
         {children}
       </main>
-    </div>
+    </Surface>
   )
 }

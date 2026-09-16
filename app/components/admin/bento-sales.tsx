@@ -13,7 +13,8 @@ import {
   Warning,
 } from "@phosphor-icons/react"
 import { BentoTile } from "./bento-tile"
-import { useMemo, useState } from "react"
+import type { PracticeClaim } from "@/lib/clinical-workspace"
+import { useEffect, useMemo, useState } from "react"
 
 type Period = "today" | "week" | "month" | "quarter"
 
@@ -75,8 +76,58 @@ function fmtCurrency(n: number): string {
 }
 
 export function BentoSales() {
-  const { claims } = useWorkspace()
+  const { claims: workspaceClaims } = useWorkspace()
   const [period, setPeriod] = useState<Period>("month")
+  const [claims, setClaims] = useState<PracticeClaim[]>([])
+  const [reportLoading, setReportLoading] = useState(true)
+  const [reportError, setReportError] = useState<string | null>(null)
+  const [reportMeta, setReportMeta] = useState<{
+    generatedAt: string
+    returnedCount: number
+    totalCount: number
+    truncated: boolean
+  } | null>(null)
+  const [reportNonce, setReportNonce] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setReportLoading(true)
+    setReportError(null)
+    void fetch("/api/practice/reports/operations", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => ({}))) as {
+          claims?: PracticeClaim[]
+          generatedAt?: string
+          returnedCount?: number
+          totalCount?: number
+          truncated?: boolean
+          error?: string
+        }
+        if (!response.ok) throw new Error(payload.error || "Could not load analytics report")
+        if (cancelled) return
+        const nextClaims = payload.claims ?? []
+        setClaims(nextClaims)
+        setReportMeta({
+          generatedAt: payload.generatedAt ?? new Date().toISOString(),
+          returnedCount: payload.returnedCount ?? nextClaims.length,
+          totalCount: payload.totalCount ?? nextClaims.length,
+          truncated: Boolean(payload.truncated),
+        })
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setClaims([])
+          setReportMeta(null)
+          setReportError(error instanceof Error ? error.message : "Could not load analytics report")
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReportLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [reportNonce])
 
   const { start, end, prevStart, prevEnd } = useMemo(() => getPeriodRange(period), [period])
 
@@ -218,8 +269,8 @@ export function BentoSales() {
   }[] = [
     { label: "Total Revenue", value: analytics.totalRevenue, prev: analytics.prevTotalRevenue, color: "text-foreground", icon: ChartLineUp },
     { label: "Medical Aid", value: analytics.maRevenue, prev: analytics.prevMaRevenue, color: "text-blue-400", icon: Receipt },
-    { label: "Cash Revenue", value: analytics.cashRevenue, prev: analytics.prevCashRevenue, color: "text-[#00E676]", icon: Receipt },
-    { label: "Outstanding", value: analytics.outstanding, prev: analytics.prevOutstanding, color: "text-[#FFC107]", icon: Clock },
+    { label: "Cash Revenue", value: analytics.cashRevenue, prev: analytics.prevCashRevenue, color: "text-status-success", icon: Receipt },
+    { label: "Outstanding", value: analytics.outstanding, prev: analytics.prevOutstanding, color: "text-status-warning", icon: Clock },
   ]
 
   const alertItems: { label: string; detail: string; severity: "amber" | "red" }[] = []
@@ -253,7 +304,7 @@ export function BentoSales() {
       {/* Date range picker */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-foreground">Analytics</h2>
-        <div className="flex items-center gap-1 rounded-xl bg-white/[0.04] p-0.5">
+        <div className="flex items-center gap-1 rounded-xl bg-panel-muted p-0.5">
           {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
             <button
               key={p}
@@ -261,8 +312,8 @@ export function BentoSales() {
               className={cn(
                 "rounded-lg px-3 py-1 text-[11px] font-medium transition-all",
                 period === p
-                  ? "bg-white/10 text-foreground shadow-sm"
-                  : "text-white/40 hover:text-white/60"
+                  ? "bg-secondary text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-accent-foreground/60"
               )}
             >
               {PERIOD_LABELS[p]}
@@ -270,6 +321,36 @@ export function BentoSales() {
           ))}
         </div>
       </div>
+
+      {reportLoading && (
+        <div className="rounded-lg border border-border bg-panel-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
+          Loading persisted report data…
+        </div>
+      )}
+      {reportError && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-[11px] text-red-200">
+          <span>{reportError}</span>
+          <button type="button" className="font-semibold underline" onClick={() => setReportNonce((n) => n + 1)}>
+            Retry
+          </button>
+        </div>
+      )}
+      {!reportLoading && !reportError && claims.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border px-3 py-3 text-center text-[11px] text-muted-foreground">
+          No persisted claim data is available for this reporting window.
+        </div>
+      )}
+      {!reportLoading &&
+        !reportError &&
+        reportMeta &&
+        (reportMeta.truncated || workspaceClaims.length !== reportMeta.totalCount) && (
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
+            Report scope mismatch: server returned {reportMeta.returnedCount} of {reportMeta.totalCount} records
+            {workspaceClaims.length !== reportMeta.totalCount
+              ? `; the live workspace currently has ${workspaceClaims.length}.`
+              : "."}
+          </div>
+        )}
 
       {/* Revenue Cards */}
       <div className="grid grid-cols-4 gap-3">
@@ -282,7 +363,7 @@ export function BentoSales() {
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1.5">
                   <card.icon className={cn("size-3.5", card.color)} weight="fill" />
-                  <span className="text-[10px] text-white/40">{card.label}</span>
+                  <span className="text-[10px] text-muted-foreground">{card.label}</span>
                 </div>
                 <span className={cn("text-xl font-bold tabular-nums", card.color)}>
                   {fmtCurrency(card.value)}
@@ -292,8 +373,8 @@ export function BentoSales() {
                     className={cn(
                       "flex items-center gap-0.5 text-[10px] font-semibold tabular-nums",
                       isOutstanding
-                        ? isPositive ? "text-[#FFC107]" : "text-[#00E676]"
-                        : isPositive ? "text-[#00E676]" : "text-[#EF5350]"
+                        ? isPositive ? "text-status-warning" : "text-status-success"
+                        : isPositive ? "text-status-success" : "text-status-danger"
                     )}
                   >
                     {isPositive ? <TrendUp className="size-2.5" /> : <TrendDown className="size-2.5" />}
@@ -317,7 +398,7 @@ export function BentoSales() {
             if (change === null) return null
             const up = change >= 0
             return (
-              <span className={cn("flex items-center gap-0.5 text-[11px] font-semibold", up ? "text-[#00E676]" : "text-[#EF5350]")}>
+              <span className={cn("flex items-center gap-0.5 text-[11px] font-semibold", up ? "text-status-success" : "text-status-danger")}>
                 {up ? <TrendUp className="size-3" /> : <TrendDown className="size-3" />}
                 {up ? "+" : ""}{change.toFixed(1)}%
               </span>
@@ -328,13 +409,13 @@ export function BentoSales() {
           datasets={[
             { data: chartData.total, color: "#ffffff", label: "Total" },
             { data: chartData.ma, color: "#3b82f6", label: "Medical Aid" },
-            { data: chartData.cash, color: "#00E676", label: "Cash" },
+            { data: chartData.cash, color: "status-success", label: "Cash" },
           ]}
           labels={chartLabels}
         />
         <div className="mt-2 flex gap-5 text-[10px]">
           <Legend color="#3b82f6" label={`Medical Aid: ${fmtCurrency(analytics.maRevenue)}`} />
-          <Legend color="#00E676" label={`Cash: ${fmtCurrency(analytics.cashRevenue)}`} />
+          <Legend color="status-success" label={`Cash: ${fmtCurrency(analytics.cashRevenue)}`} />
           <Legend color="#ffffff" label={`Total: ${fmtCurrency(analytics.totalRevenue)}`} />
         </div>
       </BentoTile>
@@ -344,27 +425,27 @@ export function BentoSales() {
         {/* Top Procedures */}
         <BentoTile title="Top Procedures" subtitle={`By revenue · ${PERIOD_LABELS[period]}`}>
           {procedures.length === 0 ? (
-            <p className="py-4 text-center text-[11px] text-white/25">No procedure data for this period</p>
+            <p className="py-4 text-center text-[11px] text-muted-foreground">No procedure data for this period</p>
           ) : (
             <div className="space-y-2.5">
               {procedures.map((proc, i) => {
                 const maxRevenue = procedures[0]?.revenue || 1
                 return (
-                  <div key={`${proc.code}-${i}`} className="flex items-center gap-3 rounded-lg px-1 -mx-1 transition-colors hover:bg-white/[0.02]">
-                    <span className="w-4 text-right text-[10px] tabular-nums text-white/20">{i + 1}</span>
+                  <div key={`${proc.code}-${i}`} className="flex items-center gap-3 rounded-lg px-1 -mx-1 transition-colors hover:bg-panel-muted/50">
+                    <span className="w-4 text-right text-[10px] tabular-nums text-muted-foreground">{i + 1}</span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-1.5">
                         <span className="text-[11px] font-semibold text-foreground">{proc.description}</span>
-                        <span className="text-[9px] tabular-nums text-white/20">{proc.code}</span>
+                        <span className="text-[9px] tabular-nums text-muted-foreground">{proc.code}</span>
                       </div>
                       <div className="mt-0.5 flex items-center gap-2">
-                        <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-white/[0.04]">
+                        <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-panel-muted">
                           <div
-                            className="absolute inset-y-0 left-0 rounded-full bg-[#00E676]/50"
+                            className="absolute inset-y-0 left-0 rounded-full bg-status-success/50"
                             style={{ width: `${(proc.revenue / maxRevenue) * 100}%` }}
                           />
                         </div>
-                        <span className="text-[10px] tabular-nums text-white/25">×{proc.count}</span>
+                        <span className="text-[10px] tabular-nums text-muted-foreground">×{proc.count}</span>
                       </div>
                     </div>
                     <span className="shrink-0 text-[11px] font-bold tabular-nums text-foreground">
@@ -382,7 +463,7 @@ export function BentoSales() {
           <div className="space-y-3">
             <MetricRow
               icon={TrendUp}
-              color="text-[#00E676]"
+              color="text-status-success"
               value={`${collectionRate.toFixed(1)}%`}
               label="Collection Rate"
               sub="Paid / Total"
@@ -396,14 +477,14 @@ export function BentoSales() {
             />
             <MetricRow
               icon={Timer}
-              color="text-white/60"
+              color="text-muted-foreground/80"
               value="—"
               label="Avg Settlement Time"
               sub="Medical Aid (when payment dates recorded)"
             />
             <MetricRow
               icon={Hourglass}
-              color={rejectionRate > 5 ? "text-[#EF5350]" : "text-[#FFC107]"}
+              color={rejectionRate > 5 ? "text-status-danger" : "text-status-warning"}
               value={`${rejectionRate.toFixed(1)}%`}
               label="Rejection Rate"
               sub="Rejected / Total"
@@ -422,19 +503,19 @@ export function BentoSales() {
                 key={i}
                 className={cn(
                   "flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors",
-                  alert.severity === "red" ? "bg-[#EF5350]/[0.06]" : "bg-[#FFC107]/[0.06]"
+                  alert.severity === "red" ? "bg-status-danger/[0.06]" : "bg-status-warning/[0.06]"
                 )}
               >
                 <Warning
                   className={cn(
                     "mt-0.5 size-4 shrink-0",
-                    alert.severity === "red" ? "text-[#EF5350]" : "text-[#FFC107]"
+                    alert.severity === "red" ? "text-status-danger" : "text-status-warning"
                   )}
                   weight="fill"
                 />
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-medium text-foreground">{alert.label}</p>
-                  <p className="text-[10px] tabular-nums text-white/30">{alert.detail}</p>
+                  <p className="text-[10px] tabular-nums text-muted-foreground">{alert.detail}</p>
                 </div>
               </div>
             ))}
@@ -459,11 +540,11 @@ function MetricRow({
   sub: string
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg px-1 -mx-1 transition-colors hover:bg-white/[0.02]">
+    <div className="flex items-center gap-3 rounded-lg px-1 -mx-1 transition-colors hover:bg-panel-muted/50">
       <Icon className={cn("size-5 shrink-0", color)} weight="fill" />
       <div className="flex-1">
         <p className="text-[12px] font-bold tabular-nums text-foreground">{value}</p>
-        <p className="text-[9px] text-white/25">{label} · {sub}</p>
+        <p className="text-[9px] text-muted-foreground">{label} · {sub}</p>
       </div>
     </div>
   )
@@ -471,7 +552,7 @@ function MetricRow({
 
 function Legend({ color, label }: { color: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5 text-white/40">
+    <span className="flex items-center gap-1.5 text-muted-foreground">
       <span className="size-1.5 rounded-full" style={{ backgroundColor: color }} />
       {label}
     </span>

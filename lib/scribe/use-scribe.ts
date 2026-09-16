@@ -2,34 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { SOAPBodySection } from "@/lib/clinical-workspace/types"
-import { useWorkspaceStore, type ScribeSegment } from "@/lib/clinical-workspace/workspace-store"
+import { useWorkspaceStore } from "@/lib/clinical-workspace/workspace-store"
 import { generateSOAPGhostText } from "./soap-mapper"
 import { EMPTY_EXTRACTED, type ExtractedEntities, type HighlightSpan } from "./entity-highlighter"
 import { useAudioRecorder } from "./use-audio-recorder"
+import { transcribeBlob } from "./transcribe-blob"
+import { toast } from "sonner"
 
 interface UseScribeOptions {
   enabled: boolean
   patientId: string | null
-}
-
-interface TranscribeResponse {
-  transcript: string
-  segments: ScribeSegment[]
-  status: string
-  model: string | null
-}
-
-async function transcribeBlob(blob: Blob): Promise<TranscribeResponse> {
-  const form = new FormData()
-  form.append("audio", blob, "recording.webm")
-
-  const res = await fetch("/api/transcribe", { method: "POST", body: form })
-  if (!res.ok) {
-    const body = await res.text().catch(() => "")
-    console.error("[scribe] Transcription failed:", res.status, body)
-    return { transcript: "", segments: [], status: "failed", model: null }
-  }
-  return res.json()
 }
 
 async function runExtraction(transcript: string): Promise<{
@@ -42,7 +24,13 @@ async function runExtraction(transcript: string): Promise<{
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ transcript }),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { error?: string }
+      toast.error("Clinical extraction failed", {
+        description: errBody.error ?? "Could not extract entities from transcript.",
+      })
+      return null
+    }
     const data = await res.json()
     if (!data.entities) return null
 
@@ -54,7 +42,11 @@ async function runExtraction(transcript: string): Promise<{
     }
 
     const highlights: HighlightSpan[] = Array.isArray(data.highlights)
-      ? data.highlights.filter((h: any) => h?.text && h?.type)
+      ? data.highlights.filter((h: unknown): h is HighlightSpan => {
+          if (!h || typeof h !== "object") return false
+          const candidate = h as Partial<HighlightSpan>
+          return Boolean(candidate.text && candidate.type)
+        })
       : []
 
     return { entities, highlights }
@@ -67,6 +59,7 @@ async function runExtraction(transcript: string): Promise<{
 export function useScribe({ enabled, patientId }: UseScribeOptions) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [isExtracting, setIsExtracting] = useState(false)
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
   const pendingChunks = useRef<Blob[]>([])
   const processingRef = useRef(false)
@@ -83,6 +76,7 @@ export function useScribe({ enabled, patientId }: UseScribeOptions) {
     }
 
     extractionInFlightRef.current = true
+    setIsExtracting(true)
     try {
       const result = await runExtraction(transcript)
       if (result) {
@@ -95,6 +89,8 @@ export function useScribe({ enabled, patientId }: UseScribeOptions) {
       if (extractionQueuedRef.current) {
         extractionQueuedRef.current = false
         triggerExtraction()
+      } else {
+        setIsExtracting(false)
       }
     }
   }, [])
@@ -199,8 +195,9 @@ export function useScribe({ enabled, patientId }: UseScribeOptions) {
     const store = useWorkspaceStore.getState()
 
     try {
-      if (!store.scribeActive) {
-        store.setScribeActive(true)
+      // File transcription and live mic capture are mutually exclusive.
+      if (store.scribeActive) {
+        store.setScribeActive(false)
       }
 
       const result = await transcribeBlob(file)
@@ -250,6 +247,7 @@ export function useScribe({ enabled, patientId }: UseScribeOptions) {
     transcribeAudioFile,
     triggerExtraction,
     isTranscribing,
+    isExtracting,
     transcriptionError,
     recorderError: recorder.error,
     recorderDuration: recorder.duration,

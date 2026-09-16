@@ -464,7 +464,7 @@ function TaskBoardCard({
   const completionLabel = `${completedCount}/${totalTaskCount}`
 
   return (
-    <div className="rounded-xl border border-border/35 bg-zinc-50/50 px-3.5 py-2.5 backdrop-blur-md dark:bg-zinc-900/50">
+    <div className="rounded-xl border border-border/35 bg-muted/50 px-3.5 py-2.5 backdrop-blur-md dark:bg-muted/50">
       <div className="mb-2 flex items-center gap-1">
         {normalizedItems.length > 0 ? (
           normalizedItems.map((item) => (
@@ -509,7 +509,7 @@ function TaskBoardCard({
                   ? "bg-emerald-500"
                   : tone === "error"
                     ? "bg-amber-500"
-                    : "bg-zinc-400"
+                    : "bg-muted-foreground"
               )}
             />
             {toneLabel}
@@ -531,7 +531,7 @@ function TaskBoardCard({
               {visibleTasks.map((item, index) => (
                 <div
                   key={item.id}
-                  className="relative flex items-start justify-between gap-2 rounded-md border border-border/35 bg-zinc-100/40 px-2 py-1.5 text-[13px] backdrop-blur-sm dark:bg-zinc-900/35"
+                  className="relative flex items-start justify-between gap-2 rounded-md border border-border/35 bg-muted/40 px-2 py-1.5 text-[13px] backdrop-blur-sm dark:bg-muted/35"
                 >
                   <div className="absolute top-0 bottom-0 left-[7px]">
                     {index < visibleTasks.length - 1 ? (
@@ -589,7 +589,7 @@ function GroupedToolActivityCard({ group }: { group: ToolGroupRow }) {
 
   return (
     <div>
-      <div className="rounded-lg border border-border/35 bg-zinc-100/40 px-2.5 py-1.5 backdrop-blur-sm dark:bg-zinc-900/40">
+      <div className="rounded-lg border border-border/35 bg-muted/40 px-2.5 py-1.5 backdrop-blur-sm dark:bg-muted/40">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
@@ -614,14 +614,14 @@ function GroupedToolActivityCard({ group }: { group: ToolGroupRow }) {
             <button
               type="button"
               onClick={() => setIsExpanded((prev) => !prev)}
-              className="rounded-md border border-border/50 px-1.5 py-0.5 text-[11px] text-muted-foreground transition hover:bg-zinc-100/60 dark:hover:bg-zinc-900/60"
+              className="rounded-md border border-border/50 px-1.5 py-0.5 text-[11px] text-muted-foreground transition hover:bg-muted/60 dark:hover:bg-muted/60"
             >
               Deep Dive
             </button>
             <button
               type="button"
               onClick={() => setIsExpanded((prev) => !prev)}
-              className="rounded-md border border-border/50 p-1 text-muted-foreground transition hover:bg-zinc-100/60 dark:hover:bg-zinc-900/60"
+              className="rounded-md border border-border/50 p-1 text-muted-foreground transition hover:bg-muted/60 dark:hover:bg-muted/60"
               aria-label={isExpanded ? "Hide call details" : "View call details"}
             >
               <CaretDown
@@ -672,7 +672,7 @@ function GroupedToolActivityCard({ group }: { group: ToolGroupRow }) {
                         )
                       }
                       className={cn(
-                        "cursor-pointer rounded-lg border border-border/40 bg-zinc-100/45 px-2 py-1.5 backdrop-blur-sm dark:bg-zinc-900/45",
+                        "cursor-pointer rounded-lg border border-border/40 bg-muted/45 px-2 py-1.5 backdrop-blur-sm dark:bg-muted/45",
                         isCallExpanded && "border-primary/25"
                       )}
                     >
@@ -701,13 +701,13 @@ function GroupedToolActivityCard({ group }: { group: ToolGroupRow }) {
                         </div>
                       </div>
                       {hasPayload && isCallExpanded ? (
-                        <div className="mt-2 space-y-2 rounded-md border border-border/40 bg-zinc-100/45 p-2 backdrop-blur-sm dark:bg-zinc-900/45">
+                        <div className="mt-2 space-y-2 rounded-md border border-border/40 bg-muted/45 p-2 backdrop-blur-sm dark:bg-muted/45">
                           {typeof row.args !== "undefined" ? (
                             <div>
                               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Arguments
                               </p>
-                              <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/40 bg-zinc-100/55 p-2 text-[12px] leading-5 dark:bg-zinc-900/55">
+                              <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/40 bg-muted/55 p-2 text-[12px] leading-5 dark:bg-muted/55">
                                 {formatPayload(row.args)}
                               </pre>
                             </div>
@@ -717,7 +717,7 @@ function GroupedToolActivityCard({ group }: { group: ToolGroupRow }) {
                               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Response
                               </p>
-                              <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/40 bg-zinc-100/55 p-2 text-[12px] leading-5 dark:bg-zinc-900/55">
+                              <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-border/40 bg-muted/55 p-2 text-[12px] leading-5 dark:bg-muted/55">
                                 {formatPayload(row.result)}
                               </pre>
                             </div>
@@ -737,7 +737,7 @@ function GroupedToolActivityCard({ group }: { group: ToolGroupRow }) {
 
 function GhostActivityTray({ activeThought }: { activeThought: string }) {
   return (
-    <div className="rounded-lg border border-white/15 bg-white/8 px-3 py-1.5 backdrop-blur-[12px] dark:bg-white/4">
+    <div className="rounded-lg border border-border bg-muted/50 px-3 py-1.5 backdrop-blur-[12px] dark:bg-muted/40">
       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/60" />
         <p className="truncate text-[12px]">{activeThought}</p>
